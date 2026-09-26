@@ -21,7 +21,7 @@ Phase 1 delivers:
 - a `store/storetest` conformance suite,
 - a `weirhttp` package that adapts the engine to `net/http` (middleware and a `RoundTripper`-backed origin), used as the reference adapter and as the integration-test harness.
 
-Phase 1.5 adds a Valkey/Redis store in a separate Go module. Phase 2 adds the Caddy module in a separate Go module ([08-caddy-adapter-spec.md](08-caddy-adapter-spec.md)). Phase 3 adds experiment-aware key dimensions. None of those are in scope for this document beyond the extension points Phase 1 must leave open.
+Phase 1.x (milestones M11 to M15, §13) adds single-range responses, targeted cache-control fields, snapshots, per-host fairness and eager hard purge. Phase 2 adds the Caddy module in a separate Go module ([08-caddy-adapter-spec.md](08-caddy-adapter-spec.md)). Phase 2.5 adds a Valkey store in a separate Go module. Phase 3 adds experiment dimensions ([10-experiments-spec.md](10-experiments-spec.md)). Phases 2 and later are in scope here only through the extension points Phase 1 must leave open.
 
 ### 1.1 Goals
 
@@ -38,10 +38,11 @@ Phase 1.5 adds a Valkey/Redis store in a separate Go module. Phase 2 adds the Ca
 - Not a WAF, bot filter, or per-client rate limiter. Weir bounds origin load; it does not decide which clients deserve service. A flood of distinct paths can still consume the origin budget; see [06-threat-model.md](06-threat-model.md) T-12.
 - Not a CDN. One process, one logical origin per `Engine`.
 - Not a private (browser) cache. Weir is always a shared cache in the RFC 9111 sense.
-- No range-request caching in Phase 1. Partial content (206) is never stored.
+- No partial-object storage. 206 responses from the origin are never stored. Weir answers single byte ranges from complete stored objects (M11, §13.1); multi-range requests get the full 200.
 - No trailer storage. Trailers from the origin are discarded on stored responses (RFC 9111 §3.1 permits this).
-- No targeted cache-control fields (RFC 9213 `CDN-Cache-Control`) in Phase 1. Tracked as a Phase 1.x candidate in [PLAN-weir.md](../PLAN-weir.md).
-- No persistence across process restarts in Phase 1. `Warm` exists to refill after a restart.
+- Targeted cache-control fields (RFC 9213) arrive in M12 (§13.2), not in M1 to M10.
+- No persistence across crashes. Graceful shutdowns snapshot the memory store (M13, §13.3); `Warm` covers everything else.
+- No multi-node cache coherence before Phase 2.5. Phase 2 deployments run one Caddy node (D17).
 
 ## 2. Decisions locked before this spec
 
@@ -59,6 +60,20 @@ These were settled with the project owner on 2026-09-27 and are not reopened by 
 | D8 | TTL jitter only ever shortens freshness. |
 | D9 | Time-dependent tests use `testing/synctest`. There is no injected `Clock`. Randomness is injectable. |
 | D10 | Minimum Go version is 1.27 (for `httptest.NewTestServer` and `synctest.Sleep`). |
+| D11 | Single-range 206 from complete stored objects (M11). |
+| D12 | Targeted fields `Weir-Cache-Control` then `CDN-Cache-Control` (M12), with `private`, `no-store` and `no-cache` in `Cache-Control` still binding (stricter than RFC 9213). |
+| D13 | Static origin concurrency limit in Phase 1; opt-in adaptive limit considered after load-test data. |
+| D14 | Phase order after Phase 1: Caddy adapter (2), then Valkey store (2.5). |
+| D15 | Graceful-shutdown snapshot of the memory store, loaded as soft-stale (M13). |
+| D16 | Per-host fairness: limiter per-host cap and memory-store per-owner byte quota (M14), off by default in the library, on in the Caddy adapter for multi-host sites. |
+| D17 | Phase 2 runs a single Caddy node; multi-node waits for the Valkey store. |
+| D18 | Hard purge is lazy; `Purge.Eager` additionally deletes matching records now (M15). |
+| D19 | Remote-store epoch lookups fail open with an event (T-9). |
+| D20 | `Cache-Status` on by default with minimal parameters. |
+| D21 | `Key.AcceptEncoding` default stays `["gzip"]`; docs steer operators to list what their origin produces. |
+| D22 | Negative caching on by default, 2 s. |
+| D23 | Prometheus is the first exporter module. |
+| D24 | Repository private on GitHub from Phase 0, public with `v0.x` tags from M1, `v1.0.0` at the end of Phase 1. |
 
 ## 3. Terminology
 
@@ -146,7 +161,7 @@ type CacheInfo struct {
 }
 ```
 
-`Purge` (fields `Mode`, `All`, `URLs`, `Origin`, `Groups`), `WarmStats` and `EngineStats` are defined in [04-lld.md §1.2](04-lld.md).
+`Purge` (fields `Mode`, `All`, `URLs`, `Origin`, `Groups`, and `Eager` from M15), `WarmStats` and `EngineStats` are defined in [04-lld.md §1.2](04-lld.md).
 
 `FwdReason` values mirror RFC 9211 §2.2: `FwdNone`, `FwdBypass`, `FwdMethod`, `FwdURIMiss`, `FwdVaryMiss`, `FwdRequest`, `FwdStale`. `StaleReason` values: `StaleNone`, `StaleWhileRevalidate`, `StaleIfError`, `StaleShed`, `StaleCircuitOpen`, `StaleCoalesceTimeout`.
 
@@ -192,7 +207,7 @@ Package `store` (import path `github.com/AshwinSathian/weir/store`) defines `Sto
 - FR-KEY-9. In `VaryAuto` mode (default), any header named in `Vary` is folded into the variant key, except the sensitive set `Cookie`, `Authorization` and `Proxy-Authorization`, which prevent storage unless listed in `Key.VaryAllow`. In `VaryStrict` mode, a response whose `Vary` names any header not in `Key.VaryAllow` MUST NOT be stored. No configuration can make Weir store a response under a key that omits a header its `Vary` names.
 - FR-KEY-10. A response whose `Vary` lists more than `Key.MaxVaryHeaders` (default 8) names MUST NOT be stored. When a primary key already has `Key.MaxVariants` (default 8) live variants, a response for a new variant MUST NOT be stored; the request is answered and counted as `vary-overflow`.
 - FR-KEY-11. Secondary header normalization for Vary follows RFC 9111 §4.1: lines combined with `, `, optional whitespace around commas removed, leading and trailing whitespace removed. Headers with a registered normalizer (§5.2.3) use it. An absent header only matches absent.
-- FR-KEY-12. The key builder MUST be deterministic across processes (no per-process seed in key bytes) so a shared store in Phase 1.5 sees the same keys from every node.
+- FR-KEY-12. The key builder MUST be deterministic across processes (no per-process seed in key bytes) so a shared store in Phase 2.5 sees the same keys from every node.
 
 #### 5.2.3 Header normalizers
 
@@ -392,6 +407,7 @@ All fields are optional. The zero value of `Config` is valid and yields the defa
 | `Client.HonorRevalidation` | false | decision D5 |
 | `Timeouts.Origin` / `Background` / `Store` | 30 s / 30 s / 50 ms | |
 | `Warm.Concurrency` | 4 | |
+| `Limiter.MaxPerHost` | 0 (off) | M14; the Caddy adapter sets 25% for multi-host sites |
 | `Limits.*` | see FR-VAL-1, FR-VAL-3, FR-STO-10 | |
 | `CacheStatus` | `"Weir"` | empty disables the header |
 | `Observer` | nil | |
@@ -482,7 +498,7 @@ Evaluated in order after validation, bypass check, and store lookup.
 | T6.8 cache busting | FR-LIM-3, FR-MR-* | M4, M8 | `TestRandomQueryFloodBounded`, `TestMissRateAnomaly` |
 | T6.9 malformed input | FR-VAL-*, §5.2.3 | M1, M7 | `FuzzAcceptEncoding`, `FuzzKeyEncodingInjective`, `TestCVE202435296` |
 | T6.10 negative caching | FR-NEG-* | M6 | `TestNegativeCacheBurst` |
-| T6.11 eviction storms | [05-storage-interface-spec.md §5](05-storage-interface-spec.md) | M1 (store), 1.5 | `TestS3FIFOScanResistance`, `TestOneHitWondersDoNotEvictHot` |
+| T6.11 eviction storms | [05-storage-interface-spec.md §5](05-storage-interface-spec.md) | M1 (store), 2.5 | `TestS3FIFOScanResistance`, `TestOneHitWondersDoNotEvictHot` |
 | T6.12 purge herd | FR-PRG-* | M9 | `TestSoftPurgeServesStaleWhileRevalidating`, `TestPurge5000KeysBounded` |
 | T6.13 rolling deploy | FR-PRG-5 | M9 | `TestGlobalEpochSoft` |
 
@@ -509,9 +525,45 @@ Evaluated in order after validation, bypass check, and store lookup.
 
 ## 12. Open questions
 
-None block Phase 0 or Phase 1. Tracked here so they are not forgotten:
+Resolved on 2026-09-27:
 
-- OQ-1. Should Phase 1.x support single-range 206 responses from stored entries? Owner: Ashwin. Revisit after M10 with real traffic needs.
-- OQ-2. Should `CDN-Cache-Control` / a `Weir-Cache-Control` targeted field (RFC 9213) be supported? Needs a Structured Fields dictionary parser. Revisit after M10.
-- OQ-3. Adaptive concurrency limits (gradient or AIMD, as in Netflix concurrency-limits) instead of a static `MaxConcurrent`. Revisit after the Phase 1 load tests produce data.
-- OQ-4. Phase 3: which identifier drives experiment bucketing, and how variant assignment interacts with SWR. Deferred to the Phase 3 spec, as the seed says.
+- OQ-1 single-range 206: D11, §13.1.
+- OQ-2 targeted fields: D12, §13.2.
+- OQ-3 adaptive limits: D13. Static in Phase 1; revisit with load-test data. The limiter reads its cap through one method so an adaptive policy can replace it.
+- OQ-4 experiment bucketing: decisions E1 to E7 in [10-experiments-spec.md](10-experiments-spec.md).
+
+Open: none that block any milestone before Phase 3.
+
+## 13. Phase 1.x requirements (M11 to M15)
+
+### 13.1 Single-range responses (M11, D11)
+
+- FR-RNG-1. For a `GET` with `Range` whose stored entry is fresh or servable under SWR and has status 200, Weir evaluates `If-Range` first (RFC 9110 §13.1.5: only a strong `ETag` match, or a `Last-Modified` date that is a strong validator, lets the range apply; otherwise the full 200 is sent).
+- FR-RNG-2. A single `bytes` range (`a-b`, `a-`, `-n`) that is satisfiable is answered with 206, `Content-Range: bytes a-b/len`, and a body sliced from the stored bytes without copying. The range applies to the stored representation bytes (after any content coding).
+- FR-RNG-3. An unsatisfiable single range yields 416 with `Content-Range: bytes */len`. Invalid specifiers, unknown units, and requests with more than one range get the full 200 (RFC 9110 §14.2 permits ignoring Range). `HEAD` ignores `Range`.
+- FR-RNG-4. A range request with no usable entry is passed through as in FR-SRV-5. If the origin answers 206 with `Content-Range: bytes a-b/total`, `total <= Storable.MaxObjectBytes`, and the 206 would pass every storability rule except its status, Weir starts one background full-object fetch for the key (coalesced, background class) so later range requests are served from cache. Range requests never trigger foreground full fetches (T-37).
+- FR-RNG-5. Responses produced by FR-RNG-2 and FR-RNG-3 carry `Cache-Status: Weir; hit` (RFC 9211 §2.1 counts 206 built from a stored response as a hit).
+
+### 13.2 Targeted cache-control fields (M12, D12)
+
+- FR-TCC-1. Target list, in priority order: `Weir-Cache-Control`, `CDN-Cache-Control`. Each is parsed as an RFC 9651 Dictionary. An empty or unparsable field is ignored (RFC 9213 §2.1). Parser: `internal/sfv`, fuzzed.
+- FR-TCC-2. The first valid field on the list determines lifetime, stale windows, `must-revalidate`, `proxy-revalidate`, `s-maxage` and `public` for this cache, and `Cache-Control` freshness directives and `Expires` are ignored.
+- FR-TCC-3. Deviation from RFC 9213, toward caching less: `private`, `no-store` and `no-cache` found in either the targeted field or `Cache-Control` all apply. A framework that sets `CDN-Cache-Control` globally but marks per-user pages `private` only in `Cache-Control` therefore does not leak them (T-34).
+- FR-TCC-4. `Weir-Cache-Control` is removed from responses sent to clients and kept in stored headers (needed to recompute freshness after 304s). `CDN-Cache-Control` is passed through unless an experiment rewrite applies ([10 §2](10-experiments-spec.md) E7).
+- FR-TCC-5. Weir does not rewrite `Age` or `Date` to hide the longer targeted lifetime from downstream caches (RFC 9213 §2.3 "age penalty"); downstream browsers revalidate against Weir, which answers 304 cheaply. Documented for operators.
+
+### 13.3 Snapshots (M13, D15)
+
+- FR-SNP-1. `memory.Config.SnapshotPath`, when set, makes the memory store write a snapshot when it is closed: every live response and vary-spec record plus all hard epochs, in the store codec with a per-record CRC-32C, to a temporary file in the same directory created with mode 0600, then `fsync` and atomic rename. Markers, negative entries and the soft/invalid sketch are not written. Writing stops at the `Close` deadline; an incomplete snapshot is discarded, never renamed.
+- FR-SNP-2. `memory.New` with `SnapshotPath` loads an existing snapshot: records failing CRC or decoding are skipped and counted, records past `Expires` are dropped, hard epochs are restored, and then the store writes a global soft epoch at load time, so every loaded entry is stale as of the restart (T-33). The file is removed after a successful load so a crash later cannot reload old content.
+- FR-SNP-3. Load respects `MaxBytes` and per-owner quotas; records beyond capacity are dropped in file order (the writer emits main-queue records before small-queue records so hot entries load first).
+
+### 13.4 Per-host fairness (M14, D16)
+
+- FR-FAIR-1. `Limiter.MaxPerHost` caps in-flight origin fetches per normalized host, in addition to the partition cap. 0 (library default) disables it. Memory stays O(`MaxConcurrent`).
+- FR-FAIR-2. `store.Entry.Owner` is an opaque `Tag` the engine sets to the entry's origin tag. `memory.Config.MaxBytesPerOwner` (0 disables; library default 0) caps bytes per owner per shard. A `Set` that would push its owner over the cap first evicts that owner's own entries, scanning at most 64 nodes from the small-queue tail and then the main-queue tail for same-owner victims; if that frees too little, the `Set` is declined (S-4). A tenant can therefore turn over its own quota, but can never evict another tenant's entries (T-32). Declining outright was rejected: a legitimate tenant whose working set exceeds its quota would keep its oldest entries for up to `MaxRetention` while its new pages went uncached.
+- FR-FAIR-3. The Caddy adapter enables both at 25% (of `MaxConcurrent` and of shard bytes) when a site serves more than one host or uses on-demand TLS, unless configured otherwise.
+
+### 13.5 Eager hard purge (M15, D18)
+
+- FR-PRG-8. `Purge{Mode: PurgeHard, Eager: true}` also deletes matching records immediately when the store implements the optional `store.Scrubber` interface (`Scrub(ctx, tags []Tag) (int, error)`). The memory store scans one shard at a time under its lock and deletes response records whose tags intersect, which reaches every variant and every keyed-header partition. The epoch is still written first, so reachability never depends on the scan finishing. `Eager` with `PurgeSoft` is an error. Stores without `Scrubber` return `ErrEagerUnsupported` after the epoch is written.

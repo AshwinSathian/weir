@@ -12,9 +12,10 @@ Design complete, implementation not started. Phase 0 (skeleton) is next. Nothing
 |---|---|---|
 | 0 | skeleton, CI, test harness | next |
 | 1 | the engine, milestone by milestone (M1 to M10) | planned |
-| 1.5 | Valkey store | planned |
-| 2 | Caddy module | draft spec |
-| 3 | experiment-aware key dimensions | not specified |
+| 1.x | single-range responses, targeted cache-control, snapshots, per-host fairness, eager purge (M11 to M15) | specified |
+| 2 | Caddy module (single node) | draft spec |
+| 2.5 | Valkey store, multi-node | planned |
+| 3 | experiment-aware key dimensions | draft spec |
 
 ## Why another cache
 

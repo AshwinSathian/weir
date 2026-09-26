@@ -25,6 +25,13 @@ type Store interface {
 
 Types (`Key`, `Tag`, `Entry`, `Kind`, `Flags`, `Epoch`, `EpochMode`, `VariantRef`, `Info`) are defined in [04-lld.md §2](04-lld.md) and live in `store/store.go`.
 
+Optional capability interfaces a store may implement (the engine checks with a type assertion on the interface, never on a concrete store type):
+
+```go
+type Scrubber interface { Scrub(ctx context.Context, tags []Tag) (int, error) } // M15, FR-PRG-8
+type Sizer    interface { Bytes() int64; MaxObjectBytes() int64 }               // EngineStats, FR-LCY-1
+```
+
 ## 2. Method contracts
 
 ### 2.1 General rules
@@ -34,7 +41,7 @@ Types (`Key`, `Tag`, `Entry`, `Kind`, `Flags`, `Epoch`, `EpochMode`, `VariantRef
 - S-3. Errors: `ErrNotFound` means the key holds no live record. `ErrUnavailable` means the store could not answer (timeout, connection failure, overload, decode failure of a remote record). Stores wrap these with context using `%w`. The engine treats any other error as `ErrUnavailable`.
 - S-4. A store MAY decline to keep any record, and MAY drop any record at any time before its `Expires`. The engine is correct with a store that keeps nothing. A store MUST NOT return a record after its `Expires` has passed by more than the store's clock granularity (1 s for Valkey's `PX`, exact for memory). The engine re-checks `Expires` anyway.
 - S-5. Immutability: after `Set(k, e)` returns, the store MUST NOT modify `e` or anything reachable from it, and callers MUST NOT modify it either. `Get` MAY return the same pointer to many callers (memory store) or a fresh decoded copy (Valkey). No caller may depend on which.
-- S-6. Stores MUST NOT interpret HTTP semantics. They never look at headers, status codes or freshness fields. The only time-based rule a store applies is `Expires`, and for epochs, the pruning rule in §4.4.
+- S-6. Stores MUST NOT interpret HTTP semantics. They never look at headers, status codes or freshness fields. The only time-based rule a store applies is `Expires`, and for epochs, the pruning rule in §4.4. `Entry.Owner` and `Entry.Tags` are opaque tags: a store may group by them (quotas, scrubbing) without knowing what they mean.
 
 ### 2.2 Get
 
@@ -88,7 +95,7 @@ Note on E-3: `At >= since` means an epoch written in the same clock tick as a re
 
 ### 4.3 Clocks
 
-Epochs compare the purging node's clock with the fetching node's clock. In Phase 1 both are the same process, and the memory store measures every epoch and `since` value as a monotonic offset from a base instant taken at `New` (`t.Sub(base)` uses monotonic readings when both values have them), so wall-clock steps cannot make a purge miss. Sketch cells hold those offsets in whole seconds, rounded up. In Phase 1.5 nodes must keep clocks within `MaxClockSkew` (a Valkey store option, default 1 s), and the Valkey store adds `MaxClockSkew` to `since` comparisons conservatively: `At + MaxClockSkew >= since`. This can purge a response fetched up to one skew interval after the purge, which is the safe direction.
+Epochs compare the purging node's clock with the fetching node's clock. In Phase 1 both are the same process, and the memory store measures every epoch and `since` value as a monotonic offset from a base instant taken at `New` (`t.Sub(base)` uses monotonic readings when both values have them), so wall-clock steps cannot make a purge miss. Sketch cells hold those offsets in whole seconds, rounded up. In Phase 2.5 nodes must keep clocks within `MaxClockSkew` (a Valkey store option, default 1 s), and the Valkey store adds `MaxClockSkew` to `since` comparisons conservatively: `At + MaxClockSkew >= since`. This can purge a response fetched up to one skew interval after the purge, which is the safe direction.
 
 ### 4.4 Bounds
 
@@ -110,9 +117,11 @@ Tags are attacker-influenced: a flood of `POST /x?r=<random>` requests that the 
 type Config struct {
 	MaxBytes     int64         // 0: 256 MiB
 	Shards       int           // 0: 16; must be a power of two
-	MaxRetention  time.Duration // 0: 24h
-	MaxHardEpochs int           // 0: 10000
-	EpochSlots    int           // 0: 1 << 19; power of two
+	MaxRetention     time.Duration // 0: 24h
+	MaxHardEpochs    int           // 0: 10000
+	EpochSlots       int           // 0: 1 << 19; power of two
+	MaxBytesPerOwner int64         // 0: off; per shard (M14, FR-FAIR-2)
+	SnapshotPath     string        // "": off (M13, FR-SNP-1..3)
 	OnEvict      func(queue string, n int) // optional; "small", "main", "expired"
 }
 
@@ -173,13 +182,29 @@ Why this shape: entries requested once (the signature of a query-string busting 
 
 `OnEvict` is called after the shard lock is released, with counts batched per `Set` call.
 
+Per-owner quota (M14): each shard keeps `map[store.Tag]int64` of bytes per owner; entries are removed from it when their node is unlinked, so its size is bounded by the owners present in the shard. The over-quota path in FR-FAIR-2 scans at most 64 nodes and never touches another owner's nodes.
+
+Scrub (M15): for each shard in turn, take the write lock, walk every node, unlink response records whose `Tags` intersect the given tags, release. Worst case O(entries) total, but never more than one shard's worth of work under one lock.
+
+### 5.5 Snapshot file (M13)
+
+```
+magic "WEIRSNAP", version 0x01, base wall time int64
+then records: kind byte (0x01 entry, 0x02 hard epoch), uvarint length, payload, CRC-32C (Castagnoli) of kind+length+payload
+entry payload: 32-byte key + codec-encoded Entry (§6)
+hard-epoch payload: 32-byte tag + int64 at
+trailer: record 0xFF with the record count; a file without a valid trailer is incomplete and ignored
+```
+
+Writer order: main-queue records (head to tail), then small-queue records, then hard epochs, then trailer. Loader behavior is FR-SNP-2 and FR-SNP-3.
+
 ### 5.4 Epoch table
 
 The global tag's three timestamps and the newest-epoch value are atomics. Hard epochs live in a `sync.RWMutex`-protected `map[store.Tag]time.Time`, pruned opportunistically inside `SetEpoch` (at most 64 expired tags per call, no background goroutine). The soft and invalid sketch planes are `[]atomic.Uint32`; raising a cell is a compare-and-swap loop, reading is a plain atomic load, so neither takes a lock.
 
 ## 6. Entry encoding (`store/codec.go`)
 
-Needed by remote stores. Implemented in Phase 1 so `storetest` can round-trip it and so the format is reviewed before Phase 1.5 depends on it.
+Needed by remote stores. Implemented in Phase 1 so `storetest` can round-trip it and so the format is reviewed before Phase 2.5 depends on it.
 
 ```
 magic   "WEIR"                 4 bytes
@@ -206,11 +231,12 @@ then a sequence of fields, each: tag uint8, length uvarint, value bytes
   0x11 variantRef    32-byte key + int64 expires (repeated)
   0x12 retryAfter    int64 nanos
   0x13 expires       int64
+  0x14 owner         32 bytes
 ```
 
 Decoding rules: unknown field tags are skipped (forward compatibility); a length beyond the remaining buffer, a duplicate singular field, or a wrong magic or version is a decode error, which the store reports as `ErrUnavailable` and the engine treats as a miss. Total encoded size is bounded by the store's object limit before decoding allocates anything. `FuzzDecodeEntry` covers the decoder.
 
-## 7. Valkey store on paper (Phase 1.5)
+## 7. Valkey store on paper (Phase 2.5)
 
 This section exists to prove the interface above does not assume in-process semantics.
 

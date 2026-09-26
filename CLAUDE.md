@@ -18,6 +18,7 @@ A Go library that sits between an HTTP server and an origin and makes shared-cac
 | store contract, S3-FIFO, codec | [docs/05-storage-interface-spec.md](docs/05-storage-interface-spec.md) |
 | security reasoning and review checklist | [docs/06-threat-model.md](docs/06-threat-model.md) |
 | which tests, with which pass criteria | [docs/07-testing-strategy.md](docs/07-testing-strategy.md) |
+| Phase 3 experiment decisions | [docs/10-experiments-spec.md](docs/10-experiments-spec.md) |
 | why the project exists, failure taxonomy T6.x | [docs/00-design-doc.md](docs/00-design-doc.md) (seed; loses to 01–09 when they disagree) |
 
 Precedence when documents disagree is in [docs/README.md](docs/README.md). A disagreement is a bug: stop, tell the user which documents conflict, and propose the fix. Do not silently pick one.
@@ -55,7 +56,7 @@ Once `go.work` exists (M10), also run the module tests with `GOWORK=off` for eac
 
 These come from the architecture principles. Breaking one is a bug even if tests pass.
 
-1. The root module imports only the Go standard library (P7, NFR-6). No exceptions, including test-only imports. Dependencies belong in separate modules (`observe/prom`, `store/valkey`, `caddy`).
+1. The root module imports only the Go standard library (P7, NFR-6). No exceptions, including test-only imports. Dependencies belong in separate modules (`observe/prom`, `caddy`, `store/valkey`).
 2. `Origin.Fetch` is called in exactly one function, `(*Engine).fetch` in `fetch.go` (P3). Every path to the origin goes through it: foreground, background, warm, pass-through, errors.
 3. Stored entries are immutable (P4). Never write to a `*store.Entry`, its `Header` map, or its `Body` slice after `Set`. To change an entry, build a new one. Response headers served to callers are cloned maps.
 4. The forwarded request equals the keyed request (P2, INV-1). Anything the origin can see on a cacheable request is keyed or explicitly allowed. Normalization rewrites the request, never just the key.

@@ -1,6 +1,6 @@
 # Weir Caddy adapter specification (draft)
 
-Status: draft v0.9. Phase 2. The seed says this document is "written once Phase 1 is stable"; this draft captures the constraints already known so Phase 1 does not paint Phase 2 into a corner. It is finalized at the start of Phase 2 against the Caddy version current then.
+Status: draft v0.95. Phase 2. The seed says this document is "written once Phase 1 is stable"; this draft captures the constraints already known so Phase 1 does not paint Phase 2 into a corner. It is finalized at the start of Phase 2 against the Caddy version current then.
 Date: 2026-09-27
 Depends on: [01-technical-spec.md](01-technical-spec.md), [04-lld.md §10](04-lld.md)
 Seed name: `04-caddy-adapter-spec.md` (renumbered, see [docs/README.md](README.md))
@@ -21,7 +21,7 @@ JSON mirrors `weir.Config` with snake_case names. Durations use Caddy's `caddy.D
 ```
 example.com {
 	weir {
-		name       site-a          # engine identity for reuse across reloads (§3)
+		name       site-a          # required; store identity across reloads (§3)
 		max_bytes  512MiB          # memory store size
 		key {
 			query_drop utm_* fbclid gclid
@@ -62,7 +62,8 @@ Consequences, accepted:
 - A reload that changes the store size starts a new, empty store. That is rare and deliberate.
 - During the overlap window both the old and new engine have their own limiter, so origin concurrency can briefly reach twice `max_concurrent`. The old engine receives no new requests after the switch, so the overlap is bounded by its in-flight fetches.
 - In-flight flights do not transfer: a request arriving at the new engine for a key the old engine is fetching starts its own fetch. At most one duplicate fetch per key per reload.
-- Key-rule changes keep old entries under their old keys; they are unreachable under the new rules and age out. Whether to soft-purge globally instead is OQ-C1.
+- Key-generation hash (OQ-C1, resolved): the adapter hashes the settings that change what an unchanged key means, namely `Forward.Mode`, `Forward.Allow` and `Storable.StripSetCookie`, and stores the hash beside the pooled store. When a reload changes it, the new engine writes one global soft epoch, so reachable entries revalidate (under SWR where the origin allows it) instead of serving content fetched under different forwarding rules. Settings that only change which key a request maps to (query rules, key headers and cookies, path normalization, experiments) are excluded: their old entries become unreachable and age out without a purge. Host lists, on-demand TLS domains and everything else a BYOD control plane changes on reload are excluded, so adding a domain never purges the cache.
+- `name` is required (OQ-C2, resolved). Two site blocks with the same `name` share a store on purpose; the same `name` with different store settings fails validation.
 
 ## 4. Origin implementation
 
@@ -81,6 +82,14 @@ Constraints this places on Phase 1, all already met:
 - `Fetch` may run after the triggering request finished (SWR, early refresh). `ctx` carries the original request's values but not its cancellation (FR-COA-9), so Caddy's replacer and vars remain available through `ctx.Value`. The clone must not touch `base`'s original `ResponseWriter`.
 - `reverse_proxy` adds `X-Forwarded-For`, `X-Forwarded-Proto` and `X-Forwarded-Host` when proxying. `X-Forwarded-For` is per-client. See §6.
 
+## 4a. Deployment topology
+
+Phase 2 supports exactly one Caddy node per cache (D17, T-38). Purges, snapshots and the memory store all assume it. Running several nodes behind a load balancer before the Valkey store (Phase 2.5) exists means each node has its own cache and a purge reaches only the node it is sent to; the adapter docs state this as unsupported.
+
+## 4b. Multi-host sites (BYOD)
+
+One engine serves every host of a site (OQ-C3, resolved): the tenants share one origin, so they share the breaker and the global limiter. Fairness comes from two caps that the adapter turns on at 25% when the site has more than one host or uses on-demand TLS (FR-FAIR-3): `Limiter.MaxPerHost` and the memory store's `MaxBytesPerOwner`. Tenants that run on different upstreams must be configured as different sites with different `name`s, or a failing tenant upstream would open the breaker for all.
+
 ## 5. Ordering with other handlers
 
 - `encode` (compression): if `encode` runs before `weir` (outer), Weir caches uncompressed bytes and `encode` compresses every response, including hits. Simple and CPU-bound. If `encode` runs after `weir` (inner, between Weir and `reverse_proxy`), Weir caches compressed variants keyed by the `Accept-Encoding` bucket. Default recommendation: let the origin compress and leave `encode` out of Weir-cached routes, or place it outside `weir` when the origin cannot. Documented with both examples.
@@ -93,9 +102,9 @@ Weir forwards a sanitized request, but `reverse_proxy` then adds `X-Forwarded-Fo
 
 ## 7. Purge over HTTP
 
-An admin API module `admin.api.weir` registers routes under Caddy's admin endpoint (local-only by default):
+Purge is available only through the admin API (decision confirmed 2026-09-27). An admin API module `admin.api.weir` registers routes under Caddy's admin endpoint (local-only by default):
 
-- `POST /weir/<name>/purge` with a JSON body matching `weir.Purge`. Returns 202 once epochs are written.
+- `POST /weir/<name>/purge` with a JSON body matching `weir.Purge` (including `eager` for hard purges). Returns 202 once epochs are written, with the scrubbed count when `eager` was set.
 - `GET /weir/<name>/stats` returning `EngineStats`.
 
 No purge endpoint is exposed on site listeners. Operators who need remote purges expose Caddy's admin API with its own access controls (T-26).
@@ -110,8 +119,10 @@ The adapter implements `weir.Observer` by incrementing metrics registered on Cad
 - Reload test: load config, warm 100 keys, reload with a changed limiter setting, assert all 100 are still hits.
 - `xcaddy build` in CI to catch Caddy API drift.
 
-## 10. Open questions
+## 10. Resolved questions
 
-- OQ-C1. On a key-rule change across reloads, keep the store and let old keys age out, or soft-purge globally? Keeping is cheaper; purging avoids serving entries whose key rules no longer match. Decide at Phase 2 kickoff.
-- OQ-C2. Should `name` default to a hash of host matchers, or be required? Required is explicit and avoids surprising engine sharing across sites.
-- OQ-C3. BYOD integration: do tenant domains share one engine (one limiter budget across tenants) or get one engine each (isolation, more memory)? The per-partition cap already includes the host, so one shared engine gives per-path fairness but not per-tenant fairness.
+- OQ-C1: keep the store; global soft purge only when the key-generation hash changes (§3).
+- OQ-C2: `name` is required (§3).
+- OQ-C3: one engine per site with per-host fairness caps (§4b).
+
+Remaining for Phase 2 kickoff: re-verify every Caddy API named here against the then-current release.

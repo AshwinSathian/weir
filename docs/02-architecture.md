@@ -104,7 +104,7 @@ Each has its own `go.mod` so importers of the core do not inherit its dependenci
 
 | Module path | Phase | Depends on |
 |---|---|---|
-| `github.com/AshwinSathian/weir/store/valkey` | 1.5 | `valkey-io/valkey-go` |
+| `github.com/AshwinSathian/weir/store/valkey` | 2.5 | `valkey-io/valkey-go` |
 | `github.com/AshwinSathian/weir/observe/prom` | 1 (M10) | `prometheus/client_golang` |
 | `github.com/AshwinSathian/weir/observe/otel` | 1 (M10), optional | `go.opentelemetry.io/otel/metric` |
 | `github.com/AshwinSathian/weir/caddy` | 2 | `caddyserver/caddy/v2` |
@@ -152,7 +152,7 @@ Stateless components are pure functions with table and fuzz tests. Stateful comp
 
 ### 5.3 Time
 
-Entries store `time.Time` values from `time.Now()`, which carry both a wall and a monotonic reading. Inside one process every subtraction (age, staleness, epoch comparison) therefore uses the monotonic clock, and a wall-clock step cannot extend freshness or hide a purge (FR-FRS-8). The codec keeps only the wall reading, because entries cross process boundaries in Phase 1.5, where node clocks must stay within the skew allowance of [05 §4.3](05-storage-interface-spec.md). Origin-supplied times (`Date`, `Expires`, `Last-Modified`) are compared only with each other.
+Entries store `time.Time` values from `time.Now()`, which carry both a wall and a monotonic reading. Inside one process every subtraction (age, staleness, epoch comparison) therefore uses the monotonic clock, and a wall-clock step cannot extend freshness or hide a purge (FR-FRS-8). The codec keeps only the wall reading, because entries cross process boundaries in Phase 2.5, where node clocks must stay within the skew allowance of [05 §4.3](05-storage-interface-spec.md). Origin-supplied times (`Date`, `Expires`, `Last-Modified`) are compared only with each other.
 
 ## 6. Architecture decision records
 
@@ -176,7 +176,7 @@ Decision: primary key from request-only inputs; a vary-spec record under the pri
 
 Alternatives: one blob per primary key holding all variants (every variant write rewrites the blob and races with concurrent writers; the whole blob is evicted together); ignore `Vary` and key on a fixed header list (unsafe, violates RFC 9111 §4.1).
 
-Consequences: the store holds four record kinds (response, vary spec, hit-for-miss marker, negative). The memory store can serve both reads under one shard lock only by coincidence, so the engine does two `Get` calls. Phase 1.5 can pipeline them.
+Consequences: the store holds four record kinds (response, vary spec, hit-for-miss marker, negative). The memory store can serve both reads under one shard lock only by coincidence, so the engine does two `Get` calls. Phase 2.5 can pipeline them.
 
 ### ADR-3 SHA-256 over a tagged, length-prefixed encoding
 
@@ -206,7 +206,7 @@ Decision: each purge writes `epoch[tag] = (time, mode)`. Every entry carries thr
 
 Alternatives: reverse index plus iteration (what Varnish xkey and Souin do); key generation counters folded into the key (purges become misses, which is hard purge only).
 
-Consequences: purge and invalidation are O(tags). Lookup does up to `MaxGroups + 3` epoch reads, lock-free atomics in the memory store and one pipelined round trip for Valkey, and usually none at all thanks to the newest-epoch fast path. Because tags are attacker-influenced (unsafe requests to distinct URIs create MUST-invalidate epochs), soft and invalid epochs live in a fixed-size max-timestamp sketch that never under-invalidates, and only operator hard purges are kept exactly ([05 §4.4](05-storage-interface-spec.md), T-29). Correctness in Phase 1.5 depends on node clocks being within the configured skew allowance ([05-storage-interface-spec.md §4.3](05-storage-interface-spec.md)).
+Consequences: purge and invalidation are O(tags). Lookup does up to `MaxGroups + 3` epoch reads, lock-free atomics in the memory store and one pipelined round trip for Valkey, and usually none at all thanks to the newest-epoch fast path. Because tags are attacker-influenced (unsafe requests to distinct URIs create MUST-invalidate epochs), soft and invalid epochs live in a fixed-size max-timestamp sketch that never under-invalidates, and only operator hard purges are kept exactly ([05 §4.4](05-storage-interface-spec.md), T-29). Correctness in Phase 2.5 depends on node clocks being within the configured skew allowance ([05-storage-interface-spec.md §4.3](05-storage-interface-spec.md)).
 
 ### ADR-6 Byte-weighted S3-FIFO for the memory store (D2)
 
@@ -266,7 +266,7 @@ Consequences: the Cache-Groups parser needs RFC 9651 List-of-Strings parsing, im
 
 ## 7. Extension points left open for later phases
 
-- Phase 1.5 store: the `store.Store` interface and `store/storetest` suite. The engine never type-asserts on the memory store; it only checks for small optional capability interfaces (`MaxObjectBytes() int64`, `Bytes() int64`) that any store may implement.
+- Phase 2.5 store: the `store.Store` interface and `store/storetest` suite. The engine never type-asserts on the memory store; it only checks for small optional capability interfaces (`MaxObjectBytes() int64`, `Bytes() int64`) that any store may implement.
 - Phase 2 Caddy: `Origin`, `Serve`, `Purge`, `Observer`. The adapter adds no engine API.
-- Phase 3 experiment dimensions: `internal/keys` has a single place where primary-key fields are appended and where the forwarded request is rewritten. A dimension will be a function that returns a name and a value, appended to the key and forwarded as a header, so P2 holds. It is not exported in Phase 1.
+- Phase 3 experiment dimensions: `internal/keys` has a single place where primary-key fields are appended and where the forwarded request is rewritten. A dimension will be a function that returns a name and a value, appended to the key and forwarded as a header, so P2 holds. It is not exported in Phase 1. Decisions for Phase 3 are in [10-experiments-spec.md](10-experiments-spec.md).
 - Adaptive limits (OQ-3): the limiter's cap is read through one method, so it can become dynamic without touching callers.

@@ -46,7 +46,7 @@ Recorded as ADRs in [docs/02-architecture.md §6](docs/02-architecture.md). The 
 |---|---|---|---|---|---|
 | Coalescing, limiter and SWR interactions produce deadlocks or goroutine leaks that only show under load | M | H | High | synctest deadlock detection on every engine test; goroutine-count check in load tests; `goroutineleak` profile in the load harness; FR-LCY-2 test | Ashwin |
 | Strict forwarding breaks real origins in ways the docs do not anticipate | M | M | Medium | `examples/weirproxy` trial against a real site before M10 closes; README section on `Forward.Allow`; `EvNotStored` reasons make misconfiguration visible | Ashwin |
-| S3-FIFO hit ratio worse than expected on real traffic | L | M | Low | Store interface allows swapping; capture a trace from the weirproxy trial and compare with an LRU baseline before Phase 1.5 | Ashwin |
+| S3-FIFO hit ratio worse than expected on real traffic | L | M | Low | Store interface allows swapping; capture a trace from the weirproxy trial and compare with an LRU baseline before Phase 2.5 | Ashwin |
 | Hit-path latency misses NFR-5 because of header cloning and forwarded-header construction | M | L | Low | benchmarks from M1; budget revisited with data in M10 per NFR-5 | Ashwin |
 | Scope creep into Phase 2 or 3 features during Phase 1 | M | M | Medium | CLAUDE.md forbids work outside the current milestone; new ideas go to Open questions | Ashwin |
 | `synctest` limitations (mutex waits are not durable) make some concurrency tests flaky | L | M | Low | P8 channel-based waits; any flaky test is a bug, fixed or quarantined within the milestone | Ashwin |
@@ -55,8 +55,8 @@ Recorded as ADRs in [docs/02-architecture.md §6](docs/02-architecture.md). The 
 ## Dependencies
 
 - Upstream: Go 1.27 toolchain; golangci-lint v2; govulncheck; GitHub Actions (`actions/checkout`, `actions/setup-go`, `golangci/golangci-lint-action`); Node.js for the nightly `http-tests/cache-tests` job.
-- Downstream: the BYOD custom-domain project (Caddy instance shared in Phase 2).
-- External: none in Phase 1. Phase 1.5 needs a Valkey server for tests (Docker). Phase 2 needs `xcaddy`.
+- Downstream: the BYOD custom-domain project (single Caddy node shared in Phase 2, D17).
+- External: none in Phase 1. Phase 2 needs `xcaddy`. Phase 2.5 needs a Valkey server for tests (Docker).
 
 ## Phases and milestones
 
@@ -73,6 +73,7 @@ Deliverable: compiling public API with stub behavior, CI, test harness.
 - [ ] P0.4 `New` with defaults and validation (FR-LCY-1); `Serve` that validates nothing and calls the origin through the single fetch function in `fetch.go` (no limiter yet); `Close`. AC: `TestZeroConfigValid`, `TestInvalidConfigRejected` (one row per FR-LCY-1 rule), `TestServePassThroughStub`.
 - [ ] P0.5 `internal/testorigin` per [07 §3](docs/07-testing-strategy.md). AC: its own tests cover gate, delay under synctest, panic, truncate, `NewChecked` failing on over-concurrency.
 - [ ] P0.6 `store/storetest.Run` with all cases from [05 §8](docs/05-storage-interface-spec.md) (they will fail until M1 provides a store; the suite itself compiles). AC: compiles; a trivial map-backed store in `storetest`'s own test passes the non-epoch cases.
+- [ ] P0.0 Private GitHub repo `AshwinSathian/weir` (created 2026-09-27); flip to public and tag `v0.1.0` when M1 closes (D24). AC: repo visibility matches the current phase.
 - [ ] P0.7 CI workflow: gofmt, vet, golangci-lint v2, `go test -race -shuffle=on`, dependency check (NFR-6) as a test (`TestNoThirdPartyImports` using `go list -deps -json`), govulncheck. AC: workflow green on the first push.
 - [ ] P0.8 `scripts/trace.sh`: extracts IDs (`FR-*`, `NFR-*`, `INV-*`) from `docs/01` and `docs/06`, greps `_test.go` for citations, prints uncited IDs, exits 0 (report mode) until `TRACE_STRICT=1`. AC: runs locally and in CI.
 
@@ -164,24 +165,36 @@ Refs: FR-OBS-*, NFR-*, seed §7.5.
 
 Exit criteria for Phase 1: [07 §12](docs/07-testing-strategy.md).
 
-### Phase 1.5: Valkey store (~3 weeks)
+### Phase 1.x: Post-M10 features (~5 weeks)
 
-Goal: prove the store interface has no in-process assumptions.
+Refs: [01 §13](docs/01-technical-spec.md), decisions D11, D12, D15, D16, D18.
 
-- [ ] 1.5.1 `store/valkey` module per [05 §7](docs/05-storage-interface-spec.md). AC: `storetest.Run` passes against Valkey in Docker in CI.
-- [ ] 1.5.2 Engine test suite (T6.x matrix) re-run with the Valkey store, real time, via a build tag. AC: all pass; any failure is an interface bug and is fixed in [05](docs/05-storage-interface-spec.md) first.
-- [ ] 1.5.3 Vary-spec compare-and-set via Lua. AC: concurrent variant writers never exceed `MaxVariants` in a 64-writer test.
-- [ ] 1.5.4 Eviction-storm review (seed T6.11) with a Valkey `maxmemory` policy experiment. AC: written up in `docs/09-research-notes.md`.
+- [ ] M11 Single-range responses. AC: `TestRangeSingleFromCache`, `TestRangeUnsatisfiable416`, `TestRangeMultiOrInvalidGets200`, `TestIfRangeStrongOnly`, `TestRangeMissBackgroundFillBounded`, `FuzzRange` pass.
+- [ ] M12 Targeted cache-control (`Weir-Cache-Control`, `CDN-Cache-Control`) with the stricter `private` rule. AC: `TestTargetedFieldPrecedence`, `TestTargetedFieldKeepsPrivate`, `TestWeirCacheControlStripped`, `FuzzSFDictionary` pass; RFC 9213 examples pass.
+- [ ] M13 Memory-store snapshots. AC: `TestSnapshotRoundTrip`, `TestSnapshotLoadIsSoftStale`, `TestSnapshotHardEpochSurvives`, `TestSnapshotCorruptRecordsSkipped`, `TestSnapshotRespectsDeadline` pass.
+- [ ] M14 Per-host fairness (limiter cap, per-owner quota). AC: `TestOwnerQuotaIsolatesTenants`, `TestPerHostLimiterCap` pass; defaults off in the library.
+- [ ] M15 Eager hard purge via `store.Scrubber`. AC: `TestEagerHardPurgeDeletesAllPartitions`, `TestEagerSoftIsError`, `TestEagerUnsupportedStore` pass.
 
 ### Phase 2: Caddy adapter (~3 weeks)
 
-- [ ] 2.1 Re-verify [08](docs/08-caddy-adapter-spec.md) against the current Caddy release; resolve OQ-C1 to OQ-C3 with the project owner; mark 08 normative. AC: 08 status is v1.0.
-- [ ] 2.2 Module, Caddyfile parsing, UsagePool store sharing, `nextOrigin`. AC: `caddytest` scenarios for T6.2, T6.6, T6.12 and the reload test pass; `xcaddy build` in CI.
-- [ ] 2.3 Admin API purge and stats; Prometheus metrics on Caddy's registry. AC: purge via admin endpoint changes subsequent `Cache-Status` to `fwd=stale`.
+- [ ] 2.1 Re-verify [08](docs/08-caddy-adapter-spec.md) against the current Caddy release; mark 08 v1.0. AC: every Caddy API named in 08 exists at the pinned version.
+- [ ] 2.2 Module, Caddyfile parsing (required `name`), store pool, key-generation hash with global soft purge on change, per-host fairness defaults for multi-host sites, `nextOrigin`. AC: `caddytest` scenarios for T6.2, T6.6, T6.12 pass; reload test (100 warm keys survive a limiter change; a `forward.allow` change makes them revalidate; adding a host changes nothing); `xcaddy build` in CI.
+- [ ] 2.3 Admin API purge (with `eager`) and stats; Prometheus metrics on Caddy's registry. AC: purge via admin endpoint changes the next `Cache-Status` to `fwd=stale`.
+- [ ] 2.4 Single-node deployment guide for the BYOD instance (T-38), including snapshot path and shutdown grace period. AC: guide in `docs/runbook.md`.
 
-### Phase 3: Experiment dimensions (not scheduled)
+### Phase 2.5: Valkey store (~3 weeks)
 
-Spec to be written after Phase 2 (seed §10, OQ-4).
+Goal: prove the store interface has no in-process assumptions and unlock multi-node deployments.
+
+- [ ] 2.5.1 `store/valkey` module per [05 §7](docs/05-storage-interface-spec.md). AC: `storetest.Run` passes against Valkey in Docker in CI.
+- [ ] 2.5.2 Engine test suite (T6.x matrix) re-run with the Valkey store, real time, via a build tag. AC: all pass; any failure is an interface bug fixed in [05](docs/05-storage-interface-spec.md) first.
+- [ ] 2.5.3 Vary-spec compare-and-set via Lua. AC: 64 concurrent variant writers never exceed `MaxVariants`.
+- [ ] 2.5.4 Eviction-storm review (seed T6.11) with a Valkey `maxmemory` experiment; `Scrubber` via background `SCAN`. AC: written up in `docs/09-research-notes.md`.
+- [ ] 2.5.5 Multi-node Caddy guide (lifts D17). AC: purge on one node is observed on another in an integration test.
+
+### Phase 3: Experiment dimensions (~4 weeks, after Phase 2.5)
+
+Spec: [docs/10-experiments-spec.md](docs/10-experiments-spec.md) (decisions E1 to E7 locked). First task: finalize the spec's open items and write tests for T-35 and T-36.
 
 ## Testing strategy
 
@@ -196,8 +209,8 @@ Spec to be written after Phase 2 (seed §10, OQ-4).
 
 ## Open questions
 
-- [ ] OQ-1 to OQ-4 in [01 §12](docs/01-technical-spec.md). Owner: Ashwin. Target: after M10.
-- [ ] OQ-C1 to OQ-C3 in [08 §10](docs/08-caddy-adapter-spec.md). Owner: Ashwin. Target: Phase 2 kickoff.
+- [x] OQ-1 to OQ-4 and OQ-C1 to OQ-C3: resolved 2026-09-27 (decisions D11 to D24 in [01 §2](docs/01-technical-spec.md), E1 to E7 in [10](docs/10-experiments-spec.md)).
+- [ ] Phase 3 open items in [10 §6](docs/10-experiments-spec.md). Owner: Ashwin. Target: Phase 3 kickoff.
 
 ## Appendix
 

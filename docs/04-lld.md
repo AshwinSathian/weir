@@ -92,6 +92,7 @@ type LimiterConfig struct {
 	MaxQueueWait      time.Duration // 0: 2s
 	MaxPerPartition   int           // 0: 16 (clamped to MaxConcurrent)
 	ReserveForeground int           // 0: MaxConcurrent/4 (at least 1 when MaxConcurrent >= 2)
+	MaxPerHost        int           // 0: off (M14)
 }
 
 type BreakerConfig struct {
@@ -154,6 +155,7 @@ type Purge struct {
 	URLs   []string  // absolute http(s) URLs; parsed and rewritten exactly like requests
 	Origin string    // "scheme://host[:port]"; required when Groups is non-empty
 	Groups []string
+	Eager  bool      // M15: with PurgeHard, also delete matching records now (store.Scrubber)
 }
 
 type WarmStats struct{ Fetched, Skipped, NotStored, Failed int }
@@ -181,6 +183,7 @@ var (
 	ErrOnlyIfCached   = errors.New("weir: only-if-cached and no stored response")
 	ErrOrigin         = errors.New("weir: origin error")
 	ErrClosed         = errors.New("weir: engine closed")
+	ErrEagerUnsupported = errors.New("weir: store cannot scrub; epoch written, delete skipped") // M15
 )
 
 type RequestError struct{ Reason string } // Is(ErrInvalidRequest) == true
@@ -245,6 +248,7 @@ type Entry struct {
 	FetchDuration       time.Duration
 	VaryNames           []string  // canonical names this variant was keyed on; nil when no Vary
 	Tags                []Tag     // implicit tags + groups
+	Owner               Tag       // origin tag; opaque to stores, used for per-owner quotas (M14)
 
 	// KindVarySpec
 	// VaryNames (shared field) plus:
@@ -775,7 +779,7 @@ func (e *Engine) fetch(ctx, s, origin) fetchResult:
 
 Adapters must not write into header value slices in place (`h[k][0] = v`); `Set`, `Add` and `Del` are safe (§6.10).
 
-When the vary spec already lists `MaxVariants` live variants and the new variant is not among them, the entry is not stored (`EvVaryOverflow`). Spec updates are read-modify-write without compare-and-swap, so concurrent writers of different variants can exceed `MaxVariants`; the overshoot is bounded by `MaxPerPartition`, because all writers for one URI share a partition. Phase 1.5 may add CAS via the Valkey store.
+When the vary spec already lists `MaxVariants` live variants and the new variant is not among them, the entry is not stored (`EvVaryOverflow`). Spec updates are read-modify-write without compare-and-swap, so concurrent writers of different variants can exceed `MaxVariants`; the overshoot is bounded by `MaxPerPartition`, because all writers for one URI share a partition. Phase 2.5 may add CAS via the Valkey store.
 
 ### 6.8 Background refresh and early refresh
 
@@ -1074,3 +1078,27 @@ The memory store's hit path takes only a shard read lock plus an atomic frequenc
 | warm workers | `Warm` | `Warm.Concurrency` | `Warm` returns |
 
 All are added to `e.wg`. `Close` sets `closed`, waits on `wg` until its context ends, then cancels `bgCtx` (which cancels in-flight origin calls via the fetch context derived from it) and waits again.
+
+## 13. Phase 1.x designs (M11 to M15)
+
+### 13.1 Single range (M11)
+
+`internal/httpcc.ParseRange(h string, size int64) (start, end int64, kind RangeKind)` with kinds `RangeNone` (absent, invalid, unknown unit, multi-range: serve 200), `RangeOK`, `RangeUnsatisfiable`. Grammar per RFC 9110 §14.1.2; digits parsed with overflow checks; header longer than 256 bytes is `RangeNone`. `If-Range` evaluation: strong `ETag` comparison, or an HTTP-date equal to the stored `Last-Modified` when that date is at least one second before the stored `Date` (RFC 9110 §8.8.2.2 strong-validator rule); anything else means the full 200. `fromEntry` slices `entry.Body[start:end+1]` into a `bytes.Reader`, sets `Content-Range` and `Content-Length`, status 206. Fuzz target `FuzzRange`.
+
+FR-RNG-4's background fill: in `pass()` for a range miss, after headers arrive, if status is 206, `Content-Range` total is known and at most `MaxObjectBytes`, and `storability` passes with the status check skipped, call `backgroundRefresh` with a spec whose forwarded request has `Range` removed.
+
+### 13.2 Targeted fields (M12)
+
+`internal/sfv.ParseDictionary(lines []string, maxMembers int) (Dict, error)` covering RFC 9651 §4.2.2 (tokens, integers, decimals, strings, booleans, parameters ignored). `httpcc.ParseResponse` gains an input: the ordered target list. It returns directives from the first valid targeted field, then ORs in `private`, `no-store`, `no-cache` from `Cache-Control` (FR-TCC-3). Integer values that are decimals or negative make the field invalid (RFC 9213 §2.1 says not to coerce). `fromEntry` deletes `Weir-Cache-Control` from the cloned header map.
+
+### 13.3 Snapshot (M13)
+
+Writer runs inside `memory.Store.Close(ctx)`: `os.CreateTemp(dir, ".weir-snap-*")`, `Chmod(0600)`, buffered writer, per-shard read lock while copying node pointers (entries are immutable so encoding happens outside the lock), trailer, `Sync`, `Rename`. Loader in `memory.New`: open, verify magic and trailer first (seek to end), then stream records. `Close` takes a context; the engine's `Close` passes its own, so the adapter's shutdown grace period bounds snapshot time.
+
+### 13.4 Per-host fairness (M14)
+
+Limiter: `byHost map[uint64]int32` alongside `byPart`; `canRun` adds `byHost[host] < MaxPerHost` when enabled. The host hash is computed once in `Classify` from the normalized host. Memory store: see [05 §5.3](05-storage-interface-spec.md) quota paragraph.
+
+### 13.5 Eager purge (M15)
+
+`Purge` writes epochs exactly as before, then, when `Eager`, type-asserts `store.Scrubber` and calls `Scrub` with the same tags. The returned count goes into `EvPurge` as `Status` (number scrubbed).

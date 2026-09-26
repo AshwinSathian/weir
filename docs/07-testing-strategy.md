@@ -222,6 +222,30 @@ Named in [06-threat-model.md](06-threat-model.md), [01-technical-spec.md](01-tec
 | `TestShardDistributionAdversarial` (component) | 100 000 keys chosen to share their first 8 bytes spread across shards within 20% of uniform |
 | `TestServedHeaderMutationDoesNotLeak` (engine) | `Add`, `Set`, `Del` and `Values` on a served response's headers leave the next hit's headers unchanged |
 
+### Phase 1.x (M11 to M15)
+
+| Test | Asserts |
+|---|---|
+| `TestRangeSingleFromCache` (engine) | `bytes=0-99`, `bytes=100-`, `bytes=-50` on a stored 1 000-byte entry return 206 with correct bytes and `Content-Range`; no origin call |
+| `TestRangeUnsatisfiable416` (engine) | `bytes=5000-` on a 1 000-byte entry returns 416 with `Content-Range: bytes */1000` |
+| `TestRangeMultiOrInvalidGets200` (engine) | `bytes=0-1,5-6`, `bytes=cow`, `items=0-1` return the full 200 |
+| `TestIfRangeStrongOnly` (engine) | weak ETag or a non-strong date in `If-Range` yields the full 200 |
+| `TestRangeMissBackgroundFillBounded` (engine) | 1 000 range requests across 1 000 cold URLs: origin in-flight stays within the background limit; exactly one fill per URL whose 206 total is within `MaxObjectBytes`; none for larger totals |
+| `FuzzRange` (property) | no panic; `RangeOK` results always satisfy `0 <= start <= end < size` |
+| `TestTargetedFieldPrecedence` (engine) | `Weir-Cache-Control` beats `CDN-Cache-Control` beats `Cache-Control`; invalid targeted field falls through |
+| `TestTargetedFieldKeepsPrivate` (engine) | `CDN-Cache-Control: max-age=600` with `Cache-Control: private` is not stored |
+| `TestWeirCacheControlStripped` (engine) | clients never see `Weir-Cache-Control` |
+| `FuzzSFDictionary` (property) | no panic; bounded members |
+| `TestSnapshotRoundTrip` (component) | close with snapshot, reopen: same entries present, file removed |
+| `TestSnapshotLoadIsSoftStale` (engine) | loaded entries revalidate (or serve under SWR) on first request |
+| `TestSnapshotHardEpochSurvives` (engine) | hard-purged entry stays unreachable after restart |
+| `TestSnapshotCorruptRecordsSkipped` (component) | flipped bytes skip one record; truncated file (no trailer) is ignored entirely |
+| `TestSnapshotRespectsDeadline` (component) | `Close` with an expired context leaves no snapshot and no temp file |
+| `TestOwnerQuotaIsolatesTenants` (component) | owner A inserting 10× its quota evicts only A's entries; owner B's entries all remain |
+| `TestPerHostLimiterCap` (component) | host cap holds while other hosts proceed |
+| `TestEagerHardPurgeDeletesAllPartitions` (engine) | eager hard purge of a URL removes variant and keyed-header entries from the memory store; `Bytes()` drops accordingly |
+| `TestEagerSoftIsError`, `TestEagerUnsupportedStore` (engine) | invalid combination rejected; store without `Scrubber` returns `ErrEagerUnsupported` after writing the epoch |
+
 ## 7. RFC behavior tables
 
 `rfc9111_test.go` in the root package holds table tests, one row per normative statement Weir implements, citing the section: storage conditions (§3), header storage exclusions (§3.1), Authorization (§3.5), Age generation (§4), Vary matching and normalization (§4.1), lifetime precedence and invalid directives (§4.2.1), heuristic limits (§4.2.2), age calculation with the RFC's own example values (§4.2.3), validation headers sent (§4.3.1), client conditionals (§4.3.2), 304 freshening (§4.3.4), invalidation (§4.4), `only-if-cached` (§5.2.1.7), `must-revalidate` 504 (§5.2.2.2), `must-understand` (§5.2.2.3), RFC 5861 examples verbatim (§3.1 and §4.1 of that RFC), and RFC 9211 examples for the parameters Weir emits.
