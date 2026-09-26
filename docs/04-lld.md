@@ -1102,3 +1102,16 @@ Limiter: `byHost map[uint64]int32` alongside `byPart`; `canRun` adds `byHost[hos
 ### 13.5 Eager purge (M15)
 
 `Purge` writes epochs exactly as before, then, when `Eager`, type-asserts `store.Scrubber` and calls `Scrub` with the same tags. The returned count goes into `EvPurge` as `Status` (number scrubbed).
+
+## 14. Designs for decisions D25 to D42
+
+- Upload pool (FR-LIM-7): the limiter holds two independent pools with the same algorithm (§8.2): `main` and `upload`. `Classify` sets `HasBody` when `Request.Body != nil` and the request did not declare `Content-Length: 0`. Partition and host caps apply within each pool.
+- Timeouts (FR-TMO-*): the fetch context carries `Timeouts.Origin` until the buffered body is read. For streams, `fetch` swaps the deadline context for a cancel-only context once headers arrive, and wraps the body in an idle-timeout reader: each `Read` arms a timer of `StreamIdle` (reset per successful read) whose expiry cancels the context. Timers are durably blocking in synctest, so the idle behavior is testable.
+- Upgrades (FR-UPG-1): checked first in `Classify`, before validation of the path (so `CONNECT host:port` authority-form targets never hit the path validator).
+- Event streams (FR-STR-1): checked in `fetch` right after headers, before `readUpTo`; such a response takes the streaming path with `shareable = false` and no marker.
+- Trace headers (FR-FWD-6): `internal/keys` validates `traceparent` with a fixed-length byte check (55 bytes, lowercase hex, version `00`, non-zero ids) and copies the three headers into the forwarded request after the allowlist step.
+- Stripped-cookie report (FR-OBS-5): a `missrate`-style Space-Saving summary of 32 string counters with a deadline; `Observe` becomes a no-op after the report is logged, so the steady-state hot path pays one atomic load.
+- Modes (FR-MODE-*): `atomic.Pointer[modeState]{mode, until}` read once per `Serve`; expiry checked against `time.Now()`. `ModeBypass` routes to `pass()`; `ModeStaleOnError` widens `sieOK` in `onFetchError` with the 24 h cap and the forbidden-flag checks.
+- Memory sizing (FR-MEM-1): computed in `New` when it builds the default store.
+- Vary reclaim (D37): when updating a vary spec, refs with past `Expires` are dropped; refs whose `Get` returns `ErrNotFound` during the same update are dropped too (one extra read per ref, at most `MaxVariants`, only on spec writes).
+

@@ -67,13 +67,13 @@ Each task has an acceptance criterion (AC) that is either true or false. "Tests"
 Goal: a repository where every later task only adds code.
 Deliverable: compiling public API with stub behavior, CI, test harness.
 
-- [ ] P0.1 `go.mod` (`module github.com/AshwinSathian/weir`, `go 1.27`), `LICENSE` (MIT), `.gitignore`, `doc.go`. AC: `go build ./...` succeeds with no `require` block.
+- [ ] P0.1 `go.mod` (`module github.com/AshwinSathian/weir`, `go 1.27`), `LICENSE` (Apache-2.0, already committed) and `NOTICE`, `.gitignore`, `doc.go`. AC: `go build ./...` succeeds with no `require` block.
 - [ ] P0.2 Public types from [04 §1](docs/04-lld.md) and [01 §4](docs/01-technical-spec.md): `Config` and sub-configs, `Request`, `Response`, `CacheInfo`, enums, errors, `StatusCode`, `RetryAfter`, `Observer`, `Event`, `Purge`, `WarmStats`, `EngineStats` and `Engine.Stats`. AC: `go doc` shows every exported identifier with a doc comment; `StatusCode` table test passes.
 - [ ] P0.3 `store` package types and interface ([05 §1](docs/05-storage-interface-spec.md)), `Entry.Size`. AC: compiles; `store` imports only the standard library.
 - [ ] P0.4 `New` with defaults and validation (FR-LCY-1); `Serve` that validates nothing and calls the origin through the single fetch function in `fetch.go` (no limiter yet); `Close`. AC: `TestZeroConfigValid`, `TestInvalidConfigRejected` (one row per FR-LCY-1 rule), `TestServePassThroughStub`.
 - [ ] P0.5 `internal/testorigin` per [07 §3](docs/07-testing-strategy.md). AC: its own tests cover gate, delay under synctest, panic, truncate, `NewChecked` failing on over-concurrency.
 - [ ] P0.6 `store/storetest.Run` with all cases from [05 §8](docs/05-storage-interface-spec.md) (they will fail until M1 provides a store; the suite itself compiles). AC: compiles; a trivial map-backed store in `storetest`'s own test passes the non-epoch cases.
-- [ ] P0.0 Private GitHub repo `AshwinSathian/weir` (created 2026-09-27); flip to public and tag `v0.1.0` when M1 closes (D24). AC: repo visibility matches the current phase.
+- [ ] P0.0 Private GitHub repo `AshwinSathian/weir` (created 2026-09-27); when M1 closes: add `SECURITY.md`, flip to public, enable private vulnerability reporting (D40), tag `v0.1.0` (D24). AC: repo visibility and reporting settings match the current phase.
 - [ ] P0.7 CI workflow: gofmt, vet, golangci-lint v2, `go test -race -shuffle=on`, dependency check (NFR-6) as a test (`TestNoThirdPartyImports` using `go list -deps -json`), govulncheck. AC: workflow green on the first push.
 - [ ] P0.8 `scripts/trace.sh`: extracts IDs (`FR-*`, `NFR-*`, `INV-*`) from `docs/01` and `docs/06`, greps `_test.go` for citations, prints uncited IDs, exits 0 (report mode) until `TRACE_STRICT=1`. AC: runs locally and in CI.
 
@@ -90,7 +90,8 @@ Refs: FR-VAL-*, FR-KEY-1..6, FR-KEY-8, FR-KEY-12, FR-FWD-*, FR-STO-* (except Var
 - [ ] M1.3 `store/memory` S3-FIFO with byte accounting, sharding, epoch sketch and hard-epoch table, `OnEvict` ([05 §4.4, §5](docs/05-storage-interface-spec.md)). AC: `storetest.Run` passes; `TestS3FIFOScanResistance`, `TestByteAccountingBound`, `TestShardDistributionAdversarial` pass.
 - [ ] M1.4 `store/codec.go`. AC: `FuzzCodecRoundTrip`, `FuzzDecodeEntry` pass.
 - [ ] M1.5 Engine: lookup, fresh hit, miss fetch and store (uncoalesced for now, via the single fetch function), storability, Age, `Cache-Status`, client conditionals (304), validation with 304 freshening, HEAD as GET, Range rules, `only-if-cached`, request `no-store`, unsafe-method URI invalidation with epochs compared by `RequestTime`, newest-response-wins store rule. Responses with `Vary` are not stored yet (`EvNotStored{vary-unsupported}`, removed in M7). AC: RFC behavior table in `rfc9111_test.go` passes for every row not tagged M5, M7 or M9; `TestCVE202435296`, `TestInvalidRequestsCostNothing`, `TestKettleUserAgent`, `TestFatGETBodyDropped`, `TestPurgeDuringInflightFetch`, `TestUnsafeMethodInvalidates` (URI part), `TestOriginClockSkewDoesNotStale`, `TestServedHeaderMutationDoesNotLeak` pass.
-- [ ] M1.6 `weirhttp` (`Middleware`, `Handler`, `TransportOrigin`, `HandlerOrigin`, `RequestFrom`, `WriteResponse`, `WriteError`) and `examples/weirproxy`. AC: integration tests with `httptest.NewTestServer` inside synctest pass; weirproxy serves a hit for a second identical request.
+- [ ] M1.5b Upgrade/CONNECT rejection, event-stream handling, 302/307 storability, trace-header forwarding, default store sizing from `GOMEMLIMIT` (D27, D28, D29, D35, D39). AC: `TestConnectRejected`, `TestUpgradeRejected`, `TestEventStreamNeverBuffered`, `TestTraceparentValidated`, `TestRedirect302NeedsExplicitFreshness`, `TestDefaultStoreSizeFromMemLimit` pass.
+- [ ] M1.6 `weirhttp` (`Middleware`, `Handler`, `TransportOrigin`, `HandlerOrigin`, `RequestFrom`, `WriteResponse`, `WriteError`, upgrade routing) and `examples/weirproxy`. AC: `TestAdaptersRouteUpgradesAround` passes; integration tests with `httptest.NewTestServer` inside synctest pass; weirproxy serves a hit for a second identical request.
 - [ ] M1.7 Benchmarks `BenchmarkServeHitSmall`, `BenchmarkKeyBuild`, `BenchmarkAcceptEncoding`, `BenchmarkMemoryStoreGetParallel`. AC: numbers recorded in `docs/benchmarks.md` with machine and Go version.
 
 #### M2 Coalescing (~1.5 weeks)
@@ -114,6 +115,7 @@ Refs: FR-LIM-*, FR-STF-*, FR-WRM-*, T6.3, T6.4, T6.5, T-18.
 - [ ] M4.1 `internal/limiter` ([04 §8.2](docs/04-lld.md)). AC: `TestLimiterSkipsFullPartition`, `TestLimiterQueueTimeout`, `TestLimiterCancel`, `TestLimiterGrantRace`, `BenchmarkLimiterAcquireRelease` pass.
 - [ ] M4.2 Wire limiter into the fetch function; streaming slot release at headers. AC: `TestLimiterCap5000Keys`, `TestPartitionFairness`, `TestSlowReaderDoesNotPinSlots`, `TestColdStartBounded` pass; `testorigin.NewChecked` used in all engine tests from here on.
 - [ ] M4.3 Store guard with remote timeouts and store breaker ([04 §5.2](docs/04-lld.md)). AC: `TestStoreOutageStillCoalescedAndLimited`, `TestStoreSlowRemote` pass.
+- [ ] M4.3b Upload pool and timeout split (D25, D26). AC: `TestSlowUploadsDoNotStarveMisses`, `TestBodylessBypassUsesMainPool`, `TestDripOriginReleasesSlot`, `TestStreamIdleTimeout` pass.
 - [ ] M4.4 `Warm`. AC: `TestWarm`, `TestWarmDoesNotUseReserve` pass.
 
 #### M5 Stale serving and circuit breaker (~2 weeks)
@@ -122,6 +124,8 @@ Refs: FR-STL-*, FR-CB-*, T6.6, T-16, T-20.
 
 - [ ] M5.1 `internal/breaker`. AC: `TestBreakerOpensHalfOpenCloses` (component), `TestBreaker500DoesNotTrip`, `TestBreakerNeedsVolume` pass.
 - [ ] M5.2 SWR serving with background refresh; SIE on every error condition; decision table 7.2 in full; operator default windows; `must-revalidate` 504. AC: `TestStaleIfErrorOnOriginDown`, `TestMustRevalidate504`, `TestDefaultStaleWindowsOff`, `TestLimiterShedsWithStale`, `TestRefreshNeverExceedsReserve` pass; RFC 5861 example rows pass.
+
+- [ ] M5.3 Incident modes via `SetMode` (D33). AC: `TestModeExpires`, `TestModeStaleOnErrorLimits`, `TestModeBypass` pass.
 
 #### M6 Negative caching (~0.5 week)
 
@@ -135,6 +139,7 @@ Refs: FR-KEY-7, FR-KEY-9..11, FR-BYP-1, FR-STO-6, T6.7, T-8, T-15.
 
 - [ ] M7.1 Vary spec and variant records, `VaryAuto`/`VaryStrict`, sensitive names, variant cap, coalescing on variant keys. AC: `TestVaryUnconfiguredHeader`, `TestVarySensitiveNotStored`, `TestVaryStar`, `TestVaryOverflow`, `TestVaryFollowersRecoalesce` pass; the M1 `vary-unsupported` reason is removed.
 - [ ] M7.2 `Key.Headers`, `Key.Cookies`, `Forward.Allow`, `Bypass`, `StripSetCookie`. AC: `TestForwardEqualsKey` covers each; `TestSetCookieNotStored`, `TestAuthorizationRules` pass.
+- [ ] M7.2b `weir.TrackingParams` preset, stripped-cookie report, vary slot reclaim (D30, D31, D37). AC: `TestStrippedCookieReport`, `TestVaryReclaimsDeadSlots` pass.
 - [ ] M7.3 Security review of `internal/keys` against [06 §6](docs/06-threat-model.md) checklist, written up in the PR. AC: checklist answered in the PR description; every T-1..T-8 test present.
 
 #### M8 Miss-rate signal (~1 week)
@@ -160,6 +165,7 @@ Refs: FR-OBS-*, NFR-*, seed §7.5.
 - [ ] M10.3 Load tests ([07 §9](docs/07-testing-strategy.md)) and nightly workflow. AC: all scenarios pass on the reference machine; results in `docs/benchmarks.md`.
 - [ ] M10.4 Nightly fuzz and cache-tests jobs; `testdata/cache-tests-baseline.json`; `docs/cache-tests-expected-failures.md`. AC: both jobs green; every expected failure cites a decision ID.
 - [ ] M10.5 NFR-5 measured; spec updated if the provisional budget was wrong. AC: `docs/benchmarks.md` has before/after `benchstat` for M1 to M10.
+- [ ] M10.5b GC cost at 1M entries measured (D36). AC: `docs/benchmarks.md` reports GC CPU share and p99; if GC CPU exceeds 10% at 1M entries, a pointer-light layout task is added to Phase 1.x.
 - [ ] M10.6 `TRACE_STRICT=1` in CI. AC: trace report empty.
 - [ ] M10.7 README usage guide: quick start with `weirhttp`, the strict-forwarding explanation, every opt-out that weakens a default (R-3). AC: README reviewed against [06 §5](docs/06-threat-model.md).
 
@@ -179,7 +185,7 @@ Refs: [01 §13](docs/01-technical-spec.md), decisions D11, D12, D15, D16, D18.
 
 - [ ] 2.1 Re-verify [08](docs/08-caddy-adapter-spec.md) against the current Caddy release; mark 08 v1.0. AC: every Caddy API named in 08 exists at the pinned version.
 - [ ] 2.2 Module, Caddyfile parsing (required `name`), store pool, key-generation hash with global soft purge on change, per-host fairness defaults for multi-host sites, `nextOrigin`. AC: `caddytest` scenarios for T6.2, T6.6, T6.12 pass; reload test (100 warm keys survive a limiter change; a `forward.allow` change makes them revalidate; adding a host changes nothing); `xcaddy build` in CI.
-- [ ] 2.3 Admin API purge (with `eager`) and stats; Prometheus metrics on Caddy's registry. AC: purge via admin endpoint changes the next `Cache-Status` to `fwd=stale`.
+- [ ] 2.3 Admin API purge (with `eager`), mode switch (`SetMode`) and stats; errors returned as `caddyhttp.Error` (D34), upgrades routed around, memory budget split (FR-MEM-1). AC: `TestRetryAfterSurvivesHandleErrors`, `TestMemorySizingSplit` pass; Prometheus metrics on Caddy's registry. AC: purge via admin endpoint changes the next `Cache-Status` to `fwd=stale`.
 - [ ] 2.4 Single-node deployment guide for the BYOD instance (T-38), including snapshot path and shutdown grace period. AC: guide in `docs/runbook.md`.
 
 ### Phase 2.5: Valkey store (~3 weeks)

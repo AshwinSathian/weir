@@ -69,10 +69,11 @@ Consequences, accepted:
 
 `ServeHTTP(w, r, next)`:
 
+0. If the request is `CONNECT` or a protocol upgrade (FR-UPG-1), call `next.ServeHTTP(w, r)` and return; WebSockets never touch the engine.
 1. `req := weirhttp.RequestFrom(r)`.
 2. `origin := nextOrigin{next: next, base: r}`.
 3. `resp, err := engine.Serve(r.Context(), req, origin)`.
-4. On error: `weirhttp.WriteError(w, err)` (status from `weir.StatusCode`, `Retry-After` from `weir.RetryAfter`), return nil.
+4. On error: set `Retry-After` from `weir.RetryAfter` on `w`, then return `caddyhttp.Error(weir.StatusCode(err), err)` so the operator's `handle_errors` routes apply (D34). Verified in v2.11.4 source: the error path writes the status on the same `ResponseWriter`, so headers set before returning survive.
 5. Otherwise write `resp` with `weirhttp.WriteResponse` and return nil.
 
 `nextOrigin.Fetch(ctx, fwd)` clones `base` with `base.Clone(ctx)`, replaces method, URL path and raw query, headers and body with the forwarded request's, and calls `next.ServeHTTP` with a response writer that streams into an `io.Pipe` (the `weirhttp.HandlerOrigin` shape). It returns as soon as the downstream handler writes headers.
@@ -106,6 +107,9 @@ Purge is available only through the admin API (decision confirmed 2026-09-27). A
 
 - `POST /weir/<name>/purge` with a JSON body matching `weir.Purge` (including `eager` for hard purges). Returns 202 once epochs are written, with the scrubbed count when `eager` was set.
 - `GET /weir/<name>/stats` returning `EngineStats`.
+- `POST /weir/<name>/mode` with `{"mode": "stale-on-error"|"bypass"|"normal", "ttl": "30m"}` calling `SetMode` (D33).
+
+Memory: stores without `max_bytes` share 40% of `GOMEMLIMIT` evenly (FR-MEM-1). Request bodies: the adapter docs require `request_body { max_size ... }` and server `timeouts { read_body ... }` on Weir routes (FR-LIM-7).
 
 No purge endpoint is exposed on site listeners. Operators who need remote purges expose Caddy's admin API with its own access controls (T-26).
 

@@ -42,13 +42,13 @@ experiments {
 
 ## 4. Mechanics
 
-1. Match experiments against the validated request (path matchers only in the first version). More than `max_active` matches is a configuration error caught at load, not a runtime condition, when the matchers overlap statically; at runtime the first `max_active` in config order apply.
+1. Match experiments against the validated request by path and normalized host (decided 2026-09-27); both are already key inputs, so matching introduces no unkeyed input. More than `max_active` matches is a configuration error caught at load, not a runtime condition, when the matchers overlap statically; at runtime the first `max_active` in config order apply.
 2. Read and verify the cookie. The value is `v1.<visitor-id>.<assignments>.<mac>`, with assignments as `exp:variant` pairs; MAC is HMAC-SHA-256 over the rest with the first key, verified against every configured key (rotation).
 3. For each matching experiment: `winner` set means that variant; an existing assignment with a variant that still exists is kept (E3); otherwise, if consent allows, `variant = pick(weights, SHA-256(salt || visitor-id))`, else control.
 4. Append dimensions `(experiment, variant)` in config order to the primary key (new tag bytes in the key encoding) and set the forwarded header `Weir-Variant: exp=variant;exp2=variant` after deleting any client-supplied value in every forwarding mode.
 5. Serve normally. On the way out, if an assignment was created or changed, add `Set-Cookie` to the response given to this client only. The stored entry never contains it (the engine adds it after the entry is built).
 6. Apply E7 to the outgoing response.
-7. Emit `EvExposure{experiment, variant}` for every served response on a matched request, hits included, so analytics do not depend on the origin seeing the request.
+7. Emit `EvExposure{experiment, variant, visitor}` once per visitor per experiment (decided 2026-09-27): when the assignment is created, or when the signed cookie lacks the experiment's exposed mark, which is then added. `visitor` is a SHA-256 prefix of the visitor id so analysis can deduplicate clients that refuse cookies (they would otherwise count as a new exposure on every request). Hits are included, so analytics do not depend on the origin seeing the request.
 
 ## 5. Adversarial notes
 
@@ -63,6 +63,6 @@ experiments {
 
 ## 6. Open items for Phase 3 kickoff
 
-- Matchers beyond path (host, header presence).
+- Matchers beyond path and host (header presence) would need their headers keyed and normalized; revisit only with a concrete use.
+
 - Cookie size limit with many historical assignments: prune assignments for experiments no longer configured on every rewrite.
-- Whether the exposure event needs sampling for high-traffic sites.

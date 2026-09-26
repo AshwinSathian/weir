@@ -79,6 +79,9 @@ Ben Maurer, "Fail at Scale", ACM Queue 13(8), 2015: CoDel-style queue timeouts, 
 | Caddy modules overlap during reloads; `caddy.UsagePool` is the recommended way to share state across loads | caddyserver/website extending guide via Context7 | 2026-09-27 |
 | Go 1.27.1 is current; Go 1.26 added `errors.AsType`, `new(expr)`, Green Tea GC default; Go 1.27 added `synctest.Sleep`, `httptest.NewTestServer`, `maphash.Hasher`, `goroutineleak` profile, `Server.MaxHeaderValueCount` | go.dev release notes, local `go doc` | 2026-09-27 |
 | golangci-lint latest v2.14.0 (2026-09-24); golangci-lint-action v9.3.0; actions/setup-go v7.0.0; actions/checkout v7.0.1 | GitHub API | 2026-09-27 |
+| `debug.SetMemoryLimit(-1)` returns the current limit without changing it; the initial value is `math.MaxInt64` unless `GOMEMLIMIT` is set | local `go doc runtime/debug.SetMemoryLimit` (Go 1.27.1) | 2026-09-27 |
+| Caddy's error path (`modules/caddyhttp/server.go`) writes the error status on the same `ResponseWriter`, so headers set before returning `caddyhttp.Error` survive; `handle_errors` routes run with it | source at tag v2.11.4 | 2026-09-27 |
+| WebSockets over HTTP/2 and HTTP/3 use extended CONNECT (RFC 8441, RFC 9220) and carry no `Upgrade` header, so upgrade detection must include `CONNECT` | RFCs | 2026-09-27 |
 | `http-tests/cache-tests` is active (last push 2026-09-18); runs against proxies via Docker or npm; authors state passing everything "means nothing" by itself | GitHub | 2026-09-27 |
 | The open-source Varnish Cache project was renamed Vinyl Cache (announced September 2025, completed early 2026) after a trademark dispute; Varnish Software ships its own distribution under the old name | ma.ttias.be, Arch Linux news, HN | 2026-09-27 |
 | `github.com/AshwinSathian/weir` does not exist yet; `tidb-incubator/weir` (a TiDB SQL proxy, 96 stars, last push 2022-01-16) and a few tiny unrelated repos use the name | GitHub API | 2026-09-27 |
@@ -101,4 +104,5 @@ Numbered against [00-design-doc.md](00-design-doc.md). None of these change the 
 | §10 title | "Appendix: Phase 2 — Experiment-aware routing" | the roadmap in §9 calls it Phase 3; Phase 2 is the Caddy adapter. It is Phase 3. |
 | §4.5 | "relevant to the Phase 2 appendix, Part 10" | same: Phase 3. |
 | §1 | "no obvious collision in the Go proxy space" | `tidb-incubator/weir` is a Go database proxy, inactive since January 2022. Low risk; noted. |
+| §9 Phase 0 | license MIT | Apache-2.0 (D41), for the explicit patent grant; changed before any outside contribution. |
 | §11 | document names `02-storage-interface-spec.md`, `03-testing-strategy.md`, `04-caddy-adapter-spec.md` | renumbered to make room for architecture, HLD, LLD and threat model; mapping in [README.md](README.md). |

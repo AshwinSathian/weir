@@ -32,8 +32,8 @@ Start with [docs/README.md](docs/README.md). The build plan is [PLAN-weir.md](PL
 
 ## Requirements
 
-Go 1.27 or later. The core module has no dependencies outside the standard library.
+Go 1.27 or later; Weir supports the two latest Go releases. The core module has no dependencies outside the standard library.
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+Apache-2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).

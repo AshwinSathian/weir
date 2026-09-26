@@ -10,7 +10,7 @@ Read in this order the first time. After that, go straight to the one you need.
 | 03 | [hld](03-hld.md) | request flows and state machines | descriptive |
 | 04 | [lld](04-lld.md) | exact types, algorithms, locking, pseudo-code, event catalog | normative for implementers |
 | 05 | [storage-interface-spec](05-storage-interface-spec.md) | `store.Store` contract, epochs, memory store (S3-FIFO), codec, Valkey on paper, conformance suite | normative |
-| 06 | [threat-model](06-threat-model.md) | threats T-1–T-38, invariants INV-1–INV-7, security review checklist | normative |
+| 06 | [threat-model](06-threat-model.md) | threats T-1–T-44, invariants INV-1–INV-7, security review checklist | normative |
 | 07 | [testing-strategy](07-testing-strategy.md) | test levels, harness, per-failure-mode tests with pass criteria, CI, definition of done | normative |
 | 08 | [caddy-adapter-spec](08-caddy-adapter-spec.md) | Phase 2 adapter | draft |
 | 09 | [research-notes](09-research-notes.md) | sources, verified facts, seed errata | living |

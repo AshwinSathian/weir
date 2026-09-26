@@ -246,6 +246,25 @@ Named in [06-threat-model.md](06-threat-model.md), [01-technical-spec.md](01-tec
 | `TestEagerHardPurgeDeletesAllPartitions` (engine) | eager hard purge of a URL removes variant and keyed-header entries from the memory store; `Bytes()` drops accordingly |
 | `TestEagerSoftIsError`, `TestEagerUnsupportedStore` (engine) | invalid combination rejected; store without `Scrubber` returns `ErrEagerUnsupported` after writing the epoch |
 
+### Decisions D25 to D42
+
+| Test | Asserts |
+|---|---|
+| `TestSlowUploadsDoNotStarveMisses` (engine) | 200 POSTs with bodies that never finish do not delay cacheable misses; upload pool saturates alone |
+| `TestBodylessBypassUsesMainPool` (engine) | bypassed GETs with a session cookie never take upload slots |
+| `TestDripOriginReleasesSlot` (engine) | origin sending 1 byte per second of a 10 KiB body: fetch fails at `Timeouts.Origin`, slot released |
+| `TestStreamIdleTimeout` (engine) | a 2-minute pass-through stream that keeps sending survives; one that stalls for `StreamIdle` ends |
+| `TestConnectRejected`, `TestUpgradeRejected` (engine), `TestAdaptersRouteUpgradesAround` (integration) | `Serve` returns `ErrUpgradeNotSupported`; weirhttp hands WebSocket and CONNECT to the next handler |
+| `TestEventStreamNeverBuffered` (engine) | first SSE event reaches the client before the origin sends a second; nothing stored |
+| `TestTraceparentValidated` (engine) | valid headers forwarded on a miss; malformed `traceparent` drops both trace headers; `NoTraceHeaders` forwards none |
+| `TestStrippedCookieReport` (engine) | after the report window one log line lists the most frequent stripped names, no values |
+| `TestModeExpires`, `TestModeStaleOnErrorLimits`, `TestModeBypass` (engine) | mode reverts after ttl; stale-on-error never serves hard-purged, invalidated or must-revalidate entries, nor beyond 24 h; bypass stores nothing |
+| `TestDefaultStoreSizeFromMemLimit` (unit) | 1 GiB limit gives 409.6 MiB rounded to shards; unset gives 256 MiB and a warning |
+| `TestMemorySizingSplit` (Caddy, Phase 2) | three unnamed-size stores share 40% of the limit |
+| `TestVaryReclaimsDeadSlots` (engine) | after a variant expires, a new variant can take its slot |
+| `TestRedirect302NeedsExplicitFreshness` (engine) | 302 with `max-age=60` stored; 302 with only `Last-Modified` not stored |
+| `TestRetryAfterSurvivesHandleErrors` (Caddy, Phase 2) | `Retry-After` present with and without `handle_errors` |
+
 ## 7. RFC behavior tables
 
 `rfc9111_test.go` in the root package holds table tests, one row per normative statement Weir implements, citing the section: storage conditions (§3), header storage exclusions (§3.1), Authorization (§3.5), Age generation (§4), Vary matching and normalization (§4.1), lifetime precedence and invalid directives (§4.2.1), heuristic limits (§4.2.2), age calculation with the RFC's own example values (§4.2.3), validation headers sent (§4.3.1), client conditionals (§4.3.2), 304 freshening (§4.3.4), invalidation (§4.4), `only-if-cached` (§5.2.1.7), `must-revalidate` 504 (§5.2.2.2), `must-understand` (§5.2.2.3), RFC 5861 examples verbatim (§3.1 and §4.1 of that RFC), and RFC 9211 examples for the parameters Weir emits.
@@ -280,7 +299,7 @@ On every push and pull request:
 
 1. `gofmt -l` is empty; `go vet ./...`.
 2. `golangci-lint run` (v2 config, see [CLAUDE.md](../CLAUDE.md)).
-3. `go test -race -shuffle=on -count=1 ./...` for every module, once with the workspace and once per module with `GOWORK=off`.
+3. `go test -race -shuffle=on -count=1 ./...` for every module, once with the workspace and once per module with `GOWORK=off`, on each supported Go release that is at or above the `go.mod` minimum (D42; only 1.27 until Go 1.28 ships).
 4. `go list -deps ./...` check for the root module: no import outside the standard library and the module itself (NFR-6).
 5. `govulncheck ./...`.
 6. `scripts/trace.sh` requirement coverage report (fails once Phase 1 is declared done).

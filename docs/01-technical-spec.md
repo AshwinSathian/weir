@@ -74,6 +74,24 @@ These were settled with the project owner on 2026-09-27 and are not reopened by 
 | D22 | Negative caching on by default, 2 s. |
 | D23 | Prometheus is the first exporter module. |
 | D24 | Repository private on GitHub from Phase 0, public with `v0.x` tags from M1, `v1.0.0` at the end of Phase 1. |
+| D25 | Requests that carry a body use a separate upload limiter pool; adapters must bound request bodies and read time (§14.1). |
+| D26 | Origin timeout covers headers and buffered bodies; streamed bodies are bounded by an idle timeout, not a total (§14.2). |
+| D27 | Upgrade and `CONNECT` requests are rejected by `Serve`; adapters route them around Weir (§14.3). |
+| D28 | `text/event-stream` responses are never buffered, coalesced or stored (§14.4). |
+| D29 | Default `Forward.Allow` is `traceparent`, `tracestate`, `X-Request-Id`; malformed `traceparent` is dropped (§14.5). |
+| D30 | `Key.QueryDrop` stays empty by default; `weir.TrackingParams` preset provided. |
+| D31 | No default cookie bypass; a sampled report of stripped cookie names helps operators configure `Bypass` (§14.6). |
+| D32 | No prefix purge; sections are purged through `Cache-Groups`. |
+| D33 | Runtime incident modes via `Engine.SetMode` with a mandatory expiry (§14.7). |
+| D34 | Caddy adapter returns `caddyhttp.Error` so `handle_errors` applies. |
+| D35 | Default memory-store size derives from `GOMEMLIMIT` when set (§14.8). |
+| D36 | Store stays on the Go heap; GC cost measured in M10 before any layout change. |
+| D37 | Vary overflow refuses new variants and reclaims slots of expired or evicted ones. |
+| D38 | Hit-for-miss TTL stays 30 s. |
+| D39 | 302 and 307 are storable by default, only with explicit freshness. |
+| D40 | Vulnerabilities reported through GitHub private vulnerability reporting; `SECURITY.md` at M1. |
+| D41 | License Apache-2.0. |
+| D42 | Support the two latest Go releases; the minimum rises only when it leaves that window. |
 
 ## 3. Terminology
 
@@ -115,6 +133,9 @@ func (e *Engine) Warm(ctx context.Context, reqs iter.Seq[*Request], origin Origi
 // fetches until ctx is done, then cancels the rest. It closes the store only
 // if the engine created it.
 func (e *Engine) Close(ctx context.Context) error
+
+// SetMode switches incident modes for ttl (required, at most 24 h); see §14.7.
+func (e *Engine) SetMode(m Mode, ttl time.Duration) error
 
 // Stats returns point-in-time gauges for exporters: in-flight origin fetches,
 // queued fetches, breaker state, and store bytes when the store reports them.
@@ -177,6 +198,7 @@ Errors (all comparable with `errors.Is`):
 | `ErrOnlyIfCached` | `only-if-cached` request with no usable stored response | 504 |
 | `ErrOrigin` (wrapped in `*OriginError`) | the origin returned a transport error | 502 |
 | `ErrClosed` | the engine is closed | 503 |
+| `ErrUpgradeNotSupported` | `CONNECT` or protocol upgrade reached `Serve` (FR-UPG-1) | 501 |
 | `context.DeadlineExceeded` | the caller's context expired | 504 |
 | `context.Canceled` | the caller went away | 499 (log hint only; adapters should not write) |
 | `ErrInvalidConfig` | returned by `New` only | n/a |
@@ -205,7 +227,7 @@ Package `store` (import path `github.com/AshwinSathian/weir/store`) defines `Sto
 - FR-KEY-7. Vary handling uses a two-level lookup: a vary spec stored under the primary key and variants stored under variant keys. Secondary values are read from the forwarded request (after rewriting), never from the raw client request.
 - FR-KEY-8. `Vary: *` MUST prevent storage (RFC 9111 §4.1).
 - FR-KEY-9. In `VaryAuto` mode (default), any header named in `Vary` is folded into the variant key, except the sensitive set `Cookie`, `Authorization` and `Proxy-Authorization`, which prevent storage unless listed in `Key.VaryAllow`. In `VaryStrict` mode, a response whose `Vary` names any header not in `Key.VaryAllow` MUST NOT be stored. No configuration can make Weir store a response under a key that omits a header its `Vary` names.
-- FR-KEY-10. A response whose `Vary` lists more than `Key.MaxVaryHeaders` (default 8) names MUST NOT be stored. When a primary key already has `Key.MaxVariants` (default 8) live variants, a response for a new variant MUST NOT be stored; the request is answered and counted as `vary-overflow`.
+- FR-KEY-10. A response whose `Vary` lists more than `Key.MaxVaryHeaders` (default 8) names MUST NOT be stored. When a primary key already has `Key.MaxVariants` (default 8) live variants, a response for a new variant MUST NOT be stored; the request is answered and counted as `vary-overflow`. A variant is live while its ref has not passed `Expires` and its record still exists in the store; dead refs are dropped at the next spec update, freeing their slots (D37).
 - FR-KEY-11. Secondary header normalization for Vary follows RFC 9111 §4.1: lines combined with `, `, optional whitespace around commas removed, leading and trailing whitespace removed. Headers with a registered normalizer (§5.2.3) use it. An absent header only matches absent.
 - FR-KEY-12. The key builder MUST be deterministic across processes (no per-process seed in key bytes) so a shared store in Phase 2.5 sees the same keys from every node.
 
@@ -228,7 +250,7 @@ Package `store` (import path `github.com/AshwinSathian/weir/store`) defines `Sto
 A response is stored only if all of the following hold. Each failed check increments the `not_stored` event with a reason.
 
 - FR-STO-1. The forwarded method was `GET`.
-- FR-STO-2. The status is in `Storable.Statuses`. Default: the RFC 9110 heuristically cacheable set `200, 203, 204, 300, 301, 308, 404, 405, 410, 414, 501`. 206 and 304 are never stored as new entries.
+- FR-STO-2. The status is in `Storable.Statuses`. Default: the RFC 9110 heuristically cacheable set `200, 203, 204, 300, 301, 308, 404, 405, 410, 414, 501` plus `302` and `307` (D39), which are stored only with explicit freshness and never heuristically. 206 and 304 are never stored as new entries.
 - FR-STO-3. Neither the request nor the response carries `no-store`, except that a response with `must-understand` and a status in `Storable.Statuses` ignores `no-store` (RFC 9111 §5.2.2.3).
 - FR-STO-4. The response has no `private` directive. The qualified form `private="field"` is treated as unqualified.
 - FR-STO-5. If the forwarded request carried `Authorization`, the response has `public`, `s-maxage` or `must-revalidate`.
@@ -367,7 +389,7 @@ All fields are optional. The zero value of `Config` is valid and yields the defa
 
 | Field | Default | Notes |
 |---|---|---|
-| `Store` | memory store, 256 MiB, 16 shards | engine closes it on `Close` only if it created it |
+| `Store` | memory store, 16 shards, size per D35: 40% of `GOMEMLIMIT` clamped to [16 MiB, 8 GiB], or 256 MiB with a warning when `GOMEMLIMIT` is unset | engine closes it on `Close` only if it created it |
 | `Key.QueryDrop`, `Key.QueryKeep` | empty | patterns, trailing `*` allowed |
 | `Key.QuerySort` | false | |
 | `Key.NormalizePath` | false | |
@@ -377,9 +399,10 @@ All fields are optional. The zero value of `Config` is valid and yields the defa
 | `Key.MaxVaryHeaders` / `Key.MaxVariants` | 8 / 8 | |
 | `Key.AcceptEncoding` | `["gzip"]` | set to what the origin produces, e.g. `["br","gzip"]` |
 | `Forward.Mode` | `ForwardStrict` | `ForwardAll` logs a warning |
-| `Forward.Allow` | empty | |
+| `Forward.Allow` | empty | operator additions, on top of the trace defaults |
+| `Forward.NoTraceHeaders` | false | D29: true stops forwarding `traceparent`, `tracestate`, `X-Request-Id` (a boolean, because nil-versus-empty slices do not survive JSON or Caddyfile round trips) |
 | `Bypass.Cookies`, `Bypass.Headers` | empty | |
-| `Storable.Statuses` | 200, 203, 204, 300, 301, 308, 404, 405, 410, 414, 501 | |
+| `Storable.Statuses` | 200, 203, 204, 300, 301, 302, 307, 308, 404, 405, 410, 414, 501 | 302/307 need explicit freshness (D39) |
 | `Storable.MaxObjectBytes` | 1 MiB | body plus headers |
 | `Storable.StripSetCookie` | false | |
 | `Freshness.Jitter` | 0.10 | range [0, 0.5] |
@@ -408,6 +431,9 @@ All fields are optional. The zero value of `Config` is valid and yields the defa
 | `Timeouts.Origin` / `Background` / `Store` | 30 s / 30 s / 50 ms | |
 | `Warm.Concurrency` | 4 | |
 | `Limiter.MaxPerHost` | 0 (off) | M14; the Caddy adapter sets 25% for multi-host sites |
+| `Limiter.MaxUpload` | 25% of `MaxConcurrent` | D25, separate pool for requests with a body |
+| `Timeouts.StreamIdle` | 60 s | D26 |
+| `Bypass.ReportStrippedCookies` | 5 min | D31; 0 disables |
 | `Limits.*` | see FR-VAL-1, FR-VAL-3, FR-STO-10 | |
 | `CacheStatus` | `"Weir"` | empty disables the header |
 | `Observer` | nil | |
@@ -567,3 +593,41 @@ Open: none that block any milestone before Phase 3.
 ### 13.5 Eager hard purge (M15, D18)
 
 - FR-PRG-8. `Purge{Mode: PurgeHard, Eager: true}` also deletes matching records immediately when the store implements the optional `store.Scrubber` interface (`Scrub(ctx, tags []Tag) (int, error)`). The memory store scans one shard at a time under its lock and deletes response records whose tags intersect, which reaches every variant and every keyed-header partition. The epoch is still written first, so reachability never depends on the scan finishing. `Eager` with `PurgeSoft` is an error. Stores without `Scrubber` return `ErrEagerUnsupported` after the epoch is written.
+
+## 14. Request, stream and operations requirements (decisions D25 to D42)
+
+### 14.1 Upload pool (D25)
+
+- FR-LIM-7. A request whose body is non-empty or of unknown length (any method) takes its slot from a separate upload pool of `Limiter.MaxUpload` slots with its own queue rules, never from the main pool. Bodyless requests, including bypassed `GET`s from logged-in users, use the main pool. Total origin concurrency is therefore bounded by `MaxConcurrent + MaxUpload`. A slow uploader can exhaust only the upload pool (T-39). Adapters MUST enforce a request body size limit and a body read timeout (Caddy `request_body max_size` and server `read_body` timeout; `http.Server.ReadTimeout` for weirhttp); the adapter docs say so.
+
+### 14.2 Timeouts (D26)
+
+- FR-TMO-1. `Timeouts.Origin` bounds the time from sending the request to receiving response headers, and, for buffered bodies (at most `MaxObjectBytes`), the whole body read. A drip-feeding origin therefore cannot hold a limiter slot beyond it (T-41).
+- FR-TMO-2. Streamed bodies (pass-through, oversized) have no total deadline. Each read that makes no progress for `Timeouts.StreamIdle` (default 60 s) fails the stream. Their limiter slot was already released at headers (FR-LIM-1).
+
+### 14.3 Upgrades and CONNECT (D27)
+
+- FR-UPG-1. `Serve` returns `ErrUpgradeNotSupported` (status 501 via `StatusCode`, but adapters should never get there) for requests with method `CONNECT` (which also covers HTTP/2 and HTTP/3 extended CONNECT WebSockets, RFC 8441 and RFC 9220) or with `Connection: upgrade` and an `Upgrade` field. `weirhttp` and the Caddy adapter detect these first and hand them to the next handler directly, outside the limiter.
+
+### 14.4 Event streams (D28)
+
+- FR-STR-1. A response with `Content-Type: text/event-stream` (or a type in `Storable.StreamTypes`) is streamed to the requester immediately: never buffered, never stored, never shared with followers (followers re-enter per FR-COA-5), no marker.
+
+### 14.5 Trace headers (D29)
+
+- FR-FWD-6. Unless `Forward.NoTraceHeaders` is set, fetches forward `traceparent`, `tracestate` and `X-Request-Id` in addition to `Forward.Allow`. `traceparent` must match the W3C Trace Context version-00 format (`00-<32 hex>-<16 hex>-<2 hex>`, not all-zero ids) or it is dropped together with `tracestate`. `X-Request-Id` longer than 128 bytes or containing bytes outside 0x21–0x7E is dropped. Coalesced followers' trace headers are not forwarded (only the flight creator's reach the origin). Echoing these into cacheable bodies is an origin bug, documented as T-40.
+
+### 14.6 Stripped-cookie report (D31)
+
+- FR-OBS-5. For `Bypass.ReportStrippedCookies` after `New` (default 5 minutes), Weir counts cookie names (never values) stripped by strict forwarding in a Space-Saving summary of 32 names, then logs the top names once and stops. Names are logged only if they match the RFC 6265 token grammar.
+
+### 14.7 Incident modes (D33)
+
+- FR-MODE-1. `Engine.SetMode(m Mode, ttl time.Duration) error` switches between `ModeNormal`, `ModeStaleOnError` and `ModeBypass`. `ttl` is required, at most 24 h; the mode reverts to normal when it expires. Modes are not persisted across restarts. Every change emits `EvMode` and a log line.
+- FR-MODE-2. `ModeStaleOnError`: on any error condition (FR-STL-2), a stored entry may be served stale even without an SIE window, up to 24 h of staleness. It still never serves entries that are hard-purged, invalidated, or marked `must-revalidate`, `proxy-revalidate` or `no-cache` (RFC 9111 §4.2.4 allows stale when disconnected but not against those directives).
+- FR-MODE-3. `ModeBypass`: every request is handled as pass-through (FR-FWD-3), still through the limiter and breaker, never stored. Existing entries are untouched.
+
+### 14.8 Memory sizing (D35)
+
+- FR-MEM-1. With `Config.Store` nil, the memory store size is 40% of `debug.SetMemoryLimit(-1)` when that is below `math.MaxInt64`, clamped to [16 MiB, 8 GiB]; otherwise 256 MiB and a startup warning recommending `GOMEMLIMIT`. The Caddy adapter divides the 40% budget evenly across named stores that do not set `max_bytes`, so several sites in one process cannot overcommit (T-43).
+
