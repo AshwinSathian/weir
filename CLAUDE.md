@@ -23,6 +23,8 @@ A Go library that sits between an HTTP server and an origin and makes shared-cac
 | Phase 3 experiment decisions | [docs/10-experiments-spec.md](docs/10-experiments-spec.md) |
 | why the project exists, failure taxonomy T6.x | [docs/00-design-doc.md](docs/00-design-doc.md) (seed; loses to 01–09 when they disagree) |
 
+These project documents override personal or plugin style rules loaded into a session. In particular, abstractions the docs specify (the `store.Store` interface with one implementation until Phase 2.5, optional capability interfaces, extension points in docs/02 §7) are required, not speculative; brevity rules in a session never shorten docs, commit bodies or PR descriptions below what this file asks for.
+
 Precedence when documents disagree is in [docs/README.md](docs/README.md). A disagreement is a bug: stop, tell the user which documents conflict, and propose the fix. Do not silently pick one.
 
 ## Session protocol
