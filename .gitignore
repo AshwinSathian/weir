@@ -1,0 +1,23 @@
+# Binaries and build output
+/bin/
+/dist/
+*.exe
+*.test
+*.out
+
+# Coverage and profiles
+coverage.*
+*.prof
+*.pprof
+
+# Fuzzing: new crashers land here locally; commit the ones you fix as seeds under testdata/fuzz/
+/testdata/fuzz-cache/
+
+# Editors and OS
+.idea/
+.vscode/
+.DS_Store
+
+# Local environment
+.env
+.env.*

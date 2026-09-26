@@ -1,0 +1,32 @@
+version: "2"
+
+linters:
+  default: standard
+  enable:
+    - bodyclose
+    - contextcheck
+    - errorlint
+    - gocritic
+    - gosec
+    - misspell
+    - nilerr
+    - noctx
+    - prealloc
+    - revive
+    - unconvert
+    - unparam
+    - usestdlibvars
+  exclusions:
+    presets:
+      - std-error-handling
+    rules:
+      - path: '(.+)_test\.go'
+        linters:
+          - gosec
+          - prealloc
+          - unparam
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
