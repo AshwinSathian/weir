@@ -10,7 +10,9 @@ A Go library that sits between an HTTP server and an origin and makes shared-cac
 
 | Need | Read |
 |---|---|
-| what to build next | [PLAN-weir.md](PLAN-weir.md): the first unchecked task in the current milestone |
+| where the project stands | [docs/progress/STATUS.md](docs/progress/STATUS.md) (shown automatically at session start) and the last entry of [docs/progress/LOG.md](docs/progress/LOG.md) |
+| what to build next | the next task card: `make next`, or `scripts/card.sh <ID>`; format and sizing in [docs/cards/README.md](docs/cards/README.md) |
+| milestone view | [PLAN-weir.md](PLAN-weir.md) |
 | what a behavior must be | [docs/01-technical-spec.md](docs/01-technical-spec.md), cited by requirement ID (`FR-COA-4`) |
 | why a structure is the way it is | [docs/02-architecture.md](docs/02-architecture.md) principles P1–P8 and ADRs |
 | how a request flows | [docs/03-hld.md](docs/03-hld.md) |
@@ -23,34 +25,48 @@ A Go library that sits between an HTTP server and an origin and makes shared-cac
 
 Precedence when documents disagree is in [docs/README.md](docs/README.md). A disagreement is a bug: stop, tell the user which documents conflict, and propose the fix. Do not silently pick one.
 
-## Workflow for every task
+## Session protocol
 
-1. Find the task in `PLAN-weir.md`. Read every doc section it references, and the LLD section for each package you will touch. Do not start from memory of an earlier session.
-2. Write the tests first, named exactly as in `docs/07-testing-strategy.md`, each with a comment citing the IDs it covers: `// FR-COA-4, T-19`. Run them and see them fail for the right reason.
-3. Write the smallest code that passes. Match the LLD's types and locking rules.
-4. Run the full check (below). Everything must pass.
-5. If the implementation had to differ from a normative document, update that document in the same commit and bump its date line. If the difference changes a requirement, a default, a decision table, or a public signature, ask the user first.
-6. Tick the task's checkbox in `PLAN-weir.md` only when its AC is met exactly.
-7. Commit (see Commits).
+One session = one task card. Sessions are sized so they never need context compaction.
 
-Stay inside the current milestone. If you notice something that belongs to a later milestone, add it to "Open questions" in `PLAN-weir.md` or mention it to the user; do not build it.
+1. Start: the SessionStart hook prints STATUS, git state, the current or next card and the last LOG entry. Run `/next-card` (or `/next-card <ID>`). It refuses to start a new card while a card PR is open and unmerged, and resumes the open PR instead when changes were requested.
+2. Read only the card's reading list (`scripts/section.sh`, `grep -n` for IDs). Never read whole design documents in an implementation session.
+3. Tests first, named as on the card and in docs/07, each citing requirement and threat IDs: `// FR-COA-4, T-19`.
+4. Smallest code that passes, matching docs/04 types and locking rules. Iterate on the touched package; run `make check` once at the end.
+5. Overrun rule: if the card is clearly bigger than its size class (more files than listed, far more code, or the context is visibly filling), stop adding scope, make what exists pass, and run `/handoff split`. The remainder becomes card `<ID>b`. A split is a normal outcome; compaction mid-card is not.
+6. If the implementation must differ from a normative document, update that document in the same PR and bump its date line. If the change touches a requirement, a default, a decision table or a public signature, ask the user first.
+7. End: `/handoff`. It runs `make check`, gets an independent review from the `card-reviewer` agent, marks the card done, updates STATUS and appends to LOG, commits, pushes and opens the PR. Then stop; the user merges.
+8. Waiting on the user mid-card: append a LOG entry with outcome `blocked` and the question, put the question under "Waiting on Ashwin" in STATUS, commit, and stop. The Stop hook blocks ending a session on a card branch with commits but no LOG update.
+
+Stay inside the card. Anything that belongs elsewhere goes into STATUS "Notes for the next session" or a new card, never into this diff.
+
+### Progress files
+
+- `docs/progress/STATUS.md` is the single current-state file: current card, state (`ready`, `in-progress`, `awaiting-merge`, `changes-requested`, `blocked`), branch, PR, next card, blockers, questions waiting on Ashwin, notes for the next session. It is overwritten, not appended.
+- `docs/progress/LOG.md` is append-only, one entry per session, template at its top. It records what happened, deviations and follow-ups. Keep entries short; the hook prints the last one every session.
+- Card marks (`### [x]`) in docs/cards/ and checkboxes in PLAN-weir.md are updated only by `/handoff`.
+- Never rewrite history of these files; corrections are new entries.
+
+### Git and PRs
+
+- Branch per card: `card/<ID>-<slug>` from an up-to-date `main`. One PR per card, opened by `/handoff` with `.github/pull_request_template.md`. The user reviews and merges; sessions never merge, force-push to `main`, or delete branches.
+- Planning or doc-only work outside a card (like the session that created this setup) may commit to `main` directly when the user asks for it.
 
 ## Commands
 
 ```sh
-go build ./...
-go vet ./...
-gofmt -l .                                   # must print nothing
-golangci-lint run                            # v2, config in .golangci.yml
-go test -race -shuffle=on -count=1 ./...     # the gate for every change
-go test -run '^$' -fuzz '^FuzzAcceptEncoding$' -fuzztime 60s ./internal/keys   # one fuzz target
-go test -tags load -run . ./loadtest         # real-time load scenarios (slow)
-go test -bench . -benchmem -run '^$' ./...   # benchmarks
-govulncheck ./...
-scripts/trace.sh                             # requirement IDs without a citing test
+make check                 # gofmt, vet, golangci-lint (pinned v2.14.0), race tests, trace report: the gate
+make test-short            # fast loop; prefer `go test ./<pkg>/...` while iterating
+make fuzz-short            # every fuzz target for FUZZTIME (default 20s)
+make bench                 # benchmarks
+make vuln                  # govulncheck
+make next                  # print the next open card
+make card ID=M1-04         # print one card
+scripts/section.sh docs/04-lld.md 6.4    # print one doc section
+TRACE_VERBOSE=1 make trace # list requirement IDs no test cites yet
 ```
 
-Once `go.work` exists (M10), also run the module tests with `GOWORK=off` for each module.
+Once `go.work` exists (M10-02), `make check` also runs each module with `GOWORK=off`.
 
 ## Hard rules
 
@@ -99,8 +115,8 @@ Do not rely on memory for library or tool APIs. For the Go standard library use 
 
 ## Commits
 
-- One task (or a coherent part of one) per commit. The tree passes the full check at every commit.
-- Conventional Commits with the milestone as scope: `feat(m2): coalesce concurrent misses per key`, `test(m4): partition fairness under flood`, `docs(lld): clarify flight removal`, `fix(m1): ...`, `chore(ci): ...`.
+- Commits on the card branch; the tree passes `make check` at the final commit.
+- Conventional Commits with the milestone as scope and the card ID at the end: `feat(m2): coalesce concurrent misses per key [M2-02]`, `test(m4): partition fairness under flood [M4-02]`, `docs(lld): clarify flight removal [M2-01]`, `chore(progress): record PR for M2-02`.
 - Body: what and why in plain sentences, requirement IDs covered, and the security checklist answers when relevant.
 - End every commit message with the co-author trailer the session provides.
 
@@ -110,4 +126,4 @@ Plain, specific, human. Mix sentence lengths. Prefer concrete numbers and names 
 
 ## Repository layout (target)
 
-See [docs/02-architecture.md §3](docs/02-architecture.md). In short: root package `weir` (engine), `store` (interface, codec), `store/memory`, `store/storetest`, `weirhttp`, `internal/{httpcc,keys,sfv,coalesce,limiter,breaker,missrate,testorigin}`, `examples/weirproxy`, `loadtest`, `scripts`.
+Workflow files: `docs/cards/` (task cards), `docs/progress/` (STATUS, LOG), `.claude/` (hooks, `/next-card` and `/handoff` skills, `card-reviewer` agent, permission allowlist), `scripts/` (card, section, trace), `Makefile`, `.github/` (CI, PR template). Code layout: see [docs/02-architecture.md §3](docs/02-architecture.md). In short: root package `weir` (engine), `store` (interface, codec), `store/memory`, `store/storetest`, `weirhttp`, `internal/{httpcc,keys,sfv,coalesce,limiter,breaker,missrate,testorigin}`, `examples/weirproxy`, `loadtest`, `scripts`.

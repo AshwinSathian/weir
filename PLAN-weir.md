@@ -6,7 +6,7 @@
 > Created: 2026-09-27
 > Author: Ashwin Sathian
 
-This plan turns [docs/01-technical-spec.md](docs/01-technical-spec.md) into milestones, tasks and acceptance criteria. It does not restate designs; each task points at the section that defines it. Work milestones in order. Within a milestone, tasks are ordered so each one leaves `go test -race ./...` green.
+This plan turns [docs/01-technical-spec.md](docs/01-technical-spec.md) into milestones, tasks and acceptance criteria. The unit of work for a Claude Code session is a task card in [docs/cards/](docs/cards/README.md); each card names the PLAN task it serves, and `/handoff` ticks a PLAN task when all its cards are done. Current state is in [docs/progress/STATUS.md](docs/progress/STATUS.md). It does not restate designs; each task points at the section that defines it. Work milestones in order. Within a milestone, tasks are ordered so each one leaves `go test -race ./...` green.
 
 ## Goals
 
@@ -67,15 +67,15 @@ Each task has an acceptance criterion (AC) that is either true or false. "Tests"
 Goal: a repository where every later task only adds code.
 Deliverable: compiling public API with stub behavior, CI, test harness.
 
-- [ ] P0.1 `go.mod` (`module github.com/AshwinSathian/weir`, `go 1.27`), `LICENSE` (Apache-2.0, already committed) and `NOTICE`, `.gitignore`, `doc.go`. AC: `go build ./...` succeeds with no `require` block.
+- [x] P0.1 `go.mod` (`module github.com/AshwinSathian/weir`, `go 1.27`), `LICENSE` (Apache-2.0, already committed) and `NOTICE`, `.gitignore`, `doc.go`. AC: `go build ./...` succeeds with no `require` block.
 - [ ] P0.2 Public types from [04 §1](docs/04-lld.md) and [01 §4](docs/01-technical-spec.md): `Config` and sub-configs, `Request`, `Response`, `CacheInfo`, enums, errors, `StatusCode`, `RetryAfter`, `Observer`, `Event`, `Purge`, `WarmStats`, `EngineStats` and `Engine.Stats`. AC: `go doc` shows every exported identifier with a doc comment; `StatusCode` table test passes.
 - [ ] P0.3 `store` package types and interface ([05 §1](docs/05-storage-interface-spec.md)), `Entry.Size`. AC: compiles; `store` imports only the standard library.
 - [ ] P0.4 `New` with defaults and validation (FR-LCY-1); `Serve` that validates nothing and calls the origin through the single fetch function in `fetch.go` (no limiter yet); `Close`. AC: `TestZeroConfigValid`, `TestInvalidConfigRejected` (one row per FR-LCY-1 rule), `TestServePassThroughStub`.
 - [ ] P0.5 `internal/testorigin` per [07 §3](docs/07-testing-strategy.md). AC: its own tests cover gate, delay under synctest, panic, truncate, `NewChecked` failing on over-concurrency.
 - [ ] P0.6 `store/storetest.Run` with all cases from [05 §8](docs/05-storage-interface-spec.md) (they will fail until M1 provides a store; the suite itself compiles). AC: compiles; a trivial map-backed store in `storetest`'s own test passes the non-epoch cases.
 - [ ] P0.0 Private GitHub repo `AshwinSathian/weir` (created 2026-09-27); when M1 closes: add `SECURITY.md`, flip to public, enable private vulnerability reporting (D40), tag `v0.1.0` (D24). AC: repo visibility and reporting settings match the current phase.
-- [ ] P0.7 CI workflow: gofmt, vet, golangci-lint v2, `go test -race -shuffle=on`, dependency check (NFR-6) as a test (`TestNoThirdPartyImports` using `go list -deps -json`), govulncheck. AC: workflow green on the first push.
-- [ ] P0.8 `scripts/trace.sh`: extracts IDs (`FR-*`, `NFR-*`, `INV-*`) from `docs/01` and `docs/06`, greps `_test.go` for citations, prints uncited IDs, exits 0 (report mode) until `TRACE_STRICT=1`. AC: runs locally and in CI.
+- [x] P0.7 CI workflow: gofmt, vet, golangci-lint v2, `go test -race -shuffle=on`, dependency check (NFR-6) as a test (`TestNoThirdPartyImports` using `go list -deps -json`), govulncheck. AC: workflow green on the first push.
+- [x] P0.8 `scripts/trace.sh`: extracts IDs (`FR-*`, `NFR-*`, `INV-*`) from `docs/01` and `docs/06`, greps `_test.go` for citations, prints uncited IDs, exits 0 (report mode) until `TRACE_STRICT=1`. AC: runs locally and in CI.
 
 Exit criteria: CI green; `Serve` round-trips a request to `testorigin`.
 

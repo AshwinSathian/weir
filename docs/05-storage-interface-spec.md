@@ -186,6 +186,10 @@ Per-owner quota (M14): each shard keeps `map[store.Tag]int64` of bytes per owner
 
 Scrub (M15): for each shard in turn, take the write lock, walk every node, unlink response records whose `Tags` intersect the given tags, release. Worst case O(entries) total, but never more than one shard's worth of work under one lock.
 
+### 5.4 Epoch table
+
+The global tag's three timestamps and the newest-epoch value are atomics. Hard epochs live in a `sync.RWMutex`-protected `map[store.Tag]time.Time`, pruned opportunistically inside `SetEpoch` (at most 64 expired tags per call, no background goroutine). The soft and invalid sketch planes are `[]atomic.Uint32`; raising a cell is a compare-and-swap loop, reading is a plain atomic load, so neither takes a lock.
+
 ### 5.5 Snapshot file (M13)
 
 ```
@@ -197,10 +201,6 @@ trailer: record 0xFF with the record count; a file without a valid trailer is in
 ```
 
 Writer order: main-queue records (head to tail), then small-queue records, then hard epochs, then trailer. Loader behavior is FR-SNP-2 and FR-SNP-3.
-
-### 5.4 Epoch table
-
-The global tag's three timestamps and the newest-epoch value are atomics. Hard epochs live in a `sync.RWMutex`-protected `map[store.Tag]time.Time`, pruned opportunistically inside `SetEpoch` (at most 64 expired tags per call, no background goroutine). The soft and invalid sketch planes are `[]atomic.Uint32`; raising a cell is a compare-and-swap loop, reading is a plain atomic load, so neither takes a lock.
 
 ## 6. Entry encoding (`store/codec.go`)
 

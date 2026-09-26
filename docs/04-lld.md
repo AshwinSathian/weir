@@ -509,6 +509,8 @@ return NeedsValidation
 
 ## 5. `store/memory`
 
+### 5.1 Engine-facing rules
+
 Algorithm, sizing and invariants are specified in [05-storage-interface-spec.md §5](05-storage-interface-spec.md). The LLD rules that matter to the engine:
 
 - `Get` returns the stored pointer. Callers never mutate it (P4). The conformance suite checks that the memory store never mutates an entry after `Set` either.

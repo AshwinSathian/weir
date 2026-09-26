@@ -21,3 +21,6 @@ coverage.*
 # Local environment
 .env
 .env.*
+
+# Claude Code personal settings (project settings in .claude/settings.json are shared)
+.claude/settings.local.json
