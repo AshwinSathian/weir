@@ -296,7 +296,7 @@ var (
 )
 ```
 
-`Entry.Size()` returns `len(Body) + header bytes + 32 per tag + 256` (fixed overhead) and is what byte-weighted stores account.
+`Entry.Size()` returns `len(Body) + header bytes + vary name bytes + 32 per tag + 56 per variant ref + 256` (fixed overhead) and is what byte-weighted stores account. Vary specs have no body, so leaving out their names and refs would let up to `MaxVariants` refs per record go uncounted against the store's byte bound (NFR-3).
 
 Tags are computed by `internal/keys`:
 
@@ -1007,6 +1007,7 @@ type Event struct {
 | `EvPurge` | `Purge` or invalidation wrote epochs | `soft`, `hard`, `invalid` |
 | `EvMissRateAnomaly` | window closed with an anomalous partition | `flag`, `throttle` |
 | `EvEvict` | memory store evicted (batched per shard per call) | `small`, `main`, `expired` |
+| `EvMode` | `SetMode` changed the incident mode or it expired (FR-MODE-1) | `normal`, `stale-on-error`, `bypass` (new mode) |
 
 Reasons never contain request data. `Partition` is the only field derived from request input; exporters must not use it as a metric label.
 

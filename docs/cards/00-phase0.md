@@ -13,7 +13,7 @@ Plumbing done in the planning session (2026-09-27): `go.mod`, `doc.go`, `Makefil
 - Out of scope: Config (P0-03), store types (P0-02), any behavior
 - Notes: this is the first PR, so it also proves CI. If CI fails for plumbing reasons, fix the plumbing in this card and say so in the LOG.
 
-### [ ] P0-02 Store types, observer and remaining public types
+### [x] P0-02 Store types, observer and remaining public types
 - Plan: P0.2, P0.3 · Size: S · Depends on: P0-01
 - Read: 04 §2 (types only), §1.2, §9.1, §9.2 (kind names only); 05 §1; 01 §14.7 (Mode names)
 - Touch: store/store.go, store/doc.go, observer.go, types.go (Purge, WarmStats, EngineStats, Mode, BreakerState), deps_test.go (all new)
