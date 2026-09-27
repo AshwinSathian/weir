@@ -90,7 +90,7 @@ Each row: the attack, where it comes from, Weir's answer, the requirement or ADR
 |---|---|---|---|---|
 | T-25 | Tenant A invalidates tenant B's groups (RFC 9875 §5) | groups are scoped by origin (scheme, host, port); tenants on distinct hosts cannot touch each other. Tenants sharing one host share a group namespace; operators who host multiple parties on one host should set `CacheGroups.Ignore` | FR-PRG-6 | `TestGroupsScopedByOrigin` |
 | T-26 | Unauthenticated purge | `Purge` is a Go call; exposing it over HTTP is the adapter's job and must be authenticated (Caddy: admin API, which is local-only by default) | 08 §7 | manual review item |
-| T-27 | Timing and Cache-Status side channel: learning whether a URL was recently requested (RFC 9111 §7.2) | acceptable for a shared reverse-proxy cache of public content; `CacheStatus: ""` disables the header; Weir never emits the `key` parameter | FR-SRV-9 | `TestCacheStatusNoKey` |
+| T-27 | Timing and Cache-Status side channel: learning whether a URL was recently requested (RFC 9111 §7.2) | acceptable for a shared reverse-proxy cache of public content; `NoCacheStatus: true` disables the header; Weir never emits the `key` parameter | FR-SRV-9 | `TestCacheStatusNoKey` |
 
 ## 4. Security invariants
 

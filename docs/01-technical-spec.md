@@ -78,7 +78,7 @@ These were settled with the project owner on 2026-09-27 and are not reopened by 
 | D26 | Origin timeout covers headers and buffered bodies; streamed bodies are bounded by an idle timeout, not a total (§14.2). |
 | D27 | Upgrade and `CONNECT` requests are rejected by `Serve`; adapters route them around Weir (§14.3). |
 | D28 | `text/event-stream` responses are never buffered, coalesced or stored (§14.4). |
-| D29 | Default `Forward.Allow` is `traceparent`, `tracestate`, `X-Request-Id`; malformed `traceparent` is dropped (§14.5). |
+| D29 | `traceparent`, `tracestate` and `X-Request-Id` are forwarded by default in addition to `Forward.Allow`; `Forward.NoTraceHeaders` turns them off; malformed `traceparent` is dropped (§14.5). |
 | D30 | `Key.QueryDrop` stays empty by default; `weir.TrackingParams` preset provided. |
 | D31 | No default cookie bypass; a sampled report of stripped cookie names helps operators configure `Bypass` (§14.6). |
 | D32 | No prefix purge; sections are purged through `Cache-Groups`. |
@@ -284,7 +284,7 @@ A response is stored only if all of the following hold. Each failed check increm
 - FR-SRV-6. `only-if-cached` in the request is always honored: a usable stored response or `ErrOnlyIfCached`.
 - FR-SRV-7. Request `no-store` is always honored: the response is not stored.
 - FR-SRV-8. With `Client.HonorRevalidation` false (default), request `no-cache`, `max-age`, `min-fresh`, `max-stale` and `Pragma: no-cache` do not change lookup behavior. With it true, `no-cache`/`max-age=0`/`Pragma: no-cache` force validation of a stored entry; the validation still goes through coalescing and the limiter.
-- FR-SRV-9. When `CacheStatus` is non-empty (default `"Weir"`), every response produced from cache or after forwarding carries a `Cache-Status` member (RFC 9211) appended to any existing field value, with `hit` or `fwd`, `fwd-status`, `stored`, `collapsed`, `ttl`, and `detail` where applicable. The `key` parameter is never emitted. Negative responses (§5.14) carry `hit; detail=negative` even though RFC 9211 §2 advises against annotating locally generated responses; they are derived from a stored record, and operators need to tell them apart from origin errors.
+- FR-SRV-9. Unless `NoCacheStatus` is set, every response produced from cache or after forwarding carries a `Cache-Status` member (RFC 9211) named `CacheStatus` (default `"Weir"`) appended to any existing field value, with `hit` or `fwd`, `fwd-status`, `stored`, `collapsed`, `ttl`, and `detail` where applicable. The `key` parameter is never emitted. Negative responses (§5.14) carry `hit; detail=negative` even though RFC 9211 §2 advises against annotating locally generated responses; they are derived from a stored record, and operators need to tell them apart from origin errors.
 
 ### 5.7 Coalescing (T6.2, T6.2a)
 
@@ -413,7 +413,7 @@ All fields are optional. The zero value of `Config` is valid and yields the defa
 | `Freshness.DefaultTTL` | 0 | |
 | `Freshness.DefaultStaleWhileRevalidate` / `DefaultStaleIfError` | 0 / 0 | decision D6 |
 | `Freshness.Keep` | 5 min | extra retention after the last stale window, only for entries with a validator, so an expired entry can still be revalidated with a cheap 304 instead of refetched (the memory store evicts it earlier under pressure) |
-| `Coalesce.LeaderMaxAge` / `FollowerMaxWait` | 10 s / 10 s | |
+| `Coalesce.LeaderMaxAge` / `FollowerMaxWait` | 10 s / 10 s | a default is lowered to `Timeouts.Origin` when that is shorter; an explicit value above it is rejected (FR-LCY-1) |
 | `Coalesce.HitForMissTTL` | 30 s | |
 | `Limiter.MaxConcurrent` / `MaxQueue` / `MaxQueueWait` | 64 / 1024 / 2 s | |
 | `Limiter.MaxPerPartition` | 16 | |
@@ -433,9 +433,10 @@ All fields are optional. The zero value of `Config` is valid and yields the defa
 | `Limiter.MaxPerHost` | 0 (off) | M14; the Caddy adapter sets 25% for multi-host sites |
 | `Limiter.MaxUpload` | 25% of `MaxConcurrent` | D25, separate pool for requests with a body |
 | `Timeouts.StreamIdle` | 60 s | D26 |
-| `Bypass.ReportStrippedCookies` | 5 min | D31; 0 disables |
+| `Bypass.ReportStrippedCookies` | 5 min | D31; a negative value disables |
 | `Limits.*` | see FR-VAL-1, FR-VAL-3, FR-STO-10 | |
-| `CacheStatus` | `"Weir"` | empty disables the header |
+| `CacheStatus` | `"Weir"` | member name |
+| `NoCacheStatus` | false | true omits the header |
 | `Observer` | nil | |
 | `Logger` | discard handler | |
 | `Rand` | `rand.Float64` from `math/rand/v2` | test hook; must return [0, 1) and be safe for concurrent use |

@@ -4,9 +4,9 @@ Updated: 2026-09-27
 Phase: 0
 Current card: none
 Card state: awaiting-merge
-Branch: card/P0-02-store-observer-types
-PR: https://github.com/AshwinSathian/weir/pull/2
-Next card: P0-03
+Branch: card/P0-03-config
+PR: pending
+Next card: P0-04
 
 ## Blockers
 
@@ -14,15 +14,13 @@ none
 
 ## Waiting on Ashwin
 
-- Review and merge the P0-02 PR.
-- Approve the `EvMode` row added to 04 §9.2: FR-MODE-1 requires the event but the catalog omitted it. The reason vocabulary (`normal`, `stale-on-error`, `bypass`, the new mode) and "or it expired" trigger are new.
+- Review and merge the P0-03 PR.
+- Confirm the coalesce-default clamp: a zero `LeaderMaxAge`/`FollowerMaxWait` now defaults to min(10s, `Timeouts.Origin`) instead of failing validation when the origin timeout is under 10s (01 §6 and 04 §1.1 updated).
 
 ## Notes for the next session
 
-- store/store.go holds every 04 §2 type, `Store`, `Scrubber`, `Sizer`, `ErrNotFound`, `ErrUnavailable` and `Entry.Size`. Tag computation (`TagGlobal` etc.) belongs to internal/keys, not yet written.
-- observer.go: `EventKind` constants end with an unexported `evCount` sentinel; add new kinds before it and give each a name in `eventKindNames` (TestEventKindString enforces it). `emit(obs, ev)` is the nil-safe helper the engine wraps in P0-05.
-- types.go: `Purge`, `PurgeMode`, `WarmStats`, `EngineStats`, `BreakerState`, `Mode`. `Engine.Stats` and `Config` are still missing; PLAN P0.2 is ticked because its mapped cards are done, and they land in P0-03 and P0-05.
-- `store.Kind` and `store.EpochMode` start at 1 so an unset value is invalid; `PurgeSoft`, `BreakerClosed`, `ModeNormal` are zero values.
-- deps_test.go runs `go list` with `GOWORK=off` for default and `load` tags and checks `go list -m all` is only this module. Add any new build tag that guards files to its tag list.
-- P0-03: a typed-nil `Config.Observer` (for example a nil `*promObserver`) passes `emit`'s nil check and panics in `Observe`; decide in validation whether to reject it.
-- M1-08: the zero `store.Kind` and `store.EpochMode` are invalid; the decoder must reject them.
+- config.go: `prepareConfig(Config) (Config, error)` copies slices, applies defaults, canonicalizes, validates. P0-05's `New` calls it, then builds the default store and runs the FR-LCY-1 store-size rule (`Storable.MaxObjectBytes` against the store's `MaxObjectBytes()`), which is not in prepareConfig.
+- P0-05: a typed-nil `Config.Store` panics like a typed-nil observer did; reject it in `New` the same way (`reflect`, see the Observer check in `validate`).
+- Config shape decided this session: `NoCacheStatus` bool (CacheStatus "" means "Weir"), negative `Bypass.ReportStrippedCookies` disables the report, `Forward.NoTraceHeaders`, `Limiter.MaxUpload` (0: max(1, MaxConcurrent/4)), `Timeouts.StreamIdle`.
+- Unchecked ranges left for their cards: `ReserveForeground > MaxConcurrent` (limiter), `MaxOpenFor < OpenFor` and `Breaker.Window` under 10 buckets of 1ns (breaker), `MissRate.MinRatio > 1`, `HeuristicFraction > 1`. Reject or clamp them when the component lands.
+- Query patterns (`Key.QueryDrop`/`QueryKeep`) are stored as strings only; M1-05 compiles them.

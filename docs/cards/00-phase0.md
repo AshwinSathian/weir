@@ -22,7 +22,7 @@ Plumbing done in the planning session (2026-09-27): `go.mod`, `doc.go`, `Makefil
 - Out of scope: codec (M1-08), any implementation
 - Notes: `Entry.Size` formula is in 04 §2. Keep `EventKind` a `uint8` with a `String()` method; exporters use the strings as labels.
 
-### [ ] P0-03 Config, defaults and validation
+### [x] P0-03 Config, defaults and validation
 - Plan: P0.4 · Size: M · Depends on: P0-02
 - Read: 04 §1.1; 01 §6, §5.19 (FR-LCY-1); 01 §14.8 (FR-MEM-1 for the store-size rule, implementation deferred)
 - Touch: config.go, config_test.go (new)
