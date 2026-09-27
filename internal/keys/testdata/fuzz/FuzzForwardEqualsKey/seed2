@@ -1,0 +1,8 @@
+go test fuzz v1
+byte('\x01')
+string("HEAD")
+string("/%7e/%2f")
+string("b2=1&a=0&c=3")
+string("lang=en")
+string("*")
+string("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")
