@@ -89,14 +89,14 @@ func TestParseDateIgnoresHostZone(t *testing.T) {
 			defer func() { time.Local = saved }()
 			want := time.Date(2026, 7, 5, 8, 0, 0, 0, time.UTC)
 			for _, s := range []string{"Sun, 05 Jul 2026 08:00:00 GMT", "Sunday, 05-Jul-26 08:00:00 GMT", "Sun Jul  5 08:00:00 2026"} {
-				if got, ok := parseDate(s); !ok || !got.Equal(want) {
-					t.Errorf("parseDate(%q) = (%v, %v), want (%v, true)", s, got, ok, want)
+				if got, ok := ParseDate(s); !ok || !got.Equal(want) {
+					t.Errorf("ParseDate(%q) = (%v, %v), want (%v, true)", s, got, ok, want)
 				}
 			}
 			for _, s := range []string{"Sunday, 05-Jul-26 08:00:00 PST", "Sunday, 05-Jul-26 08:00:00 BST",
 				"Sunday, 05-Jul-26 08:00:00 GMT-8", "Sunday, 05-Jul-26 08:00:00 UTC", "Sun, 05 Jul 2026 08:00:00 +0000"} {
-				if got, ok := parseDate(s); ok {
-					t.Errorf("parseDate(%q) = %v, want invalid", s, got)
+				if got, ok := ParseDate(s); ok {
+					t.Errorf("ParseDate(%q) = %v, want invalid", s, got)
 				}
 			}
 		})

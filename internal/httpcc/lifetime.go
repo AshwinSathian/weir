@@ -34,13 +34,13 @@ func Lifetime(d ResponseDirectives, h http.Header, status int, respTime time.Tim
 	case d.MaxAge.Set:
 		return time.Duration(d.MaxAge.V) * time.Second, false
 	}
-	date, ok := parseDate(h.Get("Date"))
+	date, ok := ParseDate(h.Get("Date"))
 	if !ok {
 		date = respTime
 	}
 	if exp := h["Expires"]; len(exp) > 0 {
 		// RFC 9111 §4.2.1 permits treating repeated Expires as stale.
-		e, ok := parseDate(exp[0])
+		e, ok := ParseDate(exp[0])
 		if !ok || len(exp) > 1 {
 			return 0, false // FR-FRS-2: invalid Expires is the past
 		}
@@ -49,7 +49,7 @@ func Lifetime(d ResponseDirectives, h http.Header, status int, respTime time.Tim
 	if !heuristicStatus(status) {
 		return 0, false
 	}
-	lm, ok := parseDate(h.Get("Last-Modified"))
+	lm, ok := ParseDate(h.Get("Last-Modified"))
 	if !ok {
 		return clampLifetime(cfg.DefaultTTL), true
 	}
@@ -103,7 +103,7 @@ func heuristicStatus(status int) bool {
 	return false
 }
 
-// parseDate parses an HTTP-date in any of the three RFC 9110 §5.6.7 forms.
+// ParseDate parses an HTTP-date in any of the three RFC 9110 §5.6.7 forms.
 // It is http.ParseTime without its zone laxity: the RFC 850 layout accepts
 // any abbreviation and resolves it against the host's TZ (PST is -8h in Los
 // Angeles and +0 elsewhere), so the same bytes would give a different
@@ -112,7 +112,7 @@ func heuristicStatus(status int) bool {
 // ponytail: RFC 850 two-digit years use Go's 1969 pivot, not RFC 9110's
 // 50-years-ahead rule, so 70-75 read as the 1970s. The form is obsolete and
 // only the origin sends it. Parse the year by hand if that matters.
-func parseDate(s string) (time.Time, bool) {
+func ParseDate(s string) (time.Time, bool) {
 	for _, layout := range [...]string{http.TimeFormat, time.RFC850, time.ANSIC} {
 		if layout == time.RFC850 && !strings.HasSuffix(s, " GMT") {
 			continue

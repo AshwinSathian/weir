@@ -269,3 +269,19 @@ Entry template:
 - Deviations: 05 §5.4 wording only.
 - Follow-ups: none.
 - Context: low.
+
+## 2026-09-28 · M1-11 · done
+- Branch / PR: card/M1-11-storability / #18
+- Done: `storability` (FR-STO-1..9, reason plus `responseDriven` for T-31, D39 explicit freshness for 302/307, `vary-unsupported` until M7) and `buildEntry` (FR-STO-11 exclusions, FR-STO-13 Date, clipped header slices, jitter, stale windows, flags, tags, owner, retention with Keep and a 1 s floor). `normalizeResponse` canonicalizes origin header keys so a lowercase `set-cookie` or `cache-control: private` cannot skip storability (INV-4, card-reviewer finding). `httpcc.ParseDate` and `keys.DropHopByHop` exported for reuse.
+- Tests: TestErrorStatusesNotStored, TestSetCookieNotStored, TestAuthorizationRules, TestNoExtensionBasedCaching, TestRedirect302NeedsExplicitFreshness, TestEntryHeadersClipped, TestStorabilityReasons, TestBuildEntry, TestRetentionFloorAndSaturation, TestOriginHeaderKeysCanonicalized. `make check` passes.
+- Deviations: 04 §9 lists the defensive `method` not-stored reason. FR-STO-10 moved to M9-03 (needs the sfv parser).
+- Follow-ups: review nits left open (invalid `Expires` counts as explicit freshness for 302/307; `Connection: Cache-Control` drops the stored Cache-Control while its directives still apply).
+- Context: low; size M was right.
+
+## 2026-09-28 · M1-11 · review-fixes
+- Branch / PR: card/M1-11-storability / #18
+- Done: adversarial review before merge. `responseDriven` was true under `Authorization` or request `no-store` whenever a response check (status, private, set-cookie) failed first; it relied on a second guard in the planned `fetch` (T-31). Now false inside `storability`. `normalizeResponse` wrote into the Origin's header map and value arrays (a data race for Origins that reuse headers) and merged in map order; now builds a new map, canonical-first then sorted.
+- Tests: TestUnkeyedRequestNeverResponseDriven, TestNormalizeResponseLeavesOriginHeaderAlone (both failed before the fix). `make check` passes.
+- Deviations: none.
+- Follow-ups: FR-STO-5 with malformed `s-maxage` (Waiting on Ashwin).
+- Context: low.
