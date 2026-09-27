@@ -747,7 +747,7 @@ func (e *Engine) fetch(ctx, s, origin) fetchResult:
     defer cancel()                           // not deferred for streaming; see below
     req := toWeirRequest(s.fwd); addConditionals(req, s.prior)
     t0 := time.Now()
-    resp, err := safeFetch(origin, tctx, req)      // recovers panics into *OriginError; (nil, nil) and 1xx statuses become *OriginError; nil Header becomes empty, nil Body becomes http.NoBody
+    resp, err := safeFetch(origin, tctx, req)      // recovers panics into *OriginError; (nil, nil) and statuses outside 200..999 (1xx, and what net/http would reject) become *OriginError; nil Header becomes empty, nil Body becomes http.NoBody
     outcome := classify(resp, err, tctx)            // success | gateway failure | other
     e.cb.Record(probe, outcome)
 

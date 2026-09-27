@@ -40,7 +40,7 @@ Plumbing done in the planning session (2026-09-27): `go.mod`, `doc.go`, `Makefil
 - Out of scope: anything in the engine
 - Notes: partition for `MaxInflightPartition` is the request path. Use `synctest.Test` in every test here.
 
-### [ ] P0-05 Engine skeleton and the single fetch function
+### [x] P0-05 Engine skeleton and the single fetch function
 - Plan: P0.4 · Size: M · Depends on: P0-03, P0-04
 - Read: 04 §6.1, §6.7 (structure only), §12; 02 P3, P8; 01 §5.19
 - Touch: engine.go, fetch.go, nopstore.go (internal to the package), engine_test.go (new)

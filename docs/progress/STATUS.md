@@ -4,9 +4,9 @@ Updated: 2026-09-27
 Phase: 0
 Current card: none
 Card state: awaiting-merge
-Branch: card/P0-04-testorigin
-PR: https://github.com/AshwinSathian/weir/pull/4
-Next card: P0-05
+Branch: card/P0-05-engine
+PR: pending
+Next card: P0-06
 
 ## Blockers
 
@@ -14,16 +14,14 @@ none
 
 ## Waiting on Ashwin
 
-- Review and merge the P0-04 PR.
+- Review and merge the P0-05 PR.
 - Confirm the coalesce-default clamp: a zero `LeaderMaxAge`/`FollowerMaxWait` now defaults to min(10s, `Timeouts.Origin`) instead of failing validation when the origin timeout is under 10s (01 §6 and 04 §1.1 updated).
 
 ## Notes for the next session
 
-- config.go: `prepareConfig(Config) (Config, error)` copies slices, applies defaults, canonicalizes, validates. P0-05's `New` calls it, then builds the default store and runs the FR-LCY-1 store-size rule (`Storable.MaxObjectBytes` against the store's `MaxObjectBytes()`), which is not in prepareConfig.
-- P0-05: a typed-nil `Config.Store` panics like a typed-nil observer did; reject it in `New` the same way (`reflect`, see the Observer check in `validate`).
-- Config shape decided this session: `NoCacheStatus` bool (CacheStatus "" means "Weir"), negative `Bypass.ReportStrippedCookies` disables the report, `Forward.NoTraceHeaders`, `Limiter.MaxUpload` (0: max(1, MaxConcurrent/4)), `Timeouts.StreamIdle`.
-- Unchecked ranges left for their cards: `ReserveForeground > MaxConcurrent` (limiter), `MaxOpenFor < OpenFor` and `Breaker.Window` under 10 buckets of 1ns (breaker), `MissRate.MinRatio > 1`, `HeuristicFraction > 1`. Reject or clamp them when the component lands.
-- P0-05: `New` should log a warning when `Forward.Allow` names `Cookie`, `Authorization` or `Proxy-Authorization` (unkeyed forwarding, R-3), like it does for `ForwardAll`.
-- Query patterns (`Key.QueryDrop`/`QueryKeep`) are stored as strings only; M1-05 compiles them.
-- testorigin: `NewChecked(tb, maxConcurrent, maxPerPartition)` (07 §3 amended). In-flight counts cover the `Fetch` call only, not body reads; if the limiter holds a slot until the body closes, M4-02 may want the body's Close to release the count.
-- P0-05's `TestServePassThroughStub` can use `testorigin.New()` with `Default(Behavior{...})` and `Requests()` for the forwarded request.
+- engine.go: `goBackground(f)` is the only way to start an engine goroutine. It checks `closed` and calls `wg.Go` under `e.mu`, so `Close` never races a `wg.Add`. Flights and background refresh must use it.
+- fetch.go: `(*Engine).fetch(ctx, req, origin)` is a skeleton that always streams. It takes a plain `*Request`; M1-07 and later cards change it to the `fetchSpec`/`fetchResult` shape in 04 §6.7 and add the limiter, breaker and buffered path. `timeoutOrOrigin` maps a done ctx to `ctx.Err()`; flights must map it to `ErrClosed` (04 §1.3).
+- `Serve` forwards `*req` unchanged and leaves `Cache` zero until classification lands (M1-07). A nil `origin` panics inside `safeFetch` and comes back as `*OriginError` (502).
+- `New` uses `nopStore` when `Config.Store` is nil (replace with the memory store in M1-09) and runs the `store.Sizer` MaxObjectBytes check. Typed-nil `Store` is rejected in `validate`.
+- Engine tests are package `weir_test` (testorigin imports weir); `export_test.go` exposes `GoBackground`.
+- Unchecked config ranges from P0-03 are still open for their component cards (limiter, breaker, miss-rate, heuristic fraction).
