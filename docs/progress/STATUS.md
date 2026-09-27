@@ -4,9 +4,9 @@ Updated: 2026-09-27
 Phase: 1
 Current card: none
 Card state: awaiting-merge
-Branch: card/M1-05-query-cookies-encoding
-PR: #11 https://github.com/AshwinSathian/weir/pull/11
-Next card: M1-06
+Branch: card/M1-06-key-encoding
+PR: none
+Next card: M1-07
 
 ## Blockers
 
@@ -25,14 +25,13 @@ none
 
 ## Notes for the next session
 
-- M1-05 keys API: `rewriteQuery(raw, c) string`, `keyedCookies(lines, c) []Cookie` (present cookies in `Key.Cookies` order, a subsequence the key encoder can walk alongside the names), `cookieHeader([]Cookie) string` ("" means omit), `aeBucket(lines, c) string`. `keys.Config` now carries the query rules, `Cookies`, `AcceptEncoding` and `MaxKeyedHeaderBytes`.
+- M1-06 keys API: `PrimaryKey(*KeyInput) store.Key`; `KeyInput{Method, Scheme, Host, Path, Query, Headers []Header, CookieNames, Cookies}`. `Header{Name, Value, Present}` per `Key.Headers` name in config order; the Accept-Encoding bucket enters here as a normalized header value.
+- `appendKey` pairs `Cookies` with `CookieNames` in one pass: pass `keyedCookies` output unchanged (config order). Reordering it drops cookie values from the key (pinned by `TestKeyedCookiesFeedEncoder`).
+- Tags: `TagGlobal()`, `TagOrigin(o)`, `TagURI(o, p, q)`, `TagGroup(o, name)`; `o` is `scheme://host[:port]` after `normalizeHost`. No `Origin` builder yet; M1-07 builds `Classified.Origin`.
+- `normalizePath(p)` is not wired yet. M1-07 must apply it (when `Key.NormalizePath`) to both the key path and the forwarded path (FR-FWD-5), and to the URI tag of ClassPass requests (04 §3.1). It returns paths with malformed escapes unchanged; Validate rejects those first.
 - 04 §3.5 pseudocode shows `keyedCookies()` returning a string; update it when M1-07 wires forwarding.
-- Query patterns are stored as strings and re-parsed per call. Nothing validates them yet: `"a*b"` is a literal, and `"*"` drops or keeps everything. `New` (config validation card) should validate them (04 §1.1 says `New` compiles query patterns).
-- keys API (M1-04): `Validate(r *Request, c *Config) (host string, err error)` returns the normalized host; key and forwarded request must both use it (P2). Errors are `keys.ErrUpgrade` and `*keys.RequestError{Reason}`; M1-07 `Classify` (or the engine) maps them to `weir.ErrUpgradeNotSupported` and `*weir.RequestError`.
-- httpcc API: `Lifetime`, `Jitter`, `StaleWindows`, `CorrectedInitialAge`, `CurrentAge`, `Evaluate`, `State` (zero `State` is invalid).
-- `Evaluate` trusts `epOK`: the caller's `newestEpoch` applies FR-PRG-7 (04 §6.3). A zero or unknown `EpochMode` with `epOK` returns `Unusable`.
-- FR-MODE-2 (`ModeStaleOnError`) must tell "stale forbidden" from "no SIE window" using `ep.Mode` and `e.Flags`; `sieOK` alone is false for both.
-- Doc wording drift, not yet fixed: 01 FR-SRV-1 and FR-STL-3 say "unqualified `no-cache`", while the 01 RFC table and 04 `FlagNoCache` treat qualified and unqualified the same. The parser, `StaleWindows` and `Evaluate` follow the table.
-- Memory store (M1-06 or wherever epochs land): keep `Epoch.At` as a `time.Now()` value with its monotonic reading. `Evaluate` computes `now.Sub(ep.At)`; a wall-only `At` lets a backward clock step shorten or cancel a soft purge.
-- Codec (store/codec.go): `Evaluate` trusts `SWR`/`SIE` and does not re-check `FlagMustRevalidate`/`FlagProxyRevalidate`. The decoder should zero both windows when those flags are set, so corrupt bytes cannot enable stale serving (FR-STL-3).
-- engine.go: `Close` does not wait for foreground `Serve` calls; decide before M1-12 closes an engine-owned store under them.
+- Query patterns are not validated yet: `New` (config validation card) should compile them (04 §1.1).
+- `Evaluate` trusts `epOK`: the caller's `newestEpoch` applies FR-PRG-7 (04 §6.3). FR-MODE-2 must use `ep.Mode` and `e.Flags` to tell "stale forbidden" from "no SIE window".
+- Memory store: keep `Epoch.At` with its monotonic reading. Codec: zero `SWR`/`SIE` when must-revalidate or proxy-revalidate flags are set (FR-STL-3).
+- engine.go: `Close` does not wait for foreground `Serve` calls; decide before M1-12.
+- Doc wording drift: 01 FR-SRV-1 and FR-STL-3 say "unqualified `no-cache`" while the 01 RFC table and 04 `FlagNoCache` treat both the same.
