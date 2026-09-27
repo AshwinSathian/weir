@@ -5,7 +5,7 @@ Phase: 0
 Current card: none
 Card state: awaiting-merge
 Branch: card/P0-01-public-types
-PR: pending
+PR: https://github.com/AshwinSathian/weir/pull/1
 Next card: P0-02
 
 ## Blockers
