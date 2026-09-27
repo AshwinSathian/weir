@@ -1,12 +1,12 @@
 # Status
 
-Updated: 2026-09-27
+Updated: 2026-09-28
 Phase: 1
 Current card: none
 Card state: awaiting-merge
-Branch: card/M1-08-entry-codec
-PR: #14 https://github.com/AshwinSathian/weir/pull/14
-Next card: M1-09
+Branch: card/M1-09-memory-store
+PR: none
+Next card: M1-10
 
 ## Blockers
 
@@ -28,7 +28,9 @@ none
 
 ## Notes for the next session
 
-- `store.Encode`/`store.Decode` exist (05 §6). Remote stores and the FR-SNP-1 snapshot writer call `Decode(b, maxObjectBytes)`; its errors already wrap `ErrUnavailable`.
-- `Decode` allocates under 32x its input (27x measured worst case, one-byte vary names) (every repeated item carries at least one byte). `Entry.Size` does not charge per-item slice or map overhead; revisit if snapshot load feeds decoded entries into a byte-weighted store.
-- Codec accepts header and vary names in any case form; add canonical-form validation when the Valkey store lands if the engine relies on it.
-- Carried from M1-07: `keys.Classify` ready for the engine (04 §3.1); `New` must still reject `Forward.Allow` entries naming keyed or hop-by-hop fields and compile query patterns; `Close` does not wait for foreground `Serve` calls (decide before M1-12); TRACE/OPTIONS with `Max-Forwards: 0` and forwarding of `Proxy-Authorization` on pass-through are open spec questions.
+- `store/memory` exists (05 §5.1-5.3): sharded S3-FIFO, `Bytes`, `MaxObjectBytes`, `OnEvict`. `SetEpoch`/`NewestEpoch` are stubs for M1-10; `TestConformance` passes `WithoutEpochs()`, drop it there.
+- M1-10 also owns E-11: `Config.MaxRetention` and the `Expires` clamp (store the clamped deadline on the node; entries are immutable). `MaxHardEpochs` and `EpochSlots` config fields are not added yet.
+- `New` builds a fixed 256 MiB memory store when `Config.Store` is nil (`ponytail:` in engine.go); FR-MEM-1 sizing is M1-15.
+- `Storable.MaxObjectBytes` counts body plus headers, while `Entry.Size` adds 256 bytes plus tags and vary names. A limit set exactly at the store's `MaxObjectBytes()` passes `New` but near-limit records get declined. Consider a margin in the M1-15 check.
+- Ghost backing array keeps its peak capacity after main shrinks (live count is bounded); `Shards` has no upper bound (operator input).
+- Carried from M1-07/M1-08: `New` must still reject `Forward.Allow` entries naming keyed or hop-by-hop fields and compile query patterns; `Close` does not wait for foreground `Serve` calls (decide before M1-12); codec accepts any header-name case (revisit with Valkey).
