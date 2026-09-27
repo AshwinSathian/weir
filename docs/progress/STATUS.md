@@ -4,9 +4,9 @@ Updated: 2026-09-27
 Phase: 0
 Current card: none
 Card state: awaiting-merge
-Branch: card/P0-03-config
-PR: https://github.com/AshwinSathian/weir/pull/3
-Next card: P0-04
+Branch: card/P0-04-testorigin
+PR: https://github.com/AshwinSathian/weir/pull/4
+Next card: P0-05
 
 ## Blockers
 
@@ -14,7 +14,7 @@ none
 
 ## Waiting on Ashwin
 
-- Review and merge the P0-03 PR.
+- Review and merge the P0-04 PR.
 - Confirm the coalesce-default clamp: a zero `LeaderMaxAge`/`FollowerMaxWait` now defaults to min(10s, `Timeouts.Origin`) instead of failing validation when the origin timeout is under 10s (01 §6 and 04 §1.1 updated).
 
 ## Notes for the next session
@@ -25,3 +25,5 @@ none
 - Unchecked ranges left for their cards: `ReserveForeground > MaxConcurrent` (limiter), `MaxOpenFor < OpenFor` and `Breaker.Window` under 10 buckets of 1ns (breaker), `MissRate.MinRatio > 1`, `HeuristicFraction > 1`. Reject or clamp them when the component lands.
 - P0-05: `New` should log a warning when `Forward.Allow` names `Cookie`, `Authorization` or `Proxy-Authorization` (unkeyed forwarding, R-3), like it does for `ForwardAll`.
 - Query patterns (`Key.QueryDrop`/`QueryKeep`) are stored as strings only; M1-05 compiles them.
+- testorigin: `NewChecked(tb, maxConcurrent, maxPerPartition)` (07 §3 amended). In-flight counts cover the `Fetch` call only, not body reads; if the limiter holds a slot until the body closes, M4-02 may want the body's Close to release the count.
+- P0-05's `TestServePassThroughStub` can use `testorigin.New()` with `Default(Behavior{...})` and `Requests()` for the forwarded request.
