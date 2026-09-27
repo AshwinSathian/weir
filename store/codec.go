@@ -52,18 +52,20 @@ var (
 	errDecodeDuplicate = fmt.Errorf("store: decode entry: duplicate field: %w", ErrUnavailable)
 	errDecodeValue     = fmt.Errorf("store: decode entry: malformed field value: %w", ErrUnavailable)
 
-	errEncodeRange = errors.New("store: encode entry: status or time out of range")
+	errEncodeRange = errors.New("store: encode entry: kind, status or time out of range")
 	errEncodeValue = errors.New("store: encode entry: empty vary name, header name or header value list")
 )
 
 // Encode serializes e in the store codec (05 §6), for stores that keep
 // entries outside the process. Zero-valued singular fields are omitted.
 // Times travel as Unix nanoseconds, so the monotonic reading and location
-// are dropped (FR-FRS-8). A status outside [0, 999], a non-zero time
+// are dropped (FR-FRS-8). An unknown kind, a status outside [0, 999], a non-zero time
 // outside the years 1678 to 2262, an empty vary name, an empty header name
 // or a header name with no values is an error.
 func Encode(e *Entry) ([]byte, error) {
-	if e.Status < 0 || e.Status > maxStatus {
+	// Decode rejects these, so encoding them would turn a successful Set
+	// into a record every Get reports as unavailable.
+	if e.Kind == 0 || e.Kind > KindNegative || e.Status < 0 || e.Status > maxStatus {
 		return nil, errEncodeRange
 	}
 	w := encoder{b: make([]byte, 0, e.Size())}

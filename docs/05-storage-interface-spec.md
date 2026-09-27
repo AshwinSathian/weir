@@ -239,7 +239,7 @@ func Encode(e *Entry) ([]byte, error)
 func Decode(b []byte, maxBytes int64) (*Entry, error) // errors wrap ErrUnavailable
 ```
 
-Times are Unix nanoseconds and 0 stands for the zero time (so the instant 1970-01-01T00:00:00Z decodes as zero); `Encode` returns an error for a non-zero time outside the int64 nanosecond range (years 1678 to 2262) a status outside [0, 999], an empty vary name, an empty header name or a header name with no values. Zero-valued singular fields and empty collections are omitted, and decode as zero values and nil.
+Times are Unix nanoseconds and 0 stands for the zero time (so the instant 1970-01-01T00:00:00Z decodes as zero); `Encode` returns an error for an unknown kind, a non-zero time outside the int64 nanosecond range (years 1678 to 2262) a status outside [0, 999], an empty vary name, an empty header name or a header name with no values. Zero-valued singular fields and empty collections are omitted, and decode as zero values and nil.
 
 Decoding rules: unknown field tags are skipped (forward compatibility); a length beyond the remaining buffer, a duplicate singular field, a fixed-size field of the wrong size, a status over 999, header names not strictly ascending, an empty vary name, an empty header name or a header value count of 0, an unknown kind, or a wrong magic or version is a decode error, which the store reports as `ErrUnavailable` and the engine treats as a miss. Total encoded size is bounded by the store's object limit (`maxBytes`) before decoding allocates anything, and every length and header value count is checked against the remaining bytes before use. The decoded entry does not alias `b`. `FuzzDecodeEntry` covers the decoder.
 

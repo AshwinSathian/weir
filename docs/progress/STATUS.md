@@ -14,7 +14,6 @@ none
 
 ## Waiting on Ashwin
 
-- Approve the codec API added in M1-08 (05 §6): `store.Encode(*Entry) ([]byte, error)` and `store.Decode(b []byte, maxBytes int64) (*Entry, error)`, decode errors wrapping `ErrUnavailable`, and time 0 meaning the zero time (a `Last-Modified` of exactly the Unix epoch decodes as absent). Review in PR.
 - Confirm the coalesce-default clamp: a zero `LeaderMaxAge`/`FollowerMaxWait` now defaults to min(10s, `Timeouts.Origin`) instead of failing validation when the origin timeout is under 10s (01 §6 and 04 §1.1 updated).
 - Approve the storetest API: `Run(t, newStore, opts ...Option)` with `WithoutEpochs()` and `Synctest()` (05 §8). `Synctest()` replaces the card's `func(d time.Duration)` advance hook, which cannot work: `synctest.Test` forbids `t.Run` inside a bubble and stores read `time.Now` (D9).
 - Pragma with Cache-Control: `ParseRequest` sets `NoCache` from `Pragma: no-cache` even when the request also has `Cache-Control` (docs say "plus Pragma: no-cache" unconditionally). RFC 7234 §5.4 ignored Pragma when Cache-Control was present. Only matters with `Client.HonorRevalidation`. Keep as is, or ignore Pragma when Cache-Control is present (FR-SRV-8 wording change)?
@@ -30,6 +29,6 @@ none
 ## Notes for the next session
 
 - `store.Encode`/`store.Decode` exist (05 §6). Remote stores and the FR-SNP-1 snapshot writer call `Decode(b, maxObjectBytes)`; its errors already wrap `ErrUnavailable`.
-- `Decode` allocates at most about 16-24x its input (every repeated item carries at least one byte). `Entry.Size` does not charge per-item slice or map overhead; revisit if snapshot load feeds decoded entries into a byte-weighted store.
+- `Decode` allocates under 32x its input (27x measured worst case, one-byte vary names) (every repeated item carries at least one byte). `Entry.Size` does not charge per-item slice or map overhead; revisit if snapshot load feeds decoded entries into a byte-weighted store.
 - Codec accepts header and vary names in any case form; add canonical-form validation when the Valkey store lands if the engine relies on it.
 - Carried from M1-07: `keys.Classify` ready for the engine (04 §3.1); `New` must still reject `Forward.Allow` entries naming keyed or hop-by-hop fields and compile query patterns; `Close` does not wait for foreground `Serve` calls (decide before M1-12); TRACE/OPTIONS with `Max-Forwards: 0` and forwarding of `Proxy-Authorization` on pass-through are open spec questions.

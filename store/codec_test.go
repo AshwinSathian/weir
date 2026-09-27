@@ -297,6 +297,8 @@ func TestEncodeRejectsUnrepresentable(t *testing.T) {
 		name string
 		e    *Entry
 	}{
+		{"zero kind", &Entry{}},
+		{"unknown kind", &Entry{Kind: KindNegative + 1}},
 		{"negative status", &Entry{Kind: KindResponse, Status: -1}},
 		{"status over 999", &Entry{Kind: KindResponse, Status: 1000}},
 		{"time after 2262", &Entry{Kind: KindResponse, Date: time.Date(3000, 1, 1, 0, 0, 0, 0, time.UTC)}},
