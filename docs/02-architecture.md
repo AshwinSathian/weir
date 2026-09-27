@@ -74,7 +74,7 @@ weir/
     store.go                Store, Entry, Key, Epoch, ErrNotFound, ErrUnavailable
     codec.go                Entry binary encoding (used by storetest now, Valkey later)
     memory/                 sharded byte-weighted S3-FIFO Store
-    storetest/              conformance suite: storetest.Run(t, newStore)
+    storetest/              conformance suite: storetest.Run(t, newStore, opts...)
   weirhttp/                 net/http middleware and RoundTripper origin
   internal/
     httpcc/                 Cache-Control, Expires, Age, Date parsing; lifetime; age

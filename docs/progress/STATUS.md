@@ -4,9 +4,9 @@ Updated: 2026-09-27
 Phase: 0
 Current card: none
 Card state: awaiting-merge
-Branch: card/P0-05-engine
-PR: https://github.com/AshwinSathian/weir/pull/5
-Next card: P0-06
+Branch: card/P0-06-storetest
+PR: none
+Next card: M1-01
 
 ## Blockers
 
@@ -14,15 +14,16 @@ none
 
 ## Waiting on Ashwin
 
-- Review and merge the P0-05 PR.
+- Review and merge the P0-06 PR.
 - Confirm the coalesce-default clamp: a zero `LeaderMaxAge`/`FollowerMaxWait` now defaults to min(10s, `Timeouts.Origin`) instead of failing validation when the origin timeout is under 10s (01 §6 and 04 §1.1 updated).
+- Approve the storetest API: `Run(t, newStore, opts ...Option)` with `WithoutEpochs()` and `Synctest()` (05 §8). `Synctest()` replaces the card's `func(d time.Duration)` advance hook, which cannot work: `synctest.Test` forbids `t.Run` inside a bubble and stores read `time.Now` (D9).
+- Resolve a conflict between CLAUDE.md hard rule 6 (no real-clock sleeps outside the `load` tag) and 05 §8 (remote stores run `ExpiredIsNotFound` on the real clock, now a 3 s sleep). Proposal: exempt remote-store conformance runs from rule 6, or run them only under an integration build tag.
 
 ## Notes for the next session
 
-- engine.go: `goBackground(f)` is the only way to start an engine goroutine. It checks `closed` and calls `wg.Go` under `e.mu`, so `Close` never races a `wg.Add`. Flights and background refresh must use it.
-- fetch.go: `(*Engine).fetch(ctx, req, origin)` is a skeleton that always streams. It takes a plain `*Request`; M1-07 and later cards change it to the `fetchSpec`/`fetchResult` shape in 04 §6.7 and add the limiter, breaker and buffered path. `timeoutOrOrigin` maps a done ctx to `ctx.Err()`; flights must map it to `ErrClosed` (04 §1.3).
-- `Serve` forwards `*req` unchanged and leaves `Cache` zero until classification lands (M1-07). A nil `origin` panics inside `safeFetch` and comes back as `*OriginError` (502).
-- `New` uses `nopStore` when `Config.Store` is nil (replace with the memory store in M1-09) and runs the `store.Sizer` MaxObjectBytes check. Typed-nil `Store` is rejected in `validate`.
-- Engine tests are package `weir_test` (testorigin imports weir); `export_test.go` exposes `GoBackground`.
-- `Close` does not wait for foreground `Serve` calls already past the closed check. Before M1-12 uses the store on the Serve path, decide whether Close tracks them (for example a second WaitGroup) before closing an engine-owned store.
-- Unchecked config ranges from P0-03 are still open for their component cards (limiter, breaker, miss-rate, heuristic fraction).
+- storetest: every store test calls `storetest.Run(t, newStore, storetest.Synctest())`; in-process stores must pass `Synctest()` or `ExpiredIsNotFound` sleeps 3 s on the real clock. M1-09 adds `WithoutEpochs()` until M1-10.
+- `WithoutEpochs()` still calls SetEpoch/NewestEpoch in `ContextCanceled` and `ClosedStore`: stubs return nil, or ErrUnavailable after Close.
+- `Run` registers `t.Cleanup(s.Close)` for every store it builds; stores may also register their own (Close is idempotent).
+- M1-08 adds `CodecRoundTrip`; M1-10 adds `EpochNeverUnderInvalidates` and `EpochHardCap` to storetest.go's case table.
+- engine.go: `goBackground(f)` is the only way to start an engine goroutine. `Close` does not wait for foreground `Serve` calls; decide before M1-12 closes an engine-owned store under them.
+- `New` uses `nopStore` when `Config.Store` is nil (replace with the memory store in M1-09).

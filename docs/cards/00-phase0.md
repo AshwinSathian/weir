@@ -49,7 +49,7 @@ Plumbing done in the planning session (2026-09-27): `go.mod`, `doc.go`, `Makefil
 - Out of scope: limiter, breaker, caching of any kind
 - Notes: create engines inside `synctest.Test` bubbles and close them before the bubble ends (07 §1 rule 2).
 
-### [ ] P0-06 Store conformance suite
+### [x] P0-06 Store conformance suite
 - Plan: P0.6 · Size: M · Depends on: P0-02
 - Read: 05 §2, §4.2, §8
 - Touch: store/storetest/storetest.go, store/storetest/mapstore_test.go (new)
