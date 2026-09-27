@@ -5,7 +5,7 @@ Phase: 1
 Current card: none
 Card state: awaiting-merge
 Branch: card/M1-05-query-cookies-encoding
-PR: pending
+PR: #11 https://github.com/AshwinSathian/weir/pull/11
 Next card: M1-06
 
 ## Blockers
