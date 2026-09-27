@@ -329,3 +329,87 @@ func TestNewCheckedFailsOnOverConcurrency(t *testing.T) {
 		})
 	}
 }
+
+// FR-TMO-2: like an http.Client body, Close unblocks a pending read and later
+// reads fail, so engine aborts and read-after-close bugs show up in tests.
+func TestBodyCloseUnblocksAndFailsReads(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		o := New()
+		o.Default(Behavior{Body: []byte("x"), BodyDelay: time.Hour})
+		resp, err := o.Fetch(t.Context(), get("/"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		done := make(chan error, 1)
+		go func() {
+			_, err := resp.Body.Read(make([]byte, 1))
+			done <- err
+		}()
+		synctest.Wait()
+		start := time.Now()
+		if err := resp.Body.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if err := <-done; !errors.Is(err, ErrBodyClosed) || time.Since(start) != 0 {
+			t.Errorf("pending read = %v after %v, want ErrBodyClosed at once", err, time.Since(start))
+		}
+		if _, err := resp.Body.Read(make([]byte, 1)); !errors.Is(err, ErrBodyClosed) {
+			t.Errorf("read after close = %v, want ErrBodyClosed", err)
+		}
+		if err := resp.Body.Close(); err != nil {
+			t.Errorf("second Close = %v", err)
+		}
+	})
+}
+
+// FR-TMO-1, T-41: a body read after the Fetch context ends fails, as it
+// would on a real transport, so a fetch that drops its deadline early is caught.
+func TestBodyReadFailsAfterContextDone(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		o := New()
+		o.Default(Behavior{Body: []byte("x")})
+		ctx, cancel := context.WithCancel(t.Context())
+		resp, err := o.Fetch(ctx, get("/"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		cancel()
+		if _, err := io.ReadAll(resp.Body); !errors.Is(err, context.Canceled) {
+			t.Errorf("read after cancel = %v, want context.Canceled", err)
+		}
+		resp.Body.Close()
+	})
+}
+
+func TestFetchWithDoneContextFails(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		o := New()
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+		if _, err := o.Fetch(ctx, get("/")); !errors.Is(err, context.Canceled) {
+			t.Errorf("Fetch = %v, want context.Canceled", err)
+		}
+		if o.Calls("/") != 1 {
+			t.Errorf("Calls = %d, want the call recorded", o.Calls("/"))
+		}
+	})
+}
+
+func TestBehaviorCopiedOnSet(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		o := New()
+		b := Behavior{Header: http.Header{"X-A": {"1"}}, Body: []byte("abc")}
+		o.Default(b)
+		b.Header.Set("X-A", "2")
+		b.Body[0] = 'z'
+		resp, err := o.Fetch(t.Context(), get("/"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.Header.Get("X-A") != "1" || string(body) != "abc" {
+			t.Errorf("got %v %q, want the behavior as set", resp.Header, body)
+		}
+	})
+}

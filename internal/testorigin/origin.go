@@ -9,6 +9,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -22,6 +23,10 @@ var ErrDown = errors.New("weir: test origin down")
 // ErrOverConcurrency is returned by a checked Origin's Fetch when the call
 // would exceed a concurrency bound.
 var ErrOverConcurrency = errors.New("weir: test origin over concurrency bound")
+
+// ErrBodyClosed is returned by a response body Read after Close, as
+// net/http does.
+var ErrBodyClosed = errors.New("weir: test origin read on closed body")
 
 // Behavior is how the origin answers one path. Steps run in field order:
 // Delay, Gate, Err, Panic, then Func or the static response. Func's
@@ -80,6 +85,7 @@ func NewChecked(tb testing.TB, maxConcurrent, maxPerPartition int) *Origin {
 
 // Route sets the behavior for an exact path; Default applies otherwise.
 func (o *Origin) Route(path string, b Behavior) {
+	b = copyBehavior(b)
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.routes[path] = b
@@ -87,9 +93,18 @@ func (o *Origin) Route(path string, b Behavior) {
 
 // Default sets the behavior for paths without a Route.
 func (o *Origin) Default(b Behavior) {
+	b = copyBehavior(b)
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.def = b
+}
+
+// copyBehavior detaches b from the caller's Header map and Body slice, so a
+// test editing them later cannot race with Fetch on engine goroutines.
+func copyBehavior(b Behavior) Behavior {
+	b.Header = b.Header.Clone()
+	b.Body = slices.Clone(b.Body)
+	return b
 }
 
 // SetDown makes every call return ErrDown while down is true.
@@ -154,8 +169,12 @@ func (o *Origin) Fetch(ctx context.Context, req *weir.Request) (*weir.Response, 
 	}
 	defer o.exit(req.Path)
 
+	// Like an http.Client, a done context fails the call even with no wait.
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if b.Delay > 0 {
-		if err := sleep(ctx, b.Delay); err != nil {
+		if err := sleep(ctx, b.Delay, nil); err != nil {
 			return nil, err
 		}
 	}
@@ -190,7 +209,8 @@ func (o *Origin) Fetch(ctx context.Context, req *weir.Request) (*weir.Response, 
 	return &weir.Response{
 		StatusCode: status,
 		Header:     header,
-		Body:       &body{ctx: ctx, delay: b.BodyDelay, r: bytes.NewReader(data), truncated: b.Truncate > 0},
+		Body: &body{ctx: ctx, delay: b.BodyDelay, r: bytes.NewReader(data), truncated: b.Truncate > 0,
+			closed: make(chan struct{})},
 	}, nil
 }
 
@@ -232,7 +252,9 @@ func (o *Origin) exit(path string) {
 	}
 }
 
-func sleep(ctx context.Context, d time.Duration) error {
+// sleep waits d, or until ctx is done or closed is closed. A nil closed
+// never fires.
+func sleep(ctx context.Context, d time.Duration, closed <-chan struct{}) error {
 	t := time.NewTimer(d)
 	defer t.Stop()
 	select {
@@ -240,21 +262,35 @@ func sleep(ctx context.Context, d time.Duration) error {
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
+	case <-closed:
+		return ErrBodyClosed
 	}
 }
 
 // body is a response body that waits delay before its first byte and, when
-// truncated, fails with io.ErrUnexpectedEOF instead of ending cleanly.
+// truncated, fails with io.ErrUnexpectedEOF instead of ending cleanly. Like
+// an http.Client body, reads fail once ctx is done or after Close, and Close
+// unblocks a pending read (the engine aborts stalled streams that way).
 type body struct {
 	ctx       context.Context // kept past Fetch on purpose: an http.Client body also fails once its request context ends
 	delay     time.Duration
 	r         *bytes.Reader
 	truncated bool
+	closed    chan struct{}
+	once      sync.Once
 }
 
 func (b *body) Read(p []byte) (int, error) {
+	select {
+	case <-b.closed:
+		return 0, ErrBodyClosed
+	default:
+	}
+	if err := b.ctx.Err(); err != nil {
+		return 0, err
+	}
 	if b.delay > 0 {
-		if err := sleep(b.ctx, b.delay); err != nil {
+		if err := sleep(b.ctx, b.delay, b.closed); err != nil {
 			return 0, err
 		}
 		b.delay = 0
@@ -266,4 +302,7 @@ func (b *body) Read(p []byte) (int, error) {
 	return n, err
 }
 
-func (b *body) Close() error { return nil }
+func (b *body) Close() error {
+	b.once.Do(func() { close(b.closed) })
+	return nil
+}

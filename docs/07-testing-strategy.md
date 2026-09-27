@@ -64,7 +64,7 @@ func (o *Origin) Requests() []*weir.Request      // every forwarded request, for
 func (o *Origin) Reset()
 ```
 
-It asserts INV-7 on every call when constructed with `NewChecked(tb testing.TB, maxConcurrent, maxPerPartition)`: a call that would exceed either bound fails the test with `tb.Errorf` (Fetch runs on engine goroutines, where `Fatal` is not allowed) and returns `ErrOverConcurrency` without running the behavior. While `SetDown(true)` is in effect every call returns `ErrDown`. Header and body delays (`Delay`, `BodyDelay`) and `Gate` end early with `ctx.Err()` when the Fetch context is done.
+It asserts INV-7 on every call when constructed with `NewChecked(tb testing.TB, maxConcurrent, maxPerPartition)`: a call that would exceed either bound fails the test with `tb.Errorf` (Fetch runs on engine goroutines, where `Fatal` is not allowed) and returns `ErrOverConcurrency` without running the behavior. While `SetDown(true)` is in effect every call returns `ErrDown`. Like an `http.Client`, a call whose context is already done fails with `ctx.Err()`, and `Delay`, `BodyDelay` and `Gate` end early when it ends. Response bodies behave like `http.Client` bodies: a read fails once the Fetch context is done, `Close` unblocks a pending read, and reads after `Close` return `ErrBodyClosed`. `Route` and `Default` copy the behavior's `Header` and `Body`.
 
 ## 4. Invariant and property tests
 
