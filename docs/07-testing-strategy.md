@@ -64,7 +64,7 @@ func (o *Origin) Requests() []*weir.Request      // every forwarded request, for
 func (o *Origin) Reset()
 ```
 
-It asserts INV-7 on every call when constructed with `NewChecked(maxConcurrent, maxPerPartition)`: exceeding either bound fails the test immediately.
+It asserts INV-7 on every call when constructed with `NewChecked(tb testing.TB, maxConcurrent, maxPerPartition)`: a call that would exceed either bound fails the test with `tb.Errorf` (Fetch runs on engine goroutines, where `Fatal` is not allowed) and returns `ErrOverConcurrency` without running the behavior. While `SetDown(true)` is in effect every call returns `ErrDown`. Header and body delays (`Delay`, `BodyDelay`) and `Gate` end early with `ctx.Err()` when the Fetch context is done.
 
 ## 4. Invariant and property tests
 

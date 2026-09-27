@@ -31,7 +31,7 @@ Plumbing done in the planning session (2026-09-27): `go.mod`, `doc.go`, `Makefil
 - Out of scope: default store construction (P0-05 uses a no-op store, M1-09 swaps in memory), query pattern compilation beyond storing the strings (M1-05)
 - Notes: every boolean must default to false (04 §1.1 note). Keep `Config` copying explicit: `New` must never retain caller slices.
 
-### [ ] P0-04 Test origin
+### [x] P0-04 Test origin
 - Plan: P0.5 · Size: M · Depends on: P0-01
 - Read: 07 §3; 07 §1 rules 2 and 4
 - Touch: internal/testorigin/origin.go, origin_test.go (new)
