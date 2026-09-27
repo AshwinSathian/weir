@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
+	"strings"
 	"testing"
 	"time"
 )
@@ -24,7 +26,17 @@ func TestStatusCode(t *testing.T) {
 		{"must-revalidate", ErrMustRevalidate, 504},
 		{"only-if-cached", ErrOnlyIfCached, 504},
 		{"origin transport error", &OriginError{Err: io.ErrUnexpectedEOF}, 502},
-		{"origin error wrapping a client cancellation is 499", &OriginError{Err: context.Canceled}, 499},
+		// The engine returns the caller's ctx.Err() unwrapped (timeoutOrOrigin).
+		// Context errors inside *OriginError are the origin's own; 499 would
+		// tell the adapter not to write to a client that is still there.
+		{"origin error wrapping the origin's own cancellation is 502", &OriginError{Err: context.Canceled}, 502},
+		{"origin error wrapping an http.Client timeout is 502", &OriginError{Err: fmt.Errorf("get: %w", context.DeadlineExceeded)}, 502},
+		// A nested engine used as origin must not leak its classification.
+		{"origin error wrapping an invalid request is 502", &OriginError{Err: &RequestError{Reason: "path"}}, 502},
+		{"origin error wrapping a shed is 502", &OriginError{Err: &RetryError{Err: ErrShed, After: time.Second}}, 502},
+		{"origin error wrapping an upgrade error is 502", &OriginError{Err: ErrUpgradeNotSupported}, 502},
+		{"outer must-revalidate wins over its origin cause", fmt.Errorf("%w: %w", ErrMustRevalidate, &OriginError{Err: io.EOF}), 504},
+		{"joined errors classify by the first recognized", errors.Join(errors.New("x"), ErrClosed, ErrInvalidRequest), 503},
 		{"closed", ErrClosed, 503},
 		{"upgrade", ErrUpgradeNotSupported, 501},
 		{"caller deadline", context.DeadlineExceeded, 504},
@@ -52,6 +64,13 @@ func TestRetryAfter(t *testing.T) {
 	}{
 		{"shed carries its wait", &RetryError{Err: ErrShed, After: 2 * time.Second}, 2 * time.Second, true},
 		{"found through fmt wrapping", fmt.Errorf("x: %w", &RetryError{Err: ErrCircuitOpen, After: 5 * time.Second}), 5 * time.Second, true},
+		{"sub-second wait rounds up", &RetryError{Err: ErrShed, After: 1500 * time.Millisecond}, 2 * time.Second, true},
+		{"negative wait clamps to zero", &RetryError{Err: ErrCircuitOpen, After: -time.Second}, 0, true},
+		{"huge wait does not overflow", &RetryError{Err: ErrShed, After: math.MaxInt64}, math.MaxInt64 / time.Second * time.Second, true},
+		{"retry wrapper around a non-retry error has no hint", &RetryError{Err: ErrClosed, After: 5 * time.Second}, 0, false},
+		{"hint from another join branch is not attached", errors.Join(&RetryError{Err: io.EOF, After: time.Minute}, ErrClosed), 0, false},
+		{"typed nil retry error does not panic", fmt.Errorf("x: %w", (*RetryError)(nil)), 0, false},
+		{"hint inside an origin error is not ours", &OriginError{Err: &RetryError{Err: ErrShed, After: time.Second}}, 0, false},
 		{"bare sentinel has no hint", ErrShed, 0, false},
 		{"nil has no hint", nil, 0, false},
 	}
@@ -88,7 +107,7 @@ func TestErrorsIs(t *testing.T) {
 		})
 	}
 	for _, zero := range []error{&OriginError{}, &RetryError{}, &RequestError{}} {
-		if zero.Error() == "" {
+		if msg := zero.Error(); msg == "" || strings.HasSuffix(msg, " ") {
 			t.Errorf("%T zero value has an empty message", zero)
 		}
 	}

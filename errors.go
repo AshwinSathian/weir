@@ -3,6 +3,7 @@ package weir
 import (
 	"context"
 	"errors"
+	"math"
 	"net/http"
 	"time"
 )
@@ -48,7 +49,12 @@ type RequestError struct {
 }
 
 // Error implements error.
-func (e *RequestError) Error() string { return "weir: invalid request: " + e.Reason }
+func (e *RequestError) Error() string {
+	if e.Reason == "" {
+		return ErrInvalidRequest.Error()
+	}
+	return "weir: invalid request: " + e.Reason
+}
 
 // Unwrap returns ErrInvalidRequest.
 func (e *RequestError) Unwrap() error { return ErrInvalidRequest }
@@ -76,28 +82,42 @@ func (e *OriginError) Is(target error) bool { return target == ErrOrigin }
 // RetryError carries a Retry-After hint for shed and circuit-open errors.
 type RetryError struct {
 	Err   error         // ErrShed or ErrCircuitOpen
-	After time.Duration // rounded up to whole seconds by the engine
+	After time.Duration // RetryAfter rounds it up to whole seconds
 }
 
 // Error implements error.
 func (e *RetryError) Error() string {
-	if e.Err == nil {
+	if e == nil || e.Err == nil {
 		return "weir: retry later"
 	}
 	return e.Err.Error()
 }
 
 // Unwrap returns Err.
-func (e *RetryError) Unwrap() error { return e.Err }
+func (e *RetryError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
+}
 
-// RetryAfter returns the Retry-After hint from a *RetryError anywhere in
-// err's chain.
+// RetryAfter returns the Retry-After hint when err classifies as shed or
+// circuit open through a *RetryError, rounded up to whole seconds and never
+// negative. A hint wrapped inside an *OriginError belongs to the origin and
+// is not returned.
 func RetryAfter(err error) (time.Duration, bool) {
-	re, ok := errors.AsType[*RetryError](err)
-	if !ok {
+	_, re := classify(err)
+	if re == nil {
 		return 0, false
 	}
-	return re.After, true
+	d := max(re.After, 0)
+	if r := d % time.Second; r != 0 {
+		if d > math.MaxInt64-time.Second {
+			return d - r, true // rounding up would overflow
+		}
+		d += time.Second - r
+	}
+	return d, true
 }
 
 // statusClientClosed is nginx's 499. It is a log hint only: the client is
@@ -105,27 +125,93 @@ func RetryAfter(err error) (time.Duration, bool) {
 const statusClientClosed = 499
 
 // StatusCode maps err to the status an adapter should send (01 §4). Unknown
-// errors map to 502.
+// errors, and nil, map to 502.
+//
+// The outermost recognized error in the chain decides, walking in the same
+// order as errors.Is. An *OriginError maps to 502 whatever it wraps: an
+// origin that returns weir errors (another engine) or its own context errors
+// must not turn an origin failure into 400, 499, 503 or 504.
 func StatusCode(err error) int {
-	switch {
-	case errors.Is(err, ErrInvalidRequest):
-		return http.StatusBadRequest
-	case errors.Is(err, ErrUpgradeNotSupported):
-		return http.StatusNotImplemented
-	case errors.Is(err, ErrShed), errors.Is(err, ErrCircuitOpen), errors.Is(err, ErrClosed):
-		return http.StatusServiceUnavailable
-	case errors.Is(err, ErrOriginTimeout), errors.Is(err, ErrMustRevalidate), errors.Is(err, ErrOnlyIfCached):
-		return http.StatusGatewayTimeout
-	// Context errors before ErrOrigin: a fetch on the request context that
-	// fails because the client left comes back as *OriginError wrapping
-	// context.Canceled, and that is not the origin's fault.
-	case errors.Is(err, context.DeadlineExceeded):
-		return http.StatusGatewayTimeout
-	case errors.Is(err, context.Canceled):
-		return statusClientClosed
-	case errors.Is(err, ErrOrigin):
-		return http.StatusBadGateway
-	default:
-		return http.StatusBadGateway
+	code, _ := classify(err)
+	return code
+}
+
+// classify walks err's chain preorder and returns the status of the first
+// recognized node. The *RetryError is returned only when it directly wraps
+// the shed or circuit-open sentinel that decided the status.
+func classify(err error) (int, *RetryError) {
+	code := 0
+	var re *RetryError
+	walk(err, func(e error) bool {
+		switch x := e.(type) { //nolint:errorlint // node-local check; walk does the unwrapping
+		case *OriginError:
+			code = http.StatusBadGateway
+			return true
+		case *RetryError:
+			if x != nil && (is(x.Err, ErrShed) || is(x.Err, ErrCircuitOpen)) {
+				code, re = http.StatusServiceUnavailable, x
+				return true
+			}
+			return false
+		}
+		code = sentinelStatus(e)
+		return code != 0
+	})
+	if code == 0 {
+		return http.StatusBadGateway, nil
 	}
+	return code, re
+}
+
+// sentinelStatus returns the status for e itself, without unwrapping, or 0.
+func sentinelStatus(e error) int {
+	switch {
+	case is(e, ErrInvalidRequest):
+		return http.StatusBadRequest
+	case is(e, ErrUpgradeNotSupported):
+		return http.StatusNotImplemented
+	case is(e, ErrShed), is(e, ErrCircuitOpen), is(e, ErrClosed):
+		return http.StatusServiceUnavailable
+	case is(e, ErrOriginTimeout), is(e, ErrMustRevalidate), is(e, ErrOnlyIfCached), is(e, context.DeadlineExceeded):
+		return http.StatusGatewayTimeout
+	case is(e, ErrOrigin):
+		return http.StatusBadGateway
+	case is(e, context.Canceled):
+		return statusClientClosed
+	}
+	return 0
+}
+
+// is is errors.Is for one node: equality or the node's own Is method. Every
+// target has a comparable type, so == cannot panic.
+func is(e, target error) bool {
+	if e == target { //nolint:errorlint // node-local check; walk does the unwrapping
+		return true
+	}
+	x, ok := e.(interface{ Is(error) bool })
+	return ok && x.Is(target)
+}
+
+// walk visits err's chain preorder, depth first, like errors.Is, and stops
+// when visit returns true.
+func walk(err error, visit func(error) bool) bool {
+	for err != nil {
+		if visit(err) {
+			return true
+		}
+		switch x := err.(type) { //nolint:errorlint // this is the unwrapping
+		case interface{ Unwrap() error }:
+			err = x.Unwrap()
+		case interface{ Unwrap() []error }:
+			for _, e := range x.Unwrap() {
+				if walk(e, visit) {
+					return true
+				}
+			}
+			return false
+		default:
+			return false
+		}
+	}
+	return false
 }
