@@ -9,6 +9,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/AshwinSathian/weir/internal/keys"
 	"github.com/AshwinSathian/weir/store"
 	"github.com/AshwinSathian/weir/store/memory"
 )
@@ -30,7 +31,8 @@ func (f OriginFunc) Fetch(ctx context.Context, req *Request) (*Response, error) 
 // Engine makes shared-cache decisions per request (04 §6.1). It is safe for
 // concurrent use (FR-LCY-3).
 type Engine struct {
-	cfg      Config // defaults applied, immutable after New
+	cfg      Config      // defaults applied, immutable after New
+	kcfg     keys.Config // compiled from cfg
 	store    store.Store
 	ownStore bool
 
@@ -65,7 +67,7 @@ func New(cfg Config) (*Engine, error) {
 		return nil, invalid("Storable.MaxObjectBytes", fmt.Sprintf("above the store's limit of %d", sz.MaxObjectBytes()))
 	}
 	warnForwarding(c)
-	e := &Engine{cfg: c, store: c.Store, ownStore: own, closeDone: make(chan struct{})}
+	e := &Engine{cfg: c, kcfg: keysConfig(&c), store: c.Store, ownStore: own, closeDone: make(chan struct{})}
 	e.bgCtx, e.bgCancel = context.WithCancel(context.Background())
 	return e, nil
 }
@@ -82,26 +84,6 @@ func warnForwarding(c Config) {
 			c.Logger.Warn("weir: Forward.Allow forwards a credential header without keying it", "header", h)
 		}
 	}
-}
-
-// Serve answers one request. It never returns (nil, nil). On a nil error the
-// caller owns resp.Body and must close it. A non-nil error means no response
-// could be produced; StatusCode(err) gives the status an adapter should send.
-func (e *Engine) Serve(ctx context.Context, req *Request, origin Origin) (*Response, error) {
-	if e.closed.Load() {
-		return nil, ErrClosed
-	}
-	if req == nil {
-		return nil, &RequestError{Reason: "nil request"}
-	}
-	// ponytail: every request passes through unchanged until classification
-	// and forwarding land (M1-07).
-	fwd := *req
-	res := e.fetch(ctx, &fwd, origin)
-	if res.err != nil {
-		return nil, res.err
-	}
-	return res.resp, nil
 }
 
 // goBackground runs f on an engine-owned goroutine with the background

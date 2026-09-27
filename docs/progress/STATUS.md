@@ -4,9 +4,9 @@ Updated: 2026-09-28
 Phase: 1
 Current card: none
 Card state: awaiting-merge
-Branch: card/M1-11-storability
-PR: #18 https://github.com/AshwinSathian/weir/pull/18
-Next card: M1-12
+Branch: card/M1-12-serve
+PR: #19 https://github.com/AshwinSathian/weir/pull/19
+Next card: M1-13
 
 ## Blockers
 
@@ -28,10 +28,11 @@ none
 
 - FR-STO-5 and malformed `s-maxage`: a response to an `Authorization` request is stored as shareable when its only permission is an invalid (`s-maxage=abc`) or conflicting repeated `s-maxage`. Lifetime is 0, but an explicit `stale-if-error` or `ModeStaleOnError` could serve it stale to another user on origin error (T-8). Proposal: for FR-STO-5, count `s-maxage` only when valid and not duplicated (FR-STO-5 wording change).
 
+- Markers from other unkeyed inputs: FR-STO-12 and T-31 block markers only for `Authorization` and request `no-store`. Trace headers (default), `Forward.Allow` headers and `ForwardAll` also reach the origin unkeyed, so an origin that answers them with `Set-Cookie`, `private` or a non-storable status lets one client plant a 30 s marker for everyone (coalescing off from M2). Proposal: no marker when the forwarded request carried any unkeyed header other than trace headers, or drop markers entirely under `ForwardAll` (FR-STO-12 wording change).
+
 ## Notes for the next session
 
-- `storability(cfg, c, resp, body, respTime)` (storable.go) and `buildEntry(cfg, c, resp, body, reqTime, respTime, d)` (entry.go) are pure and not yet called; M1-12 wires them into `fetch` and writes hit-for-miss markers from `d.responseDriven` (FR-STO-12). Cache-Groups (FR-STO-10) is M9-03.
-- With `StripSetCookie`, the triggering client must get headers from `resp.Header`, not the entry, or it loses `Set-Cookie` (FR-STO-6).
-- `normalizeResponse` now canonicalizes origin header keys into a new map when any key is non-canonical (never writes the Origin's map or arrays) (INV-4); later header checks may rely on canonical keys. `storeDecision.responseDriven` is already false under `Authorization` or request `no-store`.
-- `MaxObjectBytes` counts body plus origin header bytes before FR-STO-11 exclusions; the `Entry.Size` overhead margin is still open for M1-15. `New` still builds a fixed 256 MiB store (`ponytail:` in engine.go).
-- Carried: `New` must reject `Forward.Allow` entries naming keyed or hop-by-hop fields and compile query patterns; decide whether `Close` waits for foreground `Serve` calls before M1-12; codec accepts any header-name case (revisit with Valkey); hard-epoch prune and S3-FIFO eviction walk to measure in M1-18.
+- `Serve` now classifies, looks up the primary key, serves `Fresh` via `fromEntry` (respond.go) and otherwise calls `fetch(..., buffered=true)` uncoalesced, then `storeResponse` (serve.go). M1-13 adds validation in `cacheable` where the `ponytail:` note says StaleSWR and NeedsValidation refetch unconditionally.
+- `fetch` returns `reqTime`/`respTime` and, buffered, the whole body or an over-size stream; 500/502/503/504 skip storability and markers (negative caching, M6).
+- Unowned events: no card emits `EvRequest`, `EvFetchStart`, `EvFetchEnd`, or `EvStoreError{epoch}` on epoch lookup failure (04 §6.3); over-size and 5xx responses emit no `EvNotStored`. Give them a card or fold into M1-16.
+- Carried: newest-wins store rule (M1-15); `New` must reject `Forward.Allow` entries naming keyed or hop-by-hop fields and compile query patterns; decide whether `Close` waits for foreground `Serve` calls (today a store write after Close closes the owned store just fails); codec header-name case; hard-epoch prune and S3-FIFO walk to measure in M1-18.
