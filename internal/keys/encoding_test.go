@@ -40,6 +40,11 @@ func TestAcceptEncodingBuckets(t *testing.T) {
 		{"wholly malformed gives identity", []string{"@@@"}, "identity"},
 		{"non-ASCII gives identity", []string{"gzip, \xff"}, "identity"},
 		{"NUL gives identity", []string{"gzip\x00"}, "identity"},
+		{"q=0. is zero", []string{"gzip;q=0."}, "identity"},
+		{"q=1. is one", []string{"gzip;q=1."}, "gzip"},
+		{"repeated q parameter skipped", []string{"gzip;q=0.5;q=1"}, "identity"},
+		{"x-gzip is not gzip", []string{"x-gzip"}, "identity"},
+		{"last star wins", []string{"*;q=0.5, *;q=0"}, "identity"},
 		{"oversized gives identity", []string{"gzip," + strings.Repeat(" ", 64)}, "identity"},
 	}
 	for _, tt := range tests {

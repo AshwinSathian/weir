@@ -31,6 +31,12 @@ func TestKeyedCookies(t *testing.T) {
 		{"malformed duplicate makes name absent", []string{"lang=en; lang=\x01"}, nil},
 		{"oversized header all absent", []string{"lang=en; pad=" + strings.Repeat("x", 64)}, nil},
 		{"separators only", []string{";;; ;"}, nil},
+		// T-2: a comma does not split pairs; the whole value is keyed, so an
+		// origin that splits on ',' still parses only keyed bytes.
+		{"comma stays inside value", []string{"lang=en,sid=x"}, []Cookie{{"lang", "en,sid=x"}}},
+		{"quoted and unquoted conflict", []string{`lang="en"; lang=en`}, nil},
+		{"trailing OWS equal values agree", []string{"lang=en; lang=en "}, []Cookie{{"lang", "en"}}},
+		{"conflict persists after a repeat", []string{"lang=en", "lang=fr", "lang=en"}, nil},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
