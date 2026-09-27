@@ -1,6 +1,3 @@
-// Package httpcc parses and evaluates HTTP caching fields (RFC 9111):
-// Cache-Control directives, lifetimes and entry evaluation
-// (docs/04-lld.md §4).
 package httpcc
 
 import (
@@ -51,27 +48,27 @@ func ParseResponse(h http.Header) ResponseDirectives {
 		name := dv.name
 		var dup bool
 		switch {
-		case strings.EqualFold(name, "max-age"):
+		case equalFold(name, "max-age"):
 			dup = d.MaxAge.add(dv)
-		case strings.EqualFold(name, "s-maxage"):
+		case equalFold(name, "s-maxage"):
 			dup = d.SMaxAge.add(dv)
-		case strings.EqualFold(name, "stale-while-revalidate"):
+		case equalFold(name, "stale-while-revalidate"):
 			dup = d.SWR.add(dv)
-		case strings.EqualFold(name, "stale-if-error"):
+		case equalFold(name, "stale-if-error"):
 			dup = d.SIE.add(dv)
-		case strings.EqualFold(name, "no-store"):
+		case equalFold(name, "no-store"):
 			d.NoStore = true
-		case strings.EqualFold(name, "no-cache"):
+		case equalFold(name, "no-cache"):
 			d.NoCache = true
-		case strings.EqualFold(name, "private"):
+		case equalFold(name, "private"):
 			d.Private = true
-		case strings.EqualFold(name, "public"):
+		case equalFold(name, "public"):
 			d.Public = true
-		case strings.EqualFold(name, "must-revalidate"):
+		case equalFold(name, "must-revalidate"):
 			d.MustRevalidate = true
-		case strings.EqualFold(name, "proxy-revalidate"):
+		case equalFold(name, "proxy-revalidate"):
 			d.ProxyRevalidate = true
-		case strings.EqualFold(name, "must-understand"):
+		case equalFold(name, "must-understand"):
 			d.MustUnderstand = true
 		}
 		d.Duplicates = d.Duplicates || dup
@@ -87,17 +84,17 @@ func ParseRequest(h http.Header) RequestDirectives {
 	for dv := range directives(h["Cache-Control"]) {
 		name := dv.name
 		switch {
-		case strings.EqualFold(name, "no-store"):
+		case equalFold(name, "no-store"):
 			d.NoStore = true
-		case strings.EqualFold(name, "no-cache"):
+		case equalFold(name, "no-cache"):
 			d.NoCache = true
-		case strings.EqualFold(name, "only-if-cached"):
+		case equalFold(name, "only-if-cached"):
 			d.OnlyIfCached = true
-		case strings.EqualFold(name, "max-age"):
+		case equalFold(name, "max-age"):
 			d.MaxAge.add(dv)
-		case strings.EqualFold(name, "min-fresh"):
+		case equalFold(name, "min-fresh"):
 			d.MinFresh.add(dv)
-		case strings.EqualFold(name, "max-stale"):
+		case equalFold(name, "max-stale"):
 			if !dv.hasArg && !d.MaxStale.Set {
 				d.MaxStale = Seconds{V: maxDelta, Set: true}
 			} else {
@@ -106,7 +103,7 @@ func ParseRequest(h http.Header) RequestDirectives {
 		}
 	}
 	for dv := range directives(h["Pragma"]) {
-		if !dv.hasArg && strings.EqualFold(dv.name, "no-cache") {
+		if !dv.hasArg && equalFold(dv.name, "no-cache") {
 			d.NoCache = true
 		}
 	}
@@ -224,3 +221,23 @@ func emit(elem string, yield func(directive) bool) bool {
 }
 
 func trimOWS(s string) string { return strings.Trim(s, " \t") }
+
+// equalFold compares s with the lowercase ASCII directive name want, folding
+// ASCII letters only. strings.EqualFold folds Unicode too, so "ſ-maxage"
+// (long s) would match "s-maxage": a name no RFC 9111 cache downstream
+// recognizes, which would make Weir's lifetime diverge from theirs.
+func equalFold(s, want string) bool {
+	if len(s) != len(want) {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if 'A' <= c && c <= 'Z' {
+			c += 'a' - 'A'
+		}
+		if c != want[i] {
+			return false
+		}
+	}
+	return true
+}

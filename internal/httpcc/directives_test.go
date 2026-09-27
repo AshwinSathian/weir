@@ -14,7 +14,7 @@ func header(k string, vs ...string) http.Header {
 }
 
 func TestParseResponseDirectives(t *testing.T) {
-	// FR-FRS-2, FR-STO-4, FR-SRV-1, FR-STL-3
+	// FR-FRS-2; RFC 9111 §5.2.2 and §5.2.3
 	set := func(v int64) Seconds { return Seconds{V: v, Set: true} }
 	invalid := Seconds{Set: true, Invalid: true}
 	tests := []struct {
@@ -28,6 +28,8 @@ func TestParseResponseDirectives(t *testing.T) {
 		{"quoted delta-seconds accepted", []string{`max-age="5"`}, ResponseDirectives{MaxAge: set(5)}},
 		{"names are case-insensitive", []string{"Max-Age=7, NO-STORE, Public"},
 			ResponseDirectives{MaxAge: set(7), NoStore: true, Public: true}},
+		{"non-ASCII look-alike names are unknown", []string{"no-ſtore, ſ-maxage=99999, ſtale-if-error=60, max-age=5"},
+			ResponseDirectives{MaxAge: set(5)}},
 		{"boolean directives", []string{"no-store, no-cache, private, public, must-revalidate, proxy-revalidate, must-understand"},
 			ResponseDirectives{NoStore: true, NoCache: true, Private: true, Public: true,
 				MustRevalidate: true, ProxyRevalidate: true, MustUnderstand: true}},
@@ -56,7 +58,7 @@ func TestParseResponseDirectives(t *testing.T) {
 		{"missing argument is invalid", []string{"max-age"}, ResponseDirectives{MaxAge: invalid}},
 		{"empty argument is invalid", []string{"max-age="}, ResponseDirectives{MaxAge: invalid}},
 		{"escaped quoted argument is invalid", []string{`max-age="\5"`}, ResponseDirectives{MaxAge: invalid}},
-		// FR-STO-4: a malformed element must not hide a later private or no-store.
+		// A malformed element must not hide a later private or no-store.
 		{"unterminated quote is invalid and later directives still count", []string{`max-age="5, no-store, private`},
 			ResponseDirectives{MaxAge: invalid, NoStore: true, Private: true}},
 		{"escaped closing quote left open does not hide private", []string{`ext="C:\", private, no-store`},
@@ -85,7 +87,7 @@ func TestParseResponseDirectives(t *testing.T) {
 }
 
 func TestParseRequestDirectives(t *testing.T) {
-	// FR-SRV-6, FR-SRV-8, T-14, T-31
+	// RFC 9111 §5.2.1 and §5.4; the engine tests cover how Serve uses these fields.
 	set := func(v int64) Seconds { return Seconds{V: v, Set: true} }
 	tests := []struct {
 		name string
@@ -116,6 +118,7 @@ func TestParseRequestDirectives(t *testing.T) {
 			RequestDirectives{NoStore: true}},
 		{"Pragma no-cache counts alongside Cache-Control", http.Header{"Cache-Control": {"max-age=60"}, "Pragma": {"no-cache"}},
 			RequestDirectives{MaxAge: set(60), NoCache: true}},
+		{"non-ASCII look-alike no-store is unknown", header("Cache-Control", "no-ſtore"), RequestDirectives{}},
 		{"response-only directives ignored", header("Cache-Control", "public, private, s-maxage=5"), RequestDirectives{}},
 	}
 	for _, tt := range tests {
@@ -134,6 +137,13 @@ func FuzzCacheControl(f *testing.F) {
 		h.Set("Pragma", v)
 		r := ParseResponse(h)
 		q := ParseRequest(h)
+		// A malformed prefix must never hide a later private or no-store.
+		if r := ParseResponse(header("Cache-Control", v+", no-store, private")); !r.NoStore || !r.Private {
+			t.Fatalf("%q: trailing no-store or private lost: %+v", v, r)
+		}
+		if q := ParseRequest(header("Cache-Control", v+", no-store")); !q.NoStore {
+			t.Fatalf("%q: trailing request no-store lost", v)
+		}
 		for _, s := range []Seconds{r.MaxAge, r.SMaxAge, r.SWR, r.SIE, q.MaxAge, q.MinFresh, q.MaxStale} {
 			if s.V < 0 || s.V > maxDelta {
 				t.Fatalf("%q: out of range %+v", v, s)
