@@ -91,13 +91,14 @@ func (e *Engine) lookup(ctx context.Context, c *keys.Classified, now time.Time) 
 func (e *Engine) cacheable(ctx context.Context, c *keys.Classified, origin Origin) (*Response, error) {
 	now := time.Now()
 	lk := e.lookup(ctx, c, now)
+	var purged *store.Entry // an unusable response a marker may replace
 	if lk.entry != nil {
 		st, staleness, _ := httpcc.Evaluate(lk.entry, lk.epoch, lk.epochOK, now)
 		switch st {
 		case httpcc.Fresh:
 			return e.fromEntry(c, lk.entry, now, CacheInfo{Hit: true, TTL: -staleness}), nil
 		case httpcc.Unusable: // FR-PRG-3: exactly a miss
-			lk.entry, lk.fwd = nil, FwdURIMiss
+			purged, lk.entry, lk.fwd = lk.entry, nil, FwdURIMiss
 		}
 		// ponytail: StaleSWR and NeedsValidation refetch in the foreground,
 		// unconditionally, until validation (M1-13) and background refresh
@@ -113,7 +114,7 @@ func (e *Engine) cacheable(ctx context.Context, c *keys.Classified, origin Origi
 		ci.Detail = "hit-for-miss"
 	}
 	if !res.over && !serverError(resp.StatusCode) {
-		ci.Stored = e.storeResponse(ctx, c, &res)
+		ci.Stored = e.storeResponse(ctx, c, &res, purged)
 	}
 	switch {
 	case c.Head:
@@ -140,13 +141,13 @@ func serverError(status int) bool {
 // hit-for-miss marker when the response itself is the reason (FR-STO-12,
 // T-31). It reports whether the entry was stored. The client's own
 // response keeps every origin field (FR-STO-6).
-func (e *Engine) storeResponse(ctx context.Context, c *keys.Classified, res *fetchResult) bool {
+func (e *Engine) storeResponse(ctx context.Context, c *keys.Classified, res *fetchResult, purged *store.Entry) bool {
 	ctx = context.WithoutCancel(ctx) // a client leaving after the body arrived does not undo the store
 	d := storability(&e.cfg, c, res.resp, res.body, res.respTime)
 	if !d.ok {
 		emit(e.cfg.Observer, Event{Kind: EvNotStored, Time: res.respTime, Partition: c.Partition, Reason: d.reason})
 		if d.responseDriven {
-			e.setMarker(ctx, c.Primary, res.respTime)
+			e.setMarker(ctx, c.Primary, res.respTime, purged)
 		}
 		return false
 	}
@@ -155,9 +156,12 @@ func (e *Engine) storeResponse(ctx context.Context, c *keys.Classified, res *fet
 }
 
 // setMarker writes a hit-for-miss marker unless the key holds a response,
-// which a concurrent fetch may just have stored (04 §6.7).
-func (e *Engine) setMarker(ctx context.Context, k store.Key, now time.Time) {
-	if cur, err := e.store.Get(ctx, k); err == nil && cur.Kind == store.KindResponse {
+// which a concurrent fetch may just have stored (04 §6.7). purged, the
+// hard-purged response this request found, may be replaced: it can never be
+// served or revalidated (FR-STO-12). Stores that decode a fresh copy per Get
+// never match it, which only costs the marker.
+func (e *Engine) setMarker(ctx context.Context, k store.Key, now time.Time, purged *store.Entry) {
+	if cur, err := e.store.Get(ctx, k); err == nil && cur.Kind == store.KindResponse && cur != purged {
 		return
 	}
 	// A failed write only costs the marker's benefit: the next miss refetches.

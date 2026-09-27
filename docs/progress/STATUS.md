@@ -28,6 +28,8 @@ none
 
 - FR-STO-5 and malformed `s-maxage`: a response to an `Authorization` request is stored as shareable when its only permission is an invalid (`s-maxage=abc`) or conflicting repeated `s-maxage`. Lifetime is 0, but an explicit `stale-if-error` or `ModeStaleOnError` could serve it stale to another user on origin error (T-8). Proposal: for FR-STO-5, count `s-maxage` only when valid and not duplicated (FR-STO-5 wording change).
 
+- Markers from other unkeyed inputs: FR-STO-12 and T-31 block markers only for `Authorization` and request `no-store`. Trace headers (default), `Forward.Allow` headers and `ForwardAll` also reach the origin unkeyed, so an origin that answers them with `Set-Cookie`, `private` or a non-storable status lets one client plant a 30 s marker for everyone (coalescing off from M2). Proposal: no marker when the forwarded request carried any unkeyed header other than trace headers, or drop markers entirely under `ForwardAll` (FR-STO-12 wording change).
+
 ## Notes for the next session
 
 - `Serve` now classifies, looks up the primary key, serves `Fresh` via `fromEntry` (respond.go) and otherwise calls `fetch(..., buffered=true)` uncoalesced, then `storeResponse` (serve.go). M1-13 adds validation in `cacheable` where the `ponytail:` note says StaleSWR and NeedsValidation refetch unconditionally.

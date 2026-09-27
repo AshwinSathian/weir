@@ -293,3 +293,11 @@ Entry template:
 - Deviations: none; stale entries refetch in the foreground until M1-13/M5 (`ponytail:`).
 - Follow-ups: unowned events (STATUS notes). Reviewer nit declined: upgrades emit no `EvKeyRejected`, since its vocabulary is `RequestError.Reason` (04 §9).
 - Context: medium; size M was right.
+
+## 2026-09-28 · M1-12 · review-fixes
+- Branch / PR: card/M1-12-serve / #19
+- Done: adversarial review before merge. A hard-purged response still blocked the hit-for-miss marker, since `setMarker` saw it in the store; the purged entry may now be replaced. Probes with no findings: HEAD miss then GET hit (full body), nil request header, 50 concurrent hits mutating headers under `-race`, CRLF in `CacheStatus` (rejected by `New`), Range and conditionals not forwarded, store use after Close.
+- Tests: TestHardPurgedEntryIsMiss extended (failed before the fix). `make check` passes.
+- Deviations: none.
+- Follow-ups: markers from other unkeyed forwarded inputs (Waiting on Ashwin).
+- Context: low.

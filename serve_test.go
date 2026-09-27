@@ -362,7 +362,8 @@ func TestBufferedBodyFailures(t *testing.T) {
 	}
 }
 
-// FR-PRG-3, 04 §6.2: a hard-purged entry behaves exactly like a miss.
+// FR-PRG-3, FR-STO-12, 04 §6.2: a hard-purged entry behaves exactly like a
+// miss, marker included.
 func TestHardPurgedEntryIsMiss(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		m, err := memory.New(memory.Config{})
@@ -380,8 +381,14 @@ func TestHardPurgedEntryIsMiss(t *testing.T) {
 		if err := m.SetEpoch(t.Context(), store.TagGlobal(), store.Epoch{At: time.Now(), Mode: store.EpochHard}); err != nil {
 			t.Fatal(err)
 		}
+		o.Default(testorigin.Behavior{Header: http.Header{"Cache-Control": {"private"}}})
 		resp, _ := serve(t, e, getReq("/a"), o)
-		if got, want := resp.Header.Get("Cache-Status"), "Weir; fwd=uri-miss; fwd-status=200; stored"; got != want {
+		if got, want := resp.Header.Get("Cache-Status"), "Weir; fwd=uri-miss; fwd-status=200"; got != want {
+			t.Fatalf("Cache-Status %q, want %q", got, want)
+		}
+		// FR-STO-12: the unusable response does not block the marker.
+		resp, _ = serve(t, e, getReq("/a"), o)
+		if got, want := resp.Header.Get("Cache-Status"), "Weir; fwd=uri-miss; fwd-status=200; detail=hit-for-miss"; got != want {
 			t.Fatalf("Cache-Status %q, want %q", got, want)
 		}
 	})
