@@ -5,7 +5,7 @@ Phase: 1
 Current card: none
 Card state: awaiting-merge
 Branch: card/M1-06-key-encoding
-PR: none
+PR: #12 https://github.com/AshwinSathian/weir/pull/12
 Next card: M1-07
 
 ## Blockers
