@@ -5,7 +5,7 @@ Phase: 1
 Current card: none
 Card state: awaiting-merge
 Branch: card/M1-01-directives
-PR: none
+PR: #7 https://github.com/AshwinSathian/weir/pull/7
 Next card: M1-02
 
 ## Blockers
