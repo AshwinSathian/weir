@@ -3,10 +3,10 @@
 Updated: 2026-09-27
 Phase: 1
 Current card: none
-Card state: ready
-Branch: card/M1-01-directives
-PR: #7 merged
-Next card: M1-02
+Card state: awaiting-merge
+Branch: card/M1-02-lifetime
+PR: none
+Next card: M1-03
 
 ## Blockers
 
@@ -21,9 +21,9 @@ none
 
 ## Notes for the next session
 
-- httpcc: `ParseResponse`/`ParseRequest` in internal/httpcc/directives.go. `Seconds{V, Set, Invalid}`; `V` is 0 when Invalid. M1-02 zeroes the lifetime on `Invalid` or `Duplicates` (FR-FRS-2).
-- `Duplicates` covers all four delta-seconds directives, SWR and SIE included (FR-FRS-2 says "a directive"; 04 §4.1 comment updated).
-- Request `max-stale` without argument parses as 2147483648 (any staleness). Request duplicates keep the first value.
-- Doc wording drift, not yet fixed: 01 FR-SRV-1 and FR-STL-3 say "unqualified `no-cache`", while the 01 RFC table and 04 `FlagNoCache` treat qualified and unqualified the same. The parser follows the table.
-- storetest: in-process stores pass `storetest.Synctest()`; M1-09 adds `WithoutEpochs()` until M1-10. `New` uses `nopStore` until M1-09.
+- httpcc lifetime API: `Lifetime`, `Jitter`, `StaleWindows` in internal/httpcc/lifetime.go; `CorrectedInitialAge`, `CurrentAge` in age.go. The engine passes an `httpcc.Config` built from the defaulted `FreshnessConfig` (04 §4.2).
+- All lifetimes and windows are clamped to 2147483648 s and ages saturate, so M1-03/M1-11 retention sums cannot overflow.
+- Stale-window defaults are per directive (FR-STL-2 clarified, approved in the M1-02 session): origin `stale-if-error` alone still gets `DefaultStaleWhileRevalidate`.
+- HTTP-dates outside GMT/UTC are invalid (`http.ParseTime` resolves abbreviations against host TZ).
+- Doc wording drift, not yet fixed: 01 FR-SRV-1 and FR-STL-3 say "unqualified `no-cache`", while the 01 RFC table and 04 `FlagNoCache` treat qualified and unqualified the same. The parser and `StaleWindows` follow the table.
 - engine.go: `Close` does not wait for foreground `Serve` calls; decide before M1-12 closes an engine-owned store under them.

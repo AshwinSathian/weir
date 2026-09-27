@@ -1,0 +1,5 @@
+go test fuzz v1
+string("Sunday, 06-Nov-94 08:49:37 GMT")
+string("Sunday, 06-Nov-94 08:40:00 GMT")
+string("Saturday, 05-Nov-94 08:49:37 GMT")
+string("30, 40")
