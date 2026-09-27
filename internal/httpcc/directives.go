@@ -1,0 +1,226 @@
+// Package httpcc parses and evaluates HTTP caching fields (RFC 9111):
+// Cache-Control directives, lifetimes and entry evaluation
+// (docs/04-lld.md §4).
+package httpcc
+
+import (
+	"iter"
+	"net/http"
+	"strings"
+)
+
+// maxDelta is the delta-seconds ceiling from RFC 9111 §1.2.2.
+const maxDelta = 2147483648
+
+// Seconds is a parsed delta-seconds argument. Set reports that the directive
+// appeared; Invalid reports a missing, signed or non-digit argument, which
+// makes the lifetime zero (FR-FRS-2). V is 0 when Invalid.
+type Seconds struct {
+	V       int64
+	Set     bool
+	Invalid bool
+}
+
+// ResponseDirectives holds the response Cache-Control directives Weir acts on
+// (RFC 9111 §5.2.2). Qualified no-cache and private count as unqualified.
+type ResponseDirectives struct {
+	MaxAge, SMaxAge, SWR, SIE       Seconds
+	NoStore, NoCache, Private       bool
+	Public, MustRevalidate          bool
+	ProxyRevalidate, MustUnderstand bool
+	// Duplicates reports a delta-seconds directive (max-age, s-maxage,
+	// stale-while-revalidate, stale-if-error) repeated with different values,
+	// which makes the lifetime zero (FR-FRS-2).
+	Duplicates bool
+}
+
+// RequestDirectives holds the request cache directives (RFC 9111 §5.2.1).
+// NoCache is also set by Pragma: no-cache. A max-stale without argument
+// accepts any staleness and parses as the delta-seconds ceiling.
+type RequestDirectives struct {
+	NoStore, NoCache, OnlyIfCached bool
+	MaxAge, MinFresh, MaxStale     Seconds
+}
+
+// ParseResponse parses every Cache-Control line of h. It never fails:
+// unknown directives are ignored (RFC 9111 §5.2.3) and malformed arguments
+// are recorded as Invalid.
+func ParseResponse(h http.Header) ResponseDirectives {
+	var d ResponseDirectives
+	for dv := range directives(h["Cache-Control"]) {
+		name := dv.name
+		var dup bool
+		switch {
+		case strings.EqualFold(name, "max-age"):
+			dup = d.MaxAge.add(dv)
+		case strings.EqualFold(name, "s-maxage"):
+			dup = d.SMaxAge.add(dv)
+		case strings.EqualFold(name, "stale-while-revalidate"):
+			dup = d.SWR.add(dv)
+		case strings.EqualFold(name, "stale-if-error"):
+			dup = d.SIE.add(dv)
+		case strings.EqualFold(name, "no-store"):
+			d.NoStore = true
+		case strings.EqualFold(name, "no-cache"):
+			d.NoCache = true
+		case strings.EqualFold(name, "private"):
+			d.Private = true
+		case strings.EqualFold(name, "public"):
+			d.Public = true
+		case strings.EqualFold(name, "must-revalidate"):
+			d.MustRevalidate = true
+		case strings.EqualFold(name, "proxy-revalidate"):
+			d.ProxyRevalidate = true
+		case strings.EqualFold(name, "must-understand"):
+			d.MustUnderstand = true
+		}
+		d.Duplicates = d.Duplicates || dup
+	}
+	return d
+}
+
+// ParseRequest parses the Cache-Control and Pragma lines of h. Repeated
+// delta-seconds directives keep the first value; request directives are
+// advisory (D5).
+func ParseRequest(h http.Header) RequestDirectives {
+	var d RequestDirectives
+	for dv := range directives(h["Cache-Control"]) {
+		name := dv.name
+		switch {
+		case strings.EqualFold(name, "no-store"):
+			d.NoStore = true
+		case strings.EqualFold(name, "no-cache"):
+			d.NoCache = true
+		case strings.EqualFold(name, "only-if-cached"):
+			d.OnlyIfCached = true
+		case strings.EqualFold(name, "max-age"):
+			d.MaxAge.add(dv)
+		case strings.EqualFold(name, "min-fresh"):
+			d.MinFresh.add(dv)
+		case strings.EqualFold(name, "max-stale"):
+			if !dv.hasArg && !d.MaxStale.Set {
+				d.MaxStale = Seconds{V: maxDelta, Set: true}
+			} else {
+				d.MaxStale.add(dv)
+			}
+		}
+	}
+	for dv := range directives(h["Pragma"]) {
+		if !dv.hasArg && strings.EqualFold(dv.name, "no-cache") {
+			d.NoCache = true
+		}
+	}
+	return d
+}
+
+// add records one occurrence of a delta-seconds directive and reports
+// whether it conflicts with an earlier one. The first occurrence wins.
+func (s *Seconds) add(dv directive) (conflict bool) {
+	v, ok := parseDelta(dv)
+	next := Seconds{V: v, Set: true, Invalid: !ok}
+	if s.Set {
+		return *s != next
+	}
+	*s = next
+	return false
+}
+
+// parseDelta parses a delta-seconds argument in token or quoted-string form.
+// It rejects a missing argument, signs and non-digits, and clamps above
+// maxDelta (RFC 9111 §1.2.2) without overflowing.
+func parseDelta(dv directive) (int64, bool) {
+	if !dv.hasArg {
+		return 0, false
+	}
+	a := dv.arg
+	if len(a) > 0 && a[0] == '"' {
+		if len(a) < 2 || a[len(a)-1] != '"' {
+			return 0, false
+		}
+		// Escapes and inner quotes are non-digits, so they fail below. Not
+		// unescaping quoted-pairs is deliberate: Invalid means lifetime zero.
+		a = a[1 : len(a)-1]
+	}
+	if a == "" {
+		return 0, false
+	}
+	var v int64
+	for i := 0; i < len(a); i++ {
+		c := a[i]
+		if c < '0' || c > '9' {
+			return 0, false
+		}
+		if v < maxDelta {
+			v = v*10 + int64(c-'0')
+		}
+	}
+	return min(v, maxDelta), true
+}
+
+// directive is one Cache-Control or Pragma element.
+type directive struct {
+	name, arg string
+	hasArg    bool // an '=' was present
+}
+
+// directives yields each comma-separated element of lines, splitting only on
+// commas outside quoted strings. A quoted string opens only as the first byte
+// of an argument, so a stray '"' elsewhere is an ordinary byte. When a quote is
+// still open at the end of a line, the line is rescanned from that quote with
+// every comma splitting: a malformed element must never hide a later private
+// or no-store (FR-STO-4). Empty elements are skipped; names and arguments are
+// trimmed of optional whitespace.
+func directives(lines []string) iter.Seq[directive] {
+	return func(yield func(directive) bool) {
+		for _, line := range lines {
+			start, open := 0, -1 // open is the index of an unclosed '"'
+			eq, argStart, rescan := false, false, false
+			for i := 0; ; i++ {
+				if i >= len(line) {
+					if open >= 0 {
+						i, open, rescan = open, -1, true
+						continue
+					}
+					if !emit(line[start:], yield) {
+						return
+					}
+					break
+				}
+				c := line[i]
+				switch {
+				case open >= 0:
+					switch c {
+					case '\\':
+						i++
+					case '"':
+						open = -1
+					}
+				case c == ',':
+					if !emit(line[start:i], yield) {
+						return
+					}
+					start, eq, argStart = i+1, false, false
+				case argStart && (c == ' ' || c == '\t'):
+				case argStart:
+					argStart = false
+					if c == '"' && !rescan {
+						open = i
+					}
+				case c == '=' && !eq:
+					eq, argStart = true, true
+				}
+			}
+		}
+	}
+}
+
+func emit(elem string, yield func(directive) bool) bool {
+	name, arg, hasArg := strings.Cut(elem, "=")
+	name = trimOWS(name)
+	if name == "" {
+		return true
+	}
+	return yield(directive{name: name, arg: trimOWS(arg), hasArg: hasArg})
+}
+
+func trimOWS(s string) string { return strings.Trim(s, " \t") }
