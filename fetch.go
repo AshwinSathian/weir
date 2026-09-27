@@ -1,11 +1,14 @@
 package weir
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
+	"time"
 )
 
 var (
@@ -13,29 +16,69 @@ var (
 	errBadStatus   = errors.New("weir: origin returned an informational or invalid status")
 )
 
-// fetchResult is what fetch produced: a response the caller owns, or an error.
+// fetchResult is what fetch produced: a response the caller owns, or an
+// error. A buffered fetch also returns the body it read.
 type fetchResult struct {
-	resp *Response
-	err  error
+	resp     *Response
+	body     []byte // buffered fetches: the whole body; nil when over
+	over     bool   // buffered fetches: the body exceeded MaxObjectBytes and resp.Body streams it all
+	reqTime  time.Time
+	respTime time.Time // when the buffered body ended, or the headers arrived
+	err      error
 }
 
-// fetch is the only caller of Origin.Fetch (P3, 04 §6.7). The limiter,
-// breaker and buffered storage paths join it in their cards; today it
-// streams the response and the origin timeout bounds the body read.
-func (e *Engine) fetch(ctx context.Context, req *Request, origin Origin) fetchResult {
+// fetch is the only caller of Origin.Fetch (P3, 04 §6.7). The limiter and
+// breaker join it in their cards. A streamed fetch returns resp.Body for the
+// caller to read; a buffered one reads up to MaxObjectBytes and, when the
+// body is larger, returns a stream of the whole body instead of storing it.
+// The origin timeout bounds the body read either way.
+func (e *Engine) fetch(ctx context.Context, req *Request, origin Origin, buffered bool) fetchResult {
 	tctx, cancel := context.WithTimeoutCause(ctx, e.cfg.Timeouts.Origin, ErrOriginTimeout)
+	reqTime := time.Now()
 	resp, err := safeFetch(tctx, origin, req)
 	if err != nil {
 		cancel()
 		return fetchResult{err: timeoutOrOrigin(ctx, tctx, err)}
 	}
 	resp.Cache = CacheInfo{} // ignored on origin responses (01 §4); Serve sets it
-	if resp.Body == http.NoBody {
-		cancel() // nothing left to bound; keeps NoBody visible to adapters
-	} else {
-		resp.Body = &cancelOnClose{ReadCloser: resp.Body, cancel: cancel}
+	// Serve adds Cache-Status; an Origin may reuse its header map (INV-4).
+	// Value slices stay shared, and only full slice expressions append to them.
+	resp.Header = maps.Clone(resp.Header)
+	res := fetchResult{resp: resp, reqTime: reqTime}
+	if !buffered {
+		res.respTime = time.Now()
+		if resp.Body == http.NoBody {
+			cancel() // nothing left to bound; keeps NoBody visible to adapters
+		} else {
+			resp.Body = &cancelOnClose{ReadCloser: resp.Body, cancel: cancel}
+		}
+		return res
 	}
-	return fetchResult{resp: resp}
+	limit := e.cfg.Storable.MaxObjectBytes
+	body, rerr := io.ReadAll(io.LimitReader(resp.Body, limit+1))
+	res.respTime = time.Now()
+	if rerr != nil { // a truncated body is never stored or served
+		closeBody(resp)
+		cancel()
+		return fetchResult{err: timeoutOrOrigin(ctx, tctx, rerr)}
+	}
+	if int64(len(body)) > limit {
+		rest := resp.Body
+		resp.Body = &cancelOnClose{ReadCloser: readCloser{io.MultiReader(bytes.NewReader(body), rest), rest}, cancel: cancel}
+		res.over = true
+		return res
+	}
+	closeBody(resp)
+	cancel()
+	resp.Body = http.NoBody
+	res.body = body
+	return res
+}
+
+// readCloser joins a reader with the closer of the body it reads.
+type readCloser struct {
+	io.Reader
+	io.Closer
 }
 
 // safeFetch calls origin.Fetch and turns misbehavior into errors: a panic,

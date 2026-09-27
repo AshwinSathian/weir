@@ -134,7 +134,9 @@ func TestServeStreamBoundedByOriginTimeout(t *testing.T) {
 		o.Default(testorigin.Behavior{Body: []byte("x"), BodyDelay: time.Hour})
 		e := newEngine(t, weir.Config{Timeouts: weir.TimeoutsConfig{Origin: time.Second}})
 		defer closeEngine(t, e)
-		resp, err := e.Serve(t.Context(), getReq("/"), o)
+		post := getReq("/") // GET bodies are buffered; a pass-through streams
+		post.Method = http.MethodPost
+		resp, err := e.Serve(t.Context(), post, o)
 		if err != nil {
 			t.Fatalf("Serve: %v", err)
 		}
@@ -290,8 +292,8 @@ func TestServeIgnoresOriginCacheInfo(t *testing.T) {
 			t.Fatalf("Serve: %v", err)
 		}
 		defer resp.Body.Close()
-		if resp.Cache != (weir.CacheInfo{}) {
-			t.Errorf("Cache = %+v, want zero", resp.Cache)
+		if want := (weir.CacheInfo{Fwd: weir.FwdURIMiss, FwdStatus: http.StatusNoContent}); resp.Cache != want {
+			t.Errorf("Cache = %+v, want %+v", resp.Cache, want)
 		}
 		if resp.Body != http.NoBody || resp.Header == nil {
 			t.Errorf("Body = %T, Header nil = %v; want http.NoBody and a non-nil Header", resp.Body, resp.Header == nil)
