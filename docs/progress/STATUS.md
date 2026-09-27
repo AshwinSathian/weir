@@ -3,9 +3,9 @@
 Updated: 2026-09-27
 Phase: 1
 Current card: none
-Card state: awaiting-merge
+Card state: ready
 Branch: card/M1-02-lifetime
-PR: https://github.com/AshwinSathian/weir/pull/8
+PR: #8 merged
 Next card: M1-03
 
 ## Blockers
@@ -24,6 +24,6 @@ none
 - httpcc lifetime API: `Lifetime`, `Jitter`, `StaleWindows` in internal/httpcc/lifetime.go; `CorrectedInitialAge`, `CurrentAge` in age.go. The engine passes an `httpcc.Config` built from the defaulted `FreshnessConfig` (04 §4.2).
 - All lifetimes and windows are clamped to 2147483648 s and ages saturate, so M1-03/M1-11 retention sums cannot overflow.
 - Stale-window defaults are per directive (FR-STL-2 clarified, approved in the M1-02 session): origin `stale-if-error` alone still gets `DefaultStaleWhileRevalidate`.
-- HTTP-dates outside GMT/UTC are invalid (`http.ParseTime` resolves abbreviations against host TZ).
+- HTTP-dates: `parseDate` accepts IMF-fixdate, RFC 850 ending in ` GMT`, and asctime; any other zone is invalid (the past). It is correct under any host TZ, including London summer time.
 - Doc wording drift, not yet fixed: 01 FR-SRV-1 and FR-STL-3 say "unqualified `no-cache`", while the 01 RFC table and 04 `FlagNoCache` treat qualified and unqualified the same. The parser and `StaleWindows` follow the table.
 - engine.go: `Close` does not wait for foreground `Serve` calls; decide before M1-12 closes an engine-owned store under them.

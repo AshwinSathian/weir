@@ -75,6 +75,34 @@ func TestLifetimePrecedence(t *testing.T) {
 	}
 }
 
+func TestParseDateIgnoresHostZone(t *testing.T) {
+	// FR-FRS-1, FR-FRS-2; T-30: the same date bytes mean the same instant on
+	// every host. London shows "GMT" dates in summer as BST (+1h).
+	for _, name := range []string{"UTC", "Europe/London", "America/Los_Angeles", "Asia/Kolkata"} {
+		loc, err := time.LoadLocation(name)
+		if err != nil {
+			t.Skipf("no tzdata for %s: %v", name, err)
+		}
+		t.Run(name, func(t *testing.T) {
+			saved := time.Local
+			time.Local = loc
+			defer func() { time.Local = saved }()
+			want := time.Date(2026, 7, 5, 8, 0, 0, 0, time.UTC)
+			for _, s := range []string{"Sun, 05 Jul 2026 08:00:00 GMT", "Sunday, 05-Jul-26 08:00:00 GMT", "Sun Jul  5 08:00:00 2026"} {
+				if got, ok := parseDate(s); !ok || !got.Equal(want) {
+					t.Errorf("parseDate(%q) = (%v, %v), want (%v, true)", s, got, ok, want)
+				}
+			}
+			for _, s := range []string{"Sunday, 05-Jul-26 08:00:00 PST", "Sunday, 05-Jul-26 08:00:00 BST",
+				"Sunday, 05-Jul-26 08:00:00 GMT-8", "Sunday, 05-Jul-26 08:00:00 UTC", "Sun, 05 Jul 2026 08:00:00 +0000"} {
+				if got, ok := parseDate(s); ok {
+					t.Errorf("parseDate(%q) = %v, want invalid", s, got)
+				}
+			}
+		})
+	}
+}
+
 func TestHeuristicLimits(t *testing.T) {
 	// FR-FRS-3, FR-STO-2 (302 and 307 never heuristic, D39)
 	cfg := testCfg
@@ -160,9 +188,12 @@ func TestJitterNeverLengthens(t *testing.T) {
 	// FR-FRS-5, T6.1
 	const minLT = 10 * time.Second
 	lts := []time.Duration{0, 1, time.Second, minLT - 1, minLT, 300 * time.Second, 24 * time.Hour, maxDelta * time.Second}
-	us := []float64{0, 1e-9, 0.25, 0.5, 0.75, 0.999999, math.Nextafter(1, 0)}
+	// Out-of-range u and frac (NaN, negative, above 1, infinite) cannot come
+	// from a validated config, but must still not lengthen: Go's max returns
+	// NaN when either operand is NaN.
+	us := []float64{0, 1e-9, 0.25, 0.5, 0.75, 0.999999, math.Nextafter(1, 0), -1, 2, math.NaN(), math.Inf(1)}
 	for _, lt := range lts {
-		for _, frac := range []float64{0, 0.1, 0.5} {
+		for _, frac := range []float64{0, 0.1, 0.5, -0.5, math.NaN(), math.Inf(1)} {
 			for _, u := range us {
 				got := Jitter(lt, frac, minLT, u)
 				if got > lt || got < 0 {

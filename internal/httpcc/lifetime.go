@@ -2,6 +2,7 @@ package httpcc
 
 import (
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -62,7 +63,14 @@ func Jitter(lt time.Duration, frac float64, minLT time.Duration, u float64) time
 	if lt < minLT || frac == 0 {
 		return lt
 	}
-	return lt - time.Duration(min(max(float64(lt)*frac*u, 0), float64(lt)))
+	cut := float64(lt) * frac * u
+	switch {
+	case !(cut > 0): // also NaN, which Go's min and max propagate
+		return lt
+	case cut >= float64(lt):
+		return 0
+	}
+	return lt - time.Duration(cut)
 }
 
 // StaleWindows returns the SWR and SIE windows a response permits
@@ -96,17 +104,24 @@ func heuristicStatus(status int) bool {
 }
 
 // parseDate parses an HTTP-date in any of the three RFC 9110 §5.6.7 forms.
-// http.ParseTime accepts any zone abbreviation in the RFC 850 form and
-// resolves it against the host's TZ, so the same bytes would give a
-// different lifetime per deployment. Only a zero-offset GMT or UTC zone is
-// accepted (asctime and the IMF-fixdate literal parse as UTC).
+// It is http.ParseTime without its zone laxity: the RFC 850 layout accepts
+// any abbreviation and resolves it against the host's TZ (PST is -8h in Los
+// Angeles and +0 elsewhere), so the same bytes would give a different
+// lifetime per deployment. RFC 850 dates must end in GMT; the IMF-fixdate
+// layout has GMT as a literal and asctime has no zone.
+// ponytail: RFC 850 two-digit years use Go's 1969 pivot, not RFC 9110's
+// 50-years-ahead rule, so 70-75 read as the 1970s. The form is obsolete and
+// only the origin sends it. Parse the year by hand if that matters.
 func parseDate(s string) (time.Time, bool) {
-	t, err := http.ParseTime(s)
-	if err != nil {
-		return time.Time{}, false
+	for _, layout := range [...]string{http.TimeFormat, time.RFC850, time.ANSIC} {
+		if layout == time.RFC850 && !strings.HasSuffix(s, " GMT") {
+			continue
+		}
+		if t, err := time.Parse(layout, s); err == nil {
+			return t, true
+		}
 	}
-	name, off := t.Zone()
-	return t, off == 0 && (name == "GMT" || name == "UTC")
+	return time.Time{}, false
 }
 
 func clampLifetime(d time.Duration) time.Duration { return min(max(d, 0), maxLifetime) }
