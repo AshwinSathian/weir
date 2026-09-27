@@ -4,9 +4,9 @@ Updated: 2026-09-27
 Phase: 1
 Current card: none
 Card state: awaiting-merge
-Branch: card/M1-07-classify-forward
-PR: #13 https://github.com/AshwinSathian/weir/pull/13
-Next card: M1-08
+Branch: card/M1-08-entry-codec
+PR: pending
+Next card: M1-09
 
 ## Blockers
 
@@ -14,6 +14,7 @@ none
 
 ## Waiting on Ashwin
 
+- Approve the codec API added in M1-08 (05 §6): `store.Encode(*Entry) ([]byte, error)` and `store.Decode(b []byte, maxBytes int64) (*Entry, error)`, decode errors wrapping `ErrUnavailable`, and time 0 meaning the zero time (a `Last-Modified` of exactly the Unix epoch decodes as absent). Review in PR.
 - Confirm the coalesce-default clamp: a zero `LeaderMaxAge`/`FollowerMaxWait` now defaults to min(10s, `Timeouts.Origin`) instead of failing validation when the origin timeout is under 10s (01 §6 and 04 §1.1 updated).
 - Approve the storetest API: `Run(t, newStore, opts ...Option)` with `WithoutEpochs()` and `Synctest()` (05 §8). `Synctest()` replaces the card's `func(d time.Duration)` advance hook, which cannot work: `synctest.Test` forbids `t.Run` inside a bubble and stores read `time.Now` (D9).
 - Pragma with Cache-Control: `ParseRequest` sets `NoCache` from `Pragma: no-cache` even when the request also has `Cache-Control` (docs say "plus Pragma: no-cache" unconditionally). RFC 7234 §5.4 ignored Pragma when Cache-Control was present. Only matters with `Client.HonorRevalidation`. Keep as is, or ignore Pragma when Cache-Control is present (FR-SRV-8 wording change)?
@@ -28,10 +29,7 @@ none
 
 ## Notes for the next session
 
-- `keys.Classify(r *Request, c *Config) (Classified, error)` is ready for the engine (04 §3.1). The root package converts `weir.Request` to `keys.Request` and fills `keys.Config` from `Config` (new fields: `NormalizePath`, `ForwardAll`, `Allow` canonical, `NoTraceHeaders`, `HonorRevalidation`). `ReqCC` already drops the directives FR-SRV-8 ignores when `HonorRevalidation` is off.
-- Still to come in keys: `Key.Headers` in key and forward, `FwdBypass` and bypass rules (M7-03), and `asRangePass` for range misses (04 §6.2, FR-FWD-3). `keys.FwdReason` has only `FwdNone` and `FwdMethod`.
-- Config validation (`New`) must reject `Forward.Allow` entries that name keyed or hop-by-hop fields (Cookie, Accept-Encoding) so operators get an error; forwarding already ignores them. It also still needs to compile query patterns (04 §1.1).
-- Pass-through requests forward trace headers as received, even with `NoTraceHeaders` (FR-FWD-3 forwards everything but hop-by-hop fields). Decide with the D29 wording if that matters.
-- `Evaluate` trusts `epOK`: the caller's `newestEpoch` applies FR-PRG-7 (04 §6.3). engine.go: `Close` does not wait for foreground `Serve` calls; decide before M1-12.
-- Spec gaps from the M1-07 adversarial review: TRACE and OPTIONS are forwarded even with `Max-Forwards: 0` (RFC 9110 §7.6.2 says the proxy answers itself), and pass-through and ForwardAll forward `Proxy-Authorization` to the origin. Neither is covered by FR-FWD-*; decide when the engine pass path lands.
-- Doc wording drift: 01 FR-SRV-1 and FR-STL-3 say "unqualified `no-cache`" while the 01 RFC table and 04 `FlagNoCache` treat both the same.
+- `store.Encode`/`store.Decode` exist (05 §6). Remote stores and the FR-SNP-1 snapshot writer call `Decode(b, maxObjectBytes)`; its errors already wrap `ErrUnavailable`.
+- `Decode` allocates at most about 16-24x its input (every repeated item carries at least one byte). `Entry.Size` does not charge per-item slice or map overhead; revisit if snapshot load feeds decoded entries into a byte-weighted store.
+- Codec accepts header and vary names in any case form; add canonical-form validation when the Valkey store lands if the engine relies on it.
+- Carried from M1-07: `keys.Classify` ready for the engine (04 §3.1); `New` must still reject `Forward.Allow` entries naming keyed or hop-by-hop fields and compile query patterns; `Close` does not wait for foreground `Serve` calls (decide before M1-12); TRACE/OPTIONS with `Max-Forwards: 0` and forwarding of `Proxy-Authorization` on pass-through are open spec questions.

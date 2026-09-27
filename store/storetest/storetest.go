@@ -67,6 +67,7 @@ func Run(t *testing.T, newStore func(t *testing.T) store.Store, opts ...Option) 
 		{"ClosedStore", false, testClosedStore},
 		{"ConcurrentSetGet", false, testConcurrentSetGet},
 		{"NoMutationAfterSet", false, testNoMutationAfterSet},
+		{"CodecRoundTrip", false, testCodecRoundTrip},
 		{"EpochPerModeKept", true, testEpochPerModeKept},
 		{"EpochSinceBoundary", true, testEpochSinceBoundary},
 		{"EpochFastPath", true, testEpochFastPath},
@@ -388,6 +389,24 @@ func testNoMutationAfterSet(t *testing.T, newStore func(*testing.T) store.Store,
 		if !reflect.DeepEqual(e, want) {
 			t.Fatalf("entry %d changed after Set\n got: %+v\nwant: %+v", i, e, want)
 		}
+	}
+}
+
+// FR-SNP-1, FR-FRS-8, 05 §6, §8: Encode then Decode is the identity for
+// every kind. The case
+// does not use the store; it runs here so every store's suite covers the
+// format remote stores share.
+func testCodecRoundTrip(t *testing.T, _ func(*testing.T) store.Store, _ options) {
+	for _, e := range entries(time.Now()) {
+		b, err := store.Encode(e)
+		if err != nil {
+			t.Fatalf("Encode: %v", err)
+		}
+		got, err := store.Decode(b, int64(len(b)))
+		if err != nil {
+			t.Fatalf("Decode: %v", err)
+		}
+		sameEntry(t, got, e)
 	}
 }
 
