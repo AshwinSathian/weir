@@ -183,6 +183,7 @@ var (
 	ErrOnlyIfCached   = errors.New("weir: only-if-cached and no stored response")
 	ErrOrigin         = errors.New("weir: origin error")
 	ErrClosed         = errors.New("weir: engine closed")
+	ErrUpgradeNotSupported = errors.New("weir: connect and protocol upgrades not supported") // FR-UPG-1
 	ErrEagerUnsupported = errors.New("weir: store cannot scrub; epoch written, delete skipped") // M15
 )
 
@@ -190,16 +191,16 @@ type RequestError struct{ Reason string } // Is(ErrInvalidRequest) == true
 type OriginError struct{ Err error }       // Is(ErrOrigin) == true; Unwrap returns Err
 ```
 
-`StatusCode`: `ErrInvalidRequest` 400; `ErrShed`, `ErrCircuitOpen`, `ErrClosed` 503; `ErrOriginTimeout`, `ErrMustRevalidate`, `ErrOnlyIfCached`, `context.DeadlineExceeded` 504; `ErrOrigin` 502; `context.Canceled` 499 (a hint for logs only; the client is gone and adapters should not write); anything else 502.
+`StatusCode`: `ErrInvalidRequest` 400; `ErrUpgradeNotSupported` 501; `ErrShed`, `ErrCircuitOpen`, `ErrClosed` 503; `ErrOriginTimeout`, `ErrMustRevalidate`, `ErrOnlyIfCached`, `context.DeadlineExceeded` 504; `ErrOrigin` 502; `context.Canceled` 499 (a hint for logs only; the client is gone and adapters should not write); anything else 502. The outermost recognized error in the chain decides, in `errors.Is` walk order, and an `*OriginError` maps to 502 whatever it wraps. An origin that returns weir errors (another engine used as origin) or its own `context` errors (an `http.Client` timeout matches `context.DeadlineExceeded`) cannot turn an origin failure into 400, 499, 503 or 504, and its `RetryError` hint is not returned by `RetryAfter`. So `timeoutOrOrigin(err, ctx, tctx)` (§6.7) decides from the contexts, never from `err`. When `ctx` is done, it returns `ctx.Err()` unwrapped for direct and pass-through fetches, whose `ctx` is the request context, and `ErrClosed` for flights and background fetches, whose context ends only on `Close` (§6.4). Otherwise, when `context.Cause(tctx)` is `ErrOriginTimeout`, it returns `ErrOriginTimeout`. In every other case it returns `*OriginError{err}`. A waiter on a flight cut short by `Close` therefore gets 503, not 499.
 
 ```go
 type RetryError struct {
 	Err   error         // ErrShed or ErrCircuitOpen
-	After time.Duration // rounded up to whole seconds
+	After time.Duration // RetryAfter rounds it up to whole seconds, never negative
 }
 ```
 
-The engine wraps shed errors with `After = MaxQueueWait` and circuit-open errors with the breaker's remaining open time. `RetryAfter(err)` uses `errors.As` to extract it. `errors.Is(err, ErrShed)` still works through `Unwrap`.
+The engine wraps shed errors with `After = MaxQueueWait` and circuit-open errors with the breaker's remaining open time. `RetryAfter(err)` returns `After` only when a `*RetryError` directly wraps the `ErrShed` or `ErrCircuitOpen` that decided `StatusCode` under the chain rule above. `errors.Is(err, ErrShed)` still works through `Unwrap`.
 
 ## 2. Package `store`
 
@@ -737,7 +738,7 @@ func (e *Engine) fetch(ctx, s, origin) fetchResult:
     release := func() { if !released { released = true; permit.Release() } }
     defer release()
 
-    tctx, cancel := context.WithTimeout(ctx, timeoutFor(s.class))   // ctx: request ctx for direct/pass, detached ctx for flights
+    tctx, cancel := context.WithTimeoutCause(ctx, timeoutFor(s.class), ErrOriginTimeout)   // ctx: request ctx for direct/pass, detached ctx for flights; the cause tells the origin timeout from the caller's deadline
     defer cancel()                           // not deferred for streaming; see below
     req := toWeirRequest(s.fwd); addConditionals(req, s.prior)
     t0 := time.Now()
@@ -745,7 +746,7 @@ func (e *Engine) fetch(ctx, s, origin) fetchResult:
     outcome := classify(resp, err, tctx)            // success | gateway failure | other
     e.cb.Record(probe, outcome)
 
-    if err != nil: return errResult(timeoutOrOrigin(err, tctx), originHealth: true)
+    if err != nil: return errResult(timeoutOrOrigin(err, ctx, tctx), originHealth: true)   // §1.3
     if s.streaming:
         release()                            // slot released at headers (FR-LIM-1)
         resp.Body = cancelOnClose(resp.Body, cancel)  // origin timeout still bounds the stream
