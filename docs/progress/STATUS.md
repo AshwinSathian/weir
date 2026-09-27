@@ -25,4 +25,6 @@ none
 - `Evaluate` trusts `epOK`: the caller's `newestEpoch` applies FR-PRG-7 (04 §6.3). A zero or unknown `EpochMode` with `epOK` returns `Unusable`.
 - FR-MODE-2 (`ModeStaleOnError`) must tell "stale forbidden" from "no SIE window" using `ep.Mode` and `e.Flags`; `sieOK` alone is false for both.
 - Doc wording drift, not yet fixed: 01 FR-SRV-1 and FR-STL-3 say "unqualified `no-cache`", while the 01 RFC table and 04 `FlagNoCache` treat qualified and unqualified the same. The parser, `StaleWindows` and `Evaluate` follow the table.
+- Memory store (M1-06 or wherever epochs land): keep `Epoch.At` as a `time.Now()` value with its monotonic reading. `Evaluate` computes `now.Sub(ep.At)`; a wall-only `At` lets a backward clock step shorten or cancel a soft purge.
+- Codec (store/codec.go): `Evaluate` trusts `SWR`/`SIE` and does not re-check `FlagMustRevalidate`/`FlagProxyRevalidate`. The decoder should zero both windows when those flags are set, so corrupt bytes cannot enable stale serving (FR-STL-3).
 - engine.go: `Close` does not wait for foreground `Serve` calls; decide before M1-12 closes an engine-owned store under them.
