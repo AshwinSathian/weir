@@ -3,10 +3,10 @@
 Updated: 2026-09-27
 Phase: 1
 Current card: none
-Card state: ready
-Branch: card/M1-02-lifetime
-PR: #8 merged
-Next card: M1-03
+Card state: awaiting-merge
+Branch: card/M1-03-evaluate
+PR: #9 https://github.com/AshwinSathian/weir/pull/9
+Next card: M1-04
 
 ## Blockers
 
@@ -21,9 +21,10 @@ none
 
 ## Notes for the next session
 
-- httpcc lifetime API: `Lifetime`, `Jitter`, `StaleWindows` in internal/httpcc/lifetime.go; `CorrectedInitialAge`, `CurrentAge` in age.go. The engine passes an `httpcc.Config` built from the defaulted `FreshnessConfig` (04 §4.2).
-- All lifetimes and windows are clamped to 2147483648 s and ages saturate, so M1-03/M1-11 retention sums cannot overflow.
-- Stale-window defaults are per directive (FR-STL-2 clarified, approved in the M1-02 session): origin `stale-if-error` alone still gets `DefaultStaleWhileRevalidate`.
-- HTTP-dates: `parseDate` accepts IMF-fixdate, RFC 850 ending in ` GMT`, and asctime; any other zone is invalid (the past). It is correct under any host TZ, including London summer time.
-- Doc wording drift, not yet fixed: 01 FR-SRV-1 and FR-STL-3 say "unqualified `no-cache`", while the 01 RFC table and 04 `FlagNoCache` treat qualified and unqualified the same. The parser and `StaleWindows` follow the table.
+- httpcc API: `Lifetime`, `Jitter`, `StaleWindows` (lifetime.go); `CorrectedInitialAge`, `CurrentAge` (age.go); `Evaluate` and `State` (evaluate.go). `State` starts at 1; the zero value is invalid.
+- `Evaluate` trusts `epOK`: the caller's `newestEpoch` applies FR-PRG-7 (04 §6.3). A zero or unknown `EpochMode` with `epOK` returns `Unusable`.
+- FR-MODE-2 (`ModeStaleOnError`) must tell "stale forbidden" from "no SIE window" using `ep.Mode` and `e.Flags`; `sieOK` alone is false for both.
+- Doc wording drift, not yet fixed: 01 FR-SRV-1 and FR-STL-3 say "unqualified `no-cache`", while the 01 RFC table and 04 `FlagNoCache` treat qualified and unqualified the same. The parser, `StaleWindows` and `Evaluate` follow the table.
+- Memory store (M1-06 or wherever epochs land): keep `Epoch.At` as a `time.Now()` value with its monotonic reading. `Evaluate` computes `now.Sub(ep.At)`; a wall-only `At` lets a backward clock step shorten or cancel a soft purge.
+- Codec (store/codec.go): `Evaluate` trusts `SWR`/`SIE` and does not re-check `FlagMustRevalidate`/`FlagProxyRevalidate`. The decoder should zero both windows when those flags are set, so corrupt bytes cannot enable stale serving (FR-STL-3).
 - engine.go: `Close` does not wait for foreground `Serve` calls; decide before M1-12 closes an engine-owned store under them.
