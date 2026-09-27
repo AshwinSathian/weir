@@ -45,3 +45,11 @@ Entry template:
 - Deviations: 04 §9.2 gains an `EvMode` row (FR-MODE-1 requires it; the catalog omitted it). Reason vocabulary is new and waits on Ashwin's approval.
 - Follow-ups: none. Review should-fixes (sibling-module prefix escape, GOWORK=off) fixed.
 - Context: low; size S was right.
+
+## 2026-09-27 · P0-02 · review-fixes
+- Branch / PR: card/P0-02-store-observer-types / #2
+- Done: adversarial review before merge. `Entry.Size` now charges vary names and 56 bytes per variant ref (a vary spec with 8 refs was under-accounted by ~450 bytes, NFR-3). `emit` caps `Event.Partition` at 256 bytes and clones it so a retaining observer does not pin the request's path. `TestNoThirdPartyImports` also checks files under the `load` tag and that go.mod requires no module.
+- Tests: new rows in TestEntrySize and TestEmit; deps test verified by mutation (a `load`-tagged third-party import and a sibling-module import both fail it; the first escaped the old test). `make check` passes.
+- Deviations: 04 §2 Size formula extended (vary name bytes, 56 per variant ref).
+- Follow-ups: typed-nil observer (P0-03), zero Kind/EpochMode rejection (M1-08), both in STATUS notes.
+- Context: low.

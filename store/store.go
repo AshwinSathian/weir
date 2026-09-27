@@ -73,14 +73,24 @@ type Entry struct {
 	Expires time.Time // absolute retention deadline; the store drops the record after this
 }
 
-// entryOverhead is the fixed per-record charge in Size, covering the struct
-// and store bookkeeping.
-const entryOverhead = 256
+// Size constants (04 §2). entryOverhead is the fixed per-record charge,
+// covering the struct and store bookkeeping; variantRefSize is one VariantRef
+// (a 32-byte Key and a 24-byte time.Time).
+const (
+	entryOverhead  = 256
+	variantRefSize = 56
+)
 
-// Size returns the bytes a byte-weighted store accounts for e:
-// len(Body) + header bytes + 32 per tag + 256 (04 §2).
+// Size returns the bytes a byte-weighted store accounts for e: len(Body) +
+// header bytes + vary name bytes + 32 per tag + 56 per variant ref + 256
+// (04 §2). Vary specs carry no body, so their name and ref bytes must count
+// or the store's byte bound undercounts them (NFR-3).
 func (e *Entry) Size() int64 {
-	n := int64(len(e.Body)) + int64(len(e.Tags))*int64(len(Tag{})) + entryOverhead
+	n := int64(len(e.Body)) + int64(len(e.Tags))*int64(len(Tag{})) +
+		int64(len(e.Variants))*variantRefSize + entryOverhead
+	for _, name := range e.VaryNames {
+		n += int64(len(name))
+	}
 	for name, vals := range e.Header {
 		for _, v := range vals {
 			n += int64(len(name) + len(v))

@@ -1,6 +1,9 @@
 package weir
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // FR-OBS-1, 04 §9.2: exporters use EventKind strings as metric labels, so every kind
 // has a distinct name.
@@ -25,10 +28,18 @@ type recorder []Event
 
 func (r *recorder) Observe(ev Event) { *r = append(*r, ev) }
 
-// 04 §9.1: a nil Observer is valid and emit must not panic on it (NFR-2).
+// 04 §9.1: a nil Observer is valid and emit must not panic on it (NFR-2);
+// Partition comes from request input and is capped (NFR-3).
 func TestEmit(t *testing.T) {
 	t.Run("nil observer is a no-op", func(*testing.T) {
 		emit(nil, Event{Kind: EvRequest})
+	})
+	t.Run("partition is capped at 256 bytes", func(t *testing.T) {
+		var r recorder
+		emit(&r, Event{Kind: EvShed, Partition: strings.Repeat("p", 10_000)})
+		if got := len(r[0].Partition); got != maxPartitionBytes {
+			t.Errorf("len(Partition) = %d, want %d", got, maxPartitionBytes)
+		}
 	})
 	t.Run("event reaches the observer", func(t *testing.T) {
 		var r recorder

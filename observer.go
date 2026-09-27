@@ -1,6 +1,9 @@
 package weir
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // Observer receives engine events (04 §9). Observe is called synchronously on
 // the request path, so implementations must be fast and safe for concurrent
@@ -76,9 +79,17 @@ func (k EventKind) String() string {
 	return eventKindNames[k]
 }
 
+// maxPartitionBytes caps Event.Partition, the one field built from request
+// input, so an observer that retains events holds bounded data (04 §9.1).
+const maxPartitionBytes = 256
+
 // emit delivers ev to obs; a nil obs discards it.
 func emit(obs Observer, ev Event) {
-	if obs != nil {
-		obs.Observe(ev)
+	if obs == nil {
+		return
 	}
+	if len(ev.Partition) > maxPartitionBytes {
+		ev.Partition = strings.Clone(ev.Partition[:maxPartitionBytes]) // drop the long backing array
+	}
+	obs.Observe(ev)
 }

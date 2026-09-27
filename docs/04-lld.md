@@ -296,7 +296,7 @@ var (
 )
 ```
 
-`Entry.Size()` returns `len(Body) + header bytes + 32 per tag + 256` (fixed overhead) and is what byte-weighted stores account.
+`Entry.Size()` returns `len(Body) + header bytes + vary name bytes + 32 per tag + 56 per variant ref + 256` (fixed overhead) and is what byte-weighted stores account. Vary specs have no body, so leaving out their names and refs would let up to `MaxVariants` refs per record go uncounted against the store's byte bound (NFR-3).
 
 Tags are computed by `internal/keys`:
 
