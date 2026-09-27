@@ -287,7 +287,7 @@ Entry template:
 - Context: low.
 
 ## 2026-09-28 · M1-12 · done
-- Branch / PR: card/M1-12-serve / #pending
+- Branch / PR: card/M1-12-serve / #19
 - Done: serve.go (classification in `Serve`, lookup with epochs and markers, fresh hits, uncoalesced miss, store or hit-for-miss marker), respond.go (`fromEntry`, `finish`), cachestatus.go (RFC 9211 member, no `key`), fetch.go (buffered read up to `MaxObjectBytes`, over-size stream, origin header map cloned before Cache-Status).
 - Tests: TestFreshHitNoOrigin, TestMissStoresThenHits, TestAgeHeader, TestCacheStatusNoKey, TestServedHeaderMutationDoesNotLeak, TestInvalidRequestsCostNothing, TestKettleUserAgent, TestFatGETBodyDropped, plus TestOversizedBodyStreamed, TestBufferedBodyFailures, TestHardPurgedEntryIsMiss from review. Two older tests adjusted (POST for streaming, Serve-set CacheInfo). `make check` passes.
 - Deviations: none; stale entries refetch in the foreground until M1-13/M5 (`ponytail:`).
