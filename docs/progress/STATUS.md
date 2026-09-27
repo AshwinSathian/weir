@@ -5,7 +5,7 @@ Phase: 1
 Current card: none
 Card state: awaiting-merge
 Branch: card/M1-09-memory-store
-PR: none
+PR: #15 https://github.com/AshwinSathian/weir/pull/15
 Next card: M1-10
 
 ## Blockers

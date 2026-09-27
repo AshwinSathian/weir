@@ -239,7 +239,7 @@ Entry template:
 - Context: low.
 
 ## 2026-09-28 · M1-09 · done
-- Branch / PR: card/M1-09-memory-store / (see STATUS)
+- Branch / PR: card/M1-09-memory-store / #15
 - Done: `store/memory` (store.go, shard.go, fifo.go, ghost.go): maphash sharding with a per-process seed, byte-weighted S3-FIFO per shard, read-lock-only hits, oversize `Set` declined, `Bytes`, `MaxObjectBytes`, `OnEvict`. Engine default store is now the memory store; `nopstore.go` deleted.
 - Tests: TestConformance (storetest, no epochs, synctest), TestS3FIFOScanResistance, TestByteAccountingBound, TestShardDistributionAdversarial, TestSetDeclinesOversize, TestGetHitTakesReadLock, TestExpiredGetUnlinks, TestGhostHitInsertsIntoMain, TestGhostBoundFollowsMain, TestNewConfig; TestNewRejectsStore covers the default store limit. `make check` passes.
 - Deviations: none. E-11 retention clamp and epoch config fields left to M1-10 (05 §4.4 is its reading).
