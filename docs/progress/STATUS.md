@@ -5,7 +5,7 @@ Phase: 0
 Current card: none
 Card state: awaiting-merge
 Branch: card/P0-06-storetest
-PR: none
+PR: https://github.com/AshwinSathian/weir/pull/6
 Next card: M1-01
 
 ## Blockers
