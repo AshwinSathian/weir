@@ -28,7 +28,7 @@ func forwardHeader(h http.Header, c *Config, cookies []Cookie) http.Header {
 		if out == nil {
 			out = http.Header{}
 		}
-		dropHopByHop(out, h["Connection"])
+		DropHopByHop(out, h["Connection"])
 	} else {
 		out = http.Header{}
 		for _, name := range []string{"Authorization", "Cache-Control", "Pragma", "Traceparent", "Tracestate", "X-Request-Id"} {
@@ -39,7 +39,7 @@ func forwardHeader(h http.Header, c *Config, cookies []Cookie) http.Header {
 		}
 		// An Allow entry or a Connection option can name any copied field;
 		// hop-by-hop fields still never go.
-		dropHopByHop(out, h["Connection"])
+		DropHopByHop(out, h["Connection"])
 		delete(out, "Cookie") // only keyed cookies, even if Allow names Cookie
 		if v := cookieHeader(cookies); v != "" {
 			out["Cookie"] = []string{v}
@@ -60,9 +60,10 @@ func copyField(dst, src http.Header, name string) {
 	}
 }
 
-// dropHopByHop deletes from h the hop-by-hop fields and the fields named
-// in the client's Connection lines conn (RFC 9110 §7.6.1).
-func dropHopByHop(h http.Header, conn []string) {
+// DropHopByHop deletes from h the hop-by-hop fields, Host, and the fields named
+// in the Connection lines conn (RFC 9110 §7.6.1). It serves forwarded
+// requests and stored responses (FR-FWD-2, FR-STO-11).
+func DropHopByHop(h http.Header, conn []string) {
 	for _, line := range conn {
 		for opt := range strings.SplitSeq(line, ",") {
 			if opt = trimOWS(opt); opt != "" {

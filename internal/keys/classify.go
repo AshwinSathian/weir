@@ -131,7 +131,7 @@ func pass(out Classified, r *Request, host string) Classified {
 	if h == nil {
 		h = http.Header{}
 	}
-	dropHopByHop(h, r.Header["Connection"])
+	DropHopByHop(h, r.Header["Connection"])
 	out.Forwarded = Request{Method: r.Method, Scheme: r.Scheme, Host: host, Path: r.Path, RawQuery: r.RawQuery,
 		Header: h, Body: r.Body}
 	// net/http gives every bodyless request http.NoBody (FR-LIM-7: main pool).

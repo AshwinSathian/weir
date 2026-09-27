@@ -4,9 +4,9 @@ Updated: 2026-09-28
 Phase: 1
 Current card: none
 Card state: awaiting-merge
-Branch: card/M1-10-review-fixes
-PR: #17 https://github.com/AshwinSathian/weir/pull/17
-Next card: M1-11
+Branch: card/M1-11-storability
+PR: none
+Next card: M1-12
 
 ## Blockers
 
@@ -28,8 +28,8 @@ none
 
 ## Notes for the next session
 
-- `store/memory` epochs exist (05 §4, §5.4): exact global tag (`store.TagGlobal()`, moved from `internal/keys`, which now delegates), capped hard map pruned after `MaxRetention`, two 2^19-cell sketch planes, `newest` fast path. `SetEpoch` with an invalid mode returns an unwrapped error (not a store sentinel).
-- E-11 clamp counts from `RequestTime` (approved 2026-09-28); the clamped deadline lives on the node.
-- `New` builds a fixed 256 MiB memory store when `Config.Store` is nil (`ponytail:` in engine.go); FR-MEM-1 sizing is M1-15. `Storable.MaxObjectBytes` vs `Entry.Size` overhead margin still open for M1-15.
-- Hard-epoch prune walks up to `MaxHardEpochs` under the write lock when the table is full (`ponytail:` in epochs.go). Worst-case S3-FIFO eviction walk still to measure in M1-18.
-- Carried from M1-07/M1-08: `New` must still reject `Forward.Allow` entries naming keyed or hop-by-hop fields and compile query patterns; `Close` does not wait for foreground `Serve` calls (decide before M1-12); codec accepts any header-name case (revisit with Valkey).
+- `storability(cfg, c, resp, body, respTime)` (storable.go) and `buildEntry(cfg, c, resp, body, reqTime, respTime, d)` (entry.go) are pure and not yet called; M1-12 wires them into `fetch` and writes hit-for-miss markers from `d.responseDriven` (FR-STO-12). Cache-Groups (FR-STO-10) is M9-03.
+- With `StripSetCookie`, the triggering client must get headers from `resp.Header`, not the entry, or it loses `Set-Cookie` (FR-STO-6).
+- `normalizeResponse` now canonicalizes and merges origin header keys (INV-4); every later header check may rely on canonical keys.
+- `MaxObjectBytes` counts body plus origin header bytes before FR-STO-11 exclusions; the `Entry.Size` overhead margin is still open for M1-15. `New` still builds a fixed 256 MiB store (`ponytail:` in engine.go).
+- Carried: `New` must reject `Forward.Allow` entries naming keyed or hop-by-hop fields and compile query patterns; decide whether `Close` waits for foreground `Serve` calls before M1-12; codec accepts any header-name case (revisit with Valkey); hard-epoch prune and S3-FIFO eviction walk to measure in M1-18.

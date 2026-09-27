@@ -1033,7 +1033,7 @@ type Event struct {
 | `EvStoreError` | guard saw `ErrUnavailable` | `get`, `set`, `epoch`, `set-epoch` |
 | `EvStoreBreaker` | store guard opened or closed | `open`, `closed` |
 | `EvKeyRejected` | validation failed | `RequestError.Reason` values |
-| `EvNotStored` | storability failed | `status`, `no-store`, `private`, `authorization`, `set-cookie`, `vary-star`, `vary-sensitive`, `vary-strict`, `vary-too-many`, `no-freshness`, `too-large`, `incomplete`, `groups`, and `vary-unsupported` in M1 to M6 only (removed by M7) |
+| `EvNotStored` | storability failed | `method` (defensive: cacheable forwards are always GET), `status`, `no-store`, `private`, `authorization`, `set-cookie`, `vary-star`, `vary-sensitive`, `vary-strict`, `vary-too-many`, `no-freshness`, `too-large`, `incomplete`, `groups`, and `vary-unsupported` in M1 to M6 only (removed by M7) |
 | `EvVaryOverflow` | variant cap reached | |
 | `EvNegativeServed` | negative entry used | |
 | `EvPurge` | `Purge` or invalidation wrote epochs | `soft`, `hard`, `invalid` |

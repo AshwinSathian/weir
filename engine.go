@@ -152,10 +152,20 @@ func (e *Engine) Close(ctx context.Context) error {
 	return errors.Join(graceErr, storeErr)
 }
 
-// normalizeResponse fills a nil Header or Body, which adapters rely on.
+// normalizeResponse fills a nil Header or Body, which adapters rely on,
+// and canonicalizes header keys, merging duplicates.
 func normalizeResponse(r *Response) {
 	if r.Header == nil {
 		r.Header = http.Header{}
+	}
+	// INV-4, T-8: storability and ParseResponse read canonical keys, so a
+	// custom Origin's "set-cookie" or "cache-control" must not slip past
+	// them. Deleting during range is safe; added keys are canonical.
+	for k, v := range r.Header {
+		if ck := http.CanonicalHeaderKey(k); ck != k {
+			r.Header[ck] = append(r.Header[ck], v...)
+			delete(r.Header, k)
+		}
 	}
 	if r.Body == nil {
 		r.Body = http.NoBody
