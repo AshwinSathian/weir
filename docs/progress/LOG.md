@@ -39,7 +39,7 @@ Entry template:
 - Context: low.
 
 ## 2026-09-27 · P0-02 · done
-- Branch / PR: card/P0-02-store-observer-types / pending
+- Branch / PR: card/P0-02-store-observer-types / #2
 - Done: `store` package types, interface, optional `Scrubber`/`Sizer`, `Entry.Size`; `Observer`, `Event`, 19 `EventKind`s with `String`, nil-safe `emit`; `Purge`, `WarmStats`, `EngineStats`, `BreakerState`, `Mode`.
 - Tests: TestEntrySize, TestNoThirdPartyImports, TestEventKindString, TestEmit; `make check` passes.
 - Deviations: 04 §9.2 gains an `EvMode` row (FR-MODE-1 requires it; the catalog omitted it). Reason vocabulary is new and waits on Ashwin's approval.
