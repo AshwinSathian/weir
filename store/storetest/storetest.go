@@ -135,9 +135,25 @@ func entries(now time.Time) []*store.Entry {
 }
 
 // normalize returns a copy of e whose times have no monotonic reading and
-// UTC location, so reflect.DeepEqual compares instants like time.Equal.
+// UTC location, so reflect.DeepEqual compares instants like time.Equal, and
+// whose empty maps and slices are nil: a decoder may produce either.
 func normalize(e *store.Entry) *store.Entry {
 	c := clone(e)
+	if len(c.Header) == 0 {
+		c.Header = nil
+	}
+	if len(c.Body) == 0 {
+		c.Body = nil
+	}
+	if len(c.VaryNames) == 0 {
+		c.VaryNames = nil
+	}
+	if len(c.Tags) == 0 {
+		c.Tags = nil
+	}
+	if len(c.Variants) == 0 {
+		c.Variants = nil
+	}
 	for _, p := range []*time.Time{&c.StoredAt, &c.RequestTime, &c.ResponseTime, &c.Date, &c.LastModified, &c.Expires} {
 		*p = p.Round(0).UTC()
 	}
@@ -440,7 +456,10 @@ func testEpochFastPath(t *testing.T, newStore func(*testing.T) store.Store, _ op
 	mustSetEpoch(t, s, tag(1), base, store.EpochSoft)
 	mustSetEpoch(t, s, tag(2), base, store.EpochHard)
 	wantNoEpoch(t, s, tg, base.Add(time.Minute))
-	wantNoEpoch(t, s, []store.Tag{tag(3)}, base.Add(-time.Minute))
+	// An unset tag is unaffected by other tags' epochs. since sits a minute
+	// after the store's base instant: a sketch compares against its zero
+	// cells, and near the base instant over-invalidating would be allowed.
+	wantNoEpoch(t, s, []store.Tag{tag(3)}, base)
 }
 
 // E-3: across tags the most severe qualifying mode wins, then its newest At.

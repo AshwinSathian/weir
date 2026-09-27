@@ -21,7 +21,7 @@ type mapStore struct {
 	epochs  map[store.Tag][store.EpochHard + 1]time.Time
 }
 
-func newMapStore(t *testing.T) store.Store {
+func newMapStore(*testing.T) store.Store {
 	s := &mapStore{entries: map[store.Key]*store.Entry{}, epochs: map[store.Tag][store.EpochHard + 1]time.Time{}}
 	return s
 }
@@ -112,8 +112,9 @@ func (s *mapStore) Close() error {
 	return nil
 }
 
-// FR-PRG-7 (EpochSinceBoundary: At == since applies), FR-INV-3 (Delete),
-// FR-FRS-8 (StoredAt round trip), NFR-3 via S-4 expiry; 05 §2, §4.2, §8.
+// FR-PRG-7 (EpochSinceBoundary: an epoch at the request time applies);
+// the other cases check 05 §2 and §4.2 (S-1..S-5, E-1..E-3), which have no
+// requirement IDs of their own.
 func TestRun(t *testing.T) {
 	storetest.Run(t, newMapStore, storetest.Synctest())
 }
