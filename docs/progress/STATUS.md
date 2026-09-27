@@ -5,7 +5,7 @@ Phase: 1
 Current card: none
 Card state: awaiting-merge
 Branch: card/M1-11-storability
-PR: none
+PR: #18 https://github.com/AshwinSathian/weir/pull/18
 Next card: M1-12
 
 ## Blockers
