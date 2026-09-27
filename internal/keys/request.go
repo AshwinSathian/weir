@@ -21,9 +21,16 @@ type Request struct {
 // Config is the compiled key configuration. Limits arrive with the root
 // package's defaults already applied.
 type Config struct {
-	MaxPathBytes   int
-	MaxQueryBytes  int
-	MaxQueryParams int
+	MaxPathBytes        int
+	MaxQueryBytes       int
+	MaxQueryParams      int
+	MaxKeyedHeaderBytes int
+
+	QueryDrop      []string // exact names or "prefix*"
+	QueryKeep      []string // empty keeps all
+	QuerySort      bool
+	Cookies        []string // forwarded in this order
+	AcceptEncoding []string // lowercase tokens, most preferred first
 }
 
 // ErrUpgrade reports a CONNECT or protocol upgrade request (FR-UPG-1). The
