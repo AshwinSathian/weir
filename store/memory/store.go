@@ -116,8 +116,9 @@ func (s *Store) Set(_ context.Context, k store.Key, e *store.Entry) error {
 	now := time.Now()
 	// From RequestTime, not StoredAt: a hard epoch at P is pruned at
 	// P + MaxRetention and applies to records requested at or before P, so
-	// those must be gone by then (E-6). Records without RequestTime are checked against every epoch (since is
-	// zero), so StoredAt is enough for them. Records without either start now.
+	// those must be gone by then (E-6). Records without RequestTime are
+	// checked against every epoch (since is zero), so StoredAt is enough for
+	// them. Records without either start now.
 	from := e.RequestTime
 	if from.IsZero() {
 		from = e.StoredAt

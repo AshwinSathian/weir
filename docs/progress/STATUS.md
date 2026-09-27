@@ -4,8 +4,8 @@ Updated: 2026-09-28
 Phase: 1
 Current card: none
 Card state: awaiting-merge
-Branch: card/M1-10-memory-epochs
-PR: #16 https://github.com/AshwinSathian/weir/pull/16
+Branch: card/M1-10-review-fixes
+PR: pending
 Next card: M1-11
 
 ## Blockers
