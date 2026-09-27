@@ -5,7 +5,7 @@ Phase: 0
 Current card: none
 Card state: awaiting-merge
 Branch: card/P0-03-config
-PR: pending
+PR: https://github.com/AshwinSathian/weir/pull/3
 Next card: P0-04
 
 ## Blockers
