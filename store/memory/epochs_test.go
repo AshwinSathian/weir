@@ -3,6 +3,7 @@ package memory
 import (
 	"encoding/binary"
 	"errors"
+	"sync"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -86,6 +87,87 @@ func TestEpochSketchRounding(t *testing.T) {
 			}
 		})
 	}
+}
+
+// FR-PRG-7, E-8: epoch times far enough from the base instant to saturate
+// the offset still apply; rounding must not overflow into a tiny cell, and
+// a saturated past time must not read as "no epoch".
+func TestEpochSaturatedTimesNotLost(t *testing.T) {
+	ctx := t.Context()
+	for _, c := range []struct {
+		name      string
+		at, since time.Time
+	}{
+		{"far future", time.Date(9999, 1, 1, 0, 0, 0, 0, time.UTC), time.Now().Add(time.Hour)},
+		{"far past", time.Date(1500, 1, 1, 0, 0, 0, 0, time.UTC), time.Time{}},
+	} {
+		for _, m := range []store.EpochMode{store.EpochSoft, store.EpochInvalid, store.EpochHard} {
+			for _, tg := range []store.Tag{numTag(1), store.TagGlobal()} {
+				s := newStore(t, Config{})
+				if err := s.SetEpoch(ctx, tg, store.Epoch{At: c.at, Mode: m}); err != nil {
+					t.Fatal(err)
+				}
+				if ep, ok, err := s.NewestEpoch(ctx, []store.Tag{tg}, c.since); err != nil || !ok || ep.Mode != m {
+					t.Errorf("%s, mode %d, global %v: NewestEpoch = %+v, %v, %v; want the epoch",
+						c.name, m, tg == store.TagGlobal(), ep, ok, err)
+				}
+			}
+		}
+	}
+}
+
+// E-2, 05 §5.4: concurrent raises of one tag keep the maximum, and each
+// reader sees (mode, At) only move forward, never past the last write.
+func TestEpochConcurrentRaise(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		s := newStore(t, Config{})
+		ctx := t.Context()
+		base := time.Now().Add(time.Minute)
+		tg := []store.Tag{numTag(7), store.TagGlobal()}
+		const writers, per = 8, 500
+		top := base.Add(writers * per * time.Second)
+		var wg sync.WaitGroup
+		for w := range writers {
+			wg.Go(func() {
+				for i := range per {
+					at := base.Add(time.Duration(i*writers+w) * time.Second)
+					mode := store.EpochSoft + store.EpochMode(i%2)
+					for _, x := range tg {
+						if err := s.SetEpoch(ctx, x, store.Epoch{At: at, Mode: mode}); err != nil {
+							t.Error(err)
+							return
+						}
+					}
+				}
+			})
+			wg.Go(func() {
+				var prev store.Epoch
+				for range per {
+					ep, ok, err := s.NewestEpoch(ctx, tg[:1], base)
+					if err != nil || ok && ep.At.After(top) {
+						t.Errorf("NewestEpoch = %+v, %v, %v", ep, ok, err)
+						return
+					}
+					if !ok {
+						continue
+					}
+					if ep.Mode < prev.Mode || ep.Mode == prev.Mode && ep.At.Before(prev.At) {
+						t.Errorf("NewestEpoch went back from %+v to %+v", prev, ep)
+						return
+					}
+					prev = ep
+				}
+			})
+		}
+		wg.Wait()
+		last := base.Add(time.Duration(writers*per-1) * time.Second)
+		for _, x := range tg {
+			ep, ok, err := s.NewestEpoch(ctx, []store.Tag{x}, last)
+			if err != nil || !ok || ep.At.Before(last) {
+				t.Errorf("after raises: NewestEpoch = %+v, %v, %v; want at least %v", ep, ok, err, last)
+			}
+		}
+	})
 }
 
 // FR-PRG-5, E-5, E-6: a hard purge of everything does not use a

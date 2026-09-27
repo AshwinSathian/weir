@@ -56,6 +56,13 @@ func newEpochs(slots, maxHard int, retention time.Duration) *epochs {
 	return ep
 }
 
+// offset returns t as nanoseconds after base. Times about 292 years or more
+// before base saturate; they are lifted off the noEpoch sentinel so such an
+// epoch still applies to since values as old (E-8).
+func (ep *epochs) offset(t time.Time) int64 {
+	return max(int64(t.Sub(ep.base)), noEpoch+1)
+}
+
 // cells returns tag t's d = 2 sketch positions (E-7).
 func (ep *epochs) cells(t store.Tag) (uint64, uint64) {
 	h := maphash.Comparable(ep.seed, t)
@@ -83,7 +90,7 @@ func raise32(a *atomic.Uint32, v uint32) {
 // set records e for t (E-2). Cells are written before newest, so a reader
 // that passes the fast-path check also sees the cells.
 func (ep *epochs) set(t store.Tag, e store.Epoch) error {
-	off := int64(e.At.Sub(ep.base))
+	off := ep.offset(e.At)
 	switch {
 	case e.Mode < store.EpochSoft || e.Mode > store.EpochHard:
 		return fmt.Errorf("store: memory: epoch mode %d", e.Mode)
@@ -95,9 +102,14 @@ func (ep *epochs) set(t store.Tag, e store.Epoch) error {
 		}
 	default:
 		// Whole seconds rounded up, at least 1 so 0 stays "unset"; rounding
-		// only over-invalidates (E-8). Clamping at MaxUint32 would
-		// under-invalidate, but that is 136 years after New (E-11).
-		sec := max(1, (off+int64(time.Second)-1)/int64(time.Second))
+		// only over-invalidates (E-8). Divide then round, since adding
+		// first overflows for a saturated offset. Clamping at MaxUint32
+		// under-invalidates only for since values 136 years after New.
+		sec := off / int64(time.Second)
+		if off%int64(time.Second) > 0 {
+			sec++
+		}
+		sec = max(1, sec)
 		c := uint32(min(sec, math.MaxUint32)) //nolint:gosec // clamped to uint32 range
 		i, j := ep.cells(t)
 		p := ep.planes[e.Mode-1]
@@ -175,7 +187,7 @@ func (ep *epochs) lookup(t store.Tag, m store.EpochMode, s int64) int64 {
 		if !ok {
 			return noEpoch
 		}
-		off = int64(at.Sub(ep.base))
+		off = ep.offset(at)
 	} else {
 		i, j := ep.cells(t)
 		p := ep.planes[m-1]
