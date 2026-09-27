@@ -1,0 +1,6 @@
+go test fuzz v1
+string("GET")
+string("http")
+string("example.com")
+string("/a/../b")
+string("")

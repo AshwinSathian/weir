@@ -157,3 +157,11 @@ Entry template:
 - Deviations: 04 §4.3 gains a `default: return Unusable` line; the reviewer found an unknown epoch mode failed open (T-9).
 - Follow-ups: none new. M1.1 ticked in PLAN.
 - Context: low; size S was right.
+
+## 2026-09-27 · M1-04 · done
+- Branch / PR: card/M1-04-validate / see STATUS
+- Done: new package internal/keys: `Request`, `Config`, `ErrUpgrade`, `RequestError` with the seven reasons (request.go); `Validate` per FR-VAL-1 with CONNECT and Connection-upgrade detection first (validate.go); host normalization per 04 §3.7 (host.go).
+- Tests: TestValidateRejects (a row per reason), TestValidateAccepts, TestOptionsAsterisk, TestConnectRejected, TestNormalizeHost, TestValidateReturnsNormalizedHost, FuzzValidateRequest, FuzzHost with seeds. `make check` passes.
+- Deviations: 04 §3.1 step 1 now says upgrade detection runs before validation. 04 §3.7 now covers the edge cases: port form, bracketed IPv4 rejected, IPv6 rewritten to canonical form, `a..` rejected so normalization is idempotent.
+- Follow-ups: mapping keys errors to weir errors lands with Classify (M1-07).
+- Context: low; size M was generous.

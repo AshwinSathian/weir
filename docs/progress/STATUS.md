@@ -4,9 +4,9 @@ Updated: 2026-09-27
 Phase: 1
 Current card: none
 Card state: awaiting-merge
-Branch: card/M1-03-evaluate
-PR: #9 https://github.com/AshwinSathian/weir/pull/9
-Next card: M1-04
+Branch: card/M1-04-validate
+PR: pending
+Next card: M1-05
 
 ## Blockers
 
@@ -21,7 +21,8 @@ none
 
 ## Notes for the next session
 
-- httpcc API: `Lifetime`, `Jitter`, `StaleWindows` (lifetime.go); `CorrectedInitialAge`, `CurrentAge` (age.go); `Evaluate` and `State` (evaluate.go). `State` starts at 1; the zero value is invalid.
+- keys API (M1-04): `Validate(r *Request, c *Config) (host string, err error)` returns the normalized host; key and forwarded request must both use it (P2). Errors are `keys.ErrUpgrade` and `*keys.RequestError{Reason}`; M1-07 `Classify` (or the engine) maps them to `weir.ErrUpgradeNotSupported` and `*weir.RequestError`. `keys.Config` so far has only the path and query limits.
+- httpcc API: `Lifetime`, `Jitter`, `StaleWindows`, `CorrectedInitialAge`, `CurrentAge`, `Evaluate`, `State` (zero `State` is invalid).
 - `Evaluate` trusts `epOK`: the caller's `newestEpoch` applies FR-PRG-7 (04 §6.3). A zero or unknown `EpochMode` with `epOK` returns `Unusable`.
 - FR-MODE-2 (`ModeStaleOnError`) must tell "stale forbidden" from "no SIE window" using `ep.Mode` and `e.Flags`; `sieOK` alone is false for both.
 - Doc wording drift, not yet fixed: 01 FR-SRV-1 and FR-STL-3 say "unqualified `no-cache`", while the 01 RFC table and 04 `FlagNoCache` treat qualified and unqualified the same. The parser, `StaleWindows` and `Evaluate` follow the table.

@@ -344,7 +344,7 @@ A nil `Request.Header` is treated as empty. `internal/keys` cannot import `weir`
 
 Classification order:
 
-1. Validate per FR-VAL-1. Any failure returns `RequestError{Reason}` with reasons from a fixed list (`scheme`, `host`, `path`, `path-escape`, `query`, `query-params`, `method`).
+1. Detect `CONNECT` (any form) and `Connection: upgrade` with an `Upgrade` field first and return `keys.ErrUpgrade`, which the root maps to `ErrUpgradeNotSupported` (FR-UPG-1, T-44); a CONNECT path is authority-form and would otherwise fail as `path`. Then validate per FR-VAL-1. Any failure returns `RequestError{Reason}` with reasons from a fixed list (`scheme`, `host`, `path`, `path-escape`, `query`, `query-params`, `method`).
 2. Method: `GET`, `HEAD` are cacheable. `OPTIONS`, `TRACE` are safe but not cacheable: `ClassPass`, `FwdMethod`, no invalidation. Everything else (including lowercase `get`) is unsafe or unknown: `ClassPass`, `FwdMethod`, invalidation on 2xx/3xx.
 3. Bypass: any `Bypass.Headers` present, or any `Bypass.Cookies` present in any `Cookie` line: `ClassPass`, `FwdBypass`.
 4. Otherwise build the forwarded request and keys (§3.2 to §3.5).
@@ -447,7 +447,7 @@ Total input size above `MaxKeyedHeaderBytes` returns `"identity"` without parsin
 
 ### 3.7 Host normalization and validation
 
-Lowercase ASCII; reject any byte outside `[a-z0-9.-:\[\]]` after lowercasing (percent-encoded reg-names are rejected); split port; validate IPv6 literal with `net/netip.ParseAddr`; strip port equal to the scheme default; strip one trailing dot. Maximum 255 bytes before normalization.
+Lowercase ASCII; reject any byte other than `a`–`z`, `0`–`9`, `.`, `-`, `:`, `[` and `]` after lowercasing (percent-encoded reg-names are rejected); split port; validate IPv6 literal with `net/netip.ParseAddr`; strip port equal to the scheme default; strip one trailing dot. Maximum 255 bytes before normalization. The port is 1–65535 in at most five decimal digits; an empty port is rejected and leading zeros are dropped (`:0443` becomes `:443`, then stripped for `https`). A bracketed literal must parse as IPv6 (`[1.2.3.4]` is rejected) and is rewritten to `netip.Addr.String()` form (`[0:0::1]` becomes `[::1]`). A name that still ends in a dot after the one strip (`a..`) is rejected, so normalization is idempotent and every accepted host has one spelling. `Validate` returns the normalized host; key and forwarded request both use it (P2).
 
 ## 4. `internal/httpcc`
 
