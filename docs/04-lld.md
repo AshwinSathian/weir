@@ -328,15 +328,21 @@ type Classified struct {
 	Range      bool      // request carried Range
 	Authorized bool      // request carried Authorization
 	Unsafe     bool      // unsafe or unknown method: invalidate on 2xx/3xx
-	Forwarded  weir.Request-shaped value (see note)
-	Primary    store.Key
+	HasBody    bool      // the forwarded request carries a body (upload pool)
+	Forwarded  Request   // keys.Request, see note
+	Primary    store.Key // zero for ClassPass
 	URITag     store.Tag
 	OriginTag  store.Tag
 	Origin     string    // scheme://host[:port]
 	Partition  string    // origin + path, truncated to 512 bytes
 	PartitionH uint64    // maphash of Partition, per-process seed
-	ReqCC      RequestDirectives // no-store, only-if-cached, and (if honored) no-cache/max-age
-	ClientCond ClientConditionals // If-None-Match, If-Modified-Since from the client
+	ReqCC      httpcc.RequestDirectives // no-store, only-if-cached; the rest only with HonorRevalidation (FR-SRV-8)
+	ClientCond ClientConditionals
+}
+
+type ClientConditionals struct {
+	IfNoneMatch     []string  // entity-tags as sent, or just "*"; nil when absent, any element is malformed, or the lines exceed MaxKeyedHeaderBytes (bound, P5)
+	IfModifiedSince time.Time // zero when absent, repeated or not an HTTP-date
 }
 ```
 
@@ -349,7 +355,7 @@ Classification order:
 3. Bypass: any `Bypass.Headers` present, or any `Bypass.Cookies` present in any `Cookie` line: `ClassPass`, `FwdBypass`.
 4. Otherwise build the forwarded request and keys (§3.2 to §3.5).
 
-For `ClassPass`, the forwarded request is the client request with hop-by-hop fields removed, path and query untouched, body attached. No key is built except the URI tag (needed for invalidation). The URI tag is computed from the path and query after applying the same rewrite rules as cacheable requests (§3.4, and path normalization when enabled), even though the forwarded query stays untouched; otherwise `POST /p?utm_source=x` would invalidate a URI that no cached `GET` is stored under.
+For `ClassPass`, the forwarded request is the client request with hop-by-hop fields and any `Host` field removed (the host is `Forwarded.Host`), path and query untouched, body attached. No key is built except the URI tag (needed for invalidation). The URI tag is computed from the path and query after applying the same rewrite rules as cacheable requests (§3.4, and path normalization when enabled), even though the forwarded query stays untouched; otherwise `POST /p?utm_source=x` would invalidate a URI that no cached `GET` is stored under.
 
 ### 3.2 Canonical primary-key encoding
 
@@ -411,13 +417,17 @@ Matching compares raw bytes. `utm_source` and `utm%5Fsource` are different names
 ```
 out := http.Header{}
 for name in Key.Headers: if v, ok := normalized(name); ok { out[name] = []string{v} }
-if cookies := keyedCookies(); cookies != "": out["Cookie"] = []string{cookies}
-out["Accept-Encoding"] = []string{aeBucket}  // always, e.g. "gzip" or "identity"
-copy if present: Authorization, Cache-Control, Pragma
+copy if present: Authorization, Cache-Control, Pragma, traceparent, tracestate, X-Request-Id
 for name in Forward.Allow: copy all lines if present
+delete hop-by-hop fields, fields named in Connection, Host, conditionals, Range, Content-Length, Expect and Trailer (an Allow entry cannot bring them back)
+if v := cookieHeader(keyedCookies()); v != "": out["Cookie"] = []string{v}
+filter trace fields (FR-FWD-6)
+out["Accept-Encoding"] = []string{aeBucket}  // always, set last, e.g. "gzip" or "identity"
 ```
 
-`ForwardAll` copies all fields, then deletes hop-by-hop fields, the fields named in `Connection`, `If-None-Match`, `If-Modified-Since`, `If-Match`, `If-Unmodified-Since`, `If-Range`, `Range`, and replaces `Accept-Encoding` with the bucket.
+`ForwardAll` copies all fields, then deletes hop-by-hop fields, the fields named in `Connection`, `Host`, `If-None-Match`, `If-Modified-Since`, `If-Match`, `If-Unmodified-Since`, `If-Range`, `Range`, and the body fields `Content-Length`, `Expect` and `Trailer` (the fetch has no body), filters trace fields, and sets `Accept-Encoding` to the bucket. The `Cookie` field stays as received.
+
+Trace filtering drops `traceparent` and `tracestate` together unless there is exactly one `traceparent` line in version-00 form with lowercase hex and non-zero ids, and drops `X-Request-Id` unless it is one line of at most 128 visible ASCII bytes. With `NoTraceHeaders` all three go.
 
 The client conditionals (`If-None-Match`, `If-Modified-Since`) are parsed into `ClientConditionals` before being dropped, so the engine can answer 304 itself.
 
@@ -1131,7 +1141,7 @@ Limiter: `byHost map[uint64]int32` alongside `byPart`; `canRun` adds `byHost[hos
 
 ## 14. Designs for decisions D25 to D42
 
-- Upload pool (FR-LIM-7): the limiter holds two independent pools with the same algorithm (§8.2): `main` and `upload`. `Classify` sets `HasBody` when `Request.Body != nil` and the request did not declare `Content-Length: 0`. Partition and host caps apply within each pool.
+- Upload pool (FR-LIM-7): the limiter holds two independent pools with the same algorithm (§8.2): `main` and `upload`. `Classify` sets `HasBody` for `ClassPass` requests when `Request.Body` is neither nil nor `http.NoBody` and the request did not declare `Content-Length: 0`. A cacheable request never has one: its body is not forwarded (T-5), so a fat GET cannot take an upload slot. Partition and host caps apply within each pool.
 - Timeouts (FR-TMO-*): the fetch context carries `Timeouts.Origin` until the buffered body is read. For streams, `fetch` swaps the deadline context for a cancel-only context once headers arrive, and wraps the body in an idle-timeout reader: each `Read` arms a timer of `StreamIdle` (reset per successful read) whose expiry cancels the context. Timers are durably blocking in synctest, so the idle behavior is testable.
 - Upgrades (FR-UPG-1): checked first in `Classify`, before validation of the path (so `CONNECT host:port` authority-form targets never hit the path validator).
 - Event streams (FR-STR-1): checked in `fetch` right after headers, before `readUpTo`; such a response takes the streaming path with `shareable = false` and no marker.

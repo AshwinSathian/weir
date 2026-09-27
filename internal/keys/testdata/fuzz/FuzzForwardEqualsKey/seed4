@@ -1,0 +1,9 @@
+go test fuzz v1
+byte('\x00')
+string("GET")
+string("/a")
+string("a=1;utm_x=2")
+string("lang=e\x7fn; sid=\"x\"")
+string("GZIP, identity;q=0")
+string("00-4BF92F3577B34DA6A3CE929D0E0E4736-00F067AA0BA902B7-01")
+string("Authorization")

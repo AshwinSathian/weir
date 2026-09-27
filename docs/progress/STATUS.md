@@ -4,9 +4,9 @@ Updated: 2026-09-27
 Phase: 1
 Current card: none
 Card state: awaiting-merge
-Branch: card/M1-06-key-encoding
-PR: #12 https://github.com/AshwinSathian/weir/pull/12
-Next card: M1-07
+Branch: card/M1-07-classify-forward
+PR: #13 https://github.com/AshwinSathian/weir/pull/13
+Next card: M1-08
 
 ## Blockers
 
@@ -23,15 +23,15 @@ none
 
 - Keyed cookies and large Cookie headers: FR-VAL-3 applies `MaxKeyedHeaderBytes` (1 KiB) to all Cookie lines combined, so a 1.2 KiB analytics cookie makes a keyed `lang` absent, and the origin's default-language response is cached under the "no lang" key. Safe (no bypass) but wrong for common traffic. Options: measure only the keyed pairs' bytes, or give Cookie its own limit. Changes FR-VAL-3 wording.
 
+- Trace fields in INV-1: docs/06 INV-1 lists `Authorization`, `Cache-Control`, `Pragma`, Allow and Weir validators as the only unkeyed forwarded fields, but FR-FWD-6 (D29) also forwards `traceparent`, `tracestate` and `X-Request-Id` on cacheable fetches, and M1-07 does. Proposal: add the three trace fields to INV-1's list (06 wording change).
+- `tracestate` has no limit: T-40 says trace headers get "validated format and length", but FR-FWD-6 checks only `traceparent` and `X-Request-Id`, so up to the adapter's header limit of `tracestate` reaches the origin unkeyed. Proposal: forward it only as at most 512 bytes of visible ASCII in one or more lines combined (W3C limit), else drop it (FR-FWD-6 wording change).
+
 ## Notes for the next session
 
-- M1-06 keys API: `PrimaryKey(*KeyInput) store.Key`; `KeyInput{Method, Scheme, Host, Path, Query, Headers []Header, CookieNames, Cookies}`. `Header{Name, Value, Present}` per `Key.Headers` name in config order; the Accept-Encoding bucket enters here as a normalized header value.
-- `appendKey` pairs `Cookies` with `CookieNames` in one pass: pass `keyedCookies` output unchanged (config order). Reordering it drops cookie values from the key (pinned by `TestKeyedCookiesFeedEncoder`).
-- Tags: `TagGlobal()`, `TagOrigin(o)`, `TagURI(o, p, q)`, `TagGroup(o, name)`; `o` is `scheme://host[:port]` after `normalizeHost`. No `Origin` builder yet; M1-07 builds `Classified.Origin`.
-- `normalizePath(p)` is not wired yet. M1-07 must apply it (when `Key.NormalizePath`) to both the key path and the forwarded path (FR-FWD-5), and to the URI tag of ClassPass requests (04 §3.1). It returns paths with malformed escapes unchanged; Validate rejects those first.
-- 04 §3.5 pseudocode shows `keyedCookies()` returning a string; update it when M1-07 wires forwarding.
-- Query patterns are not validated yet: `New` (config validation card) should compile them (04 §1.1).
-- `Evaluate` trusts `epOK`: the caller's `newestEpoch` applies FR-PRG-7 (04 §6.3). FR-MODE-2 must use `ep.Mode` and `e.Flags` to tell "stale forbidden" from "no SIE window".
-- Memory store: keep `Epoch.At` with its monotonic reading. Codec: zero `SWR`/`SIE` when must-revalidate or proxy-revalidate flags are set (FR-STL-3).
-- engine.go: `Close` does not wait for foreground `Serve` calls; decide before M1-12.
+- `keys.Classify(r *Request, c *Config) (Classified, error)` is ready for the engine (04 §3.1). The root package converts `weir.Request` to `keys.Request` and fills `keys.Config` from `Config` (new fields: `NormalizePath`, `ForwardAll`, `Allow` canonical, `NoTraceHeaders`, `HonorRevalidation`). `ReqCC` already drops the directives FR-SRV-8 ignores when `HonorRevalidation` is off.
+- Still to come in keys: `Key.Headers` in key and forward, `FwdBypass` and bypass rules (M7-03), and `asRangePass` for range misses (04 §6.2, FR-FWD-3). `keys.FwdReason` has only `FwdNone` and `FwdMethod`.
+- Config validation (`New`) must reject `Forward.Allow` entries that name keyed or hop-by-hop fields (Cookie, Accept-Encoding) so operators get an error; forwarding already ignores them. It also still needs to compile query patterns (04 §1.1).
+- Pass-through requests forward trace headers as received, even with `NoTraceHeaders` (FR-FWD-3 forwards everything but hop-by-hop fields). Decide with the D29 wording if that matters.
+- `Evaluate` trusts `epOK`: the caller's `newestEpoch` applies FR-PRG-7 (04 §6.3). engine.go: `Close` does not wait for foreground `Serve` calls; decide before M1-12.
+- Spec gaps from the M1-07 adversarial review: TRACE and OPTIONS are forwarded even with `Max-Forwards: 0` (RFC 9110 §7.6.2 says the proxy answers itself), and pass-through and ForwardAll forward `Proxy-Authorization` to the origin. Neither is covered by FR-FWD-*; decide when the engine pass path lands.
 - Doc wording drift: 01 FR-SRV-1 and FR-STL-3 say "unqualified `no-cache`" while the 01 RFC table and 04 `FlagNoCache` treat both the same.
