@@ -4,7 +4,7 @@ Plumbing done in the planning session (2026-09-27): `go.mod`, `doc.go`, `Makefil
 
 ## Phase 0
 
-### [ ] P0-01 Public request, response and error types
+### [x] P0-01 Public request, response and error types
 - Plan: P0.2 · Size: S · Depends on: none
 - Read: 01 §4 (up to the store paragraph); 04 §1.3
 - Touch: request.go, errors.go, errors_test.go (all new)

@@ -183,6 +183,7 @@ var (
 	ErrOnlyIfCached   = errors.New("weir: only-if-cached and no stored response")
 	ErrOrigin         = errors.New("weir: origin error")
 	ErrClosed         = errors.New("weir: engine closed")
+	ErrUpgradeNotSupported = errors.New("weir: connect and protocol upgrades not supported") // FR-UPG-1
 	ErrEagerUnsupported = errors.New("weir: store cannot scrub; epoch written, delete skipped") // M15
 )
 
@@ -190,7 +191,7 @@ type RequestError struct{ Reason string } // Is(ErrInvalidRequest) == true
 type OriginError struct{ Err error }       // Is(ErrOrigin) == true; Unwrap returns Err
 ```
 
-`StatusCode`: `ErrInvalidRequest` 400; `ErrShed`, `ErrCircuitOpen`, `ErrClosed` 503; `ErrOriginTimeout`, `ErrMustRevalidate`, `ErrOnlyIfCached`, `context.DeadlineExceeded` 504; `ErrOrigin` 502; `context.Canceled` 499 (a hint for logs only; the client is gone and adapters should not write); anything else 502.
+`StatusCode`: `ErrInvalidRequest` 400; `ErrUpgradeNotSupported` 501; `ErrShed`, `ErrCircuitOpen`, `ErrClosed` 503; `ErrOriginTimeout`, `ErrMustRevalidate`, `ErrOnlyIfCached`, `context.DeadlineExceeded` 504; `ErrOrigin` 502; `context.Canceled` 499 (a hint for logs only; the client is gone and adapters should not write); anything else 502. Context errors are checked before `ErrOrigin`, so an `*OriginError` wrapping `context.Canceled` (a client that left during a direct fetch) maps to 499, not 502.
 
 ```go
 type RetryError struct {
