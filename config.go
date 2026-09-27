@@ -447,16 +447,26 @@ func (c *Config) validate() error {
 			}
 		}
 	}
-	if c.Observer != nil {
-		// A typed nil passes emit's nil check and panics in Observe.
-		switch v := reflect.ValueOf(c.Observer); v.Kind() {
-		case reflect.Pointer, reflect.Map, reflect.Func, reflect.Chan, reflect.Slice:
-			if v.IsNil() {
-				return invalid("Observer", "typed nil")
-			}
-		}
+	// A typed nil passes a nil interface check and panics on first use.
+	if isTypedNil(c.Observer) {
+		return invalid("Observer", "typed nil")
+	}
+	if isTypedNil(c.Store) {
+		return invalid("Store", "typed nil")
 	}
 	return nil
+}
+
+// isTypedNil reports whether v is a non-nil interface holding a nil value.
+func isTypedNil(v any) bool {
+	if v == nil {
+		return false
+	}
+	switch rv := reflect.ValueOf(v); rv.Kind() {
+	case reflect.Pointer, reflect.Map, reflect.Func, reflect.Chan, reflect.Slice:
+		return rv.IsNil()
+	}
+	return false
 }
 
 func invalid(field, reason string) error {

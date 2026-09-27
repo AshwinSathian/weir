@@ -556,12 +556,16 @@ type Engine struct {
 	log      *slog.Logger
 	rnd      func() float64
 
-	closed   atomic.Bool
-	bgCtx    context.Context    // canceled after Close's grace period
-	bgCancel context.CancelFunc
-	wg       sync.WaitGroup     // every engine-owned goroutine
+	mu        sync.Mutex         // orders setting closed against wg.Add
+	closed    atomic.Bool        // written under mu; read without it on the Serve path
+	closeDone chan struct{}      // closed when the first Close finishes
+	bgCtx     context.Context    // canceled after Close's grace period
+	bgCancel  context.CancelFunc
+	wg        sync.WaitGroup     // every engine-owned goroutine
 }
 ```
+
+Engine goroutines start only through `goBackground(f)`, which checks `closed` and calls `wg.Go` while holding `mu`. `Close` sets `closed` under `mu`, so once it starts waiting no `wg.Add` can follow; without the lock, a `goBackground` racing `Close` could panic the WaitGroup (Add concurrent with Wait) or start a goroutine after `Close` returned. `mu` is never held across a wait (P8). A second `Close` waits on `closeDone` or its own context.
 
 ### 6.2 Serve
 
@@ -747,7 +751,7 @@ func (e *Engine) fetch(ctx, s, origin) fetchResult:
     defer cancel()                           // not deferred for streaming; see below
     req := toWeirRequest(s.fwd); addConditionals(req, s.prior)
     t0 := time.Now()
-    resp, err := safeFetch(origin, tctx, req)      // recovers panics into *OriginError; (nil, nil) and 1xx statuses become *OriginError; nil Header becomes empty, nil Body becomes http.NoBody
+    resp, err := safeFetch(origin, tctx, req)      // recovers panics into *OriginError; (nil, nil) and statuses outside 200..999 (1xx, and what net/http would reject) become *OriginError; nil Header becomes empty, nil Body becomes http.NoBody
     outcome := classify(resp, err, tctx)            // success | gateway failure | other
     e.cb.Record(probe, outcome)
 
