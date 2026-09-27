@@ -1007,6 +1007,7 @@ type Event struct {
 | `EvPurge` | `Purge` or invalidation wrote epochs | `soft`, `hard`, `invalid` |
 | `EvMissRateAnomaly` | window closed with an anomalous partition | `flag`, `throttle` |
 | `EvEvict` | memory store evicted (batched per shard per call) | `small`, `main`, `expired` |
+| `EvMode` | `SetMode` changed the incident mode or it expired (FR-MODE-1) | `normal`, `stale-on-error`, `bypass` (new mode) |
 
 Reasons never contain request data. `Partition` is the only field derived from request input; exporters must not use it as a metric label.
 

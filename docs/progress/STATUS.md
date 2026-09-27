@@ -4,9 +4,9 @@ Updated: 2026-09-27
 Phase: 0
 Current card: none
 Card state: awaiting-merge
-Branch: card/P0-01-public-types
-PR: https://github.com/AshwinSathian/weir/pull/1
-Next card: P0-02
+Branch: card/P0-02-store-observer-types
+PR: pending
+Next card: P0-03
 
 ## Blockers
 
@@ -14,11 +14,13 @@ none
 
 ## Waiting on Ashwin
 
-- Review and merge the P0-01 PR. It is the first CI run.
+- Review and merge the P0-02 PR.
+- Approve the `EvMode` row added to 04 §9.2: FR-MODE-1 requires the event but the catalog omitted it. The reason vocabulary (`normal`, `stale-on-error`, `bypass`, the new mode) and "or it expired" trigger are new.
 
 ## Notes for the next session
 
-- errors.go and request.go exist in the root package. `Origin`/`OriginFunc` are not defined yet; they belong with the engine skeleton (P0-05) unless P0-02 needs them first.
-- `FwdReason` and `StaleReason` have no `String` methods. Add them with the Cache-Status rendering (FR-SRV-9), not before.
-- `StatusCode` checks context errors before `ErrOrigin` (recorded in 04 §1.3). Engine code that wraps fetch failures can rely on that.
-- P0.2 in PLAN-weir.md stays unticked until P0-02 is done.
+- store/store.go holds every 04 §2 type, `Store`, `Scrubber`, `Sizer`, `ErrNotFound`, `ErrUnavailable` and `Entry.Size`. Tag computation (`TagGlobal` etc.) belongs to internal/keys, not yet written.
+- observer.go: `EventKind` constants end with an unexported `evCount` sentinel; add new kinds before it and give each a name in `eventKindNames` (TestEventKindString enforces it). `emit(obs, ev)` is the nil-safe helper the engine wraps in P0-05.
+- types.go: `Purge`, `PurgeMode`, `WarmStats`, `EngineStats`, `BreakerState`, `Mode`. `Engine.Stats` and `Config` are still missing; PLAN P0.2 is ticked because its mapped cards are done, and they land in P0-03 and P0-05.
+- `store.Kind` and `store.EpochMode` start at 1 so an unset value is invalid; `PurgeSoft`, `BreakerClosed`, `ModeNormal` are zero values.
+- deps_test.go runs `go list` with `GOWORK=off`, so it keeps checking only the root module once go.work exists (M10-02).
