@@ -471,14 +471,24 @@ Parser rules: split on commas outside quoted strings (a quote opens only as the 
 ### 4.2 Lifetime, age, permissions
 
 ```go
-func Lifetime(d ResponseDirectives, h http.Header, status int, respTime time.Time, cfg) (lt time.Duration, heuristic bool)
+// Config carries the defaulted FreshnessConfig fields httpcc reads; httpcc cannot import the root package.
+type Config struct {
+	HeuristicFraction      float64
+	HeuristicMax           time.Duration
+	DefaultTTL             time.Duration
+	DefaultSWR, DefaultSIE time.Duration
+}
+
+func Lifetime(d ResponseDirectives, h http.Header, status int, respTime time.Time, cfg Config) (lt time.Duration, heuristic bool)
 func CorrectedInitialAge(ageHdr string, reqTime, respTime time.Time) time.Duration // age_value + response_delay (FR-FRS-4); Date is not used
 func CurrentAge(e *store.Entry, now time.Time) time.Duration
 func Jitter(lt time.Duration, frac float64, min time.Duration, u float64) time.Duration
-func StaleWindows(d ResponseDirectives, cfg) (swr, sie time.Duration)
+func StaleWindows(d ResponseDirectives, cfg Config) (swr, sie time.Duration)
 ```
 
-`StaleWindows` implements FR-STL-1 to FR-STL-3: returns (0, 0) when `MustRevalidate`, `ProxyRevalidate` or `NoCache`; origin values when set (even with `s-maxage`); operator defaults only when neither origin value is set and `s-maxage` is absent.
+`StaleWindows` implements FR-STL-1 to FR-STL-3: returns (0, 0) when `MustRevalidate`, `ProxyRevalidate` or `NoCache`; origin values when set (even with `s-maxage`); otherwise each operator default applies per directive, when the origin did not send that directive and `s-maxage` is absent (an origin `stale-if-error` alone still gets `DefaultStaleWhileRevalidate`, and the reverse).
+
+`Lifetime` returns 0 when any of the four delta-seconds directives is invalid or duplicated (FR-FRS-2), and when `Expires` is invalid or repeated. Lifetimes and stale windows, operator defaults included, are clamped to [0, 2147483648 s]. HTTP-dates in a zone other than GMT (for example `PST` or `GMT-8` in the RFC 850 form) are invalid, because `http.ParseTime` resolves zone abbreviations against the host's TZ.
 
 `Jitter` returns `lt` unchanged when `lt < min` or `frac == 0`, else `lt - time.Duration(float64(lt) * frac * u)`. Pure, so the distribution test drives it with a deterministic `u` sequence.
 
