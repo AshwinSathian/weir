@@ -1,0 +1,7 @@
+go test fuzz v1
+string("GET")
+string("http")
+string("example.com")
+string("/a\x00b")
+string("a=1&b=\x7f")
+string("")

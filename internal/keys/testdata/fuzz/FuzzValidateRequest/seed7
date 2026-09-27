@@ -1,0 +1,7 @@
+go test fuzz v1
+string("CONNECT")
+string("")
+string("")
+string("example.com:443")
+string("")
+string("")

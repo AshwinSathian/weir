@@ -3,10 +3,10 @@
 Updated: 2026-09-27
 Phase: 1
 Current card: none
-Card state: awaiting-merge
-Branch: card/M1-03-evaluate
-PR: #9 https://github.com/AshwinSathian/weir/pull/9
-Next card: M1-04
+Card state: ready
+Branch: none
+PR: #10 merged
+Next card: M1-05
 
 ## Blockers
 
@@ -19,9 +19,12 @@ none
 - Pragma with Cache-Control: `ParseRequest` sets `NoCache` from `Pragma: no-cache` even when the request also has `Cache-Control` (docs say "plus Pragma: no-cache" unconditionally). RFC 7234 §5.4 ignored Pragma when Cache-Control was present. Only matters with `Client.HonorRevalidation`. Keep as is, or ignore Pragma when Cache-Control is present (FR-SRV-8 wording change)?
 - Resolve a conflict between CLAUDE.md hard rule 6 (no real-clock sleeps outside the `load` tag) and 05 §8 (remote stores run `ExpiredIsNotFound` on the real clock, now a 3 s sleep). Proposal: exempt remote-store conformance runs from rule 6, or run them only under an integration build tag.
 
+- FR-VAL-1 and `#`: `Validate` accepts `#` (0x23) in `Path` and `RawQuery`, as FR-VAL-1 allows any byte in 0x21-0x7E. net/http passes a raw `#` through `RequestURI`, and `TransportOrigin` forwards it via `URL.Opaque`, so `GET /a#x?q` is keyed as path `/a#x`, query `q`, while nginx-style origins treat `#x?q` as a fragment and serve `/a`. Key and forward stay byte-equal, and browsers never send `#`, so this is cache fragmentation, not poisoning. Proposal: reject `#` in path and query, and `?` in path (RFC 9112 §3.2 origin-form), under the existing `path` and `query` reasons. Changes FR-VAL-1 wording, so it needs your approval.
+
 ## Notes for the next session
 
-- httpcc API: `Lifetime`, `Jitter`, `StaleWindows` (lifetime.go); `CorrectedInitialAge`, `CurrentAge` (age.go); `Evaluate` and `State` (evaluate.go). `State` starts at 1; the zero value is invalid.
+- keys API (M1-04): `Validate(r *Request, c *Config) (host string, err error)` returns the normalized host; key and forwarded request must both use it (P2). Errors are `keys.ErrUpgrade` and `*keys.RequestError{Reason}`; M1-07 `Classify` (or the engine) maps them to `weir.ErrUpgradeNotSupported` and `*weir.RequestError`. `keys.Config` so far has only the path and query limits.
+- httpcc API: `Lifetime`, `Jitter`, `StaleWindows`, `CorrectedInitialAge`, `CurrentAge`, `Evaluate`, `State` (zero `State` is invalid).
 - `Evaluate` trusts `epOK`: the caller's `newestEpoch` applies FR-PRG-7 (04 §6.3). A zero or unknown `EpochMode` with `epOK` returns `Unusable`.
 - FR-MODE-2 (`ModeStaleOnError`) must tell "stale forbidden" from "no SIE window" using `ep.Mode` and `e.Flags`; `sieOK` alone is false for both.
 - Doc wording drift, not yet fixed: 01 FR-SRV-1 and FR-STL-3 say "unqualified `no-cache`", while the 01 RFC table and 04 `FlagNoCache` treat qualified and unqualified the same. The parser, `StaleWindows` and `Evaluate` follow the table.
