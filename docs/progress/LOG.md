@@ -149,3 +149,11 @@ Entry template:
 - Deviations: none. RFC 850 two-digit year pivot left as a `ponytail:` note.
 - Follow-ups: none new.
 - Context: low.
+
+## 2026-09-27 · M1-03 · done
+- Branch / PR: card/M1-03-evaluate / pending
+- Done: `httpcc.Evaluate` and `State` in internal/httpcc/evaluate.go per 04 §4.3. Soft-purge staleness is computed as max(age - lifetime, now - purge time), equal to the pseudo-code and free of overflow. Negative stored lifetimes count as zero.
+- Tests: TestEvaluate (20 rows: fresh, no-cache, SWR and SIE edges at ±1ns, soft purge before/at/after expiry and in the future, invalid, hard, unknown mode, non-applicable epoch, saturation). `make check` passes.
+- Deviations: 04 §4.3 gains a `default: return Unusable` line; the reviewer found an unknown epoch mode failed open (T-9).
+- Follow-ups: none new. M1.1 ticked in PLAN.
+- Context: low; size S was right.

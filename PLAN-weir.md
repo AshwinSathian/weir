@@ -85,7 +85,7 @@ Exit criteria: CI green; `Serve` round-trips a request to `testorigin`.
 
 Refs: FR-VAL-*, FR-KEY-1..6, FR-KEY-8, FR-KEY-12, FR-FWD-*, FR-STO-* (except Vary support), FR-FRS-1..4, FR-FRS-7, FR-SRV-*, FR-INV-1, FR-INV-3, FR-PRG-7, T6.9, T6.11.
 
-- [ ] M1.1 `internal/httpcc` parsing, lifetime, heuristic, age ([04 §4](docs/04-lld.md)). AC: RFC table rows for §4.2.1–4.2.3 pass; `FuzzCacheControl`, `FuzzHTTPDate` exist with seeds.
+- [x] M1.1 `internal/httpcc` parsing, lifetime, heuristic, age ([04 §4](docs/04-lld.md)). AC: RFC table rows for §4.2.1–4.2.3 pass; `FuzzCacheControl`, `FuzzHTTPDate` exist with seeds.
 - [ ] M1.2 `internal/keys` validation, host, path, query rewrite, cookies extraction for keyed cookies, `Accept-Encoding` normalizer, canonical encoding, tags, strict and all forwarding ([04 §3](docs/04-lld.md)). AC: `FuzzValidateRequest`, `FuzzHost`, `FuzzQueryRewrite`, `FuzzCookies`, `FuzzAcceptEncoding`, `FuzzKeyEncodingInjective`, `FuzzForwardEqualsKey`, `FuzzMalformedHeaderAbsent` exist with seeds and pass.
 - [ ] M1.3 `store/memory` S3-FIFO with byte accounting, sharding, epoch sketch and hard-epoch table, `OnEvict` ([05 §4.4, §5](docs/05-storage-interface-spec.md)). AC: `storetest.Run` passes; `TestS3FIFOScanResistance`, `TestByteAccountingBound`, `TestShardDistributionAdversarial` pass.
 - [ ] M1.4 `store/codec.go`. AC: `FuzzCodecRoundTrip`, `FuzzDecodeEntry` pass.

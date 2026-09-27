@@ -512,6 +512,7 @@ if epOK:
     case EpochSoft:    // stale as of the purge time, windows capped at original expiry
         purgeAge := age - now.Sub(ep.At)     // the entry's age at purge time
         expiry = min(expiry, purgeAge)
+    default:           return Unusable      // zero or unknown mode fails closed (T-9)
 staleness := age - expiry
 if staleness < 0 && !e.Flags.Has(FlagNoCache): return Fresh
 if e.Flags.Has(FlagNoCache): return NeedsValidation, sieOK=false
