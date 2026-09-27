@@ -5,7 +5,7 @@ Phase: 1
 Current card: none
 Card state: awaiting-merge
 Branch: card/M1-02-lifetime
-PR: none
+PR: https://github.com/AshwinSathian/weir/pull/8
 Next card: M1-03
 
 ## Blockers
