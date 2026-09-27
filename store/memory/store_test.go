@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"math/rand/v2"
+	"sync"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -40,7 +41,7 @@ func TestConformance(t *testing.T) {
 
 // FR-LCY-1, 05 §5.1: New rejects invalid sizes and applies defaults.
 func TestNewConfig(t *testing.T) {
-	for _, cfg := range []Config{{MaxBytes: -1}, {Shards: -1}, {Shards: 3}} {
+	for _, cfg := range []Config{{MaxBytes: -1}, {Shards: -1}, {Shards: 3}, {Shards: 1 << 40}} {
 		if _, err := New(cfg); err == nil {
 			t.Errorf("New(%+v) = nil error", cfg)
 		}
@@ -66,6 +67,17 @@ func TestSetDeclinesOversize(t *testing.T) {
 	}
 	if s.Bytes() != 0 {
 		t.Fatalf("Bytes = %d after declined Set", s.Bytes())
+	}
+	// A declined replacement removes the older record: Set leaves either the
+	// new record or nothing, never the one it was asked to replace.
+	if err := s.Set(t.Context(), numKey(2), entry(10)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Set(t.Context(), numKey(2), e); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := s.Get(t.Context(), numKey(2)); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("declined replacement kept the old record: %v, %v", got, err)
 	}
 }
 
@@ -131,7 +143,8 @@ func TestByteAccountingBound(t *testing.T) {
 	const maxBytes = 256 << 10
 	s := newStore(t, Config{MaxBytes: maxBytes, Shards: 4})
 	ctx := t.Context()
-	r := rand.New(rand.NewPCG(1, 2)) //nolint:gosec // reproducible workload, not security
+	r := rand.New(rand.NewPCG(1, 2))     //nolint:gosec // reproducible workload, not security
+	last := map[store.Key]*store.Entry{} // S-4: a hit returns the latest Set, never an older one
 	for i := range 50_000 {
 		k := numKey(r.Uint64N(2000))
 		switch r.IntN(10) {
@@ -139,12 +152,18 @@ func TestByteAccountingBound(t *testing.T) {
 			if err := s.Delete(ctx, k); err != nil {
 				t.Fatal(err)
 			}
+			delete(last, k)
 		case 1, 2, 3:
-			_, _ = s.Get(ctx, k)
+			if e, err := s.Get(ctx, k); err == nil && e != last[k] {
+				t.Fatalf("op %d: Get returned a record other than the latest Set", i)
+			}
 		default:
-			if err := s.Set(ctx, k, entry(r.IntN(int(s.MaxObjectBytes())))); err != nil {
+			// Up to 10% over the limit, so some replacements are declined.
+			e := entry(r.IntN(int(s.MaxObjectBytes()) * 11 / 10))
+			if err := s.Set(ctx, k, e); err != nil {
 				t.Fatal(err)
 			}
+			last[k] = e
 		}
 		if b := s.Bytes(); b > maxBytes || b < 0 {
 			t.Fatalf("op %d: Bytes = %d, want in [0, %d]", i, b, maxBytes)
@@ -262,5 +281,51 @@ func TestGhostBoundFollowsMain(t *testing.T) {
 	}
 	if n := len(sh.ghost.ring) - sh.ghost.head; n > max(ghostFloor, sh.main.len) {
 		t.Fatalf("ghost holds %d fingerprints with %d entries in main", n, sh.main.len)
+	}
+}
+
+// S-1, NFR-3: concurrent Set, Get and Delete under constant eviction keep
+// every shard's bookkeeping consistent and within budget.
+func TestConcurrentEvictionInvariants(t *testing.T) {
+	const maxBytes = 128 << 10
+	s := newStore(t, Config{MaxBytes: maxBytes, Shards: 2})
+	var wg sync.WaitGroup
+	for g := range 16 {
+		wg.Go(func() {
+			r := rand.New(rand.NewPCG(uint64(g), 7)) //nolint:gosec // reproducible workload, not security
+			for range 5000 {
+				k := numKey(r.Uint64N(3000))
+				switch r.IntN(8) {
+				case 0:
+					_ = s.Delete(t.Context(), k)
+				case 1, 2, 3:
+					_, _ = s.Get(t.Context(), k)
+				default:
+					_ = s.Set(t.Context(), k, entry(r.IntN(2000)))
+				}
+				if b := s.Bytes(); b > maxBytes {
+					t.Errorf("Bytes = %d > %d", b, maxBytes)
+					return
+				}
+			}
+		})
+	}
+	wg.Wait()
+	for i := range s.shards {
+		sh := &s.shards[i]
+		var sum int64
+		n := 0
+		for _, q := range []*fifo{&sh.small, &sh.main} {
+			for x := q.head; x != nil; x = x.next {
+				if sh.m[x.key] != x || sh.queue(x) != q {
+					t.Fatalf("shard %d: node %x linked in the wrong queue or not mapped", i, x.key[24:])
+				}
+				sum += x.size
+				n++
+			}
+		}
+		if n != len(sh.m) || sum != sh.bytes || sh.small.bytes+sh.main.bytes != sh.bytes {
+			t.Fatalf("shard %d: %d linked nodes, %d mapped; %d linked bytes, %d accounted", i, n, len(sh.m), sum, sh.bytes)
+		}
 	}
 }

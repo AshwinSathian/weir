@@ -32,5 +32,5 @@ none
 - M1-10 also owns E-11: `Config.MaxRetention` and the `Expires` clamp (store the clamped deadline on the node; entries are immutable). `MaxHardEpochs` and `EpochSlots` config fields are not added yet.
 - `New` builds a fixed 256 MiB memory store when `Config.Store` is nil (`ponytail:` in engine.go); FR-MEM-1 sizing is M1-15.
 - `Storable.MaxObjectBytes` counts body plus headers, while `Entry.Size` adds 256 bytes plus tags and vary names. A limit set exactly at the store's `MaxObjectBytes()` passes `New` but near-limit records get declined. Consider a margin in the M1-15 check.
-- Ghost backing array keeps its peak capacity after main shrinks (live count is bounded); `Shards` has no upper bound (operator input).
+- Ghost backing array keeps its peak capacity after main shrinks (live count is bounded). One `Set` can walk up to 4x main's entries under the shard lock when main is full of hot keys (S3-FIFO reinsertion); measure in M1-18 benchmarks.
 - Carried from M1-07/M1-08: `New` must still reject `Forward.Allow` entries naming keyed or hop-by-hop fields and compile query patterns; `Close` does not wait for foreground `Serve` calls (decide before M1-12); codec accepts any header-name case (revisit with Valkey).

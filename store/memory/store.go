@@ -14,11 +14,15 @@ import (
 // Config sizes a Store (05 §5.1).
 type Config struct {
 	MaxBytes int64 // 0: 256 MiB
-	Shards   int   // 0: 16; must be a power of two
+	Shards   int   // 0: 16; a power of two, at most MaxShards
 	// OnEvict, when set, receives per-Set eviction counts by queue: "small",
 	// "main" or "expired". It runs after the shard lock is released.
 	OnEvict func(queue string, n int)
 }
+
+// MaxShards bounds Config.Shards, so a mistyped count fails New instead of
+// exhausting memory (NFR-2).
+const MaxShards = 1 << 16
 
 // Store is the in-process store. It implements store.Store and store.Sizer.
 type Store struct {
@@ -36,7 +40,7 @@ var (
 )
 
 // New returns an empty Store sized by cfg, or an error for a negative size or
-// a shard count that is not a power of two.
+// a shard count that is not a power of two up to MaxShards.
 func New(cfg Config) (*Store, error) {
 	if cfg.MaxBytes == 0 {
 		cfg.MaxBytes = 256 << 20
@@ -47,8 +51,8 @@ func New(cfg Config) (*Store, error) {
 	if cfg.MaxBytes < 0 {
 		return nil, errors.New("store: memory: negative MaxBytes")
 	}
-	if cfg.Shards < 0 || bits.OnesCount(uint(cfg.Shards)) != 1 {
-		return nil, errors.New("store: memory: Shards is not a power of two")
+	if cfg.Shards < 0 || cfg.Shards > MaxShards || bits.OnesCount(uint(cfg.Shards)) != 1 {
+		return nil, errors.New("store: memory: Shards is not a power of two up to MaxShards")
 	}
 	s := &Store{
 		shards:  make([]shard, cfg.Shards),
@@ -78,15 +82,22 @@ func (s *Store) Get(_ context.Context, k store.Key) (*store.Entry, error) {
 	return nil, store.ErrNotFound
 }
 
-// Set stores e at k. It declines, returning nil, a record past its Expires or
-// larger than MaxObjectBytes (S-4).
+// Set stores e at k. It declines, returning nil, a record past its Expires
+// (a no-op, 05 §2.3) or larger than MaxObjectBytes (which also removes any
+// record at k) (S-4).
 func (s *Store) Set(_ context.Context, k store.Key, e *store.Entry) error {
 	if s.closed.Load() {
 		return store.ErrUnavailable
 	}
 	sh := &s.shards[s.shardIndex(k)]
 	size := e.Size()
-	if size > sh.smallCap || !time.Now().Before(e.Expires) {
+	if !time.Now().Before(e.Expires) {
+		return nil
+	}
+	if size > sh.smallCap {
+		// Declined. Drop the record it would have replaced, so Set leaves
+		// the new record or nothing, never an older one.
+		sh.delete(k)
 		return nil
 	}
 	ev := sh.set(k, e, size, maphash.Comparable(s.fpSeed, k))
