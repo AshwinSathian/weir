@@ -131,6 +131,34 @@ func TestKeyedCookiesFeedEncoder(t *testing.T) {
 	}
 }
 
+func TestEncoderKeysEveryCookieValue(t *testing.T) {
+	// INV-1, T-3: a Cookies slice that breaks the config-order contract
+	// still puts every value in the key, so a caller bug fragments the
+	// cache instead of letting a forwarded cookie escape the key.
+	tests := []struct {
+		name  string
+		names []string
+		a, b  []Cookie
+	}{
+		{"out of config order", []string{"a", "b"},
+			[]Cookie{{"b", "2"}, {"a", "1"}}, []Cookie{{"b", "2"}, {"a", "9"}}},
+		{"name outside Key.Cookies", []string{"a"},
+			[]Cookie{{"z", "1"}}, []Cookie{{"z", "9"}}},
+		{"unmatched cookie versus none", []string{"a"},
+			[]Cookie{{"z", "1"}}, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			a, b := baseInput(), baseInput()
+			a.CookieNames, a.Cookies = tt.names, tt.a
+			b.CookieNames, b.Cookies = tt.names, tt.b
+			if PrimaryKey(a) == PrimaryKey(b) {
+				t.Fatal("a cookie value is missing from the key")
+			}
+		})
+	}
+}
+
 func TestPrimaryKeyNoAllocs(t *testing.T) {
 	// Hot path: the pooled buffer keeps key building allocation-free.
 	in := baseInput()

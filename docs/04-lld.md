@@ -364,13 +364,15 @@ for each name in Key.Headers (config order):
     field(0x10, name); presence(0 or 1); if 1: field(0x11, normalizedValue)
 for each name in Key.Cookies (config order):
     field(0x20, name); presence(0 or 1); if 1: field(0x21, value)
+for each cookie left unmatched (a caller bug; see note):
+    field(0x20, name); 0x01; field(0x21, value)
 Primary = sha256(buf)
 
 field(tag, b) = tag byte, uvarint(len(b)), b
 presence(p)   = 0x00 or 0x01
 ```
 
-Because every variable-length field is length-prefixed and every field is tagged, the encoding is injective. A property test ([07-testing-strategy.md §4](07-testing-strategy.md)) generates random field tuples and asserts that distinct tuples produce distinct buffers.
+Because every variable-length field is length-prefixed and every field is tagged, the encoding is injective. Cookie values arrive in `Key.Cookies` order, so the encoder pairs them with names in one pass. A value it cannot pair is still keyed after the loop: the same values build the forwarded `Cookie` header, so a caller bug splits the cache instead of forwarding an unkeyed cookie (INV-1). A property test ([07-testing-strategy.md §4](07-testing-strategy.md)) generates random field tuples and asserts that distinct tuples produce distinct buffers.
 
 Implementation uses a pooled `[]byte` builder (`sync.Pool` of `*[]byte`, reset length to 0) and `sha256.Sum256`. No `fmt`, no string concatenation.
 

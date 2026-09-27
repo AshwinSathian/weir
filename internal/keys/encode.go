@@ -93,6 +93,14 @@ func appendKey(b []byte, in *KeyInput) []byte {
 		b = appendField(b, tagCookieValue, cs[0].Value)
 		cs = cs[1:]
 	}
+	// Leftovers mean a caller broke that contract. Key them anyway, since
+	// the same slice builds the forwarded Cookie header (INV-1): the cost
+	// of the bug is a cache split, never a value the key misses.
+	for _, ck := range cs {
+		b = appendField(b, tagCookieName, ck.Name)
+		b = append(b, 1)
+		b = appendField(b, tagCookieValue, ck.Value)
+	}
 	return b
 }
 
