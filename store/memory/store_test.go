@@ -33,10 +33,10 @@ func entry(bodyLen int) *store.Entry {
 	return &store.Entry{Kind: store.KindResponse, Status: 200, Body: make([]byte, bodyLen), Expires: time.Now().Add(time.Hour)}
 }
 
-// 05 §2, §5 (S-1..S-5); epochs arrive in M1-10.
+// 05 §2, §4, §5 (S-1..S-5, E-1..E-10).
 func TestConformance(t *testing.T) {
-	storetest.Run(t, func(t *testing.T) store.Store { return newStore(t, Config{}) },
-		storetest.WithoutEpochs(), storetest.Synctest())
+	storetest.Run(t, func(t *testing.T) store.Store { return newStore(t, Config{MaxHardEpochs: 8}) },
+		storetest.HardEpochCap(8), storetest.Synctest())
 }
 
 // FR-LCY-1, 05 §5.1: New rejects invalid sizes and applies defaults.

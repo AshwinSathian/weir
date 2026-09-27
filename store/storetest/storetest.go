@@ -24,6 +24,7 @@ type Option func(*options)
 type options struct {
 	noEpochs bool
 	synctest bool
+	hardCap  int
 }
 
 // WithoutEpochs skips the epoch cases, for stores that do not implement
@@ -36,6 +37,11 @@ func WithoutEpochs() Option { return func(o *options) { o.noEpochs = true } }
 // Without it those cases sleep on the real clock, as remote stores must.
 // (synctest.Test forbids t.Run inside a bubble, so the bubble is per case.)
 func Synctest() Option { return func(o *options) { o.synctest = true } }
+
+// HardEpochCap tells Run the store's hard-epoch cap (E-6), so EpochHardCap
+// can fill it. Without it that case is skipped. Stores built by newStore
+// should use a small cap here.
+func HardEpochCap(n int) Option { return func(o *options) { o.hardCap = n } }
 
 // Run runs every conformance case against stores built by newStore. Each
 // case gets a fresh store, closed by t.Cleanup (inside the bubble under
@@ -69,6 +75,8 @@ func Run(t *testing.T, newStore func(t *testing.T) store.Store, opts ...Option) 
 		{"NoMutationAfterSet", false, testNoMutationAfterSet},
 		{"CodecRoundTrip", false, testCodecRoundTrip},
 		{"EpochPerModeKept", true, testEpochPerModeKept},
+		{"EpochNeverUnderInvalidates", true, testEpochNeverUnderInvalidates},
+		{"EpochHardCap", true, testEpochHardCap},
 		{"EpochSinceBoundary", true, testEpochSinceBoundary},
 		{"EpochFastPath", true, testEpochFastPath},
 		{"EpochsMaxAcrossTags", true, testEpochsMaxAcrossTags},
@@ -491,4 +499,45 @@ func testEpochsMaxAcrossTags(t *testing.T, newStore func(*testing.T) store.Store
 	mustSetEpoch(t, s, tag(1), t3, store.EpochSoft)
 	wantEpoch(t, s, tg, base, store.EpochInvalid, t2)
 	wantEpoch(t, s, tg, t2.Add(30*time.Second), store.EpochSoft, t3)
+}
+
+// FR-PRG-7, E-8, T-29: whatever other tags share its cells, a tag's lookup
+// never reports less than its own epoch, in either sketch mode.
+func testEpochNeverUnderInvalidates(t *testing.T, newStore func(*testing.T) store.Store, _ options) {
+	s, base := epochBase(t, newStore)
+	rng := rand.New(rand.NewPCG(1, 2)) //nolint:gosec // reproducible test data
+	const n = 200_000
+	at := make([]time.Time, n)
+	for i := range n {
+		at[i] = base.Add(time.Duration(rng.Int64N(int64(time.Hour))))
+		mustSetEpoch(t, s, tag(i), at[i], store.EpochSoft+store.EpochMode(i%2))
+	}
+	for i := range n {
+		ep, ok, err := s.NewestEpoch(t.Context(), []store.Tag{tag(i)}, at[i])
+		if err != nil || !ok || ep.At.Before(at[i]) || ep.Mode < store.EpochSoft+store.EpochMode(i%2) {
+			t.Fatalf("tag %d: NewestEpoch = %+v, %v, %v; want at least %v", i, ep, ok, err, at[i])
+		}
+	}
+}
+
+// FR-PRG-3, NFR-3, E-6: a new hard tag beyond the cap fails with ErrUnavailable; tags
+// already held can still move forward, and soft epochs have no cap.
+func testEpochHardCap(t *testing.T, newStore func(*testing.T) store.Store, o options) {
+	if o.hardCap <= 0 {
+		t.Skip("hard-epoch cap unknown (HardEpochCap not given)")
+	}
+	s, base := epochBase(t, newStore)
+	for i := range o.hardCap {
+		mustSetEpoch(t, s, tag(i), base, store.EpochHard)
+	}
+	err := s.SetEpoch(t.Context(), tag(o.hardCap), store.Epoch{At: base, Mode: store.EpochHard})
+	if !errors.Is(err, store.ErrUnavailable) {
+		t.Fatalf("SetEpoch beyond the hard cap = %v, want ErrUnavailable", err)
+	}
+	wantNoEpoch(t, s, []store.Tag{tag(o.hardCap)}, base)
+	mustSetEpoch(t, s, tag(0), base.Add(time.Minute), store.EpochHard)
+	wantEpoch(t, s, []store.Tag{tag(0)}, base.Add(time.Minute), store.EpochHard, base.Add(time.Minute))
+	for i := range 10 * o.hardCap {
+		mustSetEpoch(t, s, tag(o.hardCap+i), base, store.EpochSoft)
+	}
 }

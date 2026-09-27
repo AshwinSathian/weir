@@ -4,9 +4,9 @@ Updated: 2026-09-28
 Phase: 1
 Current card: none
 Card state: awaiting-merge
-Branch: card/M1-09-memory-store
-PR: #15 https://github.com/AshwinSathian/weir/pull/15
-Next card: M1-10
+Branch: card/M1-10-memory-epochs
+PR: #16 https://github.com/AshwinSathian/weir/pull/16
+Next card: M1-11
 
 ## Blockers
 
@@ -28,9 +28,8 @@ none
 
 ## Notes for the next session
 
-- `store/memory` exists (05 §5.1-5.3): sharded S3-FIFO, `Bytes`, `MaxObjectBytes`, `OnEvict`. `SetEpoch`/`NewestEpoch` are stubs for M1-10; `TestConformance` passes `WithoutEpochs()`, drop it there.
-- M1-10 also owns E-11: `Config.MaxRetention` and the `Expires` clamp (store the clamped deadline on the node; entries are immutable). `MaxHardEpochs` and `EpochSlots` config fields are not added yet.
-- `New` builds a fixed 256 MiB memory store when `Config.Store` is nil (`ponytail:` in engine.go); FR-MEM-1 sizing is M1-15.
-- `Storable.MaxObjectBytes` counts body plus headers, while `Entry.Size` adds 256 bytes plus tags and vary names. A limit set exactly at the store's `MaxObjectBytes()` passes `New` but near-limit records get declined. Consider a margin in the M1-15 check.
-- Ghost backing array keeps its peak capacity after main shrinks (live count is bounded). One `Set` can walk up to 4x main's entries under the shard lock when main is full of hot keys (S3-FIFO reinsertion); measure in M1-18 benchmarks.
+- `store/memory` epochs exist (05 §4, §5.4): exact global tag (`store.TagGlobal()`, moved from `internal/keys`, which now delegates), capped hard map pruned after `MaxRetention`, two 2^19-cell sketch planes, `newest` fast path. `SetEpoch` with an invalid mode returns an unwrapped error (not a store sentinel).
+- E-11 clamp counts from `RequestTime` (approved 2026-09-28); the clamped deadline lives on the node.
+- `New` builds a fixed 256 MiB memory store when `Config.Store` is nil (`ponytail:` in engine.go); FR-MEM-1 sizing is M1-15. `Storable.MaxObjectBytes` vs `Entry.Size` overhead margin still open for M1-15.
+- Hard-epoch prune walks up to `MaxHardEpochs` under the write lock when the table is full (`ponytail:` in epochs.go). Worst-case S3-FIFO eviction walk still to measure in M1-18.
 - Carried from M1-07/M1-08: `New` must still reject `Forward.Allow` entries naming keyed or hop-by-hop fields and compile query patterns; `Close` does not wait for foreground `Serve` calls (decide before M1-12); codec accepts any header-name case (revisit with Valkey).

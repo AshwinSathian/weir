@@ -1,7 +1,7 @@
 # Weir low-level design
 
 Status: v1.0
-Date: 2026-09-27
+Date: 2026-09-28
 Depends on: [01-technical-spec.md](01-technical-spec.md), [02-architecture.md](02-architecture.md), [03-hld.md](03-hld.md)
 
 This document is written for the person (or agent) implementing a milestone. It gives exact type definitions, algorithms, locking rules and pseudo-code. Code may differ in naming of unexported identifiers; exported names, behavior, bounds and locking rules may not change without updating this document in the same commit.
@@ -303,7 +303,7 @@ var (
 
 `Entry.Size()` returns `len(Body) + header bytes + vary name bytes + 32 per tag + 56 per variant ref + 256` (fixed overhead) and is what byte-weighted stores account. Vary specs have no body, so leaving out their names and refs would let up to `MaxVariants` refs per record go uncounted against the store's byte bound (NFR-3).
 
-Tags are computed by `internal/keys`:
+Tags are computed by `internal/keys`, except `TagGlobal`, which `store.TagGlobal()` defines so stores can recognize it (05 E-5) without importing `internal/keys`:
 
 ```
 TagGlobal         = sha256("weir/tag/v1\x00global")

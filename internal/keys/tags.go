@@ -17,10 +17,8 @@ const (
 )
 
 // TagGlobal returns the tag every stored entry carries, used by a purge
-// of everything. Its kind byte is 0x00.
-func TagGlobal() store.Tag {
-	return sha256.Sum256([]byte(tagVersion + "\x00global"))
-}
+// of everything. Its kind byte is 0x00; store owns the value (05 E-5).
+func TagGlobal() store.Tag { return store.TagGlobal() }
 
 // TagOrigin returns the tag of origin o, which is scheme://host[:port]
 // after host normalization.
