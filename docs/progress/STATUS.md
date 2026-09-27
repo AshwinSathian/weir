@@ -5,7 +5,7 @@ Phase: 1
 Current card: none
 Card state: awaiting-merge
 Branch: card/M1-08-entry-codec
-PR: pending
+PR: #14 https://github.com/AshwinSathian/weir/pull/14
 Next card: M1-09
 
 ## Blockers
