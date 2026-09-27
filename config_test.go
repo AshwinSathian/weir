@@ -159,6 +159,12 @@ func TestInvalidConfigRejected(t *testing.T) {
 		{"empty vary allow name", Config{Key: KeyConfig{VaryAllow: []string{""}}}, "Key.VaryAllow"},
 		{"forward allow with colon", Config{Forward: ForwardConfig{Allow: []string{"X-A:"}}}, "Forward.Allow"},
 		{"bypass header with trailing space", Config{Bypass: BypassConfig{Headers: []string{"authorization "}}}, "Bypass.Headers"},
+		{"keyed cookie with separator", Config{Key: KeyConfig{Cookies: []string{"a;b"}}}, "Key.Cookies"},
+		{"keyed cookie with equals", Config{Key: KeyConfig{Cookies: []string{"a=b"}}}, "Key.Cookies"},
+		{"empty bypass cookie", Config{Bypass: BypassConfig{Cookies: []string{""}}}, "Bypass.Cookies"},
+		{"accept-encoding list in one token", Config{Key: KeyConfig{AcceptEncoding: []string{"gzip, br"}}}, "Key.AcceptEncoding"},
+		{"empty accept-encoding token", Config{Key: KeyConfig{AcceptEncoding: []string{"gzip", ""}}}, "Key.AcceptEncoding"},
+		{"informational status storable", Config{Storable: StorableConfig{Statuses: []int{101}}}, "Storable.Statuses"},
 		{"typed nil observer", Config{Observer: typedNil}, "Observer"},
 	}
 	for _, tt := range tests {
@@ -251,9 +257,10 @@ func TestEmptyStatusesKept(t *testing.T) {
 	}
 }
 
-// FR-LCY-1, FR-FRS-5: NoJitter keeps Jitter at zero instead of the 0.10 default.
+// FR-LCY-1, FR-FRS-5: NoJitter forces Jitter to zero, even over an explicit
+// value, so consumers reading only Jitter still honor it.
 func TestNoJitterKeepsZero(t *testing.T) {
-	c, err := prepareConfig(Config{Freshness: FreshnessConfig{NoJitter: true}})
+	c, err := prepareConfig(Config{Freshness: FreshnessConfig{NoJitter: true, Jitter: 0.3}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -271,5 +278,32 @@ func TestShortOriginTimeoutClampsCoalesceDefaults(t *testing.T) {
 	}
 	if c.Coalesce.LeaderMaxAge != 5*time.Second || c.Coalesce.FollowerMaxWait != 5*time.Second {
 		t.Errorf("LeaderMaxAge %v FollowerMaxWait %v, want 5s each", c.Coalesce.LeaderMaxAge, c.Coalesce.FollowerMaxWait)
+	}
+}
+
+// FR-LCY-1, T-3: names that canonicalize to the same header, and repeated
+// cookie or coding names, appear once so the key and forwarded request list
+// each input once. First occurrence wins, keeping the operator's order.
+func TestConfigDuplicateNamesRemoved(t *testing.T) {
+	c, err := prepareConfig(Config{
+		Key: KeyConfig{
+			Headers:        []string{"x-a", "X-B", "X-A"},
+			Cookies:        []string{"b", "a", "b"},
+			AcceptEncoding: []string{"br", "gzip", "BR"},
+		},
+		Forward: ForwardConfig{Allow: []string{"x-debug", "X-Debug"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ck := range []struct{ got, want []string }{
+		{c.Key.Headers, []string{"X-A", "X-B"}},
+		{c.Key.Cookies, []string{"b", "a"}},
+		{c.Key.AcceptEncoding, []string{"br", "gzip"}},
+		{c.Forward.Allow, []string{"X-Debug"}},
+	} {
+		if !slices.Equal(ck.got, ck.want) {
+			t.Errorf("got %q, want %q", ck.got, ck.want)
+		}
 	}
 }

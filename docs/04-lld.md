@@ -147,7 +147,7 @@ type LimitsConfig struct {
 
 Note: the spec's `CacheGroups.Honor` default of true is expressed as a zero-value `Ignore` flag so the zero `Config` is correct. Every boolean in `Config` is written so that `false` is the default.
 
-`New` copies the config, applies defaults, canonicalizes header names, compiles query patterns, sorts nothing that the user ordered (for example `Key.Cookies` order is the forwarded order), and validates per FR-LCY-1. It returns `fmt.Errorf("%w: field %s: %s", ErrInvalidConfig, name, reason)`.
+`New` copies the config, applies defaults, canonicalizes header names (and lowercases `Key.AcceptEncoding`), drops repeated names keeping the first, rejects header, cookie and coding names that are not RFC 9110 tokens (T-3, T-13), compiles query patterns, sorts nothing that the user ordered (for example `Key.Cookies` order is the forwarded order), and validates per FR-LCY-1. It returns `fmt.Errorf("%w: field %s: %s", ErrInvalidConfig, name, reason)`.
 
 ### 1.2 Request, Response, Purge, WarmStats
 

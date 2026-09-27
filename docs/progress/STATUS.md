@@ -23,4 +23,5 @@ none
 - P0-05: a typed-nil `Config.Store` panics like a typed-nil observer did; reject it in `New` the same way (`reflect`, see the Observer check in `validate`).
 - Config shape decided this session: `NoCacheStatus` bool (CacheStatus "" means "Weir"), negative `Bypass.ReportStrippedCookies` disables the report, `Forward.NoTraceHeaders`, `Limiter.MaxUpload` (0: max(1, MaxConcurrent/4)), `Timeouts.StreamIdle`.
 - Unchecked ranges left for their cards: `ReserveForeground > MaxConcurrent` (limiter), `MaxOpenFor < OpenFor` and `Breaker.Window` under 10 buckets of 1ns (breaker), `MissRate.MinRatio > 1`, `HeuristicFraction > 1`. Reject or clamp them when the component lands.
+- P0-05: `New` should log a warning when `Forward.Allow` names `Cookie`, `Authorization` or `Proxy-Authorization` (unkeyed forwarding, R-3), like it does for `ForwardAll`.
 - Query patterns (`Key.QueryDrop`/`QueryKeep`) are stored as strings only; M1-05 compiles them.

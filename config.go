@@ -224,7 +224,10 @@ func (c *Config) applyDefaults() {
 	}
 
 	f := &c.Freshness
-	if f.Jitter == 0 && !f.NoJitter {
+	switch {
+	case f.NoJitter:
+		f.Jitter = 0 // consumers read Jitter alone
+	case f.Jitter == 0:
 		f.Jitter = 0.10
 	}
 	orDur(&f.JitterMinLifetime, 10*time.Second)
@@ -299,15 +302,30 @@ func (c *Config) applyDefaults() {
 	}
 }
 
+// canonicalize rewrites names to the form requests are matched in and drops
+// repeats, first occurrence first, so each input is keyed and forwarded once.
 func (c *Config) canonicalize() {
-	for _, s := range [][]string{c.Key.Headers, c.Key.VaryAllow, c.Forward.Allow, c.Bypass.Headers} {
-		for i, name := range s {
-			s[i] = http.CanonicalHeaderKey(name)
+	for _, p := range []*[]string{&c.Key.Headers, &c.Key.VaryAllow, &c.Forward.Allow, &c.Bypass.Headers} {
+		*p = dedupe(*p, http.CanonicalHeaderKey)
+	}
+	c.Key.AcceptEncoding = dedupe(c.Key.AcceptEncoding, strings.ToLower)
+	c.Key.Cookies = dedupe(c.Key.Cookies, nil)       // cookie names are case-sensitive
+	c.Bypass.Cookies = dedupe(c.Bypass.Cookies, nil) // cookie names are case-sensitive
+}
+
+// dedupe applies norm (when non-nil) to each element in place and removes
+// later repeats. The config is bounded by what the operator wrote.
+func dedupe(s []string, norm func(string) string) []string {
+	out := s[:0]
+	for _, v := range s {
+		if norm != nil {
+			v = norm(v)
+		}
+		if !slices.Contains(out, v) {
+			out = append(out, v)
 		}
 	}
-	for i, tok := range c.Key.AcceptEncoding {
-		c.Key.AcceptEncoding[i] = strings.ToLower(tok)
-	}
+	return out
 }
 
 // validate applies the FR-LCY-1 rules that need no store. The store-size rule
@@ -394,8 +412,8 @@ func (c *Config) validate() error {
 	}
 	for _, s := range c.Storable.Statuses {
 		switch {
-		case s < 100 || s > 599:
-			return invalid("Storable.Statuses", fmt.Sprintf("%d is not a status code", s))
+		case s < 200 || s > 599:
+			return invalid("Storable.Statuses", fmt.Sprintf("%d is not a final status code", s))
 		case s == 206 || s == 304 || s == 500 || s == 502 || s == 503 || s == 504:
 			// These have dedicated handling and are never stored as entries.
 			return invalid("Storable.Statuses", fmt.Sprintf("%d cannot be stored", s))
@@ -410,16 +428,22 @@ func (c *Config) validate() error {
 		name  string
 		names []string
 	}{
+		// A header name that is not a token never matches a request header,
+		// so the entry would silently do nothing (for example "Authorization ").
 		{"Key.Headers", c.Key.Headers},
 		{"Key.VaryAllow", c.Key.VaryAllow},
 		{"Forward.Allow", c.Forward.Allow},
 		{"Bypass.Headers", c.Bypass.Headers},
+		// T-3: a separator in a cookie name would split into extra cookies in
+		// the rewritten Cookie header, forwarding a pair that is not keyed.
+		{"Key.Cookies", c.Key.Cookies},
+		{"Bypass.Cookies", c.Bypass.Cookies},
+		// T-13: the chosen coding becomes the forwarded Accept-Encoding value.
+		{"Key.AcceptEncoding", c.Key.AcceptEncoding},
 	} {
-		// A name that is not a token never matches a request header, so the
-		// entry would silently do nothing (for example "Authorization ").
 		for _, n := range f.names {
 			if !isToken(n) {
-				return invalid(f.name, fmt.Sprintf("%q is not a header name", n))
+				return invalid(f.name, fmt.Sprintf("%q is not a token", n))
 			}
 		}
 	}
