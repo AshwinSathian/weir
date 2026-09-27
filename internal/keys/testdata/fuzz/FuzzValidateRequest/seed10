@@ -2,6 +2,6 @@ go test fuzz v1
 string("GET")
 string("http")
 string("example.com")
-string("/a/../b")
+string("/")
 string("")
-string("")
+string("\"upgrade\", upgrade2, xupgrade")

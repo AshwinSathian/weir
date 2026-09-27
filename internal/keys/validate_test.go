@@ -218,15 +218,27 @@ func TestValidateReturnsNormalizedHost(t *testing.T) {
 func FuzzValidateRequest(f *testing.F) {
 	// FR-VAL-1, FR-VAL-4, NFR-2; T-6: no panic, and no accepted path or
 	// query with bytes outside 0x21-0x7E or a malformed escape.
-	f.Add("GET", "http", "example.com", "/a/../b", "x=1")
-	f.Fuzz(func(t *testing.T, method, scheme, host, path, query string) {
-		r := &Request{Method: method, Scheme: scheme, Host: host, Path: path, RawQuery: query}
+	f.Add("GET", "http", "example.com", "/a/../b", "x=1", "keep-alive, Upgrade")
+	f.Fuzz(func(t *testing.T, method, scheme, host, path, query, conn string) {
+		r := &Request{Method: method, Scheme: scheme, Host: host, Path: path, RawQuery: query,
+			Header: http.Header{"Connection": {conn}, "Upgrade": {"websocket"}}}
 		h, err := Validate(r, &testCfg)
+		// FR-UPG-1, T-44: an upgrade is never missed and never invented.
+		wantUp := method == http.MethodConnect
+		for opt := range strings.SplitSeq(conn, ",") {
+			wantUp = wantUp || strings.EqualFold(strings.Trim(opt, " \t"), "upgrade")
+		}
+		if errors.Is(err, ErrUpgrade) != wantUp {
+			t.Fatalf("method %q Connection %q: upgrade = %v, want %v", method, conn, !wantUp, wantUp)
+		}
 		if err != nil {
 			if reasonOf(err) == "" && !errors.Is(err, ErrUpgrade) {
 				t.Fatalf("error %v has no reason", err)
 			}
 			return
+		}
+		if path == "*" && method != http.MethodOptions {
+			t.Fatalf("accepted * with method %q", method)
 		}
 		if !visibleASCII(path) || !visibleASCII(query) {
 			t.Fatalf("accepted invisible byte: path %q query %q", path, query)

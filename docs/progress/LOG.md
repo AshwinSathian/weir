@@ -165,3 +165,11 @@ Entry template:
 - Deviations: 04 §3.1 step 1 now says upgrade detection runs before validation. 04 §3.7 now covers the edge cases: port form, bracketed IPv4 rejected, IPv6 rewritten to canonical form, `a..` rejected so normalization is idempotent.
 - Follow-ups: mapping keys errors to weir errors lands with Classify (M1-07).
 - Context: low; size M was generous.
+
+## 2026-09-27 · M1-04 · review-fixes
+- Branch / PR: card/M1-04-validate / #10
+- Done: adversarial review before merge. `FuzzValidateRequest` now also fuzzes the `Connection` value and checks that upgrade detection neither misses nor invents an upgrade (FR-VAL-4 wants every request-path parser fuzzed; `isUpgrade` had none), plus that `*` passes only with `OPTIONS`. Two new seeds. A mutation that drops the OWS trim fails the seeds.
+- Tests: FuzzValidateRequest extended; 30 s fuzz clean; `make check` passes.
+- Deviations: none.
+- Follow-ups: FR-VAL-1 `#` question in STATUS "Waiting on Ashwin". Leaked `keys` errors would map to 502, not 400/501, until M1-07 wires the mapping (already in STATUS notes).
+- Context: low.
