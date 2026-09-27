@@ -4,9 +4,9 @@ Updated: 2026-09-27
 Phase: 1
 Current card: none
 Card state: awaiting-merge
-Branch: card/M1-07-classify-forward
-PR: #13 https://github.com/AshwinSathian/weir/pull/13
-Next card: M1-08
+Branch: card/M1-08-entry-codec
+PR: #14 https://github.com/AshwinSathian/weir/pull/14
+Next card: M1-09
 
 ## Blockers
 
@@ -28,10 +28,7 @@ none
 
 ## Notes for the next session
 
-- `keys.Classify(r *Request, c *Config) (Classified, error)` is ready for the engine (04 §3.1). The root package converts `weir.Request` to `keys.Request` and fills `keys.Config` from `Config` (new fields: `NormalizePath`, `ForwardAll`, `Allow` canonical, `NoTraceHeaders`, `HonorRevalidation`). `ReqCC` already drops the directives FR-SRV-8 ignores when `HonorRevalidation` is off.
-- Still to come in keys: `Key.Headers` in key and forward, `FwdBypass` and bypass rules (M7-03), and `asRangePass` for range misses (04 §6.2, FR-FWD-3). `keys.FwdReason` has only `FwdNone` and `FwdMethod`.
-- Config validation (`New`) must reject `Forward.Allow` entries that name keyed or hop-by-hop fields (Cookie, Accept-Encoding) so operators get an error; forwarding already ignores them. It also still needs to compile query patterns (04 §1.1).
-- Pass-through requests forward trace headers as received, even with `NoTraceHeaders` (FR-FWD-3 forwards everything but hop-by-hop fields). Decide with the D29 wording if that matters.
-- `Evaluate` trusts `epOK`: the caller's `newestEpoch` applies FR-PRG-7 (04 §6.3). engine.go: `Close` does not wait for foreground `Serve` calls; decide before M1-12.
-- Spec gaps from the M1-07 adversarial review: TRACE and OPTIONS are forwarded even with `Max-Forwards: 0` (RFC 9110 §7.6.2 says the proxy answers itself), and pass-through and ForwardAll forward `Proxy-Authorization` to the origin. Neither is covered by FR-FWD-*; decide when the engine pass path lands.
-- Doc wording drift: 01 FR-SRV-1 and FR-STL-3 say "unqualified `no-cache`" while the 01 RFC table and 04 `FlagNoCache` treat both the same.
+- `store.Encode`/`store.Decode` exist (05 §6). Remote stores and the FR-SNP-1 snapshot writer call `Decode(b, maxObjectBytes)`; its errors already wrap `ErrUnavailable`.
+- `Decode` allocates under 32x its input (27x measured worst case, one-byte vary names) (every repeated item carries at least one byte). `Entry.Size` does not charge per-item slice or map overhead; revisit if snapshot load feeds decoded entries into a byte-weighted store.
+- Codec accepts header and vary names in any case form; add canonical-form validation when the Valkey store lands if the engine relies on it.
+- Carried from M1-07: `keys.Classify` ready for the engine (04 §3.1); `New` must still reject `Forward.Allow` entries naming keyed or hop-by-hop fields and compile query patterns; `Close` does not wait for foreground `Serve` calls (decide before M1-12); TRACE/OPTIONS with `Max-Forwards: 0` and forwarding of `Proxy-Authorization` on pass-through are open spec questions.
