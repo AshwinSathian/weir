@@ -3,9 +3,9 @@
 Updated: 2026-09-27
 Phase: 0
 Current card: none
-Card state: awaiting-merge
+Card state: ready
 Branch: card/P0-06-storetest
-PR: https://github.com/AshwinSathian/weir/pull/6
+PR: #6 merged
 Next card: M1-01
 
 ## Blockers
@@ -14,7 +14,6 @@ none
 
 ## Waiting on Ashwin
 
-- Review and merge the P0-06 PR.
 - Confirm the coalesce-default clamp: a zero `LeaderMaxAge`/`FollowerMaxWait` now defaults to min(10s, `Timeouts.Origin`) instead of failing validation when the origin timeout is under 10s (01 §6 and 04 §1.1 updated).
 - Approve the storetest API: `Run(t, newStore, opts ...Option)` with `WithoutEpochs()` and `Synctest()` (05 §8). `Synctest()` replaces the card's `func(d time.Duration)` advance hook, which cannot work: `synctest.Test` forbids `t.Run` inside a bubble and stores read `time.Now` (D9).
 - Resolve a conflict between CLAUDE.md hard rule 6 (no real-clock sleeps outside the `load` tag) and 05 §8 (remote stores run `ExpiredIsNotFound` on the real clock, now a 3 s sleep). Proposal: exempt remote-store conformance runs from rule 6, or run them only under an integration build tag.
