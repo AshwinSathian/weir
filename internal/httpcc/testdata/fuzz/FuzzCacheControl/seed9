@@ -1,0 +1,2 @@
+go test fuzz v1
+string("ext=\"C:\\\", private, no-store")

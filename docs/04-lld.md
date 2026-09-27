@@ -459,14 +459,14 @@ type ResponseDirectives struct {
 	NoStore, NoCache, Private   bool
 	Public, MustRevalidate      bool
 	ProxyRevalidate, MustUnderstand bool
-	Duplicates                  bool // a freshness directive repeated with different values
+	Duplicates                  bool // a delta-seconds directive (max-age, s-maxage, SWR, SIE) repeated with different values (FR-FRS-2)
 }
 
 func ParseResponse(h http.Header) ResponseDirectives
 func ParseRequest(h http.Header) RequestDirectives // no-store, no-cache, max-age, min-fresh, max-stale, only-if-cached, plus Pragma: no-cache
 ```
 
-Parser rules: split on commas outside quoted strings; directive names compared case-insensitively; arguments accept token or quoted-string; unknown directives ignored (RFC 9111 §5.2.3); `delta-seconds` parse rejects signs and non-digits, clamps above 2147483648.
+Parser rules: split on commas outside quoted strings (a quote opens only as the first byte of an argument; an unclosed quote rescans the rest of the line so a later `private` or `no-store` still counts); directive names compared case-insensitively; arguments accept token or quoted-string; unknown directives ignored (RFC 9111 §5.2.3); `delta-seconds` parse rejects signs and non-digits, clamps above 2147483648.
 
 ### 4.2 Lifetime, age, permissions
 
