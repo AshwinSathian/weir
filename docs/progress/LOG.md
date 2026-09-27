@@ -197,3 +197,11 @@ Entry template:
 - Deviations: added FuzzNormalizePath (hard rule 8). Malformed escapes leave the path unchanged so normalization stays idempotent; Validate rejects them anyway. No doc changes.
 - Follow-ups: M1-07 wires normalizePath into key, forward and URI tag.
 - Context: low; size M was right.
+
+## 2026-09-27 · M1-06 · review-fixes
+- Branch / PR: card/M1-06-key-encoding / #12
+- Done: adversarial review before merge. Probed concurrent PrimaryKey/TagURI under -race (deterministic), escape edge cases (`%00`, `%7f%80%ff`, `%5C`, `%3b%3F%23`, mixed `.%2e`), tag namespace separation, and the cookie pairing contract. Defect: appendKey dropped cookies out of Key.Cookies order or outside it, which M1-07 would then forward unkeyed (poisoning). Unmatched cookies are now keyed after the config loop; valid inputs encode unchanged.
+- Tests: TestEncoderKeysEveryCookieValue (3 rows); `make check` and CI pass.
+- Deviations: 04 §3.2 gains the leftover-cookie loop and a note.
+- Follow-ups: `/.%2e/x` normalizes to `/../x` (by spec: key equals forward, origin resolves); worth a README line with NormalizePath.
+- Context: low.
