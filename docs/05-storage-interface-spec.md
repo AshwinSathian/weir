@@ -261,7 +261,10 @@ Notes that follow from the table and require nothing new from the interface:
 ## 8. Conformance suite (`store/storetest`)
 
 ```go
-func Run(t *testing.T, newStore func(t *testing.T) store.Store)
+func Run(t *testing.T, newStore func(t *testing.T) store.Store, opts ...Option)
+
+func WithoutEpochs() Option // epoch cases t.Skip (a store before its epoch support lands)
+func Synctest() Option      // each time-dependent case runs in its own synctest bubble
 ```
 
 Every store implementation calls `storetest.Run` from its tests. Cases (each a subtest):
@@ -271,7 +274,7 @@ Every store implementation calls `storetest.Run` from its tests. Cases (each a s
 | `GetMissing` | `ErrNotFound` |
 | `SetGetRoundTrip` | every field of every kind survives (deep equality, times compared with `Equal`) |
 | `SetReplacesAnyKind` | response replaced by vary spec and back |
-| `ExpiredIsNotFound` | record with past `Expires` is not returned (uses synctest for memory; real clock with 2 s margin for remote) |
+| `ExpiredIsNotFound` | record with past `Expires` is not returned: 1 s expiry, then `time.Sleep(3 s)`, which is fake inside a bubble with `Synctest()` (memory) and real otherwise (remote, 2 s margin). `synctest.Test` forbids `t.Run` inside a bubble, so the bubble is per case, not around `Run` |
 | `SetPastExpiresIsNoop` | |
 | `DeleteMissingOK` | |
 | `ContextCanceled` | canceled context yields an error that `errors.Is` `ErrUnavailable` within 100 ms (remote stores; memory store may ignore context and succeed) |
