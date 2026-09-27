@@ -5,7 +5,7 @@ Phase: 1
 Current card: none
 Card state: awaiting-merge
 Branch: card/M1-07-classify-forward
-PR: none
+PR: #13 https://github.com/AshwinSathian/weir/pull/13
 Next card: M1-08
 
 ## Blockers
