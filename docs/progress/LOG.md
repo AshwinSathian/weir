@@ -255,7 +255,7 @@ Entry template:
 - Context: low.
 
 ## 2026-09-28 · M1-10 · done
-- Branch / PR: card/M1-10-memory-epochs / pending
+- Branch / PR: card/M1-10-memory-epochs / #16
 - Done: `store/memory/epochs.go`: global tag exact in atomics (E-5), hard epochs in a capped map with opportunistic pruning (E-6), soft and invalid sketch planes of `uint32` seconds rounded up (E-7), newest-epoch fast path (E-10). `MaxRetention`, `MaxHardEpochs`, `EpochSlots` config; retention clamp (E-11) stored on the node. `store.TagGlobal()` added; `keys.TagGlobal` delegates, so `store/memory` imports only `store` (02 §3).
 - Tests: storetest `EpochNeverUnderInvalidates`, `EpochHardCap` (new `HardEpochCap` option); memory `TestInvalidationFloodBounded` (1M epochs, 0 allocs), `TestNewEpochConfig`, `TestEpochSketchRounding`, `TestGlobalHardEpochOutsideCap`, `TestHardEpochPrune`, `TestRetentionClamp`. Mutations (floor rounding, StoredAt clamp, no prune) each fail a test. `make check` passes.
 - Deviations: 05 E-5, E-11, §5.1, §8 and 04 §2 updated. Ashwin approved the RequestTime clamp, `MaxEpochSlots`, `HardEpochCap` and moving `TagGlobal` into `store`.
