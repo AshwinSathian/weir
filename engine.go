@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 
 	"github.com/AshwinSathian/weir/store"
+	"github.com/AshwinSathian/weir/store/memory"
 )
 
 // Origin produces responses for forwarded requests. Fetch must honor ctx:
@@ -49,10 +50,17 @@ func New(cfg Config) (*Engine, error) {
 	}
 	own := c.Store == nil
 	if own {
-		// ponytail: no-op store until the memory store lands (M1-09).
-		c.Store = nopStore{}
+		// ponytail: fixed 256 MiB until FR-MEM-1 sizing from GOMEMLIMIT (M1-15).
+		m, err := memory.New(memory.Config{})
+		if err != nil {
+			return nil, err
+		}
+		c.Store = m
 	}
 	if sz, ok := c.Store.(store.Sizer); ok && c.Storable.MaxObjectBytes > sz.MaxObjectBytes() {
+		if own {
+			_ = c.Store.Close()
+		}
 		return nil, invalid("Storable.MaxObjectBytes", fmt.Sprintf("above the store's limit of %d", sz.MaxObjectBytes()))
 	}
 	warnForwarding(c)

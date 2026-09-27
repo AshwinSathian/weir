@@ -39,7 +39,7 @@ func getReq(path string) *weir.Request {
 	return &weir.Request{Method: "GET", Scheme: "https", Host: "example.com", Path: path, Header: http.Header{"Accept": {"*/*"}}}
 }
 
-// P3, FR-LCY-1: New with a nil Store builds a no-op store, and Serve reaches
+// P3, FR-LCY-1: New with a nil Store builds the memory store, and Serve reaches
 // the origin through the single fetch function.
 func TestServePassThroughStub(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
@@ -269,6 +269,10 @@ func TestNewRejectsStore(t *testing.T) {
 	}
 	if err := e.Close(context.Background()); err != nil || s.closed {
 		t.Fatalf("Close = %v, store closed = %v; caller-owned store must stay open", err, s.closed)
+	}
+	// The default memory store admits 10% of a 16 MiB shard (05 §5.1).
+	if _, err := weir.New(weir.Config{Storable: weir.StorableConfig{MaxObjectBytes: 2 << 20}}); !errors.Is(err, weir.ErrInvalidConfig) {
+		t.Errorf("MaxObjectBytes above default store max: err = %v", err)
 	}
 }
 

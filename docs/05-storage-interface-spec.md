@@ -1,7 +1,7 @@
 # Weir storage interface specification
 
 Status: v1.0
-Date: 2026-09-27
+Date: 2026-09-28
 Depends on: [01-technical-spec.md](01-technical-spec.md), [04-lld.md §2](04-lld.md)
 Seed name: `02-storage-interface-spec.md` (renumbered, see [docs/README.md](README.md))
 
@@ -116,7 +116,7 @@ Tags are attacker-influenced: a flood of `POST /x?r=<random>` requests that the 
 ```go
 type Config struct {
 	MaxBytes     int64         // 0: 256 MiB
-	Shards       int           // 0: 16; must be a power of two
+	Shards       int           // 0: 16; a power of two, at most 1 << 16 (MaxShards)
 	MaxRetention     time.Duration // 0: 24h
 	MaxHardEpochs    int           // 0: 10000
 	EpochSlots       int           // 0: 1 << 19; power of two
@@ -170,7 +170,7 @@ type ghost struct {
 Algorithm (adapted from Yang et al., SOSP 2023, with byte weights):
 
 - `Get(k)`: read-lock; look up; if missing, unlock and return `ErrNotFound`; if not expired, raise `freq` by one with a compare-and-swap loop capped at 3 (skipped when already 3, which is the common case for hot keys), unlock and return `e`. If expired: unlock, take the write lock, look the key up again (it may have been replaced), unlink it if it is still the same expired node, unlock, return `ErrNotFound`. Hits therefore take only the read lock, so a hot key does not serialize its readers.
-- `Set(k, e)`: compute `size = e.Size()`. If `size > small.cap` return nil (declined). Lock. If `k` exists, replace the entry in place, adjust `bytes` by the size difference, keep queue and `freq`. Otherwise: if the key's fingerprint is in the ghost set, remove it from the ghost and insert at the head of `main`; else insert at the head of `small`. Then evict until `bytes <= cap`. Unlock.
+- `Set(k, e)`: compute `size = e.Size()`. If `size > small.cap`, delete any record at `k` and return nil (declined), so a declined replacement never leaves the older record in place. Lock. If `k` exists, replace the entry in place, adjust `bytes` by the size difference, keep queue and `freq`. Otherwise: if the key's fingerprint is in the ghost set, remove it from the ghost and insert at the head of `main`; else insert at the head of `small`. Then evict until `bytes <= cap`. Unlock.
 - Evict: if `small.bytes > small.cap` (or `main` is empty), evict from `small`, else from `main`.
   - From `small` tail: if the node is expired, drop it. If `freq >= 2`, move it to the head of `main` with `freq = 0`. Otherwise drop it and add its fingerprint to the ghost.
   - From `main` tail: if expired, drop it. If `freq >= 1`, decrement `freq` and move it to the head of `main` (reinsertion). Otherwise drop it.
