@@ -64,7 +64,7 @@ func (sh *shard) get(k store.Key) (*store.Entry, bool) {
 
 // set stores e at k (size already checked against smallCap) and evicts
 // until the shard is within its byte budget.
-func (sh *shard) set(k store.Key, e *store.Entry, size int64, fp uint64) evictions {
+func (sh *shard) set(k store.Key, e *store.Entry, size int64, expires time.Time, fp uint64) evictions {
 	now := time.Now()
 	sh.mu.Lock()
 	defer sh.mu.Unlock()
@@ -73,9 +73,9 @@ func (sh *shard) set(k store.Key, e *store.Entry, size int64, fp uint64) evictio
 		q := sh.queue(n)
 		q.bytes += size - n.size
 		sh.bytes += size - n.size
-		n.e, n.size = e, size
+		n.e, n.size, n.expires = e, size, expires
 	} else {
-		n = &node{key: k, e: e, size: size, fp: fp}
+		n = &node{key: k, e: e, size: size, expires: expires, fp: fp}
 		if sh.ghost.take(fp) {
 			n.queue = queueMain
 		}

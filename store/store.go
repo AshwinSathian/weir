@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"net/http"
 	"time"
@@ -12,6 +13,11 @@ type Key [32]byte
 
 // Tag is a 32-byte purge tag. Tags are computed by internal/keys.
 type Tag [32]byte
+
+// TagGlobal returns the tag every stored entry carries, used by a purge of
+// everything. It lives here, not in internal/keys, so stores can keep it
+// exactly (05 E-5) while importing only this package (02 §3).
+func TagGlobal() Tag { return sha256.Sum256([]byte("weir/tag/v1\x00global")) }
 
 // Kind is the kind of record an Entry holds.
 type Kind uint8

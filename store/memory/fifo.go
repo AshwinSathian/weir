@@ -19,13 +19,14 @@ type node struct {
 	key        store.Key
 	e          *store.Entry
 	size       int64
+	expires    time.Time     // e.Expires clamped by MaxRetention (E-11)
 	fp         uint64        // ghost fingerprint of key
 	freq       atomic.Uint32 // 0..3
 	queue      uint8
 	prev, next *node
 }
 
-func (n *node) expired(now time.Time) bool { return !now.Before(n.e.Expires) }
+func (n *node) expired(now time.Time) bool { return !now.Before(n.expires) }
 
 // fifo is an intrusive doubly linked queue: push at the head, evict from the
 // tail. bytes and len track its contents.

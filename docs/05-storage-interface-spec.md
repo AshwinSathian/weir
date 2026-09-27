@@ -101,13 +101,13 @@ Epochs compare the purging node's clock with the fetching node's clock. In Phase
 
 Tags are attacker-influenced: a flood of `POST /x?r=<random>` requests that the origin answers with 2xx creates one URI-invalidation epoch per request, and RFC 9111 §4.4 makes that invalidation a MUST. An exact per-tag table must therefore either grow without bound or, on overflow, fall back to something coarse like a global epoch, which would let about 100 000 cheap requests invalidate the whole cache. Neither is acceptable (T-29). Stores bound epoch memory as follows.
 
-- E-5. Global tag: kept exactly (three timestamps).
+- E-5. Global tag (`store.TagGlobal()`): kept exactly (three timestamps), and applied only to lookups whose tags include it.
 - E-6. Hard epochs: kept exactly per tag. Only operator `Purge` calls create them. The memory store caps them at `MaxHardEpochs` (default 10 000); `SetEpoch` for a new hard tag beyond the cap returns an error wrapping `ErrUnavailable`, and `Purge` reports it so the operator can use `All`. Entries older than `MaxRetention` cannot be affected, so hard epochs older than that are pruned.
 - E-7. Soft and invalid epochs: kept in a fixed-size max-timestamp sketch, one plane per mode. A plane is an array of `EpochSlots` (default 2^19) `uint32` cells holding monotonic seconds since the store's base instant, rounded up (§4.3). `SetEpoch(t, ep)` raises the cell at each of `d = 2` positions derived from `t` (two halves of `maphash` of the tag with a per-process seed) to at least `ceil(ep.At)`. A lookup for tag `t` reads the minimum over its `d` cells.
 - E-8. The sketch never under-invalidates: every cell a tag maps to is at least that tag's true epoch, so the minimum is too. It can over-invalidate an entry only when all `d` of its cells were raised by other tags after the entry's request time. With 60 000 distinct invalidations inside one entry lifetime and default sizing, the chance is about 4% (`(1 - e^{-2·60000/2^19})^2`), falling fast as volume drops. Over-invalidation means one extra conditional request for that entry, never an error. Rounding epoch times up to whole seconds also only over-invalidates.
 - E-9. Memory is fixed: 2 planes × 2^19 cells × 4 bytes = 4 MiB at defaults, whatever the attack volume.
 - E-10. Fast path: the store tracks the newest `At` written in any mode; when `since` is after it, `NewestEpoch` answers `ok = false` without touching the sketch. Between purges, every hit takes this path.
-- E-11. Maximum retention: `Set` clamps `Expires` to `StoredAt + MaxRetention` (default 24 h). This bounds how long hard epochs must be kept. The `uint32` seconds in the sketch cover 136 years from the store's base time.
+- E-11. Maximum retention: `Set` clamps `Expires` to `RequestTime + MaxRetention` (default 24 h; `StoredAt` when `RequestTime` is zero, the time of the `Set` when both are). This bounds how long hard epochs must be kept: a hard epoch at `P` applies to records requested at or before `P`, so all of them are gone by `P + MaxRetention`. Clamping from `StoredAt` would let a record fetched across `P` outlive the pruned epoch by its fetch time. The `uint32` seconds in the sketch cover 136 years from the store's base time.
 
 ## 5. Memory store (`store/memory`)
 
@@ -119,7 +119,7 @@ type Config struct {
 	Shards       int           // 0: 16; a power of two, at most 1 << 16 (MaxShards)
 	MaxRetention     time.Duration // 0: 24h
 	MaxHardEpochs    int           // 0: 10000
-	EpochSlots       int           // 0: 1 << 19; power of two
+	EpochSlots       int           // 0: 1 << 19; a power of two, at most 1 << 26 (MaxEpochSlots)
 	MaxBytesPerOwner int64         // 0: off; per shard (M14, FR-FAIR-2)
 	SnapshotPath     string        // "": off (M13, FR-SNP-1..3)
 	OnEvict      func(queue string, n int) // optional; "small", "main", "expired"
@@ -272,6 +272,7 @@ func Run(t *testing.T, newStore func(t *testing.T) store.Store, opts ...Option)
 
 func WithoutEpochs() Option // epoch cases t.Skip (a store before its epoch support lands)
 func Synctest() Option      // each time-dependent case runs in its own synctest bubble
+func HardEpochCap(n int) Option // the store's hard-epoch cap; EpochHardCap is skipped without it
 ```
 
 Every store implementation calls `storetest.Run` from its tests. Cases (each a subtest):

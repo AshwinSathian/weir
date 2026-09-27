@@ -13,8 +13,11 @@ import (
 
 // Config sizes a Store (05 §5.1).
 type Config struct {
-	MaxBytes int64 // 0: 256 MiB
-	Shards   int   // 0: 16; a power of two, at most MaxShards
+	MaxBytes      int64         // 0: 256 MiB
+	Shards        int           // 0: 16; a power of two, at most MaxShards
+	MaxRetention  time.Duration // 0: 24h; caps every record's lifetime (E-11)
+	MaxHardEpochs int           // 0: 10000 (E-6)
+	EpochSlots    int           // 0: 1 << 19; a power of two, at most MaxEpochSlots (E-7)
 	// OnEvict, when set, receives per-Set eviction counts by queue: "small",
 	// "main" or "expired". It runs after the shard lock is released.
 	OnEvict func(queue string, n int)
@@ -31,6 +34,7 @@ type Store struct {
 	seed    maphash.Seed // shard choice (T-22)
 	fpSeed  maphash.Seed // ghost fingerprints, independent of shard choice
 	onEvict func(string, int)
+	ep      *epochs
 	closed  atomic.Bool
 }
 
@@ -39,8 +43,8 @@ var (
 	_ store.Sizer = (*Store)(nil)
 )
 
-// New returns an empty Store sized by cfg, or an error for a negative size or
-// a shard count that is not a power of two up to MaxShards.
+// New returns an empty Store sized by cfg, or an error for a negative
+// setting or a shard or slot count that is not a power of two within its bound.
 func New(cfg Config) (*Store, error) {
 	if cfg.MaxBytes == 0 {
 		cfg.MaxBytes = 256 << 20
@@ -48,11 +52,23 @@ func New(cfg Config) (*Store, error) {
 	if cfg.Shards == 0 {
 		cfg.Shards = 16
 	}
-	if cfg.MaxBytes < 0 {
-		return nil, errors.New("store: memory: negative MaxBytes")
+	if cfg.MaxRetention == 0 {
+		cfg.MaxRetention = 24 * time.Hour
 	}
-	if cfg.Shards < 0 || cfg.Shards > MaxShards || bits.OnesCount(uint(cfg.Shards)) != 1 {
+	if cfg.MaxHardEpochs == 0 {
+		cfg.MaxHardEpochs = 10000
+	}
+	if cfg.EpochSlots == 0 {
+		cfg.EpochSlots = 1 << 19
+	}
+	if cfg.MaxBytes < 0 || cfg.MaxRetention < 0 || cfg.MaxHardEpochs < 0 {
+		return nil, errors.New("store: memory: negative MaxBytes, MaxRetention or MaxHardEpochs")
+	}
+	if !powerOfTwo(cfg.Shards, MaxShards) {
 		return nil, errors.New("store: memory: Shards is not a power of two up to MaxShards")
+	}
+	if !powerOfTwo(cfg.EpochSlots, MaxEpochSlots) {
+		return nil, errors.New("store: memory: EpochSlots is not a power of two up to MaxEpochSlots")
 	}
 	s := &Store{
 		shards:  make([]shard, cfg.Shards),
@@ -60,11 +76,16 @@ func New(cfg Config) (*Store, error) {
 		seed:    maphash.MakeSeed(),
 		fpSeed:  maphash.MakeSeed(),
 		onEvict: cfg.OnEvict,
+		ep:      newEpochs(cfg.EpochSlots, cfg.MaxHardEpochs, cfg.MaxRetention),
 	}
 	for i := range s.shards {
 		s.shards[i] = newShard(cfg.MaxBytes / int64(cfg.Shards))
 	}
 	return s, nil
+}
+
+func powerOfTwo(n, limit int) bool {
+	return n > 0 && n <= limit && bits.OnesCount(uint(n)) == 1
 }
 
 // shardIndex hashes k with a per-process seed, so request inputs cannot be
@@ -82,7 +103,8 @@ func (s *Store) Get(_ context.Context, k store.Key) (*store.Entry, error) {
 	return nil, store.ErrNotFound
 }
 
-// Set stores e at k. It declines, returning nil, a record past its Expires
+// Set stores e at k until e.Expires, clamped to MaxRetention after its
+// request time (E-11). It declines, returning nil, a record past its Expires
 // (a no-op, 05 §2.3) or larger than MaxObjectBytes (which also removes any
 // record at k) (S-4).
 func (s *Store) Set(_ context.Context, k store.Key, e *store.Entry) error {
@@ -91,7 +113,23 @@ func (s *Store) Set(_ context.Context, k store.Key, e *store.Entry) error {
 	}
 	sh := &s.shards[s.shardIndex(k)]
 	size := e.Size()
-	if !time.Now().Before(e.Expires) {
+	now := time.Now()
+	// From RequestTime, not StoredAt: a hard epoch at P is pruned at
+	// P + MaxRetention and applies to records requested at or before P, so
+	// those must be gone by then (E-6). Records without RequestTime are checked against every epoch (since is
+	// zero), so StoredAt is enough for them. Records without either start now.
+	from := e.RequestTime
+	if from.IsZero() {
+		from = e.StoredAt
+	}
+	if from.IsZero() || from.After(now) {
+		from = now
+	}
+	expires := e.Expires
+	if limit := from.Add(s.ep.retention); limit.Before(expires) {
+		expires = limit
+	}
+	if !now.Before(expires) {
 		return nil
 	}
 	if size > sh.smallCap {
@@ -100,7 +138,7 @@ func (s *Store) Set(_ context.Context, k store.Key, e *store.Entry) error {
 		sh.delete(k)
 		return nil
 	}
-	ev := sh.set(k, e, size, maphash.Comparable(s.fpSeed, k))
+	ev := sh.set(k, e, size, expires, maphash.Comparable(s.fpSeed, k))
 	if s.onEvict != nil {
 		for _, c := range []struct {
 			q string
@@ -123,22 +161,24 @@ func (s *Store) Delete(_ context.Context, k store.Key) error {
 	return nil
 }
 
-// SetEpoch records nothing yet.
-//
-// ponytail: epochs are a no-op until M1-10 adds the sketch and hard table.
-func (s *Store) SetEpoch(context.Context, store.Tag, store.Epoch) error {
+// SetEpoch records ep for t (E-2). A new hard tag beyond MaxHardEpochs
+// returns an error wrapping store.ErrUnavailable (E-6).
+func (s *Store) SetEpoch(_ context.Context, t store.Tag, ep store.Epoch) error {
 	if s.closed.Load() {
 		return store.ErrUnavailable
 	}
-	return nil
+	return s.ep.set(t, ep)
 }
 
-// NewestEpoch reports no epoch until M1-10.
-func (s *Store) NewestEpoch(context.Context, []store.Tag, time.Time) (store.Epoch, bool, error) {
+// NewestEpoch returns the most severe, then latest, epoch among tags at or
+// after since (E-3). Soft and invalid times may be rounded up to the next
+// whole second after the store was built (E-7).
+func (s *Store) NewestEpoch(_ context.Context, tags []store.Tag, since time.Time) (store.Epoch, bool, error) {
 	if s.closed.Load() {
 		return store.Epoch{}, false, store.ErrUnavailable
 	}
-	return store.Epoch{}, false, nil
+	ep, ok := s.ep.newestOf(tags, since)
+	return ep, ok, nil
 }
 
 // Info names the store; it is not remote.
