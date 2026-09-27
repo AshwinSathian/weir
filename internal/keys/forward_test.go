@@ -26,10 +26,10 @@ var fuzzCfgs = []Config{
 
 func FuzzForwardEqualsKey(f *testing.F) {
 	// INV-1, FR-FWD-1, FR-FWD-5, FR-FWD-6; T-1, T-2, T-5
-	f.Add(byte(0), "GET", "/a", "a=1&utm_x=2", "lang=en; sid=1; x=2", "gzip;q=0.5, br", "evil")
-	f.Add(byte(1), "HEAD", "/%7e/%2f", "b2=1&a=0&c=3", "lang=en", "*", "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")
-	f.Add(byte(2), "GET", "/", "", "a=1; a=2", "zstd;q=0", "")
-	f.Fuzz(func(t *testing.T, sel byte, method, path, query, cookie, ae, extra string) {
+	f.Add(byte(0), "GET", "/a", "a=1&utm_x=2", "lang=en; sid=1; x=2", "gzip;q=0.5, br", "evil", "X-Original-Url")
+	f.Add(byte(1), "HEAD", "/%7e/%2f", "b2=1&a=0&c=3", "lang=en", "*", "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01", "host")
+	f.Add(byte(2), "GET", "/", "", "a=1; a=2", "zstd;q=0", "", "content-length")
+	f.Fuzz(func(t *testing.T, sel byte, method, path, query, cookie, ae, extra, name string) {
 		cfg := &fuzzCfgs[int(sel)%len(fuzzCfgs)]
 		r := &Request{Method: method, Scheme: "https", Host: "example.com", Path: path, RawQuery: query,
 			Header: http.Header{
@@ -37,8 +37,24 @@ func FuzzForwardEqualsKey(f *testing.F) {
 				"X-Forwarded-Host": {extra}, "X-Tenant": {extra}, "Traceparent": {extra}, "Tracestate": {extra},
 				"X-Request-Id": {extra}, "If-None-Match": {extra}, "Range": {extra}, "Connection": {extra},
 			}}
+		if isToken(name) {
+			// Any field net/http would accept, under its canonical name.
+			r.Header[http.CanonicalHeaderKey(name)] = []string{extra}
+		}
+		before := r.Header.Clone()
 		c, err := Classify(r, cfg)
-		if err != nil || c.Class != ClassCacheable {
+		if !equalHeader(r.Header, before) {
+			t.Fatalf("client header mutated: %v, was %v", r.Header, before)
+		}
+		if err != nil {
+			return
+		}
+		if c.Class == ClassPass {
+			for _, name := range append(hopByHop, "Host") {
+				if _, ok := c.Forwarded.Header[name]; ok {
+					t.Fatalf("pass request forwards %s", name)
+				}
+			}
 			return
 		}
 		f := c.Forwarded

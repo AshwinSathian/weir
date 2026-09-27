@@ -9,9 +9,13 @@ import (
 // hopByHop are the fields RFC 9110 §7.6.1 says a proxy never forwards.
 var hopByHop = []string{"Connection", "Keep-Alive", "Proxy-Connection", "Te", "Transfer-Encoding", "Upgrade"}
 
-// dropped are the client preconditions and ranges a cacheable fetch never
-// carries (FR-FWD-1): the stored response must be the full one.
-var dropped = []string{"If-None-Match", "If-Modified-Since", "If-Match", "If-Unmodified-Since", "If-Range", "Range"}
+// dropped are the fields a cacheable fetch never carries (FR-FWD-1): client
+// preconditions and ranges, since the stored response must be the full one,
+// and fields that describe a body, since the fetch has none (T-5).
+var dropped = []string{
+	"If-None-Match", "If-Modified-Since", "If-Match", "If-Unmodified-Since", "If-Range", "Range",
+	"Content-Length", "Expect", "Trailer",
+}
 
 // forwardHeader builds the forwarded header of a cacheable request (04 §3.5).
 // In strict mode (T-1, INV-1) it holds only keyed fields, the cache
@@ -69,6 +73,9 @@ func dropHopByHop(h http.Header, conn []string) {
 	for _, name := range hopByHop {
 		delete(h, name)
 	}
+	// P2: the origin sees the normalized Request.Host only. net/http never
+	// leaves Host in the map, but other adapters and Origins may.
+	delete(h, "Host")
 }
 
 // filterTrace applies FR-FWD-6 (T-40): trace fields that reach the origin

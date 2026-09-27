@@ -355,7 +355,7 @@ Classification order:
 3. Bypass: any `Bypass.Headers` present, or any `Bypass.Cookies` present in any `Cookie` line: `ClassPass`, `FwdBypass`.
 4. Otherwise build the forwarded request and keys (§3.2 to §3.5).
 
-For `ClassPass`, the forwarded request is the client request with hop-by-hop fields removed, path and query untouched, body attached. No key is built except the URI tag (needed for invalidation). The URI tag is computed from the path and query after applying the same rewrite rules as cacheable requests (§3.4, and path normalization when enabled), even though the forwarded query stays untouched; otherwise `POST /p?utm_source=x` would invalidate a URI that no cached `GET` is stored under.
+For `ClassPass`, the forwarded request is the client request with hop-by-hop fields and any `Host` field removed (the host is `Forwarded.Host`), path and query untouched, body attached. No key is built except the URI tag (needed for invalidation). The URI tag is computed from the path and query after applying the same rewrite rules as cacheable requests (§3.4, and path normalization when enabled), even though the forwarded query stays untouched; otherwise `POST /p?utm_source=x` would invalidate a URI that no cached `GET` is stored under.
 
 ### 3.2 Canonical primary-key encoding
 
@@ -419,13 +419,13 @@ out := http.Header{}
 for name in Key.Headers: if v, ok := normalized(name); ok { out[name] = []string{v} }
 copy if present: Authorization, Cache-Control, Pragma, traceparent, tracestate, X-Request-Id
 for name in Forward.Allow: copy all lines if present
-delete hop-by-hop fields, fields named in Connection, conditionals and Range (an Allow entry cannot bring them back)
+delete hop-by-hop fields, fields named in Connection, Host, conditionals, Range, Content-Length, Expect and Trailer (an Allow entry cannot bring them back)
 if v := cookieHeader(keyedCookies()); v != "": out["Cookie"] = []string{v}
 filter trace fields (FR-FWD-6)
 out["Accept-Encoding"] = []string{aeBucket}  // always, set last, e.g. "gzip" or "identity"
 ```
 
-`ForwardAll` copies all fields, then deletes hop-by-hop fields, the fields named in `Connection`, `If-None-Match`, `If-Modified-Since`, `If-Match`, `If-Unmodified-Since`, `If-Range`, `Range`, filters trace fields, and sets `Accept-Encoding` to the bucket. The `Cookie` field stays as received.
+`ForwardAll` copies all fields, then deletes hop-by-hop fields, the fields named in `Connection`, `Host`, `If-None-Match`, `If-Modified-Since`, `If-Match`, `If-Unmodified-Since`, `If-Range`, `Range`, and the body fields `Content-Length`, `Expect` and `Trailer` (the fetch has no body), filters trace fields, and sets `Accept-Encoding` to the bucket. The `Cookie` field stays as received.
 
 Trace filtering drops `traceparent` and `tracestate` together unless there is exactly one `traceparent` line in version-00 form with lowercase hex and non-zero ids, and drops `X-Request-Id` unless it is one line of at most 128 visible ASCII bytes. With `NoTraceHeaders` all three go.
 

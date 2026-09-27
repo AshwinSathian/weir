@@ -140,6 +140,37 @@ func TestAllowCannotForwardRawCookie(t *testing.T) {
 	}
 }
 
+func TestBodylessForwardHasNoBodyFields(t *testing.T) {
+	// FR-FWD-1, INV-1, P2; T-5: a cacheable fetch has no body, so no field
+	// may describe one, and the host is Forwarded.Host alone.
+	h := http.Header{
+		"Content-Length": {"5"}, "Expect": {"100-continue"}, "Trailer": {"X"},
+		"Host": {"evil.example"}, "Content-Type": {"text/plain"},
+	}
+	for _, all := range []bool{false, true} {
+		t.Run(fmt.Sprintf("ForwardAll=%v", all), func(t *testing.T) {
+			cfg := classifyCfg()
+			cfg.ForwardAll = all
+			cfg.Allow = []string{"Content-Length", "Expect", "Trailer", "Host"}
+			r := classifyReq("GET", h.Clone())
+			r.Body = io.NopCloser(strings.NewReader("hello"))
+			c, err := Classify(r, cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, name := range []string{"Content-Length", "Expect", "Trailer", "Host"} {
+				if v, ok := c.Forwarded.Header[name]; ok {
+					t.Fatalf("%s forwarded: %q", name, v)
+				}
+			}
+		})
+	}
+	c, _ := Classify(classifyReq("POST", h.Clone()), classifyCfg())
+	if _, ok := c.Forwarded.Header["Host"]; ok || c.Forwarded.Header.Get("Content-Length") != "5" {
+		t.Fatalf("pass forward: %v", c.Forwarded.Header)
+	}
+}
+
 func TestClassifyNormalizePath(t *testing.T) {
 	// FR-KEY-4, FR-FWD-5
 	cfg := classifyCfg()

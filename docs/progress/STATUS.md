@@ -33,4 +33,5 @@ none
 - Config validation (`New`) must reject `Forward.Allow` entries that name keyed or hop-by-hop fields (Cookie, Accept-Encoding) so operators get an error; forwarding already ignores them. It also still needs to compile query patterns (04 §1.1).
 - Pass-through requests forward trace headers as received, even with `NoTraceHeaders` (FR-FWD-3 forwards everything but hop-by-hop fields). Decide with the D29 wording if that matters.
 - `Evaluate` trusts `epOK`: the caller's `newestEpoch` applies FR-PRG-7 (04 §6.3). engine.go: `Close` does not wait for foreground `Serve` calls; decide before M1-12.
+- Spec gaps from the M1-07 adversarial review: TRACE and OPTIONS are forwarded even with `Max-Forwards: 0` (RFC 9110 §7.6.2 says the proxy answers itself), and pass-through and ForwardAll forward `Proxy-Authorization` to the origin. Neither is covered by FR-FWD-*; decide when the engine pass path lands.
 - Doc wording drift: 01 FR-SRV-1 and FR-STL-3 say "unqualified `no-cache`" while the 01 RFC table and 04 `FlagNoCache` treat both the same.
