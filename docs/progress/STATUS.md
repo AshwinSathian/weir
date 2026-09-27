@@ -26,10 +26,12 @@ none
 - Trace fields in INV-1: docs/06 INV-1 lists `Authorization`, `Cache-Control`, `Pragma`, Allow and Weir validators as the only unkeyed forwarded fields, but FR-FWD-6 (D29) also forwards `traceparent`, `tracestate` and `X-Request-Id` on cacheable fetches, and M1-07 does. Proposal: add the three trace fields to INV-1's list (06 wording change).
 - `tracestate` has no limit: T-40 says trace headers get "validated format and length", but FR-FWD-6 checks only `traceparent` and `X-Request-Id`, so up to the adapter's header limit of `tracestate` reaches the origin unkeyed. Proposal: forward it only as at most 512 bytes of visible ASCII in one or more lines combined (W3C limit), else drop it (FR-FWD-6 wording change).
 
+- FR-STO-5 and malformed `s-maxage`: a response to an `Authorization` request is stored as shareable when its only permission is an invalid (`s-maxage=abc`) or conflicting repeated `s-maxage`. Lifetime is 0, but an explicit `stale-if-error` or `ModeStaleOnError` could serve it stale to another user on origin error (T-8). Proposal: for FR-STO-5, count `s-maxage` only when valid and not duplicated (FR-STO-5 wording change).
+
 ## Notes for the next session
 
 - `storability(cfg, c, resp, body, respTime)` (storable.go) and `buildEntry(cfg, c, resp, body, reqTime, respTime, d)` (entry.go) are pure and not yet called; M1-12 wires them into `fetch` and writes hit-for-miss markers from `d.responseDriven` (FR-STO-12). Cache-Groups (FR-STO-10) is M9-03.
 - With `StripSetCookie`, the triggering client must get headers from `resp.Header`, not the entry, or it loses `Set-Cookie` (FR-STO-6).
-- `normalizeResponse` now canonicalizes and merges origin header keys (INV-4); every later header check may rely on canonical keys.
+- `normalizeResponse` now canonicalizes origin header keys into a new map when any key is non-canonical (never writes the Origin's map or arrays) (INV-4); later header checks may rely on canonical keys. `storeDecision.responseDriven` is already false under `Authorization` or request `no-store`.
 - `MaxObjectBytes` counts body plus origin header bytes before FR-STO-11 exclusions; the `Entry.Size` overhead margin is still open for M1-15. `New` still builds a fixed 256 MiB store (`ponytail:` in engine.go).
 - Carried: `New` must reject `Forward.Allow` entries naming keyed or hop-by-hop fields and compile query patterns; decide whether `Close` waits for foreground `Serve` calls before M1-12; codec accepts any header-name case (revisit with Valkey); hard-epoch prune and S3-FIFO eviction walk to measure in M1-18.

@@ -369,3 +369,55 @@ func TestOriginHeaderKeysCanonicalized(t *testing.T) {
 		t.Errorf("got %+v, want not stored for private", d)
 	}
 }
+
+func TestUnkeyedRequestNeverResponseDriven(t *testing.T) {
+	// FR-STO-12, T-31: Authorization and a request no-store reach the origin
+	// unkeyed, so no refusal under them may license a hit-for-miss marker,
+	// whatever reason wins.
+	cfg := storableConfig(t, nil)
+	for _, tc := range []struct {
+		name string
+		mod  func(*keys.Classified)
+		resp *Response
+	}{
+		{"authorized error status", func(c *keys.Classified) { c.Authorized = true }, originResp(500, "Cache-Control", "public, max-age=60")},
+		{"authorized set-cookie", func(c *keys.Classified) { c.Authorized = true }, originResp(200, "Cache-Control", "public, max-age=60", "Set-Cookie", "a=b")},
+		{"authorized private", func(c *keys.Classified) { c.Authorized = true }, originResp(200, "Cache-Control", "private, s-maxage=60")},
+		{"no-store request, error status", func(c *keys.Classified) { c.ReqCC.NoStore = true }, originResp(403, "Cache-Control", "max-age=60")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := classifiedGET("/", false)
+			tc.mod(c)
+			if d := storability(cfg, c, tc.resp, nil, testRespTime); d.ok || d.responseDriven {
+				t.Errorf("got %+v, want refused and not response-driven", d)
+			}
+		})
+	}
+}
+
+func TestNormalizeResponseLeavesOriginHeaderAlone(t *testing.T) {
+	// INV-4, P4: canonicalizing must not write into a header map or value
+	// array the Origin may reuse across responses, and duplicate keys merge
+	// canonical-first in a fixed order.
+	shared := http.Header{
+		"Cache-Control": append(make([]string, 0, 4), "max-age=60"),
+		"cache-control": {"private"},
+		"CACHE-CONTROL": {"no-cache"},
+	}
+	snapshot := map[string][]string{}
+	for k, v := range shared {
+		snapshot[k] = slices.Clone(v[:cap(v)])
+	}
+	for range 20 {
+		r := &Response{StatusCode: 200, Header: shared}
+		normalizeResponse(r)
+		if got := r.Header["Cache-Control"]; !slices.Equal(got, []string{"max-age=60", "no-cache", "private"}) {
+			t.Fatalf("Cache-Control = %q", got)
+		}
+	}
+	for k, v := range shared {
+		if !slices.Equal(v[:cap(v)], snapshot[k]) || len(shared) != 3 {
+			t.Fatalf("origin header changed: %s = %q", k, v[:cap(v)])
+		}
+	}
+}

@@ -277,3 +277,11 @@ Entry template:
 - Deviations: 04 §9 lists the defensive `method` not-stored reason. FR-STO-10 moved to M9-03 (needs the sfv parser).
 - Follow-ups: review nits left open (invalid `Expires` counts as explicit freshness for 302/307; `Connection: Cache-Control` drops the stored Cache-Control while its directives still apply).
 - Context: low; size M was right.
+
+## 2026-09-28 · M1-11 · review-fixes
+- Branch / PR: card/M1-11-storability / #18
+- Done: adversarial review before merge. `responseDriven` was true under `Authorization` or request `no-store` whenever a response check (status, private, set-cookie) failed first; it relied on a second guard in the planned `fetch` (T-31). Now false inside `storability`. `normalizeResponse` wrote into the Origin's header map and value arrays (a data race for Origins that reuse headers) and merged in map order; now builds a new map, canonical-first then sorted.
+- Tests: TestUnkeyedRequestNeverResponseDriven, TestNormalizeResponseLeavesOriginHeaderAlone (both failed before the fix). `make check` passes.
+- Deviations: none.
+- Follow-ups: FR-STO-5 with malformed `s-maxage` (Waiting on Ashwin).
+- Context: low.

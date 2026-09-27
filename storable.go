@@ -29,7 +29,10 @@ func storability(cfg *Config, c *keys.Classified, resp *Response, body []byte, r
 	d := storeDecision{cc: httpcc.ParseResponse(resp.Header)}
 	d.lifetime, d.heuristic = httpcc.Lifetime(d.cc, resp.Header, resp.StatusCode, respTime, cfg.freshness())
 	fail := func(reason string, responseDriven bool) storeDecision {
-		d.reason, d.responseDriven = reason, responseDriven
+		// T-31: under unkeyed inputs no reason is response-driven, whichever
+		// check happened to fail first.
+		d.reason = reason
+		d.responseDriven = responseDriven && !c.Authorized && !c.ReqCC.NoStore
 		return d
 	}
 	h := resp.Header
