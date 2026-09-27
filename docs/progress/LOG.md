@@ -263,7 +263,7 @@ Entry template:
 - Context: medium; size M was right.
 
 ## 2026-09-28 · M1-10 · review-fixes
-- Branch / PR: card/M1-10-review-fixes / pending (#16 was merged before this review)
+- Branch / PR: card/M1-10-review-fixes / #17 (#16 was merged before this review)
 - Done: adversarial review of the merged epoch code. Two under-invalidation defects (E-8): seconds rounding added before dividing, so an epoch `At` saturated in the future (year 9999) overflowed into cell 1 and was lost for soft and invalid; an `At` saturated in the past (about 292 years before `New`, or zero) collided with the `noEpoch` sentinel and was lost in every mode, including the global tag. Rounding now divides first; offsets are lifted off the sentinel. 05 §5.4 now says hard epochs are pruned when a new tag finds the table full, which is what the code does.
 - Tests: TestEpochSaturatedTimesNotLost (both directions, every mode, plain and global tag), TestEpochConcurrentRaise (synctest, 8 writers and 8 readers, readers never go backwards, final value is the max). Mutation checks: reverting either fix fails the new test. `make check` passes. card-reviewer re-review: findings fixed.
 - Deviations: 05 §5.4 wording only.
