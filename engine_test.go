@@ -1,10 +1,13 @@
 package weir_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -266,5 +269,52 @@ func TestNewRejectsStore(t *testing.T) {
 	}
 	if err := e.Close(context.Background()); err != nil || s.closed {
 		t.Fatalf("Close = %v, store closed = %v; caller-owned store must stay open", err, s.closed)
+	}
+}
+
+// 01 §4: Cache on an origin's Response is ignored; an origin cannot claim a
+// hit. A body-less response keeps http.NoBody so adapters can skip the body.
+func TestServeIgnoresOriginCacheInfo(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		e := newEngine(t, weir.Config{})
+		defer closeEngine(t, e)
+		origin := weir.OriginFunc(func(context.Context, *weir.Request) (*weir.Response, error) {
+			return &weir.Response{StatusCode: http.StatusNoContent, Cache: weir.CacheInfo{Hit: true, Stored: true, Detail: "forged"}}, nil
+		})
+		resp, err := e.Serve(t.Context(), getReq("/"), origin)
+		if err != nil {
+			t.Fatalf("Serve: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.Cache != (weir.CacheInfo{}) {
+			t.Errorf("Cache = %+v, want zero", resp.Cache)
+		}
+		if resp.Body != http.NoBody || resp.Header == nil {
+			t.Errorf("Body = %T, Header nil = %v; want http.NoBody and a non-nil Header", resp.Body, resp.Header == nil)
+		}
+	})
+}
+
+// R-3: New warns when forwarding sends unkeyed credentials to the origin.
+func TestNewWarnsOnCredentialForwarding(t *testing.T) {
+	tests := []struct {
+		name string
+		fwd  weir.ForwardConfig
+		want int
+	}{
+		{"strict with no allow list is quiet", weir.ForwardConfig{}, 0},
+		{"ForwardAll warns", weir.ForwardConfig{Mode: weir.ForwardAll}, 1},
+		{"credential headers in Allow warn", weir.ForwardConfig{Allow: []string{"cookie", "Authorization", "proxy-authorization", "X-Trace"}}, 3},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			log := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
+			e := newEngine(t, weir.Config{Forward: tt.fwd, Logger: log})
+			closeEngine(t, e)
+			if got := strings.Count(buf.String(), "level=WARN"); got != tt.want {
+				t.Fatalf("%d warnings, want %d:\n%s", got, tt.want, buf.String())
+			}
+		})
 	}
 }

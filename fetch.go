@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 )
 
 var (
@@ -28,7 +29,12 @@ func (e *Engine) fetch(ctx context.Context, req *Request, origin Origin) fetchRe
 		cancel()
 		return fetchResult{err: timeoutOrOrigin(ctx, tctx, err)}
 	}
-	resp.Body = &cancelOnClose{ReadCloser: resp.Body, cancel: cancel}
+	resp.Cache = CacheInfo{} // ignored on origin responses (01 §4); Serve sets it
+	if resp.Body == http.NoBody {
+		cancel() // nothing left to bound; keeps NoBody visible to adapters
+	} else {
+		resp.Body = &cancelOnClose{ReadCloser: resp.Body, cancel: cancel}
+	}
 	return fetchResult{resp: resp}
 }
 

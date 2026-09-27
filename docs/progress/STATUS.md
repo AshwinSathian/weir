@@ -24,4 +24,5 @@ none
 - `Serve` forwards `*req` unchanged and leaves `Cache` zero until classification lands (M1-07). A nil `origin` panics inside `safeFetch` and comes back as `*OriginError` (502).
 - `New` uses `nopStore` when `Config.Store` is nil (replace with the memory store in M1-09) and runs the `store.Sizer` MaxObjectBytes check. Typed-nil `Store` is rejected in `validate`.
 - Engine tests are package `weir_test` (testorigin imports weir); `export_test.go` exposes `GoBackground`.
+- `Close` does not wait for foreground `Serve` calls already past the closed check. Before M1-12 uses the store on the Serve path, decide whether Close tracks them (for example a second WaitGroup) before closing an engine-owned store.
 - Unchecked config ranges from P0-03 are still open for their component cards (limiter, breaker, miss-rate, heuristic fraction).
