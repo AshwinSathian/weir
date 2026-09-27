@@ -14,26 +14,27 @@ Pseudo-code is Go-flavored and omits error plumbing where it adds nothing.
 
 ```go
 type Config struct {
-	Store       store.Store // nil: memory store with memory.Config{} defaults
-	Key         KeyConfig
-	Forward     ForwardConfig
-	Bypass      BypassConfig
-	Storable    StorableConfig
-	Freshness   FreshnessConfig
-	Coalesce    CoalesceConfig
-	Limiter     LimiterConfig
-	Breaker     BreakerConfig
-	Negative    NegativeConfig
-	MissRate    MissRateConfig
-	CacheGroups CacheGroupsConfig
-	Client      ClientConfig
-	Timeouts    TimeoutsConfig
-	Warm        WarmConfig
-	Limits      LimitsConfig
-	CacheStatus string        // Cache-Status member name; "" disables. Default "Weir"
-	Observer    Observer
-	Logger      *slog.Logger
-	Rand        func() float64 // [0,1); must be safe for concurrent use; default rand.Float64 (math/rand/v2)
+	Store         store.Store // nil: memory store with memory.Config{} defaults
+	Key           KeyConfig
+	Forward       ForwardConfig
+	Bypass        BypassConfig
+	Storable      StorableConfig
+	Freshness     FreshnessConfig
+	Coalesce      CoalesceConfig
+	Limiter       LimiterConfig
+	Breaker       BreakerConfig
+	Negative      NegativeConfig
+	MissRate      MissRateConfig
+	CacheGroups   CacheGroupsConfig
+	Client        ClientConfig
+	Timeouts      TimeoutsConfig
+	Warm          WarmConfig
+	Limits        LimitsConfig
+	CacheStatus   string // Cache-Status member name; "": "Weir"
+	NoCacheStatus bool   // omit the Cache-Status header (T-27)
+	Observer      Observer
+	Logger        *slog.Logger
+	Rand          func() float64 // [0,1); must be safe for concurrent use; default rand.Float64 (math/rand/v2)
 }
 
 type KeyConfig struct {
@@ -51,13 +52,15 @@ type KeyConfig struct {
 }
 
 type ForwardConfig struct {
-	Mode  ForwardMode // ForwardStrict (zero value) or ForwardAll
-	Allow []string
+	Mode           ForwardMode // ForwardStrict (zero value) or ForwardAll
+	Allow          []string
+	NoTraceHeaders bool // D29, FR-FWD-6
 }
 
 type BypassConfig struct {
-	Cookies []string
-	Headers []string
+	Cookies               []string
+	Headers               []string
+	ReportStrippedCookies time.Duration // FR-OBS-5; 0: 5m; negative disables
 }
 
 type StorableConfig struct {
@@ -67,7 +70,7 @@ type StorableConfig struct {
 }
 
 type FreshnessConfig struct {
-	Jitter                      float64       // 0: 0.10 unless NoJitter
+	Jitter                      float64 // 0: 0.10 unless NoJitter
 	NoJitter                    bool
 	JitterMinLifetime           time.Duration // 0: 10s
 	EarlyRefreshBeta            float64       // 0: 1.0
@@ -81,8 +84,8 @@ type FreshnessConfig struct {
 }
 
 type CoalesceConfig struct {
-	LeaderMaxAge    time.Duration // 0: 10s
-	FollowerMaxWait time.Duration // 0: 10s
+	LeaderMaxAge    time.Duration // 0: min(10s, Timeouts.Origin)
+	FollowerMaxWait time.Duration // 0: min(10s, Timeouts.Origin)
 	HitForMissTTL   time.Duration // 0: 30s
 }
 
@@ -93,6 +96,7 @@ type LimiterConfig struct {
 	MaxPerPartition   int           // 0: 16 (clamped to MaxConcurrent)
 	ReserveForeground int           // 0: MaxConcurrent/4 (at least 1 when MaxConcurrent >= 2)
 	MaxPerHost        int           // 0: off (M14)
+	MaxUpload         int           // D25; 0: MaxConcurrent/4, at least 1
 }
 
 type BreakerConfig struct {
@@ -128,6 +132,7 @@ type TimeoutsConfig struct {
 	Origin     time.Duration // 0: 30s
 	Background time.Duration // 0: 30s
 	Store      time.Duration // 0: 50ms (remote stores only, see §5.2)
+	StreamIdle time.Duration // 0: 60s (D26, FR-TMO-2)
 }
 
 type LimitsConfig struct {
@@ -142,7 +147,7 @@ type LimitsConfig struct {
 
 Note: the spec's `CacheGroups.Honor` default of true is expressed as a zero-value `Ignore` flag so the zero `Config` is correct. Every boolean in `Config` is written so that `false` is the default.
 
-`New` copies the config, applies defaults, canonicalizes header names, compiles query patterns, sorts nothing that the user ordered (for example `Key.Cookies` order is the forwarded order), and validates per FR-LCY-1. It returns `fmt.Errorf("%w: field %s: %s", ErrInvalidConfig, name, reason)`.
+`New` copies the config, applies defaults, canonicalizes header names (and lowercases `Key.AcceptEncoding`), drops repeated names keeping the first, rejects header, cookie and coding names that are not RFC 9110 tokens (T-3, T-13), compiles query patterns, sorts nothing that the user ordered (for example `Key.Cookies` order is the forwarded order), and validates per FR-LCY-1. It returns `fmt.Errorf("%w: field %s: %s", ErrInvalidConfig, name, reason)`.
 
 ### 1.2 Request, Response, Purge, WarmStats
 
