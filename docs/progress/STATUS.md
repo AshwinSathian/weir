@@ -5,7 +5,7 @@ Phase: 1
 Current card: none
 Card state: awaiting-merge
 Branch: card/M1-14-head-range
-PR: pending
+PR: #21 https://github.com/AshwinSathian/weir/pull/21
 Next card: M1-15
 
 ## Blockers
