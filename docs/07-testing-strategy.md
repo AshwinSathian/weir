@@ -217,6 +217,7 @@ Named in [06-threat-model.md](06-threat-model.md), [01-technical-spec.md](01-tec
 | `TestPragmaIgnoredWithCacheControl` (engine) | under `HonorRevalidation`, `Pragma: no-cache` beside a `Cache-Control` field (the unit test adds an empty line) is a hit; alone it forces validation |
 | `TestFetchDropsHopByHop` (engine) | miss, pass-through and event-stream responses from `Serve` carry no hop-by-hop field and no field the origin's `Connection` names; end-to-end fields stay |
 | `TestConnectionNamedFieldsStillDecideStorage` (engine) | a response whose `Connection` names its `Cache-Control: private`, `Vary` or `Set-Cookie` is refused, as without `Connection` |
+| `TestConnectionNamedFieldsStillInform` (engine) | with `Connection` naming them, `Age` still ages the entry, `Content-Type: text/event-stream` still streams, and `Location` on a POST 201 still invalidates |
 | `TestFreshenDropsHopByHop` (engine) | a 304's hop-by-hop and `Connection`-named fields reach neither the served nor the freshened entry; a 304 naming its `private` `Cache-Control` is not stored |
 | `TestFreshenKeepsRepresentationMetadata` (engine) | a 304 with a different `Content-Encoding` or `Content-Type` freshens the entry but keeps the stored values |
 | `TestEpochLookupErrorEmitsEvent` (engine) | a remote-flagged store failing `NewestEpoch` still serves the entry and emits `EvStoreError{epoch}` |

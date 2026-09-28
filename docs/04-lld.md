@@ -788,7 +788,7 @@ func (e *Engine) fetch(ctx, s, origin) fetchResult:
     e.cb.Record(probe, outcome)
 
     if err != nil: return errResult(timeoutOrOrigin(err, ctx, tctx), originHealth: true)   // §1.3
-    recv := clone(resp.Header) if it has Connection    // storability reads recv (FR-FWD-7, T-8); a 304's is freshened too
+    recv := clone(resp.Header) if it has Connection    // decisions read recv: storability, buildEntry (Age, Date), isEventStream, invalidate (FR-FWD-7, T-8); a 304's is freshened too
     resp.Header = clone(resp.Header); dropHopByHop(resp.Header)   // FR-FWD-7: every path below, streams included
     if s.streaming:
         release()                            // slot released at headers (FR-LIM-1)

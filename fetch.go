@@ -82,7 +82,7 @@ func (e *Engine) fetch(ctx context.Context, req *Request, origin Origin, buffere
 		res.respTime = time.Now()
 		return res
 	}
-	if !buffered || isEventStream(resp.Header, e.cfg.Storable.StreamTypes) {
+	if !buffered || isEventStream(res.received().Header, e.cfg.Storable.StreamTypes) {
 		res.respTime = time.Now()
 		res.stream = buffered
 		if resp.Body == http.NoBody {
@@ -111,6 +111,18 @@ func (e *Engine) fetch(ctx context.Context, req *Request, origin Origin, buffere
 	resp.Body = http.NoBody
 	res.body = body
 	return res
+}
+
+// received returns resp with its header as the origin sent it. Engine
+// decisions read it; the served and stored copies lose the hop-by-hop
+// fields (FR-FWD-7).
+func (r *fetchResult) received() *Response {
+	if r.recv == nil {
+		return r.resp
+	}
+	c := *r.resp
+	c.Header = r.recv
+	return &c
 }
 
 // isEventStream reports whether h names text/event-stream or a type in

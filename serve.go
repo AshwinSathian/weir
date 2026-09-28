@@ -57,7 +57,7 @@ func (e *Engine) pass(ctx context.Context, c *keys.Classified, origin Origin, fw
 		return nil, res.err
 	}
 	if c.Unsafe && res.resp.StatusCode >= 200 && res.resp.StatusCode < 400 {
-		e.invalidate(ctx, c, res.resp)
+		e.invalidate(ctx, c, res.received())
 	}
 	if c.Head { // a HEAD Range miss went forward as GET
 		closeBody(res.resp)
@@ -194,13 +194,8 @@ func serverError(status int) bool {
 // lookup returned, which this request already judged not fresh.
 func (e *Engine) storeResponse(ctx context.Context, c *keys.Classified, res *fetchResult, found, purged *store.Entry) bool {
 	ctx = context.WithoutCancel(ctx) // a client leaving after the body arrived does not undo the store
-	dr := res.resp
-	if res.recv != nil { // T-8: a field Connection names still refuses storage
-		r := *res.resp
-		r.Header = res.recv
-		dr = &r
-	}
-	d := storability(&e.cfg, c, dr, res.body, res.respTime)
+	recv := res.received()           // T-8: a field Connection names still refuses storage
+	d := storability(&e.cfg, c, recv, res.body, res.respTime)
 	if !d.ok {
 		emit(e.cfg.Observer, Event{Kind: EvNotStored, Time: res.respTime, Partition: c.Partition, Reason: d.reason})
 		if d.responseDriven {
@@ -208,7 +203,7 @@ func (e *Engine) storeResponse(ctx context.Context, c *keys.Classified, res *fet
 		}
 		return false
 	}
-	ent := buildEntry(&e.cfg, c, res.resp, res.body, res.reqTime, res.respTime, d)
+	ent := buildEntry(&e.cfg, c, recv, res.body, res.reqTime, res.respTime, d)
 	// RFC 9111 §4: a slow fetch never replaces a more recent response that
 	// another fetch stored meanwhile (04 §6.7). The record this request
 	// found is exempt: it is stale or unusable, and an origin clock that

@@ -951,14 +951,17 @@ func TestFetchDropsHopByHop(t *testing.T) {
 				e := newEngine(t, cacheCfg)
 				defer closeEngine(t, e)
 
-				resp, _ := serve(t, e, tt.req, o)
-				for name := range hop {
-					if got, ok := resp.Header[name]; ok && name != "X-Keep" {
-						t.Errorf("%s reached the adapter: %q", name, got)
+				// The second response is the stored copy for the miss.
+				for range 2 {
+					resp, _ := serve(t, e, tt.req, o)
+					for name := range hop {
+						if got, ok := resp.Header[name]; ok && name != "X-Keep" {
+							t.Errorf("%s reached the adapter (hit=%v): %q", name, resp.Cache.Hit, got)
+						}
 					}
-				}
-				if resp.Header.Get("X-Keep") != "y" {
-					t.Errorf("end-to-end field X-Keep dropped: %v", resp.Header)
+					if resp.Header.Get("X-Keep") != "y" {
+						t.Errorf("end-to-end field X-Keep dropped: %v", resp.Header)
+					}
 				}
 			})
 		})
@@ -1016,4 +1019,60 @@ func TestConnectionNamedFieldsStillDecideStorage(t *testing.T) {
 			})
 		})
 	}
+}
+
+// FR-FWD-7: every engine decision reads the response as received; only the
+// served and stored copies lose what Connection names. Age still ages the
+// entry (FR-FRS-7), Content-Type still marks an event stream (FR-STR-1), and
+// Location still invalidates (FR-INV-1).
+func TestConnectionNamedFieldsStillInform(t *testing.T) {
+	t.Run("age", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			o := testorigin.New()
+			o.Default(testorigin.Behavior{Header: http.Header{
+				"Connection": {"Age"}, "Age": {"50"}, "Cache-Control": {"max-age=60"},
+			}, Body: []byte("x")})
+			e := newEngine(t, cacheCfg)
+			defer closeEngine(t, e)
+
+			serve(t, e, getReq("/a"), o)
+			time.Sleep(11 * time.Second)
+			if resp, _ := serve(t, e, getReq("/a"), o); resp.Cache.Hit {
+				t.Fatalf("entry 61 s old served fresh: %+v", resp.Cache)
+			}
+		})
+	})
+	t.Run("event stream", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			o := testorigin.New()
+			o.Default(testorigin.Behavior{
+				Header:    http.Header{"Connection": {"Content-Type"}, "Content-Type": {"text/event-stream"}},
+				Body:      []byte("data: hi\n\n"),
+				BodyDelay: time.Hour,
+			})
+			e := newEngine(t, weir.Config{Timeouts: weir.TimeoutsConfig{Origin: time.Second}})
+			defer closeEngine(t, e)
+
+			resp, err := e.Serve(t.Context(), getReq("/a"), o)
+			if err != nil {
+				t.Fatalf("event stream buffered until the origin timeout: %v", err)
+			}
+			resp.Body.Close()
+		})
+	})
+	t.Run("location", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			o := testorigin.New()
+			o.Default(cacheable("v"))
+			o.Route("/a", unsafeAnswer(http.StatusCreated, http.Header{"Connection": {"Location"}, "Location": {"/b"}}, "a"))
+			e := newEngine(t, cacheCfg)
+			defer closeEngine(t, e)
+
+			serve(t, e, getReq("/b"), o)
+			serve(t, e, postReq("/a"), o)
+			if resp, _ := serve(t, e, getReq("/b"), o); resp.Cache.Hit {
+				t.Fatalf("Location named in Connection did not invalidate /b: %+v", resp.Cache)
+			}
+		})
+	})
 }
