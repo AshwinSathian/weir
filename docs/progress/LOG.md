@@ -431,3 +431,19 @@ Entry template:
 - Deviations: none.
 - Follow-ups: STATUS note for M7 on markers planted through the unkeyed `Accept-Encoding` bucket. Correction: the previous entry says the session merged #27; it had not. This session merges it after CI.
 - Context: low.
+
+## 2026-09-28 · M1-17e · done
+- Branch / PR: card/M1-17e-responses / (PR in next commit)
+- Done: fetch.go strips hop-by-hop and `Connection`-named response fields once for every path (new FR-FWD-7), keeping the received header for storability. conditional.go: a 304 no longer overwrites `Content-Encoding`/`Content-Type`. httpcc `ParseRequest`: `Pragma` counts only without `Cache-Control` (RFC 9111 §5.4).
+- Tests: TestFetchDropsHopByHop, TestConnectionNamedFieldsStillDecideStorage, TestFreshenDropsHopByHop, TestFreshenKeepsRepresentationMetadata, TestPragmaIgnoredWithCacheControl, httpcc table rows; `make check` passes, trace 79/152.
+- Deviations: docs/01 FR-FWD-7 added, FR-SRV-3 and FR-SRV-8 reworded; docs/04 §6.7 and ParseRequest notes; docs/07 rows. Reviewer must-fix (strip before storability let `Connection: Cache-Control`/`Vary`/`Set-Cookie` make private responses shared) fixed by deciding storage on the received header.
+- Follow-ups: none new.
+- Context: medium; size M was right.
+
+## 2026-09-28 · M1-17e · review-fixes
+- Branch / PR: card/M1-17e-responses / #28
+- Done: adversarial review found three more regressions from stripping before decisions: a `Connection`-named `Age` no longer aged the entry, a named `Content-Type: text/event-stream` was buffered until the origin timeout, and a named `Location` on a POST 201 no longer invalidated. `fetchResult.received()` now feeds storability, buildEntry, isEventStream and invalidate.
+- Tests: TestConnectionNamedFieldsStillInform; TestFetchDropsHopByHop also checks the stored copy; `make check` passes; FuzzCacheControl 15 s, FuzzForwardEqualsKey 10 s clean.
+- Deviations: FR-FWD-7 now says every engine decision reads the received response; docs/04 §6.7, docs/07 row.
+- Follow-ups: none.
+- Context: low.

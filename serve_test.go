@@ -918,3 +918,161 @@ func TestNewerResponseWinsSkipsExpiredRecord(t *testing.T) {
 		}
 	})
 }
+
+// FR-FWD-7, FR-STO-11: fetch strips the origin's hop-by-hop fields and the
+// fields its Connection names, so misses, pass-through and event streams
+// reach every adapter without them (RFC 9110 §7.6.1).
+func TestFetchDropsHopByHop(t *testing.T) {
+	hop := http.Header{
+		"Connection": {"X-Conn"}, "X-Conn": {"1"}, "Keep-Alive": {"timeout=5"},
+		"Proxy-Connection": {"keep-alive"}, "Te": {"trailers"}, "Transfer-Encoding": {"chunked"},
+		"Upgrade": {"h2c"}, "Http2-Settings": {"AAA"}, "X-Keep": {"y"},
+	}
+	post := getReq("/p")
+	post.Method = http.MethodPost
+	tests := []struct {
+		name string
+		req  *weir.Request
+		cc   string
+		ct   string
+	}{
+		{"miss", getReq("/a"), "max-age=60", "text/plain"},
+		{"pass-through", post, "", "text/plain"},
+		{"event stream", getReq("/s"), "max-age=60", "text/event-stream"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				h := hop.Clone()
+				h.Set("Cache-Control", tt.cc)
+				h.Set("Content-Type", tt.ct)
+				o := testorigin.New()
+				o.Default(testorigin.Behavior{Header: h, Body: []byte("x")})
+				e := newEngine(t, cacheCfg)
+				defer closeEngine(t, e)
+
+				// The second response is the stored copy for the miss.
+				for range 2 {
+					resp, _ := serve(t, e, tt.req, o)
+					for name := range hop {
+						if got, ok := resp.Header[name]; ok && name != "X-Keep" {
+							t.Errorf("%s reached the adapter (hit=%v): %q", name, resp.Cache.Hit, got)
+						}
+					}
+					if resp.Header.Get("X-Keep") != "y" {
+						t.Errorf("end-to-end field X-Keep dropped: %v", resp.Header)
+					}
+				}
+			})
+		})
+	}
+}
+
+// FR-SRV-8, RFC 9111 §5.4, T-14: under HonorRevalidation, Pragma: no-cache
+// forces validation only when the request has no Cache-Control.
+func TestPragmaIgnoredWithCacheControl(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		o := testorigin.New()
+		b := cacheable("hello")
+		b.Header.Set("ETag", `"1"`)
+		o.Default(b)
+		cfg := cacheCfg
+		cfg.Client.HonorRevalidation = true
+		e := newEngine(t, cfg)
+		defer closeEngine(t, e)
+
+		serve(t, e, getReq("/a"), o)
+		req := withHeader(withHeader(getReq("/a"), "Pragma", "no-cache"), "Cache-Control", "max-stale=10")
+		if resp, _ := serve(t, e, req, o); !resp.Cache.Hit || o.Calls("/a") != 1 {
+			t.Fatalf("Pragma with Cache-Control: CacheInfo %+v calls=%d, want a hit", resp.Cache, o.Calls("/a"))
+		}
+		if resp, _ := serve(t, e, withHeader(getReq("/a"), "Pragma", "no-cache"), o); resp.Cache.Hit || o.Calls("/a") != 2 {
+			t.Fatalf("Pragma alone: CacheInfo %+v calls=%d, want a validation", resp.Cache, o.Calls("/a"))
+		}
+	})
+}
+
+// FR-FWD-7, FR-STO-3, FR-STO-9, T-8: a field the origin's Connection names
+// is stripped from the response but still decides storability, so naming
+// Cache-Control, Vary or Set-Cookie cannot turn a refusal into a shared hit.
+func TestConnectionNamedFieldsStillDecideStorage(t *testing.T) {
+	tests := []struct {
+		name string
+		h    http.Header
+	}{
+		{"private", http.Header{"Connection": {"Cache-Control"}, "Cache-Control": {"private, max-age=60"}, "Expires": {"Thu, 01 Jan 2099 00:00:00 GMT"}}},
+		{"vary", http.Header{"Connection": {"Vary"}, "Vary": {"Cookie"}, "Cache-Control": {"max-age=60"}}},
+		{"set-cookie", http.Header{"Connection": {"Set-Cookie"}, "Set-Cookie": {"sid=1"}, "Cache-Control": {"max-age=60"}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				o := testorigin.New()
+				o.Default(testorigin.Behavior{Header: tt.h, Body: []byte("x")})
+				e := newEngine(t, cacheCfg)
+				defer closeEngine(t, e)
+
+				serve(t, e, getReq("/a"), o)
+				if resp, _ := serve(t, e, getReq("/a"), o); resp.Cache.Hit || o.Calls("/a") != 2 {
+					t.Fatalf("CacheInfo %+v calls=%d, want the response refused", resp.Cache, o.Calls("/a"))
+				}
+			})
+		})
+	}
+}
+
+// FR-FWD-7: every engine decision reads the response as received; only the
+// served and stored copies lose what Connection names. Age still ages the
+// entry (FR-FRS-7), Content-Type still marks an event stream (FR-STR-1), and
+// Location still invalidates (FR-INV-1).
+func TestConnectionNamedFieldsStillInform(t *testing.T) {
+	t.Run("age", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			o := testorigin.New()
+			o.Default(testorigin.Behavior{Header: http.Header{
+				"Connection": {"Age"}, "Age": {"50"}, "Cache-Control": {"max-age=60"},
+			}, Body: []byte("x")})
+			e := newEngine(t, cacheCfg)
+			defer closeEngine(t, e)
+
+			serve(t, e, getReq("/a"), o)
+			time.Sleep(11 * time.Second)
+			if resp, _ := serve(t, e, getReq("/a"), o); resp.Cache.Hit {
+				t.Fatalf("entry 61 s old served fresh: %+v", resp.Cache)
+			}
+		})
+	})
+	t.Run("event stream", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			o := testorigin.New()
+			o.Default(testorigin.Behavior{
+				Header:    http.Header{"Connection": {"Content-Type"}, "Content-Type": {"text/event-stream"}},
+				Body:      []byte("data: hi\n\n"),
+				BodyDelay: time.Hour,
+			})
+			e := newEngine(t, weir.Config{Timeouts: weir.TimeoutsConfig{Origin: time.Second}})
+			defer closeEngine(t, e)
+
+			resp, err := e.Serve(t.Context(), getReq("/a"), o)
+			if err != nil {
+				t.Fatalf("event stream buffered until the origin timeout: %v", err)
+			}
+			resp.Body.Close()
+		})
+	})
+	t.Run("location", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			o := testorigin.New()
+			o.Default(cacheable("v"))
+			o.Route("/a", unsafeAnswer(http.StatusCreated, http.Header{"Connection": {"Location"}, "Location": {"/b"}}, "a"))
+			e := newEngine(t, cacheCfg)
+			defer closeEngine(t, e)
+
+			serve(t, e, getReq("/b"), o)
+			serve(t, e, postReq("/a"), o)
+			if resp, _ := serve(t, e, getReq("/b"), o); resp.Cache.Hit {
+				t.Fatalf("Location named in Connection did not invalidate /b: %+v", resp.Cache)
+			}
+		})
+	})
+}

@@ -116,8 +116,10 @@ func TestParseRequestDirectives(t *testing.T) {
 			RequestDirectives{MaxStale: Seconds{Set: true, Invalid: true}}},
 		{"unterminated quote does not hide a request no-store", header("Cache-Control", `x="a, no-store`),
 			RequestDirectives{NoStore: true}},
-		{"Pragma no-cache counts alongside Cache-Control", http.Header{"Cache-Control": {"max-age=60"}, "Pragma": {"no-cache"}},
-			RequestDirectives{MaxAge: set(60), NoCache: true}},
+		{"Pragma ignored alongside Cache-Control", http.Header{"Cache-Control": {"max-age=60"}, "Pragma": {"no-cache"}},
+			RequestDirectives{MaxAge: set(60)}},
+		{"Pragma ignored alongside an empty Cache-Control line", http.Header{"Cache-Control": {""}, "Pragma": {"no-cache"}},
+			RequestDirectives{}},
 		{"non-ASCII look-alike no-store is unknown", header("Cache-Control", "no-ſtore"), RequestDirectives{}},
 		{"response-only directives ignored", header("Cache-Control", "public, private, s-maxage=5"), RequestDirectives{}},
 	}

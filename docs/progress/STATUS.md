@@ -4,9 +4,9 @@ Updated: 2026-09-28
 Phase: 1
 Current card: none
 Card state: awaiting-merge
-Branch: card/M1-17d-storability
-PR: #27 https://github.com/AshwinSathian/weir/pull/27
-Next card: M1-17e
+Branch: card/M1-17e-responses
+PR: #28 https://github.com/AshwinSathian/weir/pull/28
+Next card: M1-18
 
 ## Blockers
 
@@ -21,13 +21,15 @@ none
 Already built, now confirmed: the weirhttp default transport (compression off, no proxy), the coalesce-default clamp to min(10s, `Timeouts.Origin`), and the storetest `Run(t, newStore, opts...)` API with `Synctest()`. The other nine decisions are cards, and each card changes its spec text together with its code:
 
 - M1-17c (merged), the key boundary: h2c is served normally; `#` is rejected in path and query; the cookie limit counts keyed pairs only.
-- M1-17d (done, awaiting merge), storability: `s-maxage` must be valid to permit an `Authorization` response; markers are suppressed after unkeyed input; remote conformance tests move behind an `integration` tag.
-- M1-17e, responses: the engine strips hop-by-hop fields; a 304 keeps `Content-Encoding` and `Content-Type`; Pragma is ignored when `Cache-Control` is present.
+- M1-17d (merged), storability: `s-maxage` must be valid to permit an `Authorization` response; markers are suppressed after unkeyed input; remote conformance tests move behind an `integration` tag.
+- M1-17e (done, awaiting merge), responses: the engine strips hop-by-hop fields; a 304 keeps `Content-Encoding` and `Content-Type`; Pragma is ignored when `Cache-Control` is present.
 
 The cards' Notes give the reasons and the options rejected. All three come before M1-18, because closing M1 makes the repo public.
 
 ## Notes for the next session
 
+- M1-17e: `fetch` strips hop-by-hop and `Connection`-named fields from every origin response (FR-FWD-7), but keeps the received header in `fetchResult.recv` (only when `Connection` is present) and every decision reads it through `fetchResult.received()` (storability, buildEntry's `Age`/`Date`, isEventStream, invalidate), so a named `Cache-Control`/`Vary`/`Set-Cookie`/`Age`/`Location` keeps its effect (T-8). M2 moving the store into the flight must carry `recv` along. `freshened` now takes a header, not a `*Response`.
+- M1-17e: `ParseRequest` ignores `Pragma` whenever any `Cache-Control` line exists, including an empty one (deliberately conservative; fewer client-forced validations).
 - M1-17d: `keys.Classified.Unkeyed` suppresses hit-for-miss markers only. T-31 also covers negative entries; M6 (FR-NEG-4) should decide whether `Unkeyed` suppresses them too.
 - M1-17d: the `Unkeyed` check in `forwardHeader` does not consider `Key.Headers` (Classify does not key them yet). Whoever wires `Key.Headers` into `PrimaryKey` should exclude those names, or `New` should reject Allow entries naming keyed fields (carried item). It fails safe: only markers are lost.
 - M7 (variant keying): the `Accept-Encoding` bucket reaches the origin but is not in `PrimaryKey` (keyed only through Vary, M7-01). Until then a client choosing its bucket can plant a marker when the origin's storability differs by coding (for example `Vary: Accept-Encoding` only on gzip responses, refused as `vary-unsupported`). Bounded: 30 s, and the next storable response replaces it. M7 should key the bucket or treat it like `Unkeyed` for markers.

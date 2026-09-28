@@ -122,6 +122,79 @@ func TestRevalidation304Freshens(t *testing.T) {
 	})
 }
 
+// FR-SRV-3, RFC 9110 §15.4.5: a 304 cannot relabel the stored body. Its
+// Content-Encoding and Content-Type are ignored; other fields still freshen.
+func TestFreshenKeepsRepresentationMetadata(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		o := testorigin.New()
+		o.Default(testorigin.Behavior{Header: http.Header{
+			"Cache-Control": {"max-age=60"}, "Etag": {`W/"1"`},
+			"Content-Type": {"text/plain"}, "Content-Encoding": {"gzip"},
+		}, Body: []byte("v1")})
+		e, st := newRecordingEngine(t)
+		defer closeEngine(t, e)
+
+		serve(t, e, getReq("/a"), o)
+		time.Sleep(61 * time.Second)
+		o.Default(testorigin.Behavior{Func: func(*weir.Request) (*weir.Response, error) {
+			return respond(http.StatusNotModified, http.Header{
+				"Cache-Control": {"max-age=120"}, "Content-Type": {"text/html"}, "Content-Encoding": {"br"},
+			}, ""), nil
+		}})
+		resp, body := serve(t, e, getReq("/a"), o)
+		h := resp.Header
+		if body != "v1" || h.Get("Content-Type") != "text/plain" || h.Get("Content-Encoding") != "gzip" || h.Get("Cache-Control") != "max-age=120" {
+			t.Fatalf("served after 304: %q %v", body, h)
+		}
+		ents := st.responses()
+		if nw := ents[len(ents)-1]; nw.Header.Get("Content-Type") != "text/plain" || nw.Header.Get("Content-Encoding") != "gzip" {
+			t.Fatalf("stored after 304: %v", nw.Header)
+		}
+	})
+}
+
+// FR-FWD-7, FR-SRV-3: a 304's hop-by-hop fields and the fields its
+// Connection names never reach the served or the freshened entry, while a
+// Cache-Control it names still decides storage.
+func TestFreshenDropsHopByHop(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		o := testorigin.New()
+		o.Default(testorigin.Behavior{Header: http.Header{"Cache-Control": {"max-age=60"}, "Etag": {`"1"`}}, Body: []byte("v1")})
+		e, st := newRecordingEngine(t)
+		defer closeEngine(t, e)
+
+		serve(t, e, getReq("/a"), o)
+		time.Sleep(61 * time.Second)
+		o.Default(testorigin.Behavior{Func: func(*weir.Request) (*weir.Response, error) {
+			return respond(http.StatusNotModified, http.Header{
+				"Cache-Control": {"max-age=120"}, "Connection": {"X-Conn"}, "X-Conn": {"1"}, "Keep-Alive": {"timeout=5"},
+			}, ""), nil
+		}})
+		resp, _ := serve(t, e, getReq("/a"), o)
+		ents := st.responses()
+		for _, h := range []http.Header{resp.Header, ents[len(ents)-1].Header} {
+			for _, name := range []string{"Connection", "X-Conn", "Keep-Alive"} {
+				if _, ok := h[name]; ok {
+					t.Fatalf("%s survived the 304: %v", name, h)
+				}
+			}
+		}
+		if len(ents) != 2 || resp.Header.Get("Cache-Control") != "max-age=120" {
+			t.Fatalf("stored %d entries, served %v; want the freshened entry stored", len(ents), resp.Header)
+		}
+
+		time.Sleep(121 * time.Second)
+		o.Default(testorigin.Behavior{Func: func(*weir.Request) (*weir.Response, error) {
+			return respond(http.StatusNotModified, http.Header{
+				"Connection": {"Cache-Control"}, "Cache-Control": {"private, max-age=600"},
+			}, ""), nil
+		}})
+		if resp, _ := serve(t, e, getReq("/a"), o); resp.Cache.Stored || len(st.responses()) != 2 {
+			t.Fatalf("a 304 naming its private Cache-Control in Connection was stored: %+v", resp.Cache)
+		}
+	})
+}
+
 // FR-SRV-3: a 304 whose strong ETag differs from the stored one must not
 // update the entry (RFC 9111 §4.3.4); Weir repeats the request without
 // conditionals and stores the full response.

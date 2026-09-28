@@ -38,7 +38,7 @@ func (d *ResponseDirectives) Unusable() bool {
 }
 
 // RequestDirectives holds the request cache directives (RFC 9111 §5.2.1).
-// NoCache is also set by Pragma: no-cache. A max-stale without argument
+// NoCache is also set by Pragma: no-cache without Cache-Control. A max-stale without argument
 // accepts any staleness and parses as the delta-seconds ceiling.
 type RequestDirectives struct {
 	NoStore, NoCache, OnlyIfCached bool
@@ -82,7 +82,8 @@ func ParseResponse(h http.Header) ResponseDirectives {
 	return d
 }
 
-// ParseRequest parses the Cache-Control and Pragma lines of h. Repeated
+// ParseRequest parses the Cache-Control lines of h, or its Pragma lines when
+// it has no Cache-Control (RFC 9111 §5.4, FR-SRV-8). Repeated
 // delta-seconds directives keep the first value; request directives are
 // advisory (D5).
 func ParseRequest(h http.Header) RequestDirectives {
@@ -107,6 +108,9 @@ func ParseRequest(h http.Header) RequestDirectives {
 				d.MaxStale.add(dv)
 			}
 		}
+	}
+	if len(h["Cache-Control"]) > 0 {
+		return d
 	}
 	for dv := range directives(h["Pragma"]) {
 		if !dv.hasArg && equalFold(dv.name, "no-cache") {
