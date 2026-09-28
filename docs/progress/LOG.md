@@ -415,3 +415,11 @@ Entry template:
 - Deviations: FR-STO-5, FR-STO-12, 04 Classified and marker pseudocode, 05 §8, 06 T-8/T-31, 07 lists, CLAUDE.md rule 6. The Unkeyed flag lives in internal/keys (forward.go, classify.go), not serve.go as the card's Touch list said. Review should-fix applied: any invalid delta-seconds directive voids the s-maxage permission, not only duplicates.
 - Follow-ups: M6 decides Unkeyed for negative entries; Key.Headers exclusion (STATUS notes).
 - Context: low; size M was right.
+
+## 2026-09-28 · M1-17d · review-fixes
+- Branch / PR: card/M1-17d-storability / #27
+- Done: adversarial review. Probed Unkeyed against Connection-named, hop-by-hop, dropped, trace-filtered and empty Allow fields, ForwardAll, Range pass and revalidation paths; s-maxage against quoted, overflowing, case-varied and multi-line forms. No code defects. Fixed a doc collision: 07's "Integration" tier (every `go test`) versus the new `integration` build tag; the Valkey planning card now requires `-tags integration` in CI.
+- Tests: none added; `make check` and CI pass.
+- Deviations: 07 §2 rows, docs/cards/20-later.md P25-00 AC.
+- Follow-ups: none new.
+- Context: low. Merged by the session at Ashwin's request.
