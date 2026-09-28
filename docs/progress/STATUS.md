@@ -5,7 +5,7 @@ Phase: 1
 Current card: none
 Card state: awaiting-merge
 Branch: card/M1-17-weirhttp-adapter
-PR: (filled after push)
+PR: #24 https://github.com/AshwinSathian/weir/pull/24
 Next card: M1-17b
 
 ## Blockers

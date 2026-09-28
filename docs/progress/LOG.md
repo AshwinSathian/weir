@@ -361,7 +361,7 @@ Entry template:
 - Context: low; size S was right.
 
 ## 2026-09-28 · M1-17 · done
-- Branch / PR: card/M1-17-weirhttp-adapter / #(filled after push)
+- Branch / PR: card/M1-17-weirhttp-adapter / #24
 - Done: new `weirhttp` package: `RequestFrom` (raw `RequestURI`, absolute-form fallback), `WriteResponse` (clones header values), `WriteError` (499 writes nothing, `Retry-After`), `Middleware`/`Handler` (upgrades go to next or 501), `TransportOrigin` (`URL.Opaque`). `examples/weirproxy` smoke-tested: miss then `Cache-Status: Weir; hit`. `internal/keys.isUpgrade` became `IsUpgrade(method, header)` so the adapter and engine share one check (no logic change).
 - Tests: TestPathForwardedByteExact, TestAdaptersRouteUpgradesAround, TestWeirhttpEndToEnd, TestWriteError, TestDefaultTransportDisablesCompression. A mutation run of each wire fix fails the tests. `make check` passes.
 - Deviations: 04 §10 documents three net/http client hazards `Fetch` blocks: a `//` path via Opaque became `http://evil.example/x` with Host evil.example; the default User-Agent; transparent gzip. The default transport changed to set `DisableCompression`; this is in Waiting on Ashwin.
