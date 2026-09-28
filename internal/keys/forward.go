@@ -55,7 +55,8 @@ func forwardHeader(h http.Header, c *Config, cookies []Cookie) (out http.Header,
 	filterTrace(out, c.NoTraceHeaders)
 	for _, name := range c.Allow {
 		// T-31: an Allow field reaches the origin unkeyed. Cookie goes
-		// keyed-only and Accept-Encoding as its keyed bucket.
+		// keyed-only, and Accept-Encoding goes as the bucket every request
+		// carries whether or not Allow names it.
 		keyed := name == "Cookie" || name == "Accept-Encoding" || slices.Contains(defaultForward, name)
 		unkeyed = unkeyed || !keyed && len(out[name]) > 0
 	}

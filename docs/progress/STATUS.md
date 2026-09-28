@@ -30,6 +30,7 @@ The cards' Notes give the reasons and the options rejected. All three come befor
 
 - M1-17d: `keys.Classified.Unkeyed` suppresses hit-for-miss markers only. T-31 also covers negative entries; M6 (FR-NEG-4) should decide whether `Unkeyed` suppresses them too.
 - M1-17d: the `Unkeyed` check in `forwardHeader` does not consider `Key.Headers` (Classify does not key them yet). Whoever wires `Key.Headers` into `PrimaryKey` should exclude those names, or `New` should reject Allow entries naming keyed fields (carried item). It fails safe: only markers are lost.
+- M7 (variant keying): the `Accept-Encoding` bucket reaches the origin but is not in `PrimaryKey` (keyed only through Vary, M7-01). Until then a client choosing its bucket can plant a marker when the origin's storability differs by coding (for example `Vary: Accept-Encoding` only on gzip responses, refused as `vary-unsupported`). Bounded: 30 s, and the next storable response replaces it. M7 should key the bucket or treat it like `Unkeyed` for markers.
 - `validSMaxAge` uses `httpcc.ResponseDirectives.Unusable()` (the FR-FRS-2 predicate, shared with `Lifetime`).
 
 - weirhttp `RequestFrom` now cuts absolute-form targets from the raw bytes (M1-17c adversarial review: `EscapedPath` hid `#` as `%23`). An absolute-form target with an empty path (`GET http://example.com`) is still rejected as `path`; RFC 9110 §4.2.3 treats it as `/`. Pre-existing; decide whether the adapter should send `/`.

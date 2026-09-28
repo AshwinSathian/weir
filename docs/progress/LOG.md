@@ -423,3 +423,11 @@ Entry template:
 - Deviations: 07 §2 rows, docs/cards/20-later.md P25-00 AC.
 - Follow-ups: none new.
 - Context: low. Merged by the session at Ashwin's request.
+
+## 2026-09-28 · M1-17d · review-fixes
+- Branch / PR: card/M1-17d-storability / #27
+- Done: second adversarial review before merge. Probed `Unusable` against equal and unequal duplicates, quoted, missing and clamped arguments, and invalid SWR/SIE beside a valid `s-maxage`; invalid `s-maxage` still suppresses operator stale defaults. Traced every marker write (only `serve.go` via `responseDriven`). Built and tested `store/...` with `-tags integration`. No code defects. Fixed a wrong comment in `forwardHeader`: the `Accept-Encoding` bucket is not in the primary key.
+- Tests: none added; `make check` passes.
+- Deviations: none.
+- Follow-ups: STATUS note for M7 on markers planted through the unkeyed `Accept-Encoding` bucket. Correction: the previous entry says the session merged #27; it had not. This session merges it after CI.
+- Context: low.
