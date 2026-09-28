@@ -1,6 +1,7 @@
 package weirhttp_test
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"io"
@@ -348,6 +349,82 @@ func TestH2CUpgradeNotForwarded(t *testing.T) {
 			if v, ok := reqs[0].Header[name]; ok {
 				t.Errorf("origin got %s %q", name, v)
 			}
+		}
+	})
+}
+
+// FR-VAL-1, INV-1, T-6: an absolute-form target keeps the raw path and
+// query bytes too. net/http leaves '#' in URL.Path and EscapedPath turns it
+// into "%23", which would serve "/a#x" as the literal "/a%23x" instead of
+// rejecting it like the origin-form target.
+func TestRequestFromAbsoluteFormRaw(t *testing.T) {
+	tests := []struct{ target, path, query string }{
+		{"http://example.com/a#x", "/a#x", ""},
+		{"http://example.com/a?q=1#f", "/a", "q=1#f"},
+		{"http://example.com/a%7e/%2F?b=%41", "/a%7e/%2F", "b=%41"},
+		{"http://example.com?q=1", "", "q=1"},
+		{"http://example.com", "", ""},
+		{"https://example.com:8443/p", "/p", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.target, func(t *testing.T) {
+			r, err := http.ReadRequest(bufio.NewReader(strings.NewReader("GET " + tt.target + " HTTP/1.1\r\nHost: example.com\r\n\r\n")))
+			if err != nil {
+				t.Fatalf("ReadRequest: %v", err)
+			}
+			req := weirhttp.RequestFrom(r)
+			if req.Path != tt.path || req.RawQuery != tt.query {
+				t.Fatalf("RequestFrom(%q) = path %q query %q, want %q %q", tt.target, req.Path, req.RawQuery, tt.path, tt.query)
+			}
+		})
+	}
+}
+
+// FR-VAL-1, T-6: a fragment in an absolute-form target is rejected like
+// one in origin-form, over the wire, and never reaches the origin.
+func TestAbsoluteFormFragmentRejected(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		e, err := weir.New(weir.Config{})
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+		defer func() { _ = e.Close(context.Background()) }()
+		origin := weir.OriginFunc(func(context.Context, *weir.Request) (*weir.Response, error) {
+			t.Error("origin called for a fragment target")
+			return nil, errors.New("unreachable")
+		})
+		r, err := http.ReadRequest(bufio.NewReader(strings.NewReader("GET http://example.com/a#x HTTP/1.1\r\nHost: example.com\r\n\r\n")))
+		if err != nil {
+			t.Fatalf("ReadRequest: %v", err)
+		}
+		w := httptest.NewRecorder()
+		weirhttp.Handler(e, origin).ServeHTTP(w, r.WithContext(t.Context()))
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("status %d, want 400", w.Code)
+		}
+	})
+}
+
+// FR-VAL-1, INV-1, NFR-2: for every target net/http accepts, RequestFrom
+// does not panic, and an absolute-form target keeps its raw bytes after the
+// authority, so no '#' or escape is added or hidden before Validate.
+func FuzzRequestFrom(f *testing.F) {
+	f.Add("http://example.com/a#x")
+	f.Add("http://example.com/a?q=1#f")
+	f.Add("/a/b?c=%41")
+	f.Fuzz(func(t *testing.T, target string) {
+		r, err := http.ReadRequest(bufio.NewReader(strings.NewReader("GET " + target + " HTTP/1.1\r\nHost: example.com\r\n\r\n")))
+		if err != nil {
+			return
+		}
+		req := weirhttp.RequestFrom(r)
+		_, rest, ok := strings.Cut(r.RequestURI, "://")
+		i := strings.IndexAny(rest, "/?#")
+		if !ok || strings.HasPrefix(r.RequestURI, "/") || i < 0 {
+			return
+		}
+		if want := strings.Replace(rest[i:], "?", "", 1); req.Path+req.RawQuery != want {
+			t.Fatalf("target %q: path %q query %q, want the raw bytes %q", r.RequestURI, req.Path, req.RawQuery, rest[i:])
 		}
 	})
 }
