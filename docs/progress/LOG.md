@@ -359,3 +359,11 @@ Entry template:
 - Deviations: docs/01 §14.5 (FR-FWD-6) states the tracestate cap; docs/06 INV-1 lists the three trace fields; docs/04 §1.1 `StorableConfig` now lists `StreamTypes`.
 - Follow-ups: none new; two review nits left open in STATUS (StreamTypes branch has no test; upgrade-rejection tests don't assert event absence).
 - Context: low; size S was right.
+
+## 2026-09-28 · M1-17 · done
+- Branch / PR: card/M1-17-weirhttp-adapter / #(filled after push)
+- Done: new `weirhttp` package: `RequestFrom` (raw `RequestURI`, absolute-form fallback), `WriteResponse` (clones header values), `WriteError` (499 writes nothing, `Retry-After`), `Middleware`/`Handler` (upgrades go to next or 501), `TransportOrigin` (`URL.Opaque`). `examples/weirproxy` smoke-tested: miss then `Cache-Status: Weir; hit`. `internal/keys.isUpgrade` became `IsUpgrade(method, header)` so the adapter and engine share one check (no logic change).
+- Tests: TestPathForwardedByteExact, TestAdaptersRouteUpgradesAround, TestWeirhttpEndToEnd, TestWriteError, TestDefaultTransportDisablesCompression. A mutation run of each wire fix fails the tests. `make check` passes.
+- Deviations: 04 §10 documents three net/http client hazards `Fetch` blocks: a `//` path via Opaque became `http://evil.example/x` with Host evil.example; the default User-Agent; transparent gzip. The default transport changed to set `DisableCompression`; this is in Waiting on Ashwin.
+- Follow-ups: card M1-17b (`HandlerOrigin`, deferred because the card's AC and tests did not cover it). Two review nits are in STATUS.
+- Context: medium; size M was right without HandlerOrigin.

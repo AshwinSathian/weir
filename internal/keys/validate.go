@@ -9,7 +9,7 @@ import (
 // Upgrade and CONNECT detection runs first (FR-UPG-1), because those
 // requests carry paths that would otherwise fail as ReasonPath.
 func Validate(r *Request, c *Config) (string, error) {
-	if isUpgrade(r) {
+	if IsUpgrade(r.Method, r.Header) {
 		return "", ErrUpgrade
 	}
 	if r.Scheme != "http" && r.Scheme != "https" {
@@ -31,19 +31,20 @@ func Validate(r *Request, c *Config) (string, error) {
 	return host, nil
 }
 
-// isUpgrade reports CONNECT in any form, including HTTP/2 and HTTP/3
+// IsUpgrade reports CONNECT in any form, including HTTP/2 and HTTP/3
 // extended CONNECT, which carries no Upgrade field (T-44), and requests
-// with an "upgrade" Connection option plus an Upgrade field.
-func isUpgrade(r *Request) bool {
+// with an "upgrade" Connection option plus an Upgrade field. Adapters use
+// it to route these around the engine (FR-UPG-1).
+func IsUpgrade(method string, h http.Header) bool {
 	// Methods are case-sensitive (RFC 9110 §9.1): "connect" is an unknown
 	// method and goes forward as ClassPass, never through a tunnel.
-	if r.Method == http.MethodConnect {
+	if method == http.MethodConnect {
 		return true
 	}
-	if len(r.Header.Values("Upgrade")) == 0 {
+	if len(h.Values("Upgrade")) == 0 {
 		return false
 	}
-	for _, line := range r.Header.Values("Connection") {
+	for _, line := range h.Values("Connection") {
 		for opt := range strings.SplitSeq(line, ",") {
 			if strings.EqualFold(strings.Trim(opt, " \t"), "upgrade") {
 				return true

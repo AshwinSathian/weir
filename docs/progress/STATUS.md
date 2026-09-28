@@ -4,9 +4,9 @@ Updated: 2026-09-28
 Phase: 1
 Current card: none
 Card state: awaiting-merge
-Branch: card/M1-16-pass-through-upgrades-trace
-PR: #23 https://github.com/AshwinSathian/weir/pull/23
-Next card: M1-17
+Branch: card/M1-17-weirhttp-adapter
+PR: (filled after push)
+Next card: M1-17b
 
 ## Blockers
 
@@ -29,6 +29,8 @@ none
 
 - 304 and Content-Encoding: FR-SRV-3 copies every 304 field except Content-Length into the stored entry, so a 304 that names a different `Content-Encoding` (or `Content-Type`) relabels the stored body, and every later hit serves bytes that do not match their coding. RFC 9111 §3.2 lets a cache keep fields the stored body depends on. Proposal: also keep the stored `Content-Encoding` on freshen (FR-SRV-3 wording change).
 
+- weirhttp default transport: a nil `TransportOrigin.Transport` is now a clone of `http.DefaultTransport` with `DisableCompression` set, not `http.DefaultTransport` itself (04 §10 updated). Otherwise `http.Transport` adds an unkeyed `Accept-Encoding: gzip` to pass-through requests and decompresses the reply. It tightens INV-1 and changes a documented adapter default, so please confirm.
+
 ## Notes for the next session
 
 - `cacheable` (serve.go) validates StaleSWR and NeedsValidation entries with validators via `fetch(..., prior)`; SWR still validates in the foreground (`ponytail:`, M5). Under M5, StaleSWR must be served before the `only-if-cached` and Range checks, which today reject or pass through stale SWR entries.
@@ -41,3 +43,5 @@ none
 - Newest-wins lives in `storeResponse` (serve.go), not `fetch`; M2 moving the store into the flight must keep the found-record exemption (`sameRecord`). `TestNewerResponseWins` sends a second GET while the first is gated, so under M2 coalescing it must use a key that cannot join the flight.
 - Event streams (FR-STR-1, M1-16): `fetch` checks `Content-Type` against `text/event-stream` or `Storable.StreamTypes` right after headers arrive, before the buffered `io.ReadAll`, and sets `fetchResult.stream`; `cacheable` (serve.go) treats it like `res.over` (skip `storeResponse`, leave `resp.Body` as fetch wired it) but never marks it `over`. M2 coalescing and M5 background refresh must keep a `stream` response out of the flight/refresh path (FR-COA-5: followers re-enter, not share it).
 - M1-16 review nits left open (not must-fix): no test exercises the operator-configured `Storable.StreamTypes` branch of `isEventStream` (only the `text/event-stream` literal is covered); `TestConnectRejected`/`TestUpgradeRejected` check no origin call but not that no event fires.
+- weirhttp (M1-17): `TransportOrigin.Fetch` sends `//` paths in absolute form, suppresses Go's default `User-Agent`, and relies on `DisableCompression` (04 §10). `Middleware` routes upgrades with `keys.IsUpgrade` (exported from `isUpgrade`). M1-17b adds `HandlerOrigin` (streams through `io.Pipe`, owned goroutine); tick PLAN M1.6 when it lands.
+- M1-17 review nits left open: an origin-form `//x` target through `RequestFrom`'s `RequestURI` branch is untested (needs a raw connection; the test's `//` case goes absolute-form); a nil `TransportOrigin.Target` panics (documented contract).
