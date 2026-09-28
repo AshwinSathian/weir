@@ -29,7 +29,11 @@ none
 
 - 304 and Content-Encoding: FR-SRV-3 copies every 304 field except Content-Length into the stored entry, so a 304 that names a different `Content-Encoding` (or `Content-Type`) relabels the stored body, and every later hit serves bytes that do not match their coding. RFC 9111 §3.2 lets a cache keep fields the stored body depends on. Proposal: also keep the stored `Content-Encoding` on freshen (FR-SRV-3 wording change).
 
-- weirhttp default transport: a nil `TransportOrigin.Transport` is now a clone of `http.DefaultTransport` with `DisableCompression` set, not `http.DefaultTransport` itself (04 §10 updated). Otherwise `http.Transport` adds an unkeyed `Accept-Encoding: gzip` to pass-through requests and decompresses the reply. It tightens INV-1 and changes a documented adapter default, so please confirm.
+- weirhttp default transport: a nil `TransportOrigin.Transport` is now a clone of `http.DefaultTransport` with `DisableCompression` set and `Proxy` nil, not `http.DefaultTransport` itself (04 §10 updated). Otherwise `http.Transport` adds an unkeyed `Accept-Encoding: gzip` to pass-through requests, and with `HTTP_PROXY` set it sends `URL.Opaque` paths to the proxy in origin form. It tightens INV-1 and changes a documented adapter default, so please confirm.
+
+- h2c upgrade gets 501: `curl --http2 http://...` sends `Connection: Upgrade, HTTP2-Settings` and `Upgrade: h2c`, and FR-UPG-1 routes it around the engine (`Handler` answers 501). RFC 9110 §7.8 lets a server ignore `Upgrade`. Proposal: treat a request whose only `Upgrade` token is `h2c` as a normal request (drop `Upgrade` and `HTTP2-Settings` as hop-by-hop). FR-UPG-1 wording change.
+
+- Response hop-by-hop in the engine: FR-STO-11 strips hop-by-hop fields only from stored entries. Miss and pass-through responses from `Serve` still carry the origin's `Keep-Alive` and `Connection`-named fields. weirhttp now strips them in `WriteResponse`, but the Caddy adapter would repeat the work. Proposal: strip them once in `fetch` (new FR-FWD requirement).
 
 ## Notes for the next session
 

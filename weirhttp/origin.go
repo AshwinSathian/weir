@@ -16,9 +16,10 @@ type TransportOrigin struct {
 	// Target holds the scheme and host of the origin. Its path is ignored.
 	Target *url.URL
 	// Transport sends the requests. Nil means a clone of
-	// http.DefaultTransport with DisableCompression set. A custom
-	// *http.Transport must set DisableCompression too, or it adds an unkeyed
-	// Accept-Encoding: gzip to requests that carry none (INV-1).
+	// http.DefaultTransport with DisableCompression set and no Proxy. A
+	// custom *http.Transport must do the same: compression adds an unkeyed
+	// Accept-Encoding: gzip to requests that carry none (INV-1), and through
+	// a forward proxy the URL.Opaque path goes out as an origin-form target.
 	Transport http.RoundTripper
 	// Rewrite, when set, edits each outgoing request (Via, origin auth).
 	// Headers it adds to cacheable requests are unkeyed input (T-4).
@@ -28,6 +29,7 @@ type TransportOrigin struct {
 var defaultTransport = sync.OnceValue(func() http.RoundTripper {
 	t := http.DefaultTransport.(*http.Transport).Clone()
 	t.DisableCompression = true
+	t.Proxy = nil
 	return t
 })
 

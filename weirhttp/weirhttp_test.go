@@ -247,3 +247,36 @@ func TestDefaultTransportDisablesCompression(t *testing.T) {
 		t.Fatalf("default transport %T does not disable compression", weirhttp.DefaultTransport())
 	}
 }
+
+// RFC 9110 §7.6.1, FR-STO-11: hop-by-hop fields from the origin never reach
+// the client, on misses and pass-through as well as hits.
+func TestWriteResponseDropsHopByHop(t *testing.T) {
+	w := httptest.NewRecorder()
+	resp := &weir.Response{StatusCode: 200, Header: http.Header{
+		"Connection":  {"close, X-Conn-Only"},
+		"Keep-Alive":  {"timeout=5"},
+		"X-Conn-Only": {"1"},
+		"Upgrade":     {"h2c"},
+		"X-Keep":      {"1"},
+	}, Body: io.NopCloser(strings.NewReader("ok"))}
+	if err := weirhttp.WriteResponse(w, resp); err != nil {
+		t.Fatalf("WriteResponse: %v", err)
+	}
+	for _, name := range []string{"Connection", "Keep-Alive", "X-Conn-Only", "Upgrade"} {
+		if v, ok := w.Header()[name]; ok {
+			t.Errorf("client got hop-by-hop %s %q", name, v)
+		}
+	}
+	if w.Header().Get("X-Keep") != "1" || w.Body.String() != "ok" {
+		t.Errorf("end-to-end field or body lost: %v %q", w.Header(), w.Body)
+	}
+}
+
+// INV-1, FR-FWD-1: the default transport ignores HTTP_PROXY. Through a
+// forward proxy, net/http sends a URL.Opaque path as an origin-form target
+// the proxy cannot route.
+func TestDefaultTransportIgnoresProxyEnv(t *testing.T) {
+	if tr, ok := weirhttp.DefaultTransport().(*http.Transport); !ok || tr.Proxy != nil {
+		t.Fatalf("default transport %T uses a proxy function", weirhttp.DefaultTransport())
+	}
+}

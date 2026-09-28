@@ -2,12 +2,13 @@ package weirhttp
 
 import (
 	"io"
+	"maps"
 	"net/http"
-	"slices"
 	"strconv"
 	"strings"
 
 	"github.com/AshwinSathian/weir"
+	"github.com/AshwinSathian/weir/internal/keys"
 )
 
 // RequestFrom builds the engine request from r. Path and RawQuery come from
@@ -35,13 +36,15 @@ func RequestFrom(r *http.Request) *weir.Request {
 	return req
 }
 
-// WriteResponse writes resp to w and closes its body.
+// WriteResponse writes resp to w, without hop-by-hop fields, and closes
+// its body.
 func WriteResponse(w http.ResponseWriter, resp *weir.Response) error {
 	defer resp.Body.Close()
-	h := w.Header()
-	for k, v := range resp.Header {
-		h[k] = slices.Clone(v) // value slices are shared with the stored entry (P4)
-	}
+	// Clone: value slices are shared with the stored entry (P4). Misses and
+	// pass-through carry the origin's hop-by-hop fields (RFC 9110 §7.6.1).
+	h := resp.Header.Clone()
+	keys.DropHopByHop(h, resp.Header["Connection"])
+	maps.Copy(w.Header(), h)
 	w.WriteHeader(resp.StatusCode)
 	_, err := io.Copy(w, resp.Body)
 	return err

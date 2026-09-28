@@ -367,3 +367,11 @@ Entry template:
 - Deviations: 04 §10 documents three net/http client hazards `Fetch` blocks: a `//` path via Opaque became `http://evil.example/x` with Host evil.example; the default User-Agent; transparent gzip. The default transport changed to set `DisableCompression`; this is in Waiting on Ashwin.
 - Follow-ups: card M1-17b (`HandlerOrigin`, deferred because the card's AC and tests did not cover it). Two review nits are in STATUS.
 - Context: medium; size M was right without HandlerOrigin.
+
+## 2026-09-28 · M1-17 · review-fixes
+- Branch / PR: card/M1-17-weirhttp-adapter / #24
+- Done: an adversarial review, at the user's request, found and fixed two issues. `WriteResponse` now strips hop-by-hop response fields: misses and pass-through leaked the origin's `Keep-Alive` and `Connection`-named fields to clients. The default transport drops `ProxyFromEnvironment`, because with `HTTP_PROXY` set, `URL.Opaque` paths reached the proxy in origin form.
+- Tests: TestWriteResponseDropsHopByHop, TestDefaultTransportIgnoresProxyEnv. `make check` passes.
+- Deviations: 04 §10 documents both fixes.
+- Follow-ups: two new open questions in STATUS (h2c upgrade returns 501; hop-by-hop stripping in the engine instead of each adapter).
+- Context: low.
