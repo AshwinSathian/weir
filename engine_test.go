@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"math"
 	"net/http"
 	"strings"
 	"sync"
@@ -316,7 +317,7 @@ func TestNewWarnsOnCredentialForwarding(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			var buf bytes.Buffer
 			log := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
-			e := newEngine(t, weir.Config{Forward: tt.fwd, Logger: log})
+			e := newEngine(t, weir.Config{Forward: tt.fwd, Logger: log, Store: &nilStore{max: math.MaxInt64}}) // no store-sizing warning
 			closeEngine(t, e)
 			if got := strings.Count(buf.String(), "level=WARN"); got != tt.want {
 				t.Fatalf("%d warnings, want %d:\n%s", got, tt.want, buf.String())

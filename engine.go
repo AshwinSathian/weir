@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
+	"runtime/debug"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -53,8 +55,11 @@ func New(cfg Config) (*Engine, error) {
 	}
 	own := c.Store == nil
 	if own {
-		// ponytail: fixed 256 MiB until FR-MEM-1 sizing from GOMEMLIMIT (M1-15).
-		m, err := memory.New(memory.Config{})
+		n, fromLimit := defaultStoreBytes(debug.SetMemoryLimit(-1))
+		if !fromLimit {
+			c.Logger.Warn("weir: no GOMEMLIMIT set; the memory store uses 256 MiB. Set GOMEMLIMIT to size it at 40% of the limit")
+		}
+		m, err := memory.New(memory.Config{MaxBytes: n})
 		if err != nil {
 			return nil, err
 		}
@@ -70,6 +75,16 @@ func New(cfg Config) (*Engine, error) {
 	e := &Engine{cfg: c, kcfg: keysConfig(&c), store: c.Store, ownStore: own, closeDone: make(chan struct{})}
 	e.bgCtx, e.bgCancel = context.WithCancel(context.Background())
 	return e, nil
+}
+
+// defaultStoreBytes sizes the default memory store from the Go memory limit
+// (FR-MEM-1): 40% of it, clamped to [16 MiB, 8 GiB], or 256 MiB when no
+// limit is set. It reports whether the limit was used.
+func defaultStoreBytes(limit int64) (int64, bool) {
+	if limit == math.MaxInt64 {
+		return 256 << 20, false
+	}
+	return min(max(limit/5*2, 16<<20), 8<<30), true
 }
 
 // warnForwarding logs forwarding settings that send unkeyed credentials to

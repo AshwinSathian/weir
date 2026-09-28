@@ -335,3 +335,11 @@ Entry template:
 - Deviations: none.
 - Follow-ups: none.
 - Context: low.
+
+## 2026-09-28 · M1-15 · done
+- Branch / PR: card/M1-15-invalidation-epochs / (see STATUS)
+- Done: unsafe-method invalidation of target URI and same-origin `Location`/`Content-Location` (purge.go, FR-INV-1/3); newest-wins read-before-write in `storeResponse`, exempting the record the request found; default memory store at 40% of `GOMEMLIMIT` clamped to [16 MiB, 8 GiB], else 256 MiB plus a warning (FR-MEM-1).
+- Tests: TestUnsafeMethodInvalidates (URI part, incl. 303 and conditional revalidation), TestPurgeDuringInflightFetch, TestOriginClockSkewDoesNotStale, TestDefaultStoreSizeFromMemLimit, TestNewerResponseWins, TestNewerResponseWinsSkipsPurgedEntry. `make check` passes.
+- Deviations: 04 §6.7 now states the found-record exemption from newest-wins (card-reviewer should-fix). Store write stays in serve.go, not fetch.go.
+- Follow-ups: none new; notes in STATUS.
+- Context: low; size M was right.

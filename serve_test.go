@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"testing/synctest"
@@ -617,4 +618,103 @@ func TestClientNoCacheIgnored(t *testing.T) {
 			})
 		})
 	}
+}
+
+// FR-FRS-4, T-30: an origin Date 10 minutes behind does not age the
+// response on arrival.
+func TestOriginClockSkewDoesNotStale(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		o := testorigin.New()
+		o.Default(testorigin.Behavior{Header: http.Header{
+			"Cache-Control": {"max-age=300"},
+			"Date":          {time.Now().Add(-10 * time.Minute).UTC().Format(http.TimeFormat)},
+		}, Body: []byte("v")})
+		e := newEngine(t, cacheCfg)
+		defer closeEngine(t, e)
+
+		serve(t, e, getReq("/a"), o)
+		time.Sleep(time.Second)
+		resp, _ := serve(t, e, getReq("/a"), o)
+		if !resp.Cache.Hit {
+			t.Fatalf("second request not a hit: %s", resp.Header.Get("Cache-Status"))
+		}
+	})
+}
+
+// RFC 9111 §4, 04 §6.7: a slow fetch whose response is older (by Date)
+// than the stored one does not replace it.
+func TestNewerResponseWins(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		gate := make(chan struct{})
+		var mu sync.Mutex
+		n := 0
+		o := testorigin.New()
+		o.Default(testorigin.Behavior{Func: func(*weir.Request) (*weir.Response, error) {
+			date := time.Now().UTC().Format(http.TimeFormat)
+			mu.Lock()
+			n++
+			first := n == 1
+			mu.Unlock()
+			body := "new"
+			if first {
+				<-gate
+				body = "old"
+			}
+			return &weir.Response{StatusCode: http.StatusOK,
+				Header: http.Header{"Cache-Control": {"max-age=60"}, "Date": {date}},
+				Body:   io.NopCloser(strings.NewReader(body))}, nil
+		}})
+		e := newEngine(t, cacheCfg)
+		defer closeEngine(t, e)
+
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			serve(t, e, getReq("/a"), o)
+		}()
+		synctest.Wait() // the slow fetch is at the origin with its Date taken
+		time.Sleep(2 * time.Second)
+		serve(t, e, getReq("/a"), o)
+		close(gate)
+		<-done
+
+		resp, body := serve(t, e, getReq("/a"), o)
+		if !resp.Cache.Hit || body != "new" {
+			t.Fatalf("got %q hit=%v, want the newer response", body, resp.Cache.Hit)
+		}
+	})
+}
+
+// FR-PRG-3, 04 §6.7: newest-wins never protects the entry the request
+// found unusable. An origin clock that once ran ahead must not pin a
+// hard-purged entry until it expires.
+func TestNewerResponseWinsSkipsPurgedEntry(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		m, err := memory.New(memory.Config{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer m.Close()
+		o := testorigin.New()
+		ahead := cacheable("v1")
+		ahead.Header.Set("Date", time.Now().Add(5*time.Minute).UTC().Format(http.TimeFormat))
+		o.Default(ahead)
+		e := newEngine(t, weir.Config{Store: m, Freshness: weir.FreshnessConfig{NoJitter: true}})
+		defer closeEngine(t, e)
+
+		serve(t, e, getReq("/a"), o)
+		time.Sleep(time.Second)
+		if err := m.SetEpoch(t.Context(), store.TagGlobal(), store.Epoch{At: time.Now(), Mode: store.EpochHard}); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(time.Second)
+		o.Default(cacheable("v2"))
+		if resp, _ := serve(t, e, getReq("/a"), o); !resp.Cache.Stored {
+			t.Fatalf("refetch not stored: %s", resp.Header.Get("Cache-Status"))
+		}
+		resp, body := serve(t, e, getReq("/a"), o)
+		if !resp.Cache.Hit || body != "v2" {
+			t.Fatalf("got %q hit=%v, want a v2 hit", body, resp.Cache.Hit)
+		}
+	})
 }
