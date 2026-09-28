@@ -327,3 +327,11 @@ Entry template:
 - Follow-ups: M5 must serve StaleSWR before the only-if-cached and Range checks.
 - Context: low; size S was right.
 
+
+## 2026-09-28 · M1-14 · review-fixes
+- Branch / PR: card/M1-14-head-range / #21
+- Done: adversarial review before merge. A fresh entry validated because of `HonorRevalidation` directives reported `fwd=stale`; it now reports `fwd=request` (RFC 9211 §2.2). Probes with no findings: HEAD Range body close cancels the origin timeout, hard-purged and marker keys under Range, only-if-cached with Range, request no-store with Range, Range plus client If-None-Match (dropped, 206 is valid), aliasing of the client's Range lines.
+- Tests: TestClientNoCacheIgnored asserts `FwdRequest` (failed before the fix). `make check` passes.
+- Deviations: none.
+- Follow-ups: none.
+- Context: low.

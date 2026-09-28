@@ -607,8 +607,9 @@ func TestClientNoCacheIgnored(t *testing.T) {
 
 				serve(t, e, getReq("/a"), o)
 				resp, _ := serve(t, e, withHeader(getReq("/a"), d.name, d.value), o)
-				if resp.Cache.Hit || o.Calls("/a") != 2 {
-					t.Fatalf("hit=%v calls=%d, want a validation", resp.Cache.Hit, o.Calls("/a"))
+				// RFC 9211 §2.2: the request's directives caused the forward.
+				if resp.Cache.Hit || resp.Cache.Fwd != weir.FwdRequest || o.Calls("/a") != 2 {
+					t.Fatalf("CacheInfo %+v calls=%d, want a validation with fwd=request", resp.Cache, o.Calls("/a"))
 				}
 				if got := o.Requests()[1].Header.Get("If-None-Match"); got != `"1"` {
 					t.Fatalf("If-None-Match = %q, want the stored ETag", got)

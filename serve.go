@@ -101,7 +101,7 @@ func (e *Engine) cacheable(ctx context.Context, c *keys.Classified, origin Origi
 	if lk.entry != nil {
 		st, staleness, _ := httpcc.Evaluate(lk.entry, lk.epoch, lk.epochOK, now)
 		if st == httpcc.Fresh && !c.ReqCC.OnlyIfCached && forcesValidation(&c.ReqCC) {
-			st = httpcc.NeedsValidation
+			st, lk.fwd = httpcc.NeedsValidation, FwdRequest // RFC 9211 §2.2 fwd=request
 		}
 		switch st {
 		case httpcc.Fresh:
