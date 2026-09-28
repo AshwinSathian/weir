@@ -393,7 +393,7 @@ Entry template:
 - Context: medium; two adversarial review rounds found a must-fix (truncated and 204/304 bodies stored). Size S was right for the code, tight for the review loop.
 
 ## 2026-09-28 · M1-17c · done
-- Branch / PR: card/M1-17c-key-boundary / PR number in STATUS
+- Branch / PR: card/M1-17c-key-boundary / #26
 - Done: `keys.IsUpgrade` serves a lone `h2c` Upgrade as a plain request; `Http2-Settings` joins `hopByHop`. `checkPath` rejects raw `#` and `?`, `checkQuery` raw `#` (`path`/`query` reasons). `keyedCookies` applies `MaxKeyedHeaderBytes` to the forwarded keyed pairs, not the raw lines.
 - Tests: TestH2CUpgradeServedNormally (keys, weirhttp), TestH2CKeyedLikePlainRequest, TestH2CUpgradeNotForwarded, TestFragmentInTargetRejected, TestKeyedCookieLimitCountsKeyedPairs; FuzzValidateRequest gains an Upgrade argument (corpus extended, 6 seeds), FuzzCookies checks the limit (2 seeds), FuzzForwardEqualsKey covers the h2c shape (mutation-checked); `make check` passes.
 - Deviations: FR-UPG-1, FR-VAL-1, FR-VAL-3 reworded as the card decided; FR-FWD-2 hop-by-hop list and 04 §3.1/§3.5 follow; 06 T-6, T-13, T-44 and 07 FR-UPG-1 row list the new tests.

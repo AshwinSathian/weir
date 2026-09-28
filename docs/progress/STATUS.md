@@ -5,7 +5,7 @@ Phase: 1
 Current card: none
 Card state: awaiting-merge
 Branch: card/M1-17c-key-boundary
-PR: none
+PR: #26 https://github.com/AshwinSathian/weir/pull/26
 Next card: M1-17d
 
 ## Blockers
