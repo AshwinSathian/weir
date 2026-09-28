@@ -116,6 +116,13 @@ func (e *Engine) cacheable(ctx context.Context, c *keys.Classified, origin Origi
 	ci := CacheInfo{Fwd: lk.fwd, FwdStatus: res.resp.StatusCode}
 	if res.notMod { // FR-SRV-3: the freshened entry is stored and served like a full response
 		res.resp, res.body = freshened(prior, res.resp), prior.Body
+		if prior.Flags&store.FlagFromAuthorized != 0 && !c.Authorized {
+			// FR-STO-5, T-8: the body answered an Authorization request, so
+			// the merged headers still need a shared-cache permission.
+			ac := *c
+			ac.Authorized = true
+			c = &ac
+		}
 	}
 	resp := res.resp
 	if lk.marker {

@@ -181,6 +181,33 @@ func TestRevalidation304WithBody(t *testing.T) {
 	})
 }
 
+// FR-STO-5, T-8: an entry stored from an Authorization request keeps the
+// shared-cache permission rule when a request without Authorization
+// freshens it: a 304 that drops public leaves the entry unstored.
+func TestFreshenKeepsAuthorizedRule(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		o := testorigin.New()
+		o.Default(testorigin.Behavior{Header: http.Header{"Cache-Control": {"public, max-age=60"}, "Etag": {`"1"`}}, Body: []byte("secret")})
+		e, st := newRecordingEngine(t)
+		defer closeEngine(t, e)
+
+		auth := getReq("/a")
+		auth.Header.Set("Authorization", "Bearer x")
+		if resp, _ := serve(t, e, auth, o); !resp.Cache.Stored {
+			t.Fatalf("public response to an authorized request not stored: %+v", resp.Cache)
+		}
+		time.Sleep(61 * time.Second)
+		o.Default(testorigin.Behavior{Status: http.StatusNotModified, Header: http.Header{"Cache-Control": {"max-age=60"}}})
+		resp, body := serve(t, e, getReq("/a"), o)
+		if body != "secret" || resp.Cache.Stored {
+			t.Fatalf("freshened without public: body %q stored=%v, want served but not stored", body, resp.Cache.Stored)
+		}
+		if n := len(st.responses()); n != 1 {
+			t.Fatalf("stored %d response entries, want 1", n)
+		}
+	})
+}
+
 // FR-SRV-3: a stale entry without validators is refetched unconditionally.
 func TestStaleWithoutValidatorsRefetches(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {

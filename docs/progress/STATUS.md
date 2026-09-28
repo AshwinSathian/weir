@@ -5,7 +5,7 @@ Phase: 1
 Current card: none
 Card state: awaiting-merge
 Branch: card/M1-13-revalidation
-PR: none
+PR: #20 https://github.com/AshwinSathian/weir/pull/20
 Next card: M1-14
 
 ## Blockers
@@ -29,6 +29,8 @@ none
 - FR-STO-5 and malformed `s-maxage`: a response to an `Authorization` request is stored as shareable when its only permission is an invalid (`s-maxage=abc`) or conflicting repeated `s-maxage`. Lifetime is 0, but an explicit `stale-if-error` or `ModeStaleOnError` could serve it stale to another user on origin error (T-8). Proposal: for FR-STO-5, count `s-maxage` only when valid and not duplicated (FR-STO-5 wording change).
 
 - Markers from other unkeyed inputs: FR-STO-12 and T-31 block markers only for `Authorization` and request `no-store`. Trace headers (default), `Forward.Allow` headers and `ForwardAll` also reach the origin unkeyed, so an origin that answers them with `Set-Cookie`, `private` or a non-storable status lets one client plant a 30 s marker for everyone (coalescing off from M2). Proposal: no marker when the forwarded request carried any unkeyed header other than trace headers, or drop markers entirely under `ForwardAll` (FR-STO-12 wording change).
+
+- 304 and Content-Encoding: FR-SRV-3 copies every 304 field except Content-Length into the stored entry, so a 304 that names a different `Content-Encoding` (or `Content-Type`) relabels the stored body, and every later hit serves bytes that do not match their coding. RFC 9111 §3.2 lets a cache keep fields the stored body depends on. Proposal: also keep the stored `Content-Encoding` on freshen (FR-SRV-3 wording change).
 
 ## Notes for the next session
 
