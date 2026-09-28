@@ -718,3 +718,52 @@ func TestNewerResponseWinsSkipsPurgedEntry(t *testing.T) {
 		}
 	})
 }
+
+// lazyStore returns records past their Expires, as 05 §2 lets a store do.
+type lazyStore struct {
+	*memory.Store
+	mu sync.Mutex
+	m  map[store.Key]*store.Entry
+}
+
+func (s *lazyStore) Get(_ context.Context, k store.Key) (*store.Entry, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if e, ok := s.m[k]; ok {
+		return e, nil
+	}
+	return nil, store.ErrNotFound
+}
+
+func (s *lazyStore) Set(_ context.Context, k store.Key, e *store.Entry) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.m[k] = e
+	return nil
+}
+
+// 04 §6.7: newest-wins ignores an expired record a store still returns, so
+// an origin clock that once ran ahead does not block every later store.
+func TestNewerResponseWinsSkipsExpiredRecord(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		m, err := memory.New(memory.Config{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer m.Close()
+		o := testorigin.New()
+		o.Default(testorigin.Behavior{Header: http.Header{
+			"Cache-Control": {"max-age=1"},
+			"Date":          {time.Now().Add(5 * time.Minute).UTC().Format(http.TimeFormat)},
+		}, Body: []byte("v1")})
+		e := newEngine(t, weir.Config{Store: &lazyStore{Store: m, m: map[store.Key]*store.Entry{}}, Freshness: weir.FreshnessConfig{NoJitter: true}})
+		defer closeEngine(t, e)
+
+		serve(t, e, getReq("/a"), o)
+		time.Sleep(3 * time.Second)
+		o.Default(cacheable("v2"))
+		if resp, _ := serve(t, e, getReq("/a"), o); !resp.Cache.Stored {
+			t.Fatalf("refetch not stored: %s", resp.Header.Get("Cache-Status"))
+		}
+	})
+}

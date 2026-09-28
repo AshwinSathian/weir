@@ -59,7 +59,7 @@ func New(cfg Config) (*Engine, error) {
 		if !fromLimit {
 			c.Logger.Warn("weir: no GOMEMLIMIT set; the memory store uses 256 MiB. Set GOMEMLIMIT to size it at 40% of the limit")
 		}
-		m, err := memory.New(memory.Config{MaxBytes: n})
+		m, err := memory.New(memory.Config{MaxBytes: n, Shards: defaultShards(n, c.Storable.MaxObjectBytes)})
 		if err != nil {
 			return nil, err
 		}
@@ -85,6 +85,18 @@ func defaultStoreBytes(limit int64) (int64, bool) {
 		return 256 << 20, false
 	}
 	return min(max(limit/5*2, 16<<20), 8<<30), true
+}
+
+// defaultShards is 16, halved while a shard's small queue (a tenth of the
+// shard) could not hold one maxObject object, down to 1. Without it, a
+// GOMEMLIMIT under about 400 MiB would make the zero Config fail New
+// (FR-LCY-1) against the store's MaxObjectBytes.
+func defaultShards(storeBytes, maxObject int64) int {
+	n := 16
+	for n > 1 && storeBytes/int64(n)/10 < maxObject {
+		n /= 2
+	}
+	return n
 }
 
 // warnForwarding logs forwarding settings that send unkeyed credentials to

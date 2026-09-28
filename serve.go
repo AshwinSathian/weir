@@ -199,9 +199,10 @@ func (e *Engine) storeResponse(ctx context.Context, c *keys.Classified, res *fet
 	// RFC 9111 §4: a slow fetch never replaces a more recent response that
 	// another fetch stored meanwhile (04 §6.7). The record this request
 	// found is exempt: it is stale or unusable, and an origin clock that
-	// once ran ahead would otherwise pin it until it expires.
+	// once ran ahead would otherwise pin it until it expires. So is a
+	// record past its Expires that a lazy store still returns.
 	if cur, err := e.store.Get(ctx, c.Primary); err == nil && cur.Kind == store.KindResponse &&
-		!sameRecord(cur, found) && newer(cur, ent) {
+		cur.Expires.After(res.respTime) && !sameRecord(cur, found) && newer(cur, ent) {
 		return false
 	}
 	return e.store.Set(ctx, c.Primary, ent) == nil

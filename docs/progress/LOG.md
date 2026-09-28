@@ -343,3 +343,11 @@ Entry template:
 - Deviations: 04 §6.7 now states the found-record exemption from newest-wins (card-reviewer should-fix). Store write stays in serve.go, not fetch.go.
 - Follow-ups: none new; notes in STATUS.
 - Context: low; size M was right.
+
+## 2026-09-28 · M1-15 · review-fixes
+- Branch / PR: card/M1-15-invalidation-epochs / #22
+- Done: adversarial review before merge. Zero-config `New` failed under `GOMEMLIMIT` below about 400 MiB (16 shards left a small queue under 1 MiB); `defaultShards` halves the shard count until one small queue holds `Storable.MaxObjectBytes`. Invalidation now emits `EvPurge{invalid}` (04 §9.2). Newest-wins ignores a record past its `Expires` that a lazy store still returns.
+- Tests: TestDefaultStoreSizeFromMemLimit (zero Config at 1/40/200/399 MiB limits), TestUnsafeMethodInvalidates (event count), TestNewerResponseWinsSkipsExpiredRecord; each failed before its fix. TestNewRejectsStore now uses a 1 GiB object. `make check` passes.
+- Deviations: 01 §6 `Store` default row and 05 §5.1 now describe the shard reduction; 04 §6.7 names the expired-record exemption.
+- Follow-ups: none.
+- Context: low.

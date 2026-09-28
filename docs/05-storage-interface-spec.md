@@ -130,7 +130,7 @@ func (s *Store) Bytes() int64 // current accounted bytes, for EngineStats
 func (s *Store) MaxObjectBytes() int64 // largest record the store can admit: 10% of one shard
 ```
 
-The engine, when it creates the default store, passes `Storable.MaxObjectBytes` through a check against `MaxObjectBytes()` (FR-LCY-1): with 256 MiB and 16 shards a shard is 16 MiB, the small queue 1.6 MiB, so the default 1 MiB object limit fits.
+The engine, when it creates the default store, passes `Storable.MaxObjectBytes` through a check against `MaxObjectBytes()` (FR-LCY-1): with 256 MiB and 16 shards a shard is 16 MiB, the small queue 1.6 MiB, so the default 1 MiB object limit fits. A smaller store sized from `GOMEMLIMIT` (FR-MEM-1, down to 16 MiB) would not fit it with 16 shards, so the engine halves the shard count, down to 1, until one shard's small queue holds `Storable.MaxObjectBytes`.
 
 ### 5.2 Sharding
 

@@ -3,6 +3,7 @@ package weir
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"log/slog"
 	"math"
 	"runtime/debug"
@@ -48,4 +49,20 @@ func TestDefaultStoreSizeFromMemLimit(t *testing.T) {
 			t.Fatalf("no GOMEMLIMIT warning; log: %q", buf.String())
 		}
 	})
+
+	// FR-LCY-1: the zero Config stays valid under any GOMEMLIMIT. A small
+	// store uses fewer shards so one shard's small queue still holds a
+	// Storable.MaxObjectBytes object.
+	for _, limit := range []int64{1 << 20, 40 << 20, 200 << 20, 399 << 20} {
+		t.Run(fmt.Sprintf("zero Config valid at %d MiB limit", limit>>20), func(t *testing.T) {
+			defer debug.SetMemoryLimit(debug.SetMemoryLimit(limit))
+			e, err := New(Config{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := e.Close(context.Background()); err != nil {
+				t.Error(err)
+			}
+		})
+	}
 }

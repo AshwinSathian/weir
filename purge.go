@@ -30,6 +30,7 @@ func (e *Engine) invalidate(ctx context.Context, c *keys.Classified, resp *Respo
 		}
 	}
 	ep := store.Epoch{At: time.Now(), Mode: store.EpochInvalid}
+	emit(e.cfg.Observer, Event{Kind: EvPurge, Time: ep.At, Partition: c.Partition, Reason: "invalid"})
 	for _, t := range tags {
 		_ = e.store.SetEpoch(ctx, t, ep)
 	}

@@ -273,8 +273,9 @@ func TestNewRejectsStore(t *testing.T) {
 	if err := e.Close(context.Background()); err != nil || s.closed {
 		t.Fatalf("Close = %v, store closed = %v; caller-owned store must stay open", err, s.closed)
 	}
-	// The default memory store admits 10% of a 16 MiB shard (05 §5.1).
-	if _, err := weir.New(weir.Config{Storable: weir.StorableConfig{MaxObjectBytes: 2 << 20}}); !errors.Is(err, weir.ErrInvalidConfig) {
+	// The default memory store admits 10% of one shard, and it is at most
+	// 8 GiB in one shard (05 §5.1, FR-MEM-1), so 1 GiB never fits.
+	if _, err := weir.New(weir.Config{Storable: weir.StorableConfig{MaxObjectBytes: 1 << 30}}); !errors.Is(err, weir.ErrInvalidConfig) {
 		t.Errorf("MaxObjectBytes above default store max: err = %v", err)
 	}
 }

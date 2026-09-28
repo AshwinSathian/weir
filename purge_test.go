@@ -46,7 +46,10 @@ func TestUnsafeMethodInvalidates(t *testing.T) {
 		o.Route("/x", unsafeAnswer(http.StatusCreated, http.Header{"Location": {"https://other.example/y"}}, "x"))
 		o.Route("/f", unsafeAnswer(http.StatusSeeOther, http.Header{"Location": {"/g"}}, "f"))
 		o.Route("/d", unsafeAnswer(http.StatusNotFound, http.Header{"Location": {"/e"}}, "d"))
-		e := newEngine(t, cacheCfg)
+		obs := &purgeObserver{}
+		cfg := cacheCfg
+		cfg.Observer = obs
+		e := newEngine(t, cfg)
 		defer closeEngine(t, e)
 
 		other := func(path string) *weir.Request { r := getReq(path); r.Host = "other.example"; return r }
@@ -85,7 +88,31 @@ func TestUnsafeMethodInvalidates(t *testing.T) {
 		if got := last.Header.Get("If-None-Match"); got != `"a"` {
 			t.Errorf("revalidation of /a sent If-None-Match %q, want %q", got, `"a"`)
 		}
+		// 04 §9.2: one EvPurge{invalid} per invalidating response, none for the 404.
+		if got := obs.count(); got != 3 {
+			t.Errorf("EvPurge{invalid} events = %d, want 3", got)
+		}
 	})
+}
+
+// purgeObserver counts EvPurge events with reason "invalid".
+type purgeObserver struct {
+	mu sync.Mutex
+	n  int
+}
+
+func (o *purgeObserver) Observe(ev weir.Event) {
+	if ev.Kind == weir.EvPurge && ev.Reason == "invalid" {
+		o.mu.Lock()
+		o.n++
+		o.mu.Unlock()
+	}
+}
+
+func (o *purgeObserver) count() int {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.n
 }
 
 // FR-PRG-7, T-10: a fetch sent before an invalidation and stored after it
