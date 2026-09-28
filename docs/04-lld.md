@@ -67,6 +67,7 @@ type StorableConfig struct {
 	Statuses       []int // nil: default set
 	MaxObjectBytes int64 // 0: 1 MiB
 	StripSetCookie bool
+	StreamTypes    []string // FR-STR-1: streamed like text/event-stream
 }
 
 type FreshnessConfig struct {

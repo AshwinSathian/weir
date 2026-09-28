@@ -26,15 +26,18 @@ var fuzzCfgs = []Config{
 
 func FuzzForwardEqualsKey(f *testing.F) {
 	// INV-1, FR-FWD-1, FR-FWD-5, FR-FWD-6; T-1, T-2, T-5
-	f.Add(byte(0), "GET", "/a", "a=1&utm_x=2", "lang=en; sid=1; x=2", "gzip;q=0.5, br", "evil", "X-Original-Url")
-	f.Add(byte(1), "HEAD", "/%7e/%2f", "b2=1&a=0&c=3", "lang=en", "*", "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01", "host")
-	f.Add(byte(2), "GET", "/", "", "a=1; a=2", "zstd;q=0", "", "content-length")
-	f.Fuzz(func(t *testing.T, sel byte, method, path, query, cookie, ae, extra, name string) {
+	f.Add(byte(0), "GET", "/a", "a=1&utm_x=2", "lang=en; sid=1; x=2", "gzip;q=0.5, br", "evil", "X-Original-Url", "")
+	f.Add(byte(1), "HEAD", "/%7e/%2f", "b2=1&a=0&c=3", "lang=en", "*", "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01", "host", "")
+	// T-40: two Tracestate lines whose combined length straddles the 512-byte
+	// W3C limit filterTrace sums across lines.
+	f.Add(byte(2), "GET", "/", "", "a=1; a=2", "zstd;q=0", "", "content-length", strings.Repeat("a", 510))
+	f.Fuzz(func(t *testing.T, sel byte, method, path, query, cookie, ae, extra, name, tracestate2 string) {
 		cfg := &fuzzCfgs[int(sel)%len(fuzzCfgs)]
 		r := &Request{Method: method, Scheme: "https", Host: "example.com", Path: path, RawQuery: query,
 			Header: http.Header{
 				"Cookie": {cookie}, "Accept-Encoding": {ae},
-				"X-Forwarded-Host": {extra}, "X-Tenant": {extra}, "Traceparent": {extra}, "Tracestate": {extra},
+				"X-Forwarded-Host": {extra}, "X-Tenant": {extra}, "Traceparent": {extra},
+				"Tracestate":   {extra, tracestate2},
 				"X-Request-Id": {extra}, "If-None-Match": {extra}, "Range": {extra}, "Connection": {extra},
 			}}
 		if isToken(name) {

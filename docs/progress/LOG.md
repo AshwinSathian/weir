@@ -351,3 +351,11 @@ Entry template:
 - Deviations: 01 §6 `Store` default row and 05 §5.1 now describe the shard reduction; 04 §6.7 names the expired-record exemption.
 - Follow-ups: none.
 - Context: low.
+
+## 2026-09-28 · M1-16 · done
+- Branch / PR: card/M1-16-pass-through-upgrades-trace / #(filled after push)
+- Done: event streams (FR-STR-1) — `fetch` detects `Content-Type: text/event-stream` or `Storable.StreamTypes` right after headers, before the buffered read, and streams immediately (never stored, no marker); user-approved fixes to two open questions — `internal/keys` now caps forwarded `Tracestate` at 512 bytes of visible ASCII combined across lines (W3C limit), dropping it alone and keeping `Traceparent` (FR-FWD-6); docs/06 INV-1 now lists `traceparent`/`tracestate`/`X-Request-Id` as unkeyed forwarded fields. CONNECT/upgrade rejection (FR-UPG-1) and traceparent validation (FR-FWD-6) were already implemented by prior cards; this card added engine-level regression tests and decided no event fires for the upgrade path (`EvKeyRejected`'s vocabulary is `RequestError.Reason` only, and adapters intercept CONNECT/upgrade before `Serve` in production).
+- Tests: TestConnectRejected, TestUpgradeRejected, TestEventStreamNeverBuffered, TestTraceparentValidated (engine level, serve_test.go); new tracestate-cap cases in internal/keys' TestTraceparentValidated table. Review added: FuzzForwardEqualsKey now varies a second `Tracestate` line so its combined-length check gets multi-line fuzz coverage (existing seed corpus files updated for the new fuzz signature). `make check` and `make fuzz-short` pass.
+- Deviations: docs/01 §14.5 (FR-FWD-6) states the tracestate cap; docs/06 INV-1 lists the three trace fields; docs/04 §1.1 `StorableConfig` now lists `StreamTypes`.
+- Follow-ups: none new; two review nits left open in STATUS (StreamTypes branch has no test; upgrade-rejection tests don't assert event absence).
+- Context: low; size S was right.
