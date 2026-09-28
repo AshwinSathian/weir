@@ -3,6 +3,7 @@ package keys
 import (
 	"hash/maphash"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/AshwinSathian/weir/internal/httpcc"
@@ -55,6 +56,8 @@ type Classified struct {
 	PartitionH uint64 // maphash of Partition, per-process seed
 	ReqCC      httpcc.RequestDirectives
 	ClientCond ClientConditionals
+	rangeHdr   []string // the client's Range lines, for AsRangePass
+	ifRange    []string // the client's If-Range lines, for AsRangePass
 }
 
 const maxPartitionBytes = 512
@@ -80,6 +83,8 @@ func Classify(r *Request, c *Config) (Classified, error) {
 	out := Classified{
 		Head:       r.Method == http.MethodHead,
 		Range:      len(h["Range"]) > 0,
+		rangeHdr:   h["Range"],
+		ifRange:    h["If-Range"],
 		Authorized: len(h["Authorization"]) > 0,
 		URITag:     TagURI(origin, path, query),
 		OriginTag:  TagOrigin(origin),
@@ -121,6 +126,22 @@ func Classify(r *Request, c *Config) (Classified, error) {
 		}
 	}
 	return out, nil
+}
+
+// AsRangePass turns a cacheable Range request that no entry answers into a
+// pass-through (FR-SRV-5): the forwarded request gains the client's Range
+// and If-Range lines, so the origin decides between 206 and 200 (RFC 9110
+// §13.1.5). A HEAD stays a GET (FR-FWD-4); the engine drops the body.
+// T-7: the cacheable forward itself never carries Range.
+func (c *Classified) AsRangePass() *Classified {
+	out := *c
+	out.Class, out.FwdReason = ClassPass, FwdNone
+	out.Forwarded.Header = c.Forwarded.Header.Clone()
+	out.Forwarded.Header["Range"] = slices.Clone(c.rangeHdr)
+	if len(c.ifRange) > 0 {
+		out.Forwarded.Header["If-Range"] = slices.Clone(c.ifRange)
+	}
+	return &out
 }
 
 // pass fills the forwarded request of a ClassPass request: path, query and

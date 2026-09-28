@@ -4,9 +4,9 @@ Updated: 2026-09-28
 Phase: 1
 Current card: none
 Card state: awaiting-merge
-Branch: card/M1-13-revalidation
-PR: #20 https://github.com/AshwinSathian/weir/pull/20
-Next card: M1-14
+Branch: card/M1-14-head-range
+PR: pending
+Next card: M1-15
 
 ## Blockers
 
@@ -34,8 +34,9 @@ none
 
 ## Notes for the next session
 
-- `cacheable` (serve.go) validates StaleSWR and NeedsValidation entries that have validators via `fetch(..., prior)`; a 304 is merged by `freshened` (conditional.go) and stored through the normal `storeResponse` path. SWR still validates in the foreground (`ponytail:`, M5). Client conditionals are evaluated only in `fromEntry` (hits), not after a validation.
-- `fetch` retries a strong-ETag-mismatch 304 unconditionally under the same timeout; M4 must keep the retry under the same limiter slot. A 304 to that retry passes through unstored.
-- After a validation whose response is unstorable and response-driven, `setMarker` relies on the read-before-write to skip the marker (04 §6.7 says only when `prior == nil`); pass that through when M2 restructures fetch results.
-- Unowned events: no card emits `EvRequest`, `EvFetchStart`, `EvFetchEnd`, or `EvStoreError{epoch}` on epoch lookup failure (04 §6.3); over-size and 5xx responses emit no `EvNotStored`. Give them a card or fold into M1-16.
-- Carried: newest-wins store rule (M1-15); `New` must reject `Forward.Allow` entries naming keyed or hop-by-hop fields and compile query patterns; decide whether `Close` waits for foreground `Serve` calls (today a store write after Close closes the owned store just fails); codec header-name case; hard-epoch prune and S3-FIFO walk to measure in M1-18.
+- `cacheable` (serve.go) validates StaleSWR and NeedsValidation entries with validators via `fetch(..., prior)`; SWR still validates in the foreground (`ponytail:`, M5). Under M5, StaleSWR must be served before the `only-if-cached` and Range checks, which today reject or pass through stale SWR entries.
+- A Range request that no entry answers (miss or stale) goes through `pass` via `keys.Classified.AsRangePass()` with Range and If-Range (FR-SRV-5 updated). HEAD with Range goes forward as GET and the body is dropped (FR-FWD-4). M11-01 adds 206 from entries; FR-RNG-4's background fill hooks into that `pass` call.
+- With `HonorRevalidation`, `no-cache`/`max-age=0` turn Fresh into NeedsValidation (`forcesValidation`), except under `only-if-cached`.
+- `fetch` retries a strong-ETag-mismatch 304 under the same timeout; M4 must keep the retry under the same limiter slot. After a validation whose response is unstorable and response-driven, `setMarker` relies on the read-before-write to skip the marker.
+- Unowned events: no card emits `EvRequest`, `EvFetchStart`, `EvFetchEnd`, or `EvStoreError{epoch}`; over-size and 5xx responses emit no `EvNotStored`. Give them a card or fold into M1-16.
+- Carried: newest-wins store rule (M1-15); `New` must reject `Forward.Allow` entries naming keyed or hop-by-hop fields and compile query patterns; decide whether `Close` waits for foreground `Serve` calls; codec header-name case; hard-epoch prune and S3-FIFO walk to measure in M1-18.

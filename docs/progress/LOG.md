@@ -318,3 +318,12 @@ Entry template:
 - Deviations: none.
 - Follow-ups: 304 relabelling Content-Encoding (Waiting on Ashwin).
 - Context: low.
+
+## 2026-09-28 · M1-14 · done
+- Branch / PR: card/M1-14-head-range / pending
+- Done: `only-if-cached` returns `ErrOnlyIfCached` (504) without an origin call; a Range request with no usable entry (miss or stale) passes through with Range and If-Range, unstored, no marker, via `keys.Classified.AsRangePass`; `HonorRevalidation` makes `no-cache`/`max-age=0`/`Pragma: no-cache` validate a fresh entry. HEAD-from-GET and request `no-store` already worked; now tested.
+- Tests: TestHeadFromGetEntry, TestRangeGarbageNotPoisoning, TestOnlyIfCached, TestOnlyIfCachedBeatsNoCache, TestRequestNoStore, TestClientNoCacheIgnored, TestAsRangePass. `make check` passes.
+- Deviations: FR-SRV-5 now forwards If-Range with Range (Ashwin approved, review finding); 04 §6.2 passes Range through whenever no entry answers, not only on `lk.entry == nil` (Ashwin chose FR-SRV-5 over the LLD); 04 §3.1 lists `AsRangePass`.
+- Follow-ups: M5 must serve StaleSWR before the only-if-cached and Range checks.
+- Context: low; size S was right.
+

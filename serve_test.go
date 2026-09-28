@@ -393,3 +393,227 @@ func TestHardPurgedEntryIsMiss(t *testing.T) {
 		}
 	})
 }
+
+// withHeader returns req with one more request field.
+func withHeader(req *weir.Request, name, value string) *weir.Request {
+	req.Header.Set(name, value)
+	return req
+}
+
+func headReq(path string) *weir.Request {
+	r := getReq(path)
+	r.Method = http.MethodHead
+	return r
+}
+
+// FR-SRV-4, FR-FWD-4: a HEAD miss is fetched as GET and stored, the client
+// gets headers only, and a later HEAD or GET is answered from that entry.
+func TestHeadFromGetEntry(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		o := testorigin.New()
+		o.Default(cacheable("hello"))
+		e := newEngine(t, cacheCfg)
+		defer closeEngine(t, e)
+
+		resp, body := serve(t, e, headReq("/a"), o)
+		if body != "" || resp.StatusCode != http.StatusOK || !resp.Cache.Stored {
+			t.Fatalf("HEAD miss: %d %q stored=%v", resp.StatusCode, body, resp.Cache.Stored)
+		}
+		if m := o.Requests()[0].Method; m != http.MethodGet {
+			t.Fatalf("HEAD miss forwarded as %s, want GET", m)
+		}
+		resp, body = serve(t, e, getReq("/a"), o)
+		if body != "hello" || !resp.Cache.Hit {
+			t.Fatalf("GET after HEAD miss: %q hit=%v", body, resp.Cache.Hit)
+		}
+		resp, body = serve(t, e, headReq("/a"), o)
+		if body != "" || !resp.Cache.Hit || resp.Header.Get("Cache-Control") != "max-age=60" {
+			t.Fatalf("HEAD hit: %q hit=%v header %v", body, resp.Cache.Hit, resp.Header)
+		}
+		if n := o.Calls("/a"); n != 1 {
+			t.Fatalf("origin calls = %d, want 1", n)
+		}
+	})
+}
+
+// FR-SRV-5, T-7: a Range request with no usable entry passes through with
+// its Range field; the origin's error is neither stored nor turned into a
+// marker, and a Range request on a fresh entry gets the full 200.
+func TestRangeGarbageNotPoisoning(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		o := testorigin.New()
+		o.Default(testorigin.Behavior{Func: func(r *weir.Request) (*weir.Response, error) {
+			if r.Header.Get("Range") != "" { // an origin that chokes on bad ranges
+				return respond(http.StatusBadRequest, http.Header{"Cache-Control": {"max-age=60"}}, "bad range"), nil
+			}
+			// The ETag keeps the entry stored once stale.
+			return respond(http.StatusOK, http.Header{"Cache-Control": {"max-age=60"}, "Etag": {`"v1"`}}, "full"), nil
+		}})
+		e := newEngine(t, cacheCfg)
+		defer closeEngine(t, e)
+
+		resp, body := serve(t, e, withHeader(getReq("/a"), "Range", "bytes=cow"), o)
+		if resp.StatusCode != http.StatusBadRequest || body != "bad range" || resp.Cache.Stored {
+			t.Fatalf("range miss: %d %q stored=%v", resp.StatusCode, body, resp.Cache.Stored)
+		}
+		if got := o.Requests()[0].Header.Get("Range"); got != "bytes=cow" {
+			t.Fatalf("forwarded Range = %q, want bytes=cow", got)
+		}
+		resp, body = serve(t, e, getReq("/a"), o)
+		if body != "full" || resp.Cache.Hit || !resp.Cache.Stored || resp.Cache.Detail != "" {
+			t.Fatalf("plain request after range: %q %+v, want a normal miss", body, resp.Cache)
+		}
+		resp, body = serve(t, e, withHeader(getReq("/a"), "Range", "bytes=0-1"), o)
+		if resp.StatusCode != http.StatusOK || body != "full" || !resp.Cache.Hit {
+			t.Fatalf("range on fresh entry: %d %q hit=%v", resp.StatusCode, body, resp.Cache.Hit)
+		}
+		if n := o.Calls("/a"); n != 2 {
+			t.Fatalf("origin calls = %d, want 2", n)
+		}
+
+		// FR-FWD-4: a HEAD Range miss goes forward as GET; the client gets
+		// no body.
+		_, body = serve(t, e, withHeader(headReq("/b"), "Range", "bytes=0-1"), o)
+		if r := o.Requests()[2]; r.Method != http.MethodGet || r.Header.Get("Range") != "bytes=0-1" || body != "" {
+			t.Fatalf("HEAD range miss forwarded as %s Range=%q, body %q", r.Method, r.Header.Get("Range"), body)
+		}
+
+		// T-37: a stale entry does not turn a Range request into a stored
+		// full fetch; the pass-through carries If-Range too (RFC 9110
+		// §13.1.5), and the next plain fetch carries neither (T-7).
+		time.Sleep(61 * time.Second)
+		rr := withHeader(withHeader(getReq("/a"), "Range", "bytes=0-1"), "If-Range", `"v1"`)
+		resp, _ = serve(t, e, rr, o)
+		r := o.Requests()[3]
+		if r.Header.Get("Range") != "bytes=0-1" || r.Header.Get("If-Range") != `"v1"` || resp.Cache.Stored || resp.Cache.Fwd != weir.FwdStale {
+			t.Fatalf("range on stale entry: forwarded %v, CacheInfo %+v", r.Header, resp.Cache)
+		}
+		serve(t, e, withHeader(getReq("/a"), "If-Range", `"v1"`), o)
+		if r := o.Requests()[4]; r.Header.Get("Range") != "" || r.Header.Get("If-Range") != "" {
+			t.Fatalf("cacheable fetch carried %v", r.Header)
+		}
+	})
+}
+
+// FR-SRV-6: only-if-cached is answered from a usable entry or fails with
+// ErrOnlyIfCached (504) without contacting the origin.
+func TestOnlyIfCached(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		o := testorigin.New()
+		o.Default(cacheable("hello"))
+		e := newEngine(t, cacheCfg)
+		defer closeEngine(t, e)
+		oic := func() *weir.Request { return withHeader(getReq("/a"), "Cache-Control", "only-if-cached") }
+
+		_, err := e.Serve(t.Context(), oic(), o)
+		if !errors.Is(err, weir.ErrOnlyIfCached) || weir.StatusCode(err) != http.StatusGatewayTimeout {
+			t.Fatalf("miss: err %v, want ErrOnlyIfCached with 504", err)
+		}
+		if n := o.Calls("/a"); n != 0 {
+			t.Fatalf("origin calls on miss = %d, want 0", n)
+		}
+		serve(t, e, getReq("/a"), o)
+		resp, body := serve(t, e, oic(), o)
+		if body != "hello" || !resp.Cache.Hit {
+			t.Fatalf("fresh: %q hit=%v", body, resp.Cache.Hit)
+		}
+		time.Sleep(61 * time.Second)
+		if _, err := e.Serve(t.Context(), oic(), o); !errors.Is(err, weir.ErrOnlyIfCached) {
+			t.Fatalf("stale: err %v, want ErrOnlyIfCached", err)
+		}
+		if n := o.Calls("/a"); n != 1 {
+			t.Fatalf("origin calls = %d, want 1", n)
+		}
+	})
+}
+
+// FR-SRV-6, FR-SRV-8: with HonorRevalidation, only-if-cached still gets a
+// fresh entry even when no-cache would otherwise force validation.
+func TestOnlyIfCachedBeatsNoCache(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		o := testorigin.New()
+		o.Default(cacheable("hello"))
+		cfg := cacheCfg
+		cfg.Client.HonorRevalidation = true
+		e := newEngine(t, cfg)
+		defer closeEngine(t, e)
+
+		serve(t, e, getReq("/a"), o)
+		resp, body := serve(t, e, withHeader(getReq("/a"), "Cache-Control", "only-if-cached, no-cache"), o)
+		if body != "hello" || !resp.Cache.Hit || o.Calls("/a") != 1 {
+			t.Fatalf("%q hit=%v calls=%d, want the fresh entry", body, resp.Cache.Hit, o.Calls("/a"))
+		}
+	})
+}
+
+// FR-SRV-7: request no-store is honored under the default config: the
+// response is served but not stored, and no marker is left behind (T-31).
+func TestRequestNoStore(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		o := testorigin.New()
+		o.Default(cacheable("hello"))
+		e := newEngine(t, cacheCfg)
+		defer closeEngine(t, e)
+
+		resp, body := serve(t, e, withHeader(getReq("/a"), "Cache-Control", "no-store"), o)
+		if body != "hello" || resp.Cache.Stored {
+			t.Fatalf("no-store: %q stored=%v", body, resp.Cache.Stored)
+		}
+		resp, _ = serve(t, e, getReq("/a"), o)
+		if resp.Cache.Hit || !resp.Cache.Stored || resp.Cache.Detail != "" {
+			t.Fatalf("next request %+v, want a normal miss that stores", resp.Cache)
+		}
+	})
+}
+
+// FR-SRV-8, D5, T-14: client revalidation directives do not change lookup
+// by default; with HonorRevalidation they force validation of a fresh entry.
+func TestClientNoCacheIgnored(t *testing.T) {
+	directives := []struct{ name, value string }{
+		{"Cache-Control", "no-cache"},
+		{"Pragma", "no-cache"},
+		{"Cache-Control", "max-age=0"},
+		{"Cache-Control", "min-fresh=3600"},
+		{"Cache-Control", "max-stale=0"},
+	}
+	for _, d := range directives {
+		t.Run(d.name+" "+d.value+" is a hit by default", func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				o := testorigin.New()
+				o.Default(cacheable("hello"))
+				e := newEngine(t, cacheCfg)
+				defer closeEngine(t, e)
+
+				serve(t, e, getReq("/a"), o)
+				resp, body := serve(t, e, withHeader(getReq("/a"), d.name, d.value), o)
+				if body != "hello" || !resp.Cache.Hit || o.Calls("/a") != 1 {
+					t.Fatalf("%q hit=%v calls=%d, want a hit", body, resp.Cache.Hit, o.Calls("/a"))
+				}
+			})
+		})
+		if strings.HasPrefix(d.value, "min-fresh") || strings.HasPrefix(d.value, "max-stale") {
+			continue // FR-SRV-8 names only no-cache and max-age=0 as forcing validation
+		}
+		t.Run(d.name+" "+d.value+" validates with HonorRevalidation", func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				o := testorigin.New()
+				b := cacheable("hello")
+				b.Header.Set("ETag", `"1"`)
+				o.Default(b)
+				cfg := cacheCfg
+				cfg.Client.HonorRevalidation = true
+				e := newEngine(t, cfg)
+				defer closeEngine(t, e)
+
+				serve(t, e, getReq("/a"), o)
+				resp, _ := serve(t, e, withHeader(getReq("/a"), d.name, d.value), o)
+				if resp.Cache.Hit || o.Calls("/a") != 2 {
+					t.Fatalf("hit=%v calls=%d, want a validation", resp.Cache.Hit, o.Calls("/a"))
+				}
+				if got := o.Requests()[1].Header.Get("If-None-Match"); got != `"1"` {
+					t.Fatalf("If-None-Match = %q, want the stored ETag", got)
+				}
+			})
+		})
+	}
+}
