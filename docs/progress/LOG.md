@@ -335,3 +335,19 @@ Entry template:
 - Deviations: none.
 - Follow-ups: none.
 - Context: low.
+
+## 2026-09-28 · M1-15 · done
+- Branch / PR: card/M1-15-invalidation-epochs / #22
+- Done: unsafe-method invalidation of target URI and same-origin `Location`/`Content-Location` (purge.go, FR-INV-1/3); newest-wins read-before-write in `storeResponse`, exempting the record the request found; default memory store at 40% of `GOMEMLIMIT` clamped to [16 MiB, 8 GiB], else 256 MiB plus a warning (FR-MEM-1).
+- Tests: TestUnsafeMethodInvalidates (URI part, incl. 303 and conditional revalidation), TestPurgeDuringInflightFetch, TestOriginClockSkewDoesNotStale, TestDefaultStoreSizeFromMemLimit, TestNewerResponseWins, TestNewerResponseWinsSkipsPurgedEntry. `make check` passes.
+- Deviations: 04 §6.7 now states the found-record exemption from newest-wins (card-reviewer should-fix). Store write stays in serve.go, not fetch.go.
+- Follow-ups: none new; notes in STATUS.
+- Context: low; size M was right.
+
+## 2026-09-28 · M1-15 · review-fixes
+- Branch / PR: card/M1-15-invalidation-epochs / #22
+- Done: adversarial review before merge. Zero-config `New` failed under `GOMEMLIMIT` below about 400 MiB (16 shards left a small queue under 1 MiB); `defaultShards` halves the shard count until one small queue holds `Storable.MaxObjectBytes`. Invalidation now emits `EvPurge{invalid}` (04 §9.2). Newest-wins ignores a record past its `Expires` that a lazy store still returns.
+- Tests: TestDefaultStoreSizeFromMemLimit (zero Config at 1/40/200/399 MiB limits), TestUnsafeMethodInvalidates (event count), TestNewerResponseWinsSkipsExpiredRecord; each failed before its fix. TestNewRejectsStore now uses a 1 GiB object. `make check` passes.
+- Deviations: 01 §6 `Store` default row and 05 §5.1 now describe the shard reduction; 04 §6.7 names the expired-record exemption.
+- Follow-ups: none.
+- Context: low.

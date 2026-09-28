@@ -4,9 +4,9 @@ Updated: 2026-09-28
 Phase: 1
 Current card: none
 Card state: awaiting-merge
-Branch: card/M1-14-head-range
-PR: #21 https://github.com/AshwinSathian/weir/pull/21
-Next card: M1-15
+Branch: card/M1-15-invalidation-epochs
+PR: #22 https://github.com/AshwinSathian/weir/pull/22
+Next card: M1-16
 
 ## Blockers
 
@@ -39,4 +39,6 @@ none
 - With `HonorRevalidation`, `no-cache`/`max-age=0` turn Fresh into NeedsValidation (`forcesValidation`), except under `only-if-cached`.
 - `fetch` retries a strong-ETag-mismatch 304 under the same timeout; M4 must keep the retry under the same limiter slot. After a validation whose response is unstorable and response-driven, `setMarker` relies on the read-before-write to skip the marker.
 - Unowned events: no card emits `EvRequest`, `EvFetchStart`, `EvFetchEnd`, or `EvStoreError{epoch}`; over-size and 5xx responses emit no `EvNotStored`. Give them a card or fold into M1-16.
-- Carried: newest-wins store rule (M1-15); `New` must reject `Forward.Allow` entries naming keyed or hop-by-hop fields and compile query patterns; decide whether `Close` waits for foreground `Serve` calls; codec header-name case; hard-epoch prune and S3-FIFO walk to measure in M1-18.
+- Carried: `New` must reject `Forward.Allow` entries naming keyed or hop-by-hop fields and compile query patterns; decide whether `Close` waits for foreground `Serve` calls; codec header-name case; hard-epoch prune and S3-FIFO walk to measure in M1-18.
+- `invalidate` (purge.go) handles FR-INV-1 URI, `Location` and `Content-Location`; FR-INV-2 groups are M9-03. Failed `SetEpoch` writes are ignored with no event.
+- Newest-wins lives in `storeResponse` (serve.go), not `fetch`; M2 moving the store into the flight must keep the found-record exemption (`sameRecord`). `TestNewerResponseWins` sends a second GET while the first is gated, so under M2 coalescing it must use a key that cannot join the flight.

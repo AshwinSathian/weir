@@ -52,6 +52,9 @@ func (e *Engine) pass(ctx context.Context, c *keys.Classified, origin Origin, fw
 	if res.err != nil {
 		return nil, res.err
 	}
+	if c.Unsafe && res.resp.StatusCode >= 200 && res.resp.StatusCode < 400 {
+		e.invalidate(ctx, c, res.resp)
+	}
 	if c.Head { // a HEAD Range miss went forward as GET
 		closeBody(res.resp)
 		res.resp.Body = http.NoBody
@@ -96,6 +99,7 @@ func (e *Engine) lookup(ctx context.Context, c *keys.Classified, now time.Time) 
 func (e *Engine) cacheable(ctx context.Context, c *keys.Classified, origin Origin) (*Response, error) {
 	now := time.Now()
 	lk := e.lookup(ctx, c, now)
+	found := lk.entry       // the response this request found; it may always be replaced
 	var purged *store.Entry // an unusable response a marker may replace
 	var prior *store.Entry  // the stale entry to validate
 	if lk.entry != nil {
@@ -146,7 +150,7 @@ func (e *Engine) cacheable(ctx context.Context, c *keys.Classified, origin Origi
 		ci.Detail = "hit-for-miss"
 	}
 	if !res.over && !serverError(resp.StatusCode) {
-		ci.Stored = e.storeResponse(ctx, c, &res, purged)
+		ci.Stored = e.storeResponse(ctx, c, &res, found, purged)
 	}
 	switch {
 	case c.Head:
@@ -179,8 +183,9 @@ func serverError(status int) bool {
 // storeResponse stores a fully read response when storable, else writes a
 // hit-for-miss marker when the response itself is the reason (FR-STO-12,
 // T-31). It reports whether the entry was stored. The client's own
-// response keeps every origin field (FR-STO-6).
-func (e *Engine) storeResponse(ctx context.Context, c *keys.Classified, res *fetchResult, purged *store.Entry) bool {
+// response keeps every origin field (FR-STO-6). found is the response the
+// lookup returned, which this request already judged not fresh.
+func (e *Engine) storeResponse(ctx context.Context, c *keys.Classified, res *fetchResult, found, purged *store.Entry) bool {
 	ctx = context.WithoutCancel(ctx) // a client leaving after the body arrived does not undo the store
 	d := storability(&e.cfg, c, res.resp, res.body, res.respTime)
 	if !d.ok {
@@ -191,7 +196,35 @@ func (e *Engine) storeResponse(ctx context.Context, c *keys.Classified, res *fet
 		return false
 	}
 	ent := buildEntry(&e.cfg, c, res.resp, res.body, res.reqTime, res.respTime, d)
+	// RFC 9111 §4: a slow fetch never replaces a more recent response that
+	// another fetch stored meanwhile (04 §6.7). The record this request
+	// found is exempt: it is stale or unusable, and an origin clock that
+	// once ran ahead would otherwise pin it until it expires. So is a
+	// record past its Expires that a lazy store still returns.
+	if cur, err := e.store.Get(ctx, c.Primary); err == nil && cur.Kind == store.KindResponse &&
+		cur.Expires.After(res.respTime) && !sameRecord(cur, found) && newer(cur, ent) {
+		return false
+	}
 	return e.store.Set(ctx, c.Primary, ent) == nil
+}
+
+// sameRecord reports whether a and b are the same stored response. Stores
+// that decode a fresh copy per Get return a different pointer, so the
+// request and response times identify it.
+func sameRecord(a, b *store.Entry) bool {
+	return a == b || b != nil && a.RequestTime.Equal(b.RequestTime) && a.ResponseTime.Equal(b.ResponseTime)
+}
+
+// newer reports whether a is a more recent response than b: a later Date,
+// or on equal Dates a later ResponseTime. Date compares origin time with
+// origin time, so origin clock skew does not matter (T-30). The read before
+// the write is not atomic; two writes racing within one store round trip
+// can still let the older win until the next refresh.
+func newer(a, b *store.Entry) bool {
+	if !a.Date.Equal(b.Date) {
+		return a.Date.After(b.Date)
+	}
+	return a.ResponseTime.After(b.ResponseTime)
 }
 
 // setMarker writes a hit-for-miss marker unless the key holds a response,

@@ -389,7 +389,7 @@ All fields are optional. The zero value of `Config` is valid and yields the defa
 
 | Field | Default | Notes |
 |---|---|---|
-| `Store` | memory store, 16 shards, size per D35: 40% of `GOMEMLIMIT` clamped to [16 MiB, 8 GiB], or 256 MiB with a warning when `GOMEMLIMIT` is unset | engine closes it on `Close` only if it created it |
+| `Store` | memory store, 16 shards (halved, down to 1, while a shard's small queue could not hold `Storable.MaxObjectBytes`, so the zero Config stays valid under a small `GOMEMLIMIT`), size per D35: 40% of `GOMEMLIMIT` clamped to [16 MiB, 8 GiB], or 256 MiB with a warning when `GOMEMLIMIT` is unset | engine closes it on `Close` only if it created it |
 | `Key.QueryDrop`, `Key.QueryKeep` | empty | patterns, trailing `*` allowed |
 | `Key.QuerySort` | false | |
 | `Key.NormalizePath` | false | |
