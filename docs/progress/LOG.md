@@ -409,7 +409,7 @@ Entry template:
 - Context: low. Merged by the session at Ashwin's request.
 
 ## 2026-09-28 · M1-17d · done
-- Branch / PR: card/M1-17d-storability / #TBD
+- Branch / PR: card/M1-17d-storability / #27
 - Done: an `Authorization` response needs `public`, `must-revalidate` or an `s-maxage` in a usable field (`validSMaxAge`, new `httpcc.ResponseDirectives.Unusable`). `keys.Classified.Unkeyed` (Allow field sent, or ForwardAll) clears `responseDriven`, so no marker. storetest `ExpiredIsNotFound` on the real clock runs only under `-tags integration`.
 - Tests: TestAuthorizationNeedsValidSMaxage, TestNoMarkerAfterUnkeyedInput; `make check` passes, storetest passes with `-tags integration`.
 - Deviations: FR-STO-5, FR-STO-12, 04 Classified and marker pseudocode, 05 §8, 06 T-8/T-31, 07 lists, CLAUDE.md rule 6. The Unkeyed flag lives in internal/keys (forward.go, classify.go), not serve.go as the card's Touch list said. Review should-fix applied: any invalid delta-seconds directive voids the s-maxage permission, not only duplicates.
