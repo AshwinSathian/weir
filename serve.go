@@ -36,7 +36,11 @@ func (e *Engine) Serve(ctx context.Context, req *Request, origin Origin) (*Respo
 // rejected maps a classification error to the public one (04 §6.2).
 func (e *Engine) rejected(err error) error {
 	if errors.Is(err, keys.ErrUpgrade) {
-		return ErrUpgradeNotSupported // not a validation failure; M1-16 owns its event
+		// Not a validation failure: EvKeyRejected's vocabulary is
+		// RequestError.Reason values only (04 §9.2), and FR-UPG-1 has
+		// weirhttp and Caddy route CONNECT and upgrades around Serve, so
+		// production traffic never reaches this path.
+		return ErrUpgradeNotSupported
 	}
 	reason := "invalid"
 	if re, ok := errors.AsType[*keys.RequestError](err); ok {
@@ -149,14 +153,14 @@ func (e *Engine) cacheable(ctx context.Context, c *keys.Classified, origin Origi
 	if lk.marker {
 		ci.Detail = "hit-for-miss"
 	}
-	if !res.over && !serverError(resp.StatusCode) {
+	if !res.over && !res.stream && !serverError(resp.StatusCode) {
 		ci.Stored = e.storeResponse(ctx, c, &res, found, purged)
 	}
 	switch {
 	case c.Head:
-		closeBody(resp) // an over-size stream is canceled, not downloaded
+		closeBody(resp) // an over-size or event-stream body is canceled, not downloaded
 		resp.Body = http.NoBody
-	case !res.over && len(res.body) > 0:
+	case !res.over && !res.stream && len(res.body) > 0:
 		resp.Body = io.NopCloser(bytes.NewReader(res.body))
 	}
 	return e.finish(resp, ci), nil

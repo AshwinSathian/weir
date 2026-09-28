@@ -1,7 +1,7 @@
 # Weir threat model
 
 Status: v1.0
-Date: 2026-09-27
+Date: 2026-09-28
 Depends on: [01-technical-spec.md](01-technical-spec.md), [02-architecture.md](02-architecture.md)
 
 The seed's §7.3 makes the cache key a security boundary. This document says what that boundary protects, from whom, how each known attack class is answered, and what remains the operator's problem. Every threat has an ID so tests and code comments can cite it (`// T-3: ...`).
@@ -96,7 +96,7 @@ Each row: the attack, where it comes from, Weir's answer, the requirement or ADR
 
 These hold for every build. Each has at least one test that fails if it breaks.
 
-- INV-1 (key-forward consistency). For a cacheable, non-bypassed request, every header, path byte, query byte and body byte in the forwarded request is either a key input or was allowed by `Forward.Allow` or is one of `Authorization`, `Cache-Control`, `Pragma`, or a validator Weir added. Property test: random requests, random config; recompute the key from the forwarded request alone and compare.
+- INV-1 (key-forward consistency). For a cacheable, non-bypassed request, every header, path byte, query byte and body byte in the forwarded request is either a key input or was allowed by `Forward.Allow` or is one of `Authorization`, `Cache-Control`, `Pragma`, `traceparent`, `tracestate`, `X-Request-Id` (FR-FWD-6, D29), or a validator Weir added. Property test: random requests, random config; recompute the key from the forwarded request alone and compare.
 - INV-2 (injective key). Distinct keyed-input tuples produce distinct canonical encodings.
 - INV-3 (malformed means absent). A keyed header whose normalizer rejects the value is absent from both key and forwarded request.
 - INV-4 (no unsafe storage). No stored entry came from a response with `no-store` (without `must-understand`), `private`, `Vary: *`, unstripped `Set-Cookie`, or from an `Authorization` request without `public`, `s-maxage` or `must-revalidate`.

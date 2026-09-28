@@ -742,6 +742,122 @@ func (s *lazyStore) Set(_ context.Context, k store.Key, e *store.Entry) error {
 	return nil
 }
 
+// FR-UPG-1, T-44: CONNECT (including the authority-form target that would
+// otherwise fail path validation) never reaches the origin.
+func TestConnectRejected(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		o := testorigin.New()
+		e := newEngine(t, cacheCfg)
+		defer closeEngine(t, e)
+
+		r := getReq("example.com:443")
+		r.Method = http.MethodConnect
+		resp, err := e.Serve(t.Context(), r, o)
+		if resp != nil || !errors.Is(err, weir.ErrUpgradeNotSupported) || weir.StatusCode(err) != http.StatusNotImplemented {
+			t.Fatalf("got %v, %v; want ErrUpgradeNotSupported with 501", resp, err)
+		}
+		if o.TotalCalls() != 0 {
+			t.Fatalf("origin called %d times", o.TotalCalls())
+		}
+	})
+}
+
+// FR-UPG-1: a Connection: upgrade request with an Upgrade field never
+// reaches the origin.
+func TestUpgradeRejected(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		o := testorigin.New()
+		e := newEngine(t, cacheCfg)
+		defer closeEngine(t, e)
+
+		r := withHeader(withHeader(getReq("/a"), "Connection", "upgrade"), "Upgrade", "websocket")
+		resp, err := e.Serve(t.Context(), r, o)
+		if resp != nil || !errors.Is(err, weir.ErrUpgradeNotSupported) {
+			t.Fatalf("got %v, %v; want ErrUpgradeNotSupported", resp, err)
+		}
+		if o.TotalCalls() != 0 {
+			t.Fatalf("origin called %d times", o.TotalCalls())
+		}
+	})
+}
+
+// FR-STR-1: a text/event-stream response is streamed to the requester
+// immediately (never buffered, so the origin timeout only bounds the body
+// read after Serve returns) and never stored, marker included.
+func TestEventStreamNeverBuffered(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		o := testorigin.New()
+		stream := testorigin.Behavior{
+			Header:    http.Header{"Content-Type": {"text/event-stream"}, "Cache-Control": {"max-age=60"}},
+			Body:      []byte("data: hi\n\n"),
+			BodyDelay: time.Hour,
+		}
+		o.Default(stream)
+		e := newEngine(t, weir.Config{Timeouts: weir.TimeoutsConfig{Origin: time.Second}})
+		defer closeEngine(t, e)
+
+		resp, err := e.Serve(t.Context(), getReq("/a"), o)
+		if err != nil {
+			t.Fatalf("Serve: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.Cache.Stored {
+			t.Fatalf("event-stream response stored: %+v", resp.Cache)
+		}
+		if _, err := io.ReadAll(resp.Body); err == nil {
+			t.Fatal("read of an hour-delayed event-stream body succeeded under a 1s origin timeout")
+		}
+
+		stream.BodyDelay = 0
+		o.Default(stream)
+		resp2, body := serve(t, e, getReq("/a"), o)
+		if resp2.Cache.Hit || resp2.Cache.Stored || body != "data: hi\n\n" {
+			t.Fatalf("second event-stream request: %q %+v, want an uncached forward", body, resp2.Cache)
+		}
+		if n := o.Calls("/a"); n != 2 {
+			t.Fatalf("origin calls = %d, want 2 (never stored)", n)
+		}
+	})
+}
+
+// FR-FWD-6, D29, T-40: a valid traceparent, tracestate and X-Request-Id
+// reach the origin; a malformed traceparent drops both trace headers, and
+// tracestate over the 512-byte W3C limit is dropped alone.
+func TestTraceparentValidated(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		const tp = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+		o := testorigin.New()
+		o.Default(cacheable("x"))
+		e := newEngine(t, cacheCfg)
+		defer closeEngine(t, e)
+
+		r := getReq("/a")
+		r.Header.Set("Traceparent", tp)
+		r.Header.Set("Tracestate", "a=1")
+		r.Header.Set("X-Request-Id", "r1")
+		serve(t, e, r, o)
+		if got := o.Requests()[0].Header; got.Get("Traceparent") != tp || got.Get("Tracestate") != "a=1" || got.Get("X-Request-Id") != "r1" {
+			t.Fatalf("forwarded trace headers %v", got)
+		}
+
+		bad := getReq("/b")
+		bad.Header.Set("Traceparent", "not-a-traceparent")
+		bad.Header.Set("Tracestate", "a=1")
+		serve(t, e, bad, o)
+		if got := o.Requests()[1].Header; got.Get("Traceparent") != "" || got.Get("Tracestate") != "" {
+			t.Fatalf("malformed traceparent still forwarded: %v", got)
+		}
+
+		long := getReq("/c")
+		long.Header.Set("Traceparent", tp)
+		long.Header.Set("Tracestate", strings.Repeat("a", 513))
+		serve(t, e, long, o)
+		if got := o.Requests()[2].Header; got.Get("Traceparent") != tp || got.Get("Tracestate") != "" {
+			t.Fatalf("over-limit tracestate not dropped: %v", got)
+		}
+	})
+}
+
 // 04 §6.7: newest-wins ignores an expired record a store still returns, so
 // an origin clock that once ran ahead does not block every later store.
 func TestNewerResponseWinsSkipsExpiredRecord(t *testing.T) {

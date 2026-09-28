@@ -8,6 +8,8 @@ import (
 	"io"
 	"maps"
 	"net/http"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/AshwinSathian/weir/store"
@@ -25,6 +27,7 @@ type fetchResult struct {
 	body     []byte // buffered fetches: the whole body; nil when over
 	notMod   bool   // resp is a 304 validating the prior entry (FR-SRV-3)
 	over     bool   // buffered fetches: the body exceeded MaxObjectBytes and resp.Body streams it all
+	stream   bool   // an event-stream response; resp.Body streams it, never stored (FR-STR-1)
 	reqTime  time.Time
 	respTime time.Time // when the buffered body ended, or the headers arrived
 	err      error
@@ -71,8 +74,9 @@ func (e *Engine) fetch(ctx context.Context, req *Request, origin Origin, buffere
 		res.respTime = time.Now()
 		return res
 	}
-	if !buffered {
+	if !buffered || isEventStream(resp.Header, e.cfg.Storable.StreamTypes) {
 		res.respTime = time.Now()
+		res.stream = buffered
 		if resp.Body == http.NoBody {
 			cancel() // nothing left to bound; keeps NoBody visible to adapters
 		} else {
@@ -99,6 +103,18 @@ func (e *Engine) fetch(ctx context.Context, req *Request, origin Origin, buffere
 	resp.Body = http.NoBody
 	res.body = body
 	return res
+}
+
+// isEventStream reports whether h names text/event-stream or a type in
+// extra as its Content-Type (FR-STR-1). Parameters and case are ignored
+// (RFC 9110 §8.3.1); extra is already lowercased (config.go canonicalize).
+func isEventStream(h http.Header, extra []string) bool {
+	ct := h.Get("Content-Type")
+	if i := strings.IndexByte(ct, ';'); i >= 0 {
+		ct = ct[:i]
+	}
+	ct = strings.ToLower(strings.TrimSpace(ct))
+	return ct == "text/event-stream" || slices.Contains(extra, ct)
 }
 
 // readCloser joins a reader with the closer of the body it reads.

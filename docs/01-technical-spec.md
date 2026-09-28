@@ -616,7 +616,7 @@ Open: none that block any milestone before Phase 3.
 
 ### 14.5 Trace headers (D29)
 
-- FR-FWD-6. Unless `Forward.NoTraceHeaders` is set, fetches forward `traceparent`, `tracestate` and `X-Request-Id` in addition to `Forward.Allow`. `traceparent` must match the W3C Trace Context version-00 format (`00-<32 hex>-<16 hex>-<2 hex>`, not all-zero ids) or it is dropped together with `tracestate`. `X-Request-Id` longer than 128 bytes or containing bytes outside 0x21–0x7E is dropped. Coalesced followers' trace headers are not forwarded (only the flight creator's reach the origin). Echoing these into cacheable bodies is an origin bug, documented as T-40.
+- FR-FWD-6. Unless `Forward.NoTraceHeaders` is set, fetches forward `traceparent`, `tracestate` and `X-Request-Id` in addition to `Forward.Allow`. `traceparent` must match the W3C Trace Context version-00 format (`00-<32 hex>-<16 hex>-<2 hex>`, not all-zero ids) or it is dropped together with `tracestate`. `tracestate` combined across its lines longer than 512 bytes (the W3C limit) or containing a byte outside 0x21–0x7E is dropped on its own, `traceparent` kept. `X-Request-Id` longer than 128 bytes or containing bytes outside 0x21–0x7E is dropped. Coalesced followers' trace headers are not forwarded (only the flight creator's reach the origin). Echoing these into cacheable bodies is an origin bug, documented as T-40.
 
 ### 14.6 Stripped-cookie report (D31)
 

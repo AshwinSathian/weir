@@ -93,6 +93,7 @@ type StorableConfig struct {
 	Statuses       []int // nil: default set; never 206, 304, 500, 502, 503, 504
 	MaxObjectBytes int64 // 0: 1 MiB, body plus headers
 	StripSetCookie bool
+	StreamTypes    []string // Content-Type media types streamed like text/event-stream (FR-STR-1)
 }
 
 // FreshnessConfig tunes lifetimes, jitter and early refresh (FR-FRS).
@@ -202,7 +203,7 @@ func (c *Config) copySlices() {
 	for _, p := range []*[]string{
 		&c.Key.QueryDrop, &c.Key.QueryKeep, &c.Key.Headers, &c.Key.Cookies,
 		&c.Key.VaryAllow, &c.Key.AcceptEncoding, &c.Forward.Allow,
-		&c.Bypass.Cookies, &c.Bypass.Headers,
+		&c.Bypass.Cookies, &c.Bypass.Headers, &c.Storable.StreamTypes,
 	} {
 		*p = slices.Clone(*p)
 	}
@@ -311,6 +312,8 @@ func (c *Config) canonicalize() {
 	c.Key.AcceptEncoding = dedupe(c.Key.AcceptEncoding, strings.ToLower)
 	c.Key.Cookies = dedupe(c.Key.Cookies, nil)       // cookie names are case-sensitive
 	c.Bypass.Cookies = dedupe(c.Bypass.Cookies, nil) // cookie names are case-sensitive
+	// RFC 9110 §8.3.1: a media type's type and subtype compare case-insensitively.
+	c.Storable.StreamTypes = dedupe(c.Storable.StreamTypes, strings.ToLower)
 }
 
 // dedupe applies norm (when non-nil) to each element in place and removes

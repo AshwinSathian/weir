@@ -79,6 +79,10 @@ func DropHopByHop(h http.Header, conn []string) {
 	delete(h, "Host")
 }
 
+// maxTracestateBytes is the W3C Trace Context limit on tracestate combined
+// across its lines (FR-FWD-6).
+const maxTracestateBytes = 512
+
 // filterTrace applies FR-FWD-6 (T-40): trace fields that reach the origin
 // have a validated shape, and none do with NoTraceHeaders.
 func filterTrace(h http.Header, none bool) {
@@ -86,9 +90,22 @@ func filterTrace(h http.Header, none bool) {
 		delete(h, "Traceparent")
 		delete(h, "Tracestate")
 	}
+	if ts := h["Tracestate"]; len(ts) > 0 && (combinedLen(ts) > maxTracestateBytes || !allVisibleASCII(ts)) {
+		delete(h, "Tracestate")
+	}
 	if id := h["X-Request-Id"]; none || len(id) > 0 && (len(id) != 1 || len(id[0]) > 128 || !visibleASCII(id[0])) {
 		delete(h, "X-Request-Id")
 	}
+}
+
+// allVisibleASCII reports whether every line is visibleASCII.
+func allVisibleASCII(lines []string) bool {
+	for _, l := range lines {
+		if !visibleASCII(l) {
+			return false
+		}
+	}
+	return true
 }
 
 // validTraceparent accepts W3C Trace Context version 00 only:
