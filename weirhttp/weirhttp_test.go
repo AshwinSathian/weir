@@ -280,3 +280,74 @@ func TestDefaultTransportIgnoresProxyEnv(t *testing.T) {
 		t.Fatalf("default transport %T uses a proxy function", weirhttp.DefaultTransport())
 	}
 }
+
+// FR-UPG-1, INV-1: an Upgrade whose only token is h2c (curl --http2 on an
+// http URL) is served through the engine and keyed like a plain request;
+// the origin never sees Upgrade or HTTP2-Settings. h2c next to websocket
+// still routes around the engine (T-44).
+func TestH2CUpgradeServedNormally(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		s := &seen{}
+		_, c := proxy(t, s, http.Header{"Cache-Control": {"max-age=60"}}, "hello")
+		u := &url.URL{Scheme: "http", Host: "example.com", Path: "/page"}
+		if code, _, body := get(t, c, u); code != http.StatusOK || body != "hello" {
+			t.Fatalf("plain: status %d body %q", code, body)
+		}
+		send := func(upgrade string) (int, http.Header) {
+			req := (&http.Request{Method: http.MethodGet, URL: u, Host: u.Host, Header: http.Header{
+				"User-Agent":     {""},
+				"Connection":     {"Upgrade, HTTP2-Settings"},
+				"Upgrade":        {upgrade},
+				"Http2-Settings": {"AAMAAABkAAQAAP__"},
+			}}).WithContext(t.Context())
+			resp, err := c.Do(req)
+			if err != nil {
+				t.Fatalf("Upgrade %q: %v", upgrade, err)
+			}
+			_, _ = io.Copy(io.Discard, resp.Body)
+			_ = resp.Body.Close()
+			return resp.StatusCode, resp.Header
+		}
+		code, h := send("h2c")
+		if code != http.StatusOK || !strings.Contains(h.Get("Cache-Status"), "hit") {
+			t.Errorf("h2c: status %d Cache-Status %q, want a hit on the plain entry", code, h.Get("Cache-Status"))
+		}
+		if code, _ := send("h2c, websocket"); code != http.StatusNotImplemented {
+			t.Errorf("h2c, websocket: status %d, want 501 from Handler", code)
+		}
+		reqs := s.all()
+		if len(reqs) != 1 {
+			t.Fatalf("origin got %d requests, want 1", len(reqs))
+		}
+	})
+}
+
+// FR-UPG-1, INV-1: a miss with a lone h2c Upgrade reaches the origin
+// without Upgrade or HTTP2-Settings.
+func TestH2CUpgradeNotForwarded(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		s := &seen{}
+		_, c := proxy(t, s, http.Header{"Cache-Control": {"max-age=60"}}, "hello")
+		u := &url.URL{Scheme: "http", Host: "example.com", Path: "/page"}
+		req := (&http.Request{Method: http.MethodGet, URL: u, Host: u.Host, Header: http.Header{
+			"User-Agent":     {""},
+			"Connection":     {"Upgrade, HTTP2-Settings"},
+			"Upgrade":        {"h2c"},
+			"Http2-Settings": {"AAMAAABkAAQAAP__"},
+		}}).WithContext(t.Context())
+		resp, err := c.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		reqs := s.all()
+		if resp.StatusCode != http.StatusOK || len(reqs) != 1 {
+			t.Fatalf("status %d, origin requests %d", resp.StatusCode, len(reqs))
+		}
+		for _, name := range []string{"Upgrade", "Http2-Settings", "Connection"} {
+			if v, ok := reqs[0].Header[name]; ok {
+				t.Errorf("origin got %s %q", name, v)
+			}
+		}
+	})
+}

@@ -6,8 +6,10 @@ import (
 	"strings"
 )
 
-// hopByHop are the fields RFC 9110 §7.6.1 says a proxy never forwards.
-var hopByHop = []string{"Connection", "Keep-Alive", "Proxy-Connection", "Te", "Transfer-Encoding", "Upgrade"}
+// hopByHop are the fields RFC 9110 §7.6.1 says a proxy never forwards,
+// plus HTTP2-Settings, which RFC 9113 §3.1 ties to an h2c Upgrade on the
+// client's connection (FR-UPG-1).
+var hopByHop = []string{"Connection", "Keep-Alive", "Proxy-Connection", "Te", "Transfer-Encoding", "Upgrade", "Http2-Settings"}
 
 // dropped are the fields a cacheable fetch never carries (FR-FWD-1): client
 // preconditions and ranges, since the stored response must be the full one,

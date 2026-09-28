@@ -131,7 +131,7 @@ func TestConnectRejected(t *testing.T) {
 			r.Header = http.Header{"Connection": {"keep-alive, Upgrade"}, "Upgrade": {"websocket"}}
 		}},
 		{"upgrade token in a later Connection line", func(r *Request) {
-			r.Header = http.Header{"Connection": {"keep-alive", " UPGRADE "}, "Upgrade": {"h2c"}}
+			r.Header = http.Header{"Connection": {"keep-alive", " UPGRADE "}, "Upgrade": {"websocket"}}
 		}},
 		{"upgrade with invalid path still an upgrade", func(r *Request) {
 			r.Path = "not-a-path"
@@ -218,15 +218,23 @@ func TestValidateReturnsNormalizedHost(t *testing.T) {
 func FuzzValidateRequest(f *testing.F) {
 	// FR-VAL-1, FR-VAL-4, NFR-2; T-6: no panic, and no accepted path or
 	// query with bytes outside 0x21-0x7E or a malformed escape.
-	f.Add("GET", "http", "example.com", "/a/../b", "x=1", "keep-alive, Upgrade")
-	f.Fuzz(func(t *testing.T, method, scheme, host, path, query, conn string) {
+	f.Add("GET", "http", "example.com", "/a/../b", "x=1", "keep-alive, Upgrade", "websocket")
+	f.Fuzz(func(t *testing.T, method, scheme, host, path, query, conn, upgrade string) {
 		r := &Request{Method: method, Scheme: scheme, Host: host, Path: path, RawQuery: query,
-			Header: http.Header{"Connection": {conn}, "Upgrade": {"websocket"}}}
+			Header: http.Header{"Connection": {conn}, "Upgrade": {upgrade}}}
 		h, err := Validate(r, &testCfg)
-		// FR-UPG-1, T-44: an upgrade is never missed and never invented.
+		// FR-UPG-1, T-44: an upgrade is never missed and never invented; a
+		// lone h2c token is the one Upgrade value served normally.
+		var toks []string
+		for tok := range strings.SplitSeq(upgrade, ",") {
+			if tok = strings.Trim(tok, " \t"); tok != "" {
+				toks = append(toks, tok)
+			}
+		}
+		h2cOnly := len(toks) == 1 && strings.EqualFold(toks[0], "h2c")
 		wantUp := method == http.MethodConnect
 		for opt := range strings.SplitSeq(conn, ",") {
-			wantUp = wantUp || strings.EqualFold(strings.Trim(opt, " \t"), "upgrade")
+			wantUp = wantUp || !h2cOnly && strings.EqualFold(strings.Trim(opt, " \t"), "upgrade")
 		}
 		if errors.Is(err, ErrUpgrade) != wantUp {
 			t.Fatalf("method %q Connection %q: upgrade = %v, want %v", method, conn, !wantUp, wantUp)
@@ -242,6 +250,10 @@ func FuzzValidateRequest(f *testing.F) {
 		}
 		if !visibleASCII(path) || !visibleASCII(query) {
 			t.Fatalf("accepted invisible byte: path %q query %q", path, query)
+		}
+		// FR-VAL-1: no raw fragment or query delimiter reaches the origin.
+		if strings.ContainsAny(path, "#?") || strings.Contains(query, "#") {
+			t.Fatalf("accepted delimiter: path %q query %q", path, query)
 		}
 		if path != "*" && !strings.HasPrefix(path, "/") {
 			t.Fatalf("accepted path %q", path)
@@ -279,4 +291,65 @@ func FuzzHost(f *testing.F) {
 			t.Fatalf("not idempotent: %q -> %q -> %q, %v", host, h, h2, ok)
 		}
 	})
+}
+
+func TestFragmentInTargetRejected(t *testing.T) {
+	// FR-VAL-1, T-6: a raw '#' is invalid in origin-form (RFC 9112 §3.2) and an
+	// origin reads it as a fragment, so "/a#x" would split the cache for
+	// one resource. A raw '?' in Path would move bytes into the query the
+	// origin sees.
+	tests := []struct {
+		name   string
+		mod    func(r *Request)
+		reason string
+	}{
+		{"hash in path", func(r *Request) { r.Path = "/a#x" }, ReasonPath},
+		{"trailing hash in path", func(r *Request) { r.Path = "/a#" }, ReasonPath},
+		{"question mark in path", func(r *Request) { r.Path = "/a?b=1" }, ReasonPath},
+		{"hash in query", func(r *Request) { r.RawQuery = "x=1#frag" }, ReasonQuery},
+		{"lone hash query", func(r *Request) { r.RawQuery = "#" }, ReasonQuery},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := okReq()
+			tt.mod(r)
+			if got := reasonOf(mustErr(t, r)); got != tt.reason {
+				t.Fatalf("reason = %q, want %q", got, tt.reason)
+			}
+		})
+	}
+	// Escaped forms name literal bytes and stay valid.
+	r := okReq()
+	r.Path, r.RawQuery = "/a%23x%3F", "x=%23"
+	if _, err := Validate(r, &testCfg); err != nil {
+		t.Fatalf("escaped # and ? rejected: %v", err)
+	}
+}
+
+func TestH2CUpgradeServedNormally(t *testing.T) {
+	// FR-UPG-1: RFC 9110 §7.8 lets a server ignore Upgrade. An Upgrade whose
+	// only token is h2c is served like a plain request; any other token
+	// alongside it still routes around the engine (T-44).
+	tests := []struct {
+		name    string
+		upgrade []string
+		want    bool
+	}{
+		{"h2c alone", []string{"h2c"}, false},
+		{"h2c any case with OWS", []string{" H2C "}, false},
+		{"h2c and websocket", []string{"h2c, websocket"}, true},
+		{"h2c across two lines with websocket", []string{"h2c", "websocket"}, true},
+		{"h2c twice", []string{"h2c, h2c"}, true},
+		{"h2c with version", []string{"h2c/1"}, true},
+		{"empty Upgrade value", []string{""}, true},
+		{"websocket", []string{"websocket"}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := http.Header{"Connection": {"Upgrade, HTTP2-Settings"}, "Upgrade": tt.upgrade}
+			if got := IsUpgrade(http.MethodGet, h); got != tt.want {
+				t.Fatalf("IsUpgrade(Upgrade %q) = %v, want %v", tt.upgrade, got, tt.want)
+			}
+		})
+	}
 }

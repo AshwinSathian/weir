@@ -1,0 +1,10 @@
+go test fuzz v1
+byte('\x82')
+string("GET")
+string("/a")
+string("")
+string("")
+string("")
+string("AAMAAABkAAQAAP__")
+string("Http2-Settings")
+string("")

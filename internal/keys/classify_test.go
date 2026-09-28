@@ -444,3 +444,33 @@ func TestAsRangePass(t *testing.T) {
 		t.Fatal("pass forward aliases the client's Range lines")
 	}
 }
+
+func TestH2CKeyedLikePlainRequest(t *testing.T) {
+	// FR-UPG-1, INV-1: an h2c upgrade request has the plain request's key,
+	// and Upgrade and HTTP2-Settings never reach the origin, in either
+	// forwarding mode, even when Connection does not name them.
+	for _, all := range []bool{false, true} {
+		cfg := classifyCfg()
+		cfg.ForwardAll = all
+		cfg.Allow = []string{"Upgrade", "Http2-Settings"}
+		plain, err := Classify(classifyReq("GET", nil), cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, conn := range []string{"Upgrade, HTTP2-Settings", "Upgrade"} {
+			h := http.Header{"Connection": {conn}, "Upgrade": {"h2c"}, "Http2-Settings": {"AAMAAABkAAQAAP__"}}
+			c, err := Classify(classifyReq("GET", h), cfg)
+			if err != nil {
+				t.Fatalf("ForwardAll=%v Connection %q: %v", all, conn, err)
+			}
+			if c.Primary != plain.Primary {
+				t.Errorf("ForwardAll=%v Connection %q: key differs from the plain request", all, conn)
+			}
+			for _, name := range []string{"Upgrade", "Http2-Settings", "Connection"} {
+				if v, ok := c.Forwarded.Header[name]; ok {
+					t.Errorf("ForwardAll=%v Connection %q: forwarded %s %q", all, conn, name, v)
+				}
+			}
+		}
+	}
+}

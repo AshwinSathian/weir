@@ -29,7 +29,9 @@ func TestKeyedCookies(t *testing.T) {
 		{"non-ASCII value absent", []string{"lang=\xe9n; sid=9"}, []Cookie{{"sid", "9"}}},
 		{"value with inner space absent", []string{"lang=e n"}, nil},
 		{"malformed duplicate makes name absent", []string{"lang=en; lang=\x01"}, nil},
-		{"oversized header all absent", []string{"lang=en; pad=" + strings.Repeat("x", 64)}, nil},
+		{"unkeyed bytes do not count toward the limit", []string{"lang=en; pad=" + strings.Repeat("x", 64)}, []Cookie{{"lang", "en"}}},
+		{"keyed pairs over the limit all absent", []string{"lang=en; sid=" + strings.Repeat("x", 52)}, nil},
+		{"keyed pairs at the limit kept", []string{"lang=en; sid=" + strings.Repeat("x", 51)}, []Cookie{{"lang", "en"}, {"sid", strings.Repeat("x", 51)}}},
 		{"separators only", []string{";;; ;"}, nil},
 		// T-2: a comma does not split pairs; the whole value is keyed, so an
 		// origin that splits on ',' still parses only keyed bytes.
@@ -44,6 +46,21 @@ func TestKeyedCookies(t *testing.T) {
 				t.Fatalf("keyedCookies(%q) = %q, want %q", tt.lines, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestKeyedCookieLimitCountsKeyedPairs(t *testing.T) {
+	// FR-VAL-3, FR-KEY-6, T-13: MaxKeyedHeaderBytes bounds the forwarded keyed
+	// pairs, not the raw lines, so a 4 KiB analytics cookie next to a keyed
+	// lang keeps lang. The scan stays linear in the header size.
+	c := &Config{Cookies: []string{"lang"}, MaxKeyedHeaderBytes: 1024}
+	lines := []string{"_ga=" + strings.Repeat("a", 4096) + "; lang=en", "_gid=" + strings.Repeat("b", 4096)}
+	if got := keyedCookies(lines, c); !slices.Equal(got, []Cookie{{"lang", "en"}}) {
+		t.Fatalf("keyedCookies = %q, want lang=en", got)
+	}
+	lines = []string{"lang=" + strings.Repeat("e", 1020)}
+	if got := keyedCookies(lines, c); got != nil {
+		t.Fatalf("oversized keyed value: keyedCookies = %q, want absent", got)
 	}
 }
 
@@ -65,6 +82,9 @@ func FuzzCookies(f *testing.F) {
 	f.Fuzz(func(t *testing.T, a, b string) {
 		c := &Config{Cookies: []string{"lang", "sid", "x"}, MaxKeyedHeaderBytes: 1024}
 		got := keyedCookies([]string{a, b}, c)
+		if h := cookieHeader(got); len(h) > c.MaxKeyedHeaderBytes {
+			t.Fatalf("keyed pairs %d bytes over the limit", len(h))
+		}
 		last := -1
 		for _, ck := range got {
 			i := slices.Index(c.Cookies, ck.Name)

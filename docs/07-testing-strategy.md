@@ -1,7 +1,7 @@
 # Weir testing strategy
 
 Status: v1.0
-Date: 2026-09-27
+Date: 2026-09-28
 Depends on: [01-technical-spec.md](01-technical-spec.md), [06-threat-model.md](06-threat-model.md)
 Seed name: `03-testing-strategy.md` (renumbered, see [docs/README.md](README.md))
 
@@ -254,7 +254,7 @@ Named in [06-threat-model.md](06-threat-model.md), [01-technical-spec.md](01-tec
 | `TestBodylessBypassUsesMainPool` (engine) | bypassed GETs with a session cookie never take upload slots |
 | `TestDripOriginReleasesSlot` (engine) | origin sending 1 byte per second of a 10 KiB body: fetch fails at `Timeouts.Origin`, slot released |
 | `TestStreamIdleTimeout` (engine) | a 2-minute pass-through stream that keeps sending survives; one that stalls for `StreamIdle` ends |
-| `TestConnectRejected`, `TestUpgradeRejected` (engine), `TestAdaptersRouteUpgradesAround` (integration) | `Serve` returns `ErrUpgradeNotSupported`; weirhttp hands WebSocket and CONNECT to the next handler |
+| `TestConnectRejected`, `TestUpgradeRejected` (engine), `TestAdaptersRouteUpgradesAround` (integration), `TestH2CUpgradeServedNormally` (keys and weirhttp), `TestH2CKeyedLikePlainRequest` | `Serve` returns `ErrUpgradeNotSupported`; weirhttp hands WebSocket and CONNECT to the next handler; a lone `h2c` upgrade is served and keyed like a plain request, and the origin never sees `Upgrade` or `HTTP2-Settings` |
 | `TestEventStreamNeverBuffered` (engine) | first SSE event reaches the client before the origin sends a second; nothing stored |
 | `TestTraceparentValidated` (engine) | valid headers forwarded on a miss; malformed `traceparent` drops both trace headers; `NoTraceHeaders` forwards none |
 | `TestStrippedCookieReport` (engine) | after the report window one log line lists the most frequent stripped names, no values |
