@@ -375,3 +375,11 @@ Entry template:
 - Deviations: 04 §10 documents both fixes.
 - Follow-ups: two new open questions in STATUS (h2c upgrade returns 501; hop-by-hop stripping in the engine instead of each adapter).
 - Context: low.
+
+## 2026-09-28 · open questions · done
+- Branch / PR: card/M1-17-weirhttp-adapter / #24
+- Done: decided all 12 open questions at Ashwin's request, after the #24 adversarial review. Three were already built and are confirmed. The other nine became cards M1-17c (key boundary), M1-17d (storability) and M1-17e (responses), with reasons and rejected options in each card's Notes. M1-18 now depends on M1-17e.
+- Tests: none (planning only)
+- Deviations: none yet; each card changes its spec text with its code.
+- Follow-ups: M1-17b, then M1-17c to M1-17e, then M1-18.
+- Context: low.
