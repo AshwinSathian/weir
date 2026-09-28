@@ -1085,7 +1085,7 @@ func Handler(e *weir.Engine, origin weir.Origin) http.Handler
 // TransportOrigin sends forwarded requests to Target with Transport.
 type TransportOrigin struct {
 	Target    *url.URL          // scheme and host of the origin
-	Transport http.RoundTripper // nil: http.DefaultTransport
+	Transport http.RoundTripper // nil: clone of http.DefaultTransport with DisableCompression, no Proxy
 	Rewrite   func(*http.Request) // optional hook for Via, auth to origin, etc.
 }
 
@@ -1100,7 +1100,9 @@ func WriteError(w http.ResponseWriter, err error)
 
 `RequestFrom` takes `Path` and `RawQuery` from `r.RequestURI` (split at the first `?`), not from `r.URL`, so the engine sees the bytes the client sent. For absolute-form request targets it uses the path of the parsed URL's `EscapedPath()` and `RawQuery`. `Scheme` is `https` when `r.TLS != nil`, else `http`. `Host` is `r.Host`.
 
-`TransportOrigin.Fetch` builds `*http.Request` with `URL.Opaque` set to the forwarded path so `net/url` does not re-encode it, sets `Host` to the forwarded host, copies headers, and calls `RoundTrip` with the given context.
+`TransportOrigin.Fetch` builds `*http.Request` with `URL.Opaque` set to the forwarded path so `net/url` does not re-encode it, sets `Host` to the forwarded host, copies headers, and calls `RoundTrip` with the given context. Three `net/http` client behaviors would break INV-1, and `Fetch` blocks each. A path starting with `//` would go out as `scheme://rest`, naming another authority, so it is sent in absolute form (`//host//path`, RFC 9112 §3.2.2). A missing `User-Agent` gets `Go-http-client/1.1`, so `Fetch` sets an empty value, which `net/http` omits. `http.Transport` adds `Accept-Encoding: gzip` and decompresses transparently unless `DisableCompression` is set, so the default transport sets it, and a caller's own `*http.Transport` must too. The default transport also drops `ProxyFromEnvironment`: through a forward proxy, `net/http` sends a `URL.Opaque` path as an origin-form target the proxy cannot route.
+
+`WriteResponse` removes hop-by-hop fields and the fields named in `Connection` before writing (RFC 9110 §7.6.1). Stored entries already lack them (FR-STO-11), but miss and pass-through responses carry the origin's.
 
 `HandlerOrigin` runs the handler on a goroutine writing into an `io.Pipe`-backed `ResponseWriter` and returns once headers are written (or the handler returns). This is the shape the Caddy adapter reuses for `next`.
 

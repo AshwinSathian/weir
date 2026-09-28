@@ -359,3 +359,27 @@ Entry template:
 - Deviations: docs/01 §14.5 (FR-FWD-6) states the tracestate cap; docs/06 INV-1 lists the three trace fields; docs/04 §1.1 `StorableConfig` now lists `StreamTypes`.
 - Follow-ups: none new; two review nits left open in STATUS (StreamTypes branch has no test; upgrade-rejection tests don't assert event absence).
 - Context: low; size S was right.
+
+## 2026-09-28 · M1-17 · done
+- Branch / PR: card/M1-17-weirhttp-adapter / #24
+- Done: new `weirhttp` package: `RequestFrom` (raw `RequestURI`, absolute-form fallback), `WriteResponse` (clones header values), `WriteError` (499 writes nothing, `Retry-After`), `Middleware`/`Handler` (upgrades go to next or 501), `TransportOrigin` (`URL.Opaque`). `examples/weirproxy` smoke-tested: miss then `Cache-Status: Weir; hit`. `internal/keys.isUpgrade` became `IsUpgrade(method, header)` so the adapter and engine share one check (no logic change).
+- Tests: TestPathForwardedByteExact, TestAdaptersRouteUpgradesAround, TestWeirhttpEndToEnd, TestWriteError, TestDefaultTransportDisablesCompression. A mutation run of each wire fix fails the tests. `make check` passes.
+- Deviations: 04 §10 documents three net/http client hazards `Fetch` blocks: a `//` path via Opaque became `http://evil.example/x` with Host evil.example; the default User-Agent; transparent gzip. The default transport changed to set `DisableCompression`; this is in Waiting on Ashwin.
+- Follow-ups: card M1-17b (`HandlerOrigin`, deferred because the card's AC and tests did not cover it). Two review nits are in STATUS.
+- Context: medium; size M was right without HandlerOrigin.
+
+## 2026-09-28 · M1-17 · review-fixes
+- Branch / PR: card/M1-17-weirhttp-adapter / #24
+- Done: an adversarial review, at the user's request, found and fixed two issues. `WriteResponse` now strips hop-by-hop response fields: misses and pass-through leaked the origin's `Keep-Alive` and `Connection`-named fields to clients. The default transport drops `ProxyFromEnvironment`, because with `HTTP_PROXY` set, `URL.Opaque` paths reached the proxy in origin form.
+- Tests: TestWriteResponseDropsHopByHop, TestDefaultTransportIgnoresProxyEnv. `make check` passes.
+- Deviations: 04 §10 documents both fixes.
+- Follow-ups: two new open questions in STATUS (h2c upgrade returns 501; hop-by-hop stripping in the engine instead of each adapter).
+- Context: low.
+
+## 2026-09-28 · open questions · done
+- Branch / PR: card/M1-17-weirhttp-adapter / #24
+- Done: decided all 12 open questions at Ashwin's request, after the #24 adversarial review. Three were already built and are confirmed. The other nine became cards M1-17c (key boundary), M1-17d (storability) and M1-17e (responses), with reasons and rejected options in each card's Notes. M1-18 now depends on M1-17e.
+- Tests: none (planning only)
+- Deviations: none yet; each card changes its spec text with its code.
+- Follow-ups: M1-17b, then M1-17c to M1-17e, then M1-18.
+- Context: low.
