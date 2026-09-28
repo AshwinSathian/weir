@@ -47,6 +47,7 @@ type Classified struct {
 	Authorized bool      // request carried Authorization
 	Unsafe     bool      // unsafe or unknown method: invalidate on 2xx/3xx
 	HasBody    bool      // the forwarded request carries a body (upload pool, FR-LIM-7)
+	Unkeyed    bool      // the forward carries a Forward.Allow field, or ForwardAll (FR-STO-12, T-31)
 	Forwarded  Request   // the request the origin sees on a miss
 	Primary    store.Key // zero for ClassPass
 	URITag     store.Tag
@@ -113,8 +114,9 @@ func Classify(r *Request, c *Config) (Classified, error) {
 	cookies := keyedCookies(h["Cookie"], c)
 	// FR-FWD-4: a HEAD miss is fetched as GET so the response can be stored.
 	// T-5: the body of a fat GET never reaches the origin.
-	out.Forwarded = Request{Method: http.MethodGet, Scheme: r.Scheme, Host: host, Path: path, RawQuery: query,
-		Header: forwardHeader(h, c, cookies)}
+	fh, unkeyed := forwardHeader(h, c, cookies)
+	out.Forwarded = Request{Method: http.MethodGet, Scheme: r.Scheme, Host: host, Path: path, RawQuery: query, Header: fh}
+	out.Unkeyed = unkeyed
 	out.Primary = PrimaryKey(&KeyInput{Method: http.MethodGet, Scheme: r.Scheme, Host: host, Path: path, Query: query,
 		CookieNames: c.Cookies, Cookies: cookies})
 	out.ClientCond = ClientConditionals{IfNoneMatch: parseIfNoneMatch(h["If-None-Match"], c)}

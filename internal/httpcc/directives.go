@@ -31,6 +31,12 @@ type ResponseDirectives struct {
 	Duplicates bool
 }
 
+// Unusable reports an invalid or conflicting delta-seconds directive, which
+// makes the lifetime zero (FR-FRS-2, RFC 9111 §4.2.1).
+func (d *ResponseDirectives) Unusable() bool {
+	return d.Duplicates || d.MaxAge.Invalid || d.SMaxAge.Invalid || d.SWR.Invalid || d.SIE.Invalid
+}
+
 // RequestDirectives holds the request cache directives (RFC 9111 §5.2.1).
 // NoCache is also set by Pragma: no-cache. A max-stale without argument
 // accepts any staleness and parses as the delta-seconds ceiling.

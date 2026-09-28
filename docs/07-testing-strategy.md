@@ -170,6 +170,7 @@ Each seed taxonomy entry maps to the tests below. "Engine" tests run under synct
 - `TestNegativeCacheBurst` (engine): origin returns 503 for one key; 200 requests in the same 100 ms; 1 origin call; 199 synthesized 503s with `detail=negative`; after `Negative.TTL`, 1 more call.
 - `TestNegativeNotFor500`, `TestNegativePrefersStale`, `TestNegativeScopedToKey`, `TestNegativeNeverReplacesResponse` (engine).
 - `TestMarkerNotFromAuthorizedRequest`, `TestMarkerNotFromRequestNoStore` (engine, T-31): after such a request, the next 100 anonymous requests for the URL collapse into 1 origin call.
+- `TestNoMarkerAfterUnkeyedInput` (engine, FR-STO-12, T-31): a request that forwarded a `Forward.Allow` field or ran under `ForwardAll` plants no marker; trace headers alone still do.
 
 ### T6.11 Eviction storms
 
@@ -210,6 +211,7 @@ Named in [06-threat-model.md](06-threat-model.md), [01-technical-spec.md](01-tec
 | `TestErrorStatusesNotStored` (engine) | 400, 401, 403, 500, 502, 503 with `max-age=60` are not stored under default config |
 | `TestSetCookieNotStored` (engine) | `Set-Cookie` blocks storage; with `StripSetCookie` the stored entry has no `Set-Cookie` and the triggering client still receives it |
 | `TestAuthorizationRules` (engine) | RFC 9111 §3.5: stored only with `public`, `s-maxage` or `must-revalidate` |
+| `TestAuthorizationNeedsValidSMaxage` (unit) | `s-maxage=abc`, two differing `s-maxage` values, or a valid `s-maxage` beside an invalid or conflicting delta-seconds directive do not permit storing an `Authorization` response; `public` and `must-revalidate` still do |
 | `TestAuthorizedNotCoalesced` (engine) | 50 concurrent `Authorization` requests on a cold key make 50 origin calls; none receives another's response |
 | `TestClientNoCacheIgnored` (engine) | `Cache-Control: no-cache` and `Pragma: no-cache` requests are hits under default config |
 | `TestEpochLookupErrorEmitsEvent` (engine) | a remote-flagged store failing `NewestEpoch` still serves the entry and emits `EvStoreError{epoch}` |

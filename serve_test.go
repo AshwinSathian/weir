@@ -567,6 +567,41 @@ func TestRequestNoStore(t *testing.T) {
 	})
 }
 
+// FR-STO-12, T-31: a field the origin sees unkeyed (a Forward.Allow field
+// or anything under ForwardAll) could let one client plant a marker for a
+// hot URL, so such requests plant none. Trace headers alone still do.
+func TestNoMarkerAfterUnkeyedInput(t *testing.T) {
+	allow := weir.Config{Freshness: weir.FreshnessConfig{NoJitter: true}, Forward: weir.ForwardConfig{Allow: []string{"X-Tenant"}}}
+	all := weir.Config{Freshness: weir.FreshnessConfig{NoJitter: true}, Forward: weir.ForwardConfig{Mode: weir.ForwardAll}}
+	for _, tc := range []struct {
+		name   string
+		cfg    weir.Config
+		header [2]string
+		marker bool
+	}{
+		{"Forward.Allow field present plants no marker", allow, [2]string{"X-Tenant", "a"}, false},
+		{"Forward.Allow naming keyed fields plants a marker", weir.Config{Freshness: weir.FreshnessConfig{NoJitter: true}, Forward: weir.ForwardConfig{Allow: []string{"Accept-Encoding", "Cookie"}}}, [2]string{"Accept-Encoding", "gzip"}, true},
+		{"Forward.Allow configured but absent plants a marker", allow, [2]string{"Traceparent", "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01"}, true},
+		{"ForwardAll plants no marker", all, [2]string{"Traceparent", "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01"}, false},
+		{"trace header alone plants a marker", cacheCfg, [2]string{"Traceparent", "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01"}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				o := testorigin.New()
+				o.Default(testorigin.Behavior{Header: http.Header{"Cache-Control": {"private"}}, Body: []byte("p")})
+				e := newEngine(t, tc.cfg)
+				defer closeEngine(t, e)
+
+				serve(t, e, withHeader(getReq("/a"), tc.header[0], tc.header[1]), o)
+				resp, _ := serve(t, e, getReq("/a"), o)
+				if got := resp.Cache.Detail == "hit-for-miss"; got != tc.marker {
+					t.Fatalf("marker = %v, want %v (%+v)", got, tc.marker, resp.Cache)
+				}
+			})
+		})
+	}
+}
+
 // FR-SRV-8, D5, T-14: client revalidation directives do not change lookup
 // by default; with HonorRevalidation they force validation of a fresh entry.
 func TestClientNoCacheIgnored(t *testing.T) {

@@ -23,9 +23,11 @@ var dropped = []string{
 // In strict mode (T-1, INV-1) it holds only keyed fields, the cache
 // directives and Authorization (FR-FWD-1), and operator-allowed and trace
 // fields. cookies is the keyedCookies result the key was built from.
-func forwardHeader(h http.Header, c *Config, cookies []Cookie) http.Header {
-	var out http.Header
+// unkeyed reports that the origin sees a field the key ignores beyond the
+// default set: always under ForwardAll, else when an Allow field is sent.
+func forwardHeader(h http.Header, c *Config, cookies []Cookie) (out http.Header, unkeyed bool) {
 	if c.ForwardAll {
+		unkeyed = true
 		out = h.Clone()
 		if out == nil {
 			out = http.Header{}
@@ -33,7 +35,7 @@ func forwardHeader(h http.Header, c *Config, cookies []Cookie) http.Header {
 		DropHopByHop(out, h["Connection"])
 	} else {
 		out = http.Header{}
-		for _, name := range []string{"Authorization", "Cache-Control", "Pragma", "Traceparent", "Tracestate", "X-Request-Id"} {
+		for _, name := range defaultForward {
 			copyField(out, h, name)
 		}
 		for _, name := range c.Allow {
@@ -51,10 +53,21 @@ func forwardHeader(h http.Header, c *Config, cookies []Cookie) http.Header {
 		delete(out, name)
 	}
 	filterTrace(out, c.NoTraceHeaders)
+	for _, name := range c.Allow {
+		// T-31: an Allow field reaches the origin unkeyed. Cookie goes
+		// keyed-only and Accept-Encoding as its keyed bucket.
+		keyed := name == "Cookie" || name == "Accept-Encoding" || slices.Contains(defaultForward, name)
+		unkeyed = unkeyed || !keyed && len(out[name]) > 0
+	}
 	// Set last so no Connection option or Allow entry can remove or replace it.
 	out["Accept-Encoding"] = []string{aeBucket(h["Accept-Encoding"], c)}
-	return out
+	return out, unkeyed
 }
+
+// defaultForward are the unkeyed fields strict mode always sends. Only
+// Authorization and a request no-store change behavior (FR-FWD-1); the rest
+// are cache directives and trace fields.
+var defaultForward = []string{"Authorization", "Cache-Control", "Pragma", "Traceparent", "Tracestate", "X-Request-Id"}
 
 func copyField(dst, src http.Header, name string) {
 	if v := src[name]; len(v) > 0 {
