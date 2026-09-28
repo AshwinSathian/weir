@@ -399,3 +399,11 @@ Entry template:
 - Deviations: FR-UPG-1, FR-VAL-1, FR-VAL-3 reworded as the card decided; FR-FWD-2 hop-by-hop list and 04 §3.1/§3.5 follow; 06 T-6, T-13, T-44 and 07 FR-UPG-1 row list the new tests.
 - Follow-ups: none (large-Cookie benchmark noted for M1-18 in STATUS).
 - Context: low-medium; size M was right. Reviewer found no must-fix; both should-fix (04 upgrade text, INV-1 fuzz gap) fixed.
+
+## 2026-09-28 · M1-17c · review-fixes
+- Branch / PR: card/M1-17c-key-boundary / #26
+- Done: adversarial review found `GET http://example.com/a#x` bypassed the fragment rejection (`RequestFrom` used `EscapedPath`, which re-encodes `#` as `%23`). `RequestFrom` now cuts absolute-form targets after the authority from the raw bytes.
+- Tests: TestRequestFromAbsoluteFormRaw, TestAbsoluteFormFragmentRejected, FuzzRequestFrom; `make check` and CI pass.
+- Deviations: 04 §10 `RequestFrom` text, 06 T-6 test list.
+- Follow-ups: absolute-form empty path (STATUS note).
+- Context: low. Merged by the session at Ashwin's request.
