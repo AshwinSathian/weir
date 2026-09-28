@@ -140,7 +140,10 @@ func (e *Engine) cacheable(ctx context.Context, c *keys.Classified, origin Origi
 	}
 	ci := CacheInfo{Fwd: lk.fwd, FwdStatus: res.resp.StatusCode}
 	if res.notMod { // FR-SRV-3: the freshened entry is stored and served like a full response
-		res.resp, res.body = freshened(prior, res.resp), prior.Body
+		res.resp, res.body = freshened(prior, res.resp.Header), prior.Body
+		if res.recv != nil {
+			res.recv = freshened(prior, res.recv).Header
+		}
 		if prior.Flags&store.FlagFromAuthorized != 0 && !c.Authorized {
 			// FR-STO-5, T-8: the body answered an Authorization request, so
 			// the merged headers still need a shared-cache permission.
@@ -191,7 +194,13 @@ func serverError(status int) bool {
 // lookup returned, which this request already judged not fresh.
 func (e *Engine) storeResponse(ctx context.Context, c *keys.Classified, res *fetchResult, found, purged *store.Entry) bool {
 	ctx = context.WithoutCancel(ctx) // a client leaving after the body arrived does not undo the store
-	d := storability(&e.cfg, c, res.resp, res.body, res.respTime)
+	dr := res.resp
+	if res.recv != nil { // T-8: a field Connection names still refuses storage
+		r := *res.resp
+		r.Header = res.recv
+		dr = &r
+	}
+	d := storability(&e.cfg, c, dr, res.body, res.respTime)
 	if !d.ok {
 		emit(e.cfg.Observer, Event{Kind: EvNotStored, Time: res.respTime, Partition: c.Partition, Reason: d.reason})
 		if d.responseDriven {

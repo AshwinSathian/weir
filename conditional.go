@@ -39,18 +39,22 @@ func strongETagMismatch(h http.Header, stored string) bool {
 	return tag != "" && !strings.HasPrefix(tag, "W/") && tag != stored
 }
 
-// freshened merges a 304 into prior's stored response (FR-SRV-3, RFC 9111
-// §4.3.4): every 304 field replaces the stored one, except Content-Length,
-// which describes the empty 304 body. buildEntry then drops what storage
-// excludes and recomputes freshness. prior is not modified (P4).
-func freshened(prior *store.Entry, notModified *Response) *Response {
+// freshened merges the fields of a 304 into prior's stored response
+// (FR-SRV-3, RFC 9111 §4.3.4): every 304 field replaces the stored one,
+// except Content-Length, which describes the empty 304 body, and
+// Content-Encoding and Content-Type, which only the stored body can vouch
+// for (RFC 9110 §15.4.5). buildEntry then drops what storage excludes and
+// recomputes freshness. prior is not modified (P4).
+func freshened(prior *store.Entry, notModified http.Header) *Response {
 	h := maps.Clone(prior.Header)
 	if h == nil {
 		h = http.Header{}
 	}
 	delete(h, "Date") // a 304 without Date dates the entry now (FR-STO-13), like a full response
-	for k, v := range notModified.Header {
-		if k != "Content-Length" {
+	for k, v := range notModified {
+		switch k {
+		case "Content-Length", "Content-Encoding", "Content-Type":
+		default:
 			h[k] = v
 		}
 	}

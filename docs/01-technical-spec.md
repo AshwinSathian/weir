@@ -244,6 +244,7 @@ Package `store` (import path `github.com/AshwinSathian/weir/store`) defines `Sto
 - FR-FWD-3. Unsafe and unknown methods, bypassed requests, and range requests on a miss are forwarded with all client headers except hop-by-hop fields, and with the body.
 - FR-FWD-4. `HEAD` requests on a miss are forwarded as `GET` so the response can be stored; the client receives headers only.
 - FR-FWD-5. The forwarded request's `Path` and `RawQuery` are exactly the key inputs from FR-KEY-4 and FR-KEY-5.
+- FR-FWD-7. Every origin response loses its hop-by-hop fields (the FR-FWD-2 list) and the fields its `Connection` names before `Serve` returns it or stores it, on every path: miss, validation, pass-through and event stream. The strip happens once, in the engine's single origin call (P3), so each adapter gets it without repeating it; adapters may strip again because they own the connection. The storage decision (§5.4) still reads the response as received: a field that `Connection` names (for example `Cache-Control: private`, `Vary` or `Set-Cookie`) refuses storage exactly as it would unnamed (T-8), and is then absent from the served and stored response.
 
 ### 5.4 Storability (RFC 9111 §3, §3.5)
 
@@ -278,12 +279,12 @@ A response is stored only if all of the following hold. Each failed check increm
 
 - FR-SRV-1. A fresh entry is served without contacting the origin unless it carries unqualified `no-cache`, in which case it is validated first.
 - FR-SRV-2. For client conditional requests on a hit, Weir evaluates `If-None-Match` (weak comparison) and, if absent, `If-Modified-Since` against the stored response and answers 304 when the precondition fails (RFC 9111 §4.3.2, RFC 9110 §13.2.2). This applies only to stored 200 responses. `If-Modified-Since` without a stored `Last-Modified` uses the stored `Date`. The 304 carries the stored `Cache-Control`, `Content-Location`, `Date`, `ETag`, `Expires` and `Vary` fields (RFC 9110 §15.4.5), plus `Age` and `Cache-Status`.
-- FR-SRV-3. To validate a stored entry Weir sends `If-None-Match` with the stored `ETag` and `If-Modified-Since` with the stored `Last-Modified` when present. On 304, it freshens the entry per RFC 9111 §4.3.4 (stored headers updated from the 304 except `Content-Length`), recomputes freshness with new jitter, and serves it. If the 304 carries a strong `ETag` that differs from the stored one, the stored entry is not updated (§4.3.4) and Weir repeats the request unconditionally under the same limiter slot. On a full response it applies §5.4. On an origin-health failure it applies §5.8.
+- FR-SRV-3. To validate a stored entry Weir sends `If-None-Match` with the stored `ETag` and `If-Modified-Since` with the stored `Last-Modified` when present. On 304, it freshens the entry per RFC 9111 §4.3.4 (stored headers updated from the 304 except `Content-Length`, `Content-Encoding` and `Content-Type`, which describe the stored body; RFC 9110 §15.4.5 says a 304 should not carry other representation metadata, and keeping the stored values keeps body and labels consistent even under a weak `ETag`), recomputes freshness with new jitter, and serves it. If the 304 carries a strong `ETag` that differs from the stored one, the stored entry is not updated (§4.3.4) and Weir repeats the request unconditionally under the same limiter slot. On a full response it applies §5.4. On an origin-health failure it applies §5.8.
 - FR-SRV-4. `HEAD` requests are answered from `GET` entries without a body.
 - FR-SRV-5. A request with `Range` is answered from a stored entry with the full 200 response when the entry is fresh or servable under SWR (RFC 9110 lets a server ignore `Range`). Otherwise it is forwarded with its `Range` and `If-Range` fields (so the origin applies `If-Range`, RFC 9110 §13.1.5), is not coalesced, is not stored, and does not create hit-for-miss markers.
 - FR-SRV-6. `only-if-cached` in the request is always honored: a usable stored response or `ErrOnlyIfCached`.
 - FR-SRV-7. Request `no-store` is always honored: the response is not stored.
-- FR-SRV-8. With `Client.HonorRevalidation` false (default), request `no-cache`, `max-age`, `min-fresh`, `max-stale` and `Pragma: no-cache` do not change lookup behavior. With it true, `no-cache`/`max-age=0`/`Pragma: no-cache` force validation of a stored entry; the validation still goes through coalescing and the limiter.
+- FR-SRV-8. With `Client.HonorRevalidation` false (default), request `no-cache`, `max-age`, `min-fresh`, `max-stale` and `Pragma: no-cache` do not change lookup behavior. With it true, `no-cache`/`max-age=0` force validation of a stored entry, and so does `Pragma: no-cache` when the request has no `Cache-Control` field (RFC 9111 §5.4); the validation still goes through coalescing and the limiter.
 - FR-SRV-9. Unless `NoCacheStatus` is set, every response produced from cache or after forwarding carries a `Cache-Status` member (RFC 9211) named `CacheStatus` (default `"Weir"`) appended to any existing field value, with `hit` or `fwd`, `fwd-status`, `stored`, `collapsed`, `ttl`, and `detail` where applicable. The `key` parameter is never emitted. Negative responses (§5.14) carry `hit; detail=negative` even though RFC 9211 §2 advises against annotating locally generated responses; they are derived from a stored record, and operators need to tell them apart from origin errors.
 
 ### 5.7 Coalescing (T6.2, T6.2a)
@@ -493,7 +494,7 @@ Evaluated in order after validation, bypass check, and store lookup.
 | 9111 §5.2.2 | response directives | all honored; qualified `no-cache` and `private` treated as unqualified |
 | 9111 §5.2 | proxies pass cache directives through | FR-FWD-1 |
 | 5861 | stale-while-revalidate, stale-if-error | FR-STL-1, FR-STL-2, FR-STL-6 |
-| 9110 §7.6.1 | hop-by-hop fields | FR-FWD-2, FR-STO-11 |
+| 9110 §7.6.1 | hop-by-hop fields | FR-FWD-2, FR-FWD-7, FR-STO-11 |
 | 9110 §12.5.3 | Accept-Encoding | §5.2.3 |
 | 9110 §13.2.2 | precondition evaluation order | FR-SRV-2 |
 | 9211 | Cache-Status | FR-SRV-9 |

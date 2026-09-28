@@ -484,7 +484,7 @@ type ResponseDirectives struct {
 }
 
 func ParseResponse(h http.Header) ResponseDirectives
-func ParseRequest(h http.Header) RequestDirectives // no-store, no-cache, max-age, min-fresh, max-stale, only-if-cached, plus Pragma: no-cache
+func ParseRequest(h http.Header) RequestDirectives // no-store, no-cache, max-age, min-fresh, max-stale, only-if-cached, plus Pragma: no-cache only when no Cache-Control line is present (RFC 9111 §5.4)
 ```
 
 Parser rules: split on commas outside quoted strings (a quote opens only as the first byte of an argument; an unclosed quote rescans the rest of the line so a later `private` or `no-store` still counts); directive names compared case-insensitively; arguments accept token or quoted-string; unknown directives ignored (RFC 9111 §5.2.3); `delta-seconds` parse rejects signs and non-digits, clamps above 2147483648.
@@ -633,7 +633,7 @@ func (e *Engine) cacheable(ctx, c, origin, attempt):
     return e.fetchCoalesced(ctx, c, lk, origin, attempt)  // §6.4; prevCK is the previous attempt's coalescing key
 ```
 
-With `Client.HonorRevalidation`, a request `no-cache`, `max-age=0` or `Pragma: no-cache` turns a `Fresh` or `StaleSWR` result into `NeedsValidation` before the switch.
+With `Client.HonorRevalidation`, a request `no-cache`, `max-age=0` or `Pragma: no-cache` (only without `Cache-Control`) turns a `Fresh` or `StaleSWR` result into `NeedsValidation` before the switch.
 
 ### 6.3 Lookup
 
@@ -788,6 +788,8 @@ func (e *Engine) fetch(ctx, s, origin) fetchResult:
     e.cb.Record(probe, outcome)
 
     if err != nil: return errResult(timeoutOrOrigin(err, ctx, tctx), originHealth: true)   // §1.3
+    recv := clone(resp.Header) if it has Connection    // storability reads recv (FR-FWD-7, T-8); a 304's is freshened too
+    resp.Header = clone(resp.Header); dropHopByHop(resp.Header)   // FR-FWD-7: every path below, streams included
     if s.streaming:
         release()                            // slot released at headers (FR-LIM-1)
         resp.Body = cancelOnClose(resp.Body, cancel)  // origin timeout still bounds the stream
@@ -796,7 +798,7 @@ func (e *Engine) fetch(ctx, s, origin) fetchResult:
         drain(resp.Body)
         if strongETagMismatch(resp, s.prior):         // RFC 9111 §4.3.4: must not update
             retry once without conditionals under the same permit and continue below with that response
-        ent := freshen(s.prior, resp, t0, time.Now(), e.rnd)
+        ent := freshen(s.prior, resp, t0, time.Now(), e.rnd)   // 304 fields replace stored ones except Content-Length, Content-Encoding, Content-Type (FR-SRV-3)
         e.store(s, ent)
         return fetchResult{entry: ent, shareable: true, stored: ..., fwdStatus: 304}
     body, over, rerr := readUpTo(resp.Body, e.cfg.Storable.MaxObjectBytes)

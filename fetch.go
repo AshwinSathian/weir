@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/AshwinSathian/weir/internal/keys"
 	"github.com/AshwinSathian/weir/store"
 )
 
@@ -24,10 +25,11 @@ var (
 // error. A buffered fetch also returns the body it read.
 type fetchResult struct {
 	resp     *Response
-	body     []byte // buffered fetches: the whole body; nil when over
-	notMod   bool   // resp is a 304 validating the prior entry (FR-SRV-3)
-	over     bool   // buffered fetches: the body exceeded MaxObjectBytes and resp.Body streams it all
-	stream   bool   // an event-stream response; resp.Body streams it, never stored (FR-STR-1)
+	recv     http.Header // resp.Header as received, when it had Connection; storability reads it (FR-FWD-7, T-8)
+	body     []byte      // buffered fetches: the whole body; nil when over
+	notMod   bool        // resp is a 304 validating the prior entry (FR-SRV-3)
+	over     bool        // buffered fetches: the body exceeded MaxObjectBytes and resp.Body streams it all
+	stream   bool        // an event-stream response; resp.Body streams it, never stored (FR-STR-1)
 	reqTime  time.Time
 	respTime time.Time // when the buffered body ended, or the headers arrived
 	err      error
@@ -67,6 +69,12 @@ func (e *Engine) fetch(ctx context.Context, req *Request, origin Origin, buffere
 	// Value slices stay shared, and only full slice expressions append to them.
 	resp.Header = maps.Clone(resp.Header)
 	res := fetchResult{resp: resp, reqTime: reqTime, notMod: prior != nil && resp.StatusCode == http.StatusNotModified}
+	if len(resp.Header["Connection"]) > 0 {
+		res.recv = maps.Clone(resp.Header)
+	}
+	// FR-FWD-7: strip once here, on the single origin path (P3), so no
+	// adapter or stored entry sees the origin connection's fields.
+	keys.DropHopByHop(resp.Header, resp.Header["Connection"])
 	if res.notMod { // a 304 body means nothing; never read or stream it (04 §6.7)
 		closeBody(resp)
 		cancel()
