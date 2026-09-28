@@ -10,11 +10,14 @@ type Cookie struct {
 
 // keyedCookies returns the Key.Cookies present in the Cookie lines, in
 // config order (FR-KEY-6). A name with conflicting values, or with any
-// malformed occurrence, is absent. Lines over MaxKeyedHeaderBytes combined
-// make every cookie absent (FR-VAL-3). Absent is the fallback both in the
-// key and in the forwarded request, so malformed input never mints a key.
+// malformed occurrence, is absent. Keyed pairs whose forwarded Cookie
+// header would exceed MaxKeyedHeaderBytes make every cookie absent
+// (FR-VAL-3); unkeyed cookies do not count. Absent is the fallback both in
+// the key and in the forwarded request, so malformed input never mints a
+// key. The scan costs header bytes times len(Key.Cookies), and the
+// server's header limit bounds the header (P5, 04 §3.5).
 func keyedCookies(lines []string, c *Config) []Cookie {
-	if len(lines) == 0 || len(c.Cookies) == 0 || combinedLen(lines) > c.MaxKeyedHeaderBytes {
+	if len(lines) == 0 || len(c.Cookies) == 0 {
 		return nil
 	}
 	const (
@@ -46,10 +49,18 @@ func keyedCookies(lines []string, c *Config) []Cookie {
 		}
 	}
 	var out []Cookie
+	size := 0
 	for i, s := range state {
 		if s == seen {
+			if len(out) > 0 {
+				size += len("; ")
+			}
+			size += len(c.Cookies[i]) + 1 + len(vals[i])
 			out = append(out, Cookie{c.Cookies[i], vals[i]})
 		}
+	}
+	if size > c.MaxKeyedHeaderBytes {
+		return nil
 	}
 	return out
 }

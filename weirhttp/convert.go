@@ -13,8 +13,8 @@ import (
 
 // RequestFrom builds the engine request from r. Path and RawQuery come from
 // the raw request target, so the engine keys and forwards the bytes the
-// client sent (FR-FWD-1, INV-1). Absolute-form targets fall back to the
-// parsed URL.
+// client sent (FR-FWD-1, INV-1). Absolute-form targets are cut after the
+// authority; other targets fall back to the parsed URL.
 func RequestFrom(r *http.Request) *weir.Request {
 	req := &weir.Request{
 		Method: r.Method,
@@ -27,6 +27,13 @@ func RequestFrom(r *http.Request) *weir.Request {
 	}
 	if t := r.RequestURI; t == "*" || strings.HasPrefix(t, "/") {
 		req.Path, req.RawQuery, _ = strings.Cut(t, "?")
+	} else if _, rest, ok := strings.Cut(t, "://"); ok {
+		// T-6: net/http leaves '#' in URL.Path and EscapedPath re-encodes it
+		// as "%23", hiding a fragment Validate must reject (FR-VAL-1). The
+		// authority ends at the first '/', '?' or '#' (RFC 3986 §3.2).
+		if i := strings.IndexAny(rest, "/?#"); i >= 0 {
+			req.Path, req.RawQuery, _ = strings.Cut(rest[i:], "?")
+		}
 	} else {
 		req.Path, req.RawQuery = r.URL.EscapedPath(), r.URL.RawQuery
 	}

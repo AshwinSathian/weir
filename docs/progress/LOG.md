@@ -391,3 +391,19 @@ Entry template:
 - Deviations: 04 §10 extended with cancel, panic, Content-Length, 204/304/HEAD, trailer and parse-failure behavior. No requirement or signature changed.
 - Follow-ups: context-values threat gap for the Caddy adapter (STATUS notes).
 - Context: medium; two adversarial review rounds found a must-fix (truncated and 204/304 bodies stored). Size S was right for the code, tight for the review loop.
+
+## 2026-09-28 · M1-17c · done
+- Branch / PR: card/M1-17c-key-boundary / #26
+- Done: `keys.IsUpgrade` serves a lone `h2c` Upgrade as a plain request; `Http2-Settings` joins `hopByHop`. `checkPath` rejects raw `#` and `?`, `checkQuery` raw `#` (`path`/`query` reasons). `keyedCookies` applies `MaxKeyedHeaderBytes` to the forwarded keyed pairs, not the raw lines.
+- Tests: TestH2CUpgradeServedNormally (keys, weirhttp), TestH2CKeyedLikePlainRequest, TestH2CUpgradeNotForwarded, TestFragmentInTargetRejected, TestKeyedCookieLimitCountsKeyedPairs; FuzzValidateRequest gains an Upgrade argument (corpus extended, 6 seeds), FuzzCookies checks the limit (2 seeds), FuzzForwardEqualsKey covers the h2c shape (mutation-checked); `make check` passes.
+- Deviations: FR-UPG-1, FR-VAL-1, FR-VAL-3 reworded as the card decided; FR-FWD-2 hop-by-hop list and 04 §3.1/§3.5 follow; 06 T-6, T-13, T-44 and 07 FR-UPG-1 row list the new tests.
+- Follow-ups: none (large-Cookie benchmark noted for M1-18 in STATUS).
+- Context: low-medium; size M was right. Reviewer found no must-fix; both should-fix (04 upgrade text, INV-1 fuzz gap) fixed.
+
+## 2026-09-28 · M1-17c · review-fixes
+- Branch / PR: card/M1-17c-key-boundary / #26
+- Done: adversarial review found `GET http://example.com/a#x` bypassed the fragment rejection (`RequestFrom` used `EscapedPath`, which re-encodes `#` as `%23`). `RequestFrom` now cuts absolute-form targets after the authority from the raw bytes.
+- Tests: TestRequestFromAbsoluteFormRaw, TestAbsoluteFormFragmentRejected, FuzzRequestFrom; `make check` and CI pass.
+- Deviations: 04 §10 `RequestFrom` text, 06 T-6 test list.
+- Follow-ups: absolute-form empty path (STATUS note).
+- Context: low. Merged by the session at Ashwin's request.

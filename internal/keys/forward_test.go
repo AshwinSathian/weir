@@ -16,7 +16,7 @@ var fuzzCfgs = []Config{
 	{
 		MaxPathBytes: 256, MaxQueryBytes: 256, MaxQueryParams: 8, MaxKeyedHeaderBytes: 128,
 		NormalizePath: true, QuerySort: true, QueryKeep: []string{"a", "b*"},
-		Allow: []string{"X-Tenant"}, NoTraceHeaders: true, AcceptEncoding: []string{"br", "gzip"},
+		Allow: []string{"X-Tenant", "Upgrade", "Http2-Settings"}, NoTraceHeaders: true, AcceptEncoding: []string{"br", "gzip"},
 	},
 	{
 		MaxPathBytes: 256, MaxQueryBytes: 256, MaxQueryParams: 8, MaxKeyedHeaderBytes: 128,
@@ -25,12 +25,15 @@ var fuzzCfgs = []Config{
 }
 
 func FuzzForwardEqualsKey(f *testing.F) {
-	// INV-1, FR-FWD-1, FR-FWD-5, FR-FWD-6; T-1, T-2, T-5
+	// INV-1, FR-FWD-1, FR-FWD-5, FR-FWD-6, FR-UPG-1; T-1, T-2, T-5, T-44
 	f.Add(byte(0), "GET", "/a", "a=1&utm_x=2", "lang=en; sid=1; x=2", "gzip;q=0.5, br", "evil", "X-Original-Url", "")
 	f.Add(byte(1), "HEAD", "/%7e/%2f", "b2=1&a=0&c=3", "lang=en", "*", "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01", "host", "")
 	// T-40: two Tracestate lines whose combined length straddles the 512-byte
 	// W3C limit filterTrace sums across lines.
 	f.Add(byte(2), "GET", "/", "", "a=1; a=2", "zstd;q=0", "", "content-length", strings.Repeat("a", 510))
+	// FR-UPG-1: a lone h2c upgrade is served; Allow names Upgrade and
+	// HTTP2-Settings in config 1, and neither may reach the origin.
+	f.Add(byte(0x82), "GET", "/a", "", "", "", "AAMAAABkAAQAAP__", "Http2-Settings", "")
 	f.Fuzz(func(t *testing.T, sel byte, method, path, query, cookie, ae, extra, name, tracestate2 string) {
 		cfg := &fuzzCfgs[int(sel)%len(fuzzCfgs)]
 		r := &Request{Method: method, Scheme: "https", Host: "example.com", Path: path, RawQuery: query,
@@ -40,6 +43,12 @@ func FuzzForwardEqualsKey(f *testing.F) {
 				"Tracestate":   {extra, tracestate2},
 				"X-Request-Id": {extra}, "If-None-Match": {extra}, "Range": {extra}, "Connection": {extra},
 			}}
+		if sel&0x80 != 0 {
+			// The h2c upgrade shape: the high bit of sel adds it to any config.
+			r.Header["Connection"] = []string{extra, "Upgrade"} // HTTP2-Settings not named
+			r.Header["Upgrade"] = []string{"h2c"}
+			r.Header["Http2-Settings"] = []string{extra}
+		}
 		if isToken(name) {
 			// Any field net/http would accept, under its canonical name.
 			r.Header[http.CanonicalHeaderKey(name)] = []string{extra}
@@ -69,6 +78,9 @@ func FuzzForwardEqualsKey(f *testing.F) {
 			allowed = append(allowed, "Traceparent", "Tracestate", "X-Request-Id")
 		}
 		for name := range f.Header {
+			if name == "Connection" || name == "Upgrade" || name == "Http2-Settings" {
+				t.Fatalf("forwarded hop-by-hop header %q", name)
+			}
 			if indexOf(allowed, name) < 0 {
 				t.Fatalf("forwarded unkeyed header %q", name)
 			}

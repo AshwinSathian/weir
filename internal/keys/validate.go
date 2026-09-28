@@ -33,15 +33,18 @@ func Validate(r *Request, c *Config) (string, error) {
 
 // IsUpgrade reports CONNECT in any form, including HTTP/2 and HTTP/3
 // extended CONNECT, which carries no Upgrade field (T-44), and requests
-// with an "upgrade" Connection option plus an Upgrade field. Adapters use
-// it to route these around the engine (FR-UPG-1).
+// with an "upgrade" Connection option plus an Upgrade field other than a
+// lone h2c. Adapters use it to route these around the engine (FR-UPG-1).
 func IsUpgrade(method string, h http.Header) bool {
 	// Methods are case-sensitive (RFC 9110 §9.1): "connect" is an unknown
 	// method and goes forward as ClassPass, never through a tunnel.
 	if method == http.MethodConnect {
 		return true
 	}
-	if len(h.Values("Upgrade")) == 0 {
+	// RFC 9110 §7.8 lets a server ignore Upgrade. A lone h2c is ignored so
+	// "curl --http2 http://..." is served; Upgrade and HTTP2-Settings are
+	// hop-by-hop, so key and forward stay equal.
+	if up := h.Values("Upgrade"); len(up) == 0 || onlyH2C(up) {
 		return false
 	}
 	for _, line := range h.Values("Connection") {
@@ -54,11 +57,29 @@ func IsUpgrade(method string, h http.Header) bool {
 	return false
 }
 
+// onlyH2C reports whether the Upgrade lines hold exactly one token, h2c.
+func onlyH2C(lines []string) bool {
+	n := 0
+	for _, line := range lines {
+		for tok := range strings.SplitSeq(line, ",") {
+			if tok = trimOWS(tok); tok == "" {
+				continue
+			}
+			if n++; n > 1 || !strings.EqualFold(tok, "h2c") {
+				return false
+			}
+		}
+	}
+	return n == 1
+}
+
 func checkPath(method, p string, limit int) string {
 	if p == "*" && method == http.MethodOptions {
 		return ""
 	}
-	if p == "" || p[0] != '/' || len(p) > limit || !visibleASCII(p) {
+	// '#' and '?' end the path in origin-form (RFC 9112 §3.2); raw, they
+	// would reach the origin as a fragment or a query the key never saw.
+	if p == "" || p[0] != '/' || len(p) > limit || !visibleASCII(p) || strings.ContainsAny(p, "#?") {
 		return ReasonPath
 	}
 	for i := 0; i < len(p); i++ {
@@ -73,7 +94,7 @@ func checkPath(method, p string, limit int) string {
 }
 
 func checkQuery(q string, c *Config) string {
-	if len(q) > c.MaxQueryBytes || !visibleASCII(q) {
+	if len(q) > c.MaxQueryBytes || !visibleASCII(q) || strings.IndexByte(q, '#') >= 0 {
 		return ReasonQuery
 	}
 	if q != "" && strings.Count(q, "&")+1 > c.MaxQueryParams {

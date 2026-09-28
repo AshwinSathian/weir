@@ -354,7 +354,7 @@ A nil `Request.Header` is treated as empty. `internal/keys` cannot import `weir`
 
 Classification order:
 
-1. Detect `CONNECT` (any form) and `Connection: upgrade` with an `Upgrade` field first and return `keys.ErrUpgrade`, which the root maps to `ErrUpgradeNotSupported` (FR-UPG-1, T-44); a CONNECT path is authority-form and would otherwise fail as `path`. Then validate per FR-VAL-1. Any failure returns `RequestError{Reason}` with reasons from a fixed list (`scheme`, `host`, `path`, `path-escape`, `query`, `query-params`, `method`).
+1. Detect `CONNECT` (any form) and `Connection: upgrade` with an `Upgrade` field (other than one whose only token is `h2c`, which is served as a plain request) first and return `keys.ErrUpgrade`, which the root maps to `ErrUpgradeNotSupported` (FR-UPG-1, T-44); a CONNECT path is authority-form and would otherwise fail as `path`. Then validate per FR-VAL-1. Any failure returns `RequestError{Reason}` with reasons from a fixed list (`scheme`, `host`, `path`, `path-escape`, `query`, `query-params`, `method`).
 2. Method: `GET`, `HEAD` are cacheable. `OPTIONS`, `TRACE` are safe but not cacheable: `ClassPass`, `FwdMethod`, no invalidation. Everything else (including lowercase `get`) is unsafe or unknown: `ClassPass`, `FwdMethod`, invalidation on 2xx/3xx.
 3. Bypass: any `Bypass.Headers` present, or any `Bypass.Cookies` present in any `Cookie` line: `ClassPass`, `FwdBypass`.
 4. Otherwise build the forwarded request and keys (§3.2 to §3.5).
@@ -428,6 +428,10 @@ if v := cookieHeader(keyedCookies()); v != "": out["Cookie"] = []string{v}
 filter trace fields (FR-FWD-6)
 out["Accept-Encoding"] = []string{aeBucket}  // always, set last, e.g. "gzip" or "identity"
 ```
+
+The hop-by-hop fields are RFC 9110 §7.6.1's list plus `HTTP2-Settings` (FR-UPG-1: a lone `h2c` upgrade is served as a plain request). `DropHopByHop` also serves stored and served responses, where dropping `HTTP2-Settings` is intended: it never belongs in a response.
+
+`keyedCookies` scans every `Cookie` line once, so its cost is linear in the received header size, times `len(Key.Cookies)` for the name lookup, and the server's header limit bounds that size (P5; net/http defaults to 1 MiB). `MaxKeyedHeaderBytes` applies to the keyed pairs joined as `cookieHeader` writes them, not to the received lines (FR-VAL-3); over it, every keyed cookie is absent. The per-name state is two slices of `len(Key.Cookies)`.
 
 `ForwardAll` copies all fields, then deletes hop-by-hop fields, the fields named in `Connection`, `Host`, `If-None-Match`, `If-Modified-Since`, `If-Match`, `If-Unmodified-Since`, `If-Range`, `Range`, and the body fields `Content-Length`, `Expect` and `Trailer` (the fetch has no body), filters trace fields, and sets `Accept-Encoding` to the bucket. The `Cookie` field stays as received.
 
@@ -1098,7 +1102,7 @@ func WriteResponse(w http.ResponseWriter, resp *weir.Response) error
 func WriteError(w http.ResponseWriter, err error)
 ```
 
-`RequestFrom` takes `Path` and `RawQuery` from `r.RequestURI` (split at the first `?`), not from `r.URL`, so the engine sees the bytes the client sent. For absolute-form request targets it uses the path of the parsed URL's `EscapedPath()` and `RawQuery`. `Scheme` is `https` when `r.TLS != nil`, else `http`. `Host` is `r.Host`.
+`RequestFrom` takes `Path` and `RawQuery` from `r.RequestURI` (split at the first `?`), not from `r.URL`, so the engine sees the bytes the client sent. For absolute-form request targets (`scheme://authority...`) it cuts the raw target after the authority, which ends at the first `/`, `?` or `#`, and splits the rest at the first `?`. It never uses `r.URL.EscapedPath()` there: `net/http` leaves a raw `#` in `URL.Path`, and `EscapedPath` re-encodes it as `%23`, which would hide a fragment from FR-VAL-1 (T-6). Only targets without `://` (CONNECT authority-form, or a request built in code with an empty `RequestURI`) fall back to the parsed URL. `Scheme` is `https` when `r.TLS != nil`, else `http`. `Host` is `r.Host`.
 
 `TransportOrigin.Fetch` builds `*http.Request` with `URL.Opaque` set to the forwarded path so `net/url` does not re-encode it, sets `Host` to the forwarded host, copies headers, and calls `RoundTrip` with the given context. Three `net/http` client behaviors would break INV-1, and `Fetch` blocks each. A path starting with `//` would go out as `scheme://rest`, naming another authority, so it is sent in absolute form (`//host//path`, RFC 9112 §3.2.2). A missing `User-Agent` gets `Go-http-client/1.1`, so `Fetch` sets an empty value, which `net/http` omits. `http.Transport` adds `Accept-Encoding: gzip` and decompresses transparently unless `DisableCompression` is set, so the default transport sets it, and a caller's own `*http.Transport` must too. The default transport also drops `ProxyFromEnvironment`: through a forward proxy, `net/http` sends a `URL.Opaque` path as an origin-form target the proxy cannot route.
 
@@ -1149,7 +1153,7 @@ Limiter: `byHost map[uint64]int32` alongside `byPart`; `canRun` adds `byHost[hos
 
 - Upload pool (FR-LIM-7): the limiter holds two independent pools with the same algorithm (§8.2): `main` and `upload`. `Classify` sets `HasBody` for `ClassPass` requests when `Request.Body` is neither nil nor `http.NoBody` and the request did not declare `Content-Length: 0`. A cacheable request never has one: its body is not forwarded (T-5), so a fat GET cannot take an upload slot. Partition and host caps apply within each pool.
 - Timeouts (FR-TMO-*): the fetch context carries `Timeouts.Origin` until the buffered body is read. For streams, `fetch` swaps the deadline context for a cancel-only context once headers arrive, and wraps the body in an idle-timeout reader: each `Read` arms a timer of `StreamIdle` (reset per successful read) whose expiry cancels the context. Timers are durably blocking in synctest, so the idle behavior is testable.
-- Upgrades (FR-UPG-1): checked first in `Classify`, before validation of the path (so `CONNECT host:port` authority-form targets never hit the path validator).
+- Upgrades (FR-UPG-1, except a lone `h2c`): checked first in `Classify`, before validation of the path (so `CONNECT host:port` authority-form targets never hit the path validator).
 - Event streams (FR-STR-1): checked in `fetch` right after headers, before `readUpTo`; such a response takes the streaming path with `shareable = false` and no marker.
 - Trace headers (FR-FWD-6): `internal/keys` validates `traceparent` with a fixed-length byte check (55 bytes, lowercase hex, version `00`, non-zero ids) and copies the three headers into the forwarded request after the allowlist step.
 - Stripped-cookie report (FR-OBS-5): a `missrate`-style Space-Saving summary of 32 string counters with a deadline; `Observe` becomes a no-op after the report is logged, so the steady-state hot path pays one atomic load.
