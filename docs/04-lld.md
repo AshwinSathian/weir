@@ -338,7 +338,10 @@ type Classified struct {
 	PartitionH uint64    // maphash of Partition, per-process seed
 	ReqCC      httpcc.RequestDirectives // no-store, only-if-cached; the rest only with HonorRevalidation (FR-SRV-8)
 	ClientCond ClientConditionals
+	rangeHdr, ifRange []string // client's Range and If-Range lines, only for AsRangePass (FR-SRV-5)
 }
+
+func (c *Classified) AsRangePass() *Classified // ClassPass copy whose forwarded header (cloned) adds Range and If-Range; method stays GET (FR-FWD-4)
 
 type ClientConditionals struct {
 	IfNoneMatch     []string  // entity-tags as sent, or just "*"; nil when absent, any element is malformed, or the lines exceed MaxKeyedHeaderBytes (bound, P5)
@@ -618,7 +621,7 @@ func (e *Engine) cacheable(ctx, c, origin, attempt):
         // NeedsValidation falls through with lk.entry kept for conditional headers and SIE
     if c.ReqCC.OnlyIfCached: return nil, ErrOnlyIfCached
     if lk.negative != nil && !(lk.entry != nil && sieOK): return e.fromNegative(lk.negative)
-    if c.Range && lk.entry == nil: return e.pass(ctx, c.asRangePass(), origin)
+    if c.Range: return e.pass(ctx, c.AsRangePass(), origin)   // FR-SRV-5: even with a stale entry (T-37); adds the client's Range and If-Range lines
     if lk.marker || c.Authorized && lk.entry == nil || attempt > 0 && lk.ck == prevCK:
         return e.fetchDirect(ctx, c, lk, origin)          // §6.5, no coalescing
     return e.fetchCoalesced(ctx, c, lk, origin, attempt)  // §6.4; prevCK is the previous attempt's coalescing key

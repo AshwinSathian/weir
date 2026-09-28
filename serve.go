@@ -28,7 +28,7 @@ func (e *Engine) Serve(ctx context.Context, req *Request, origin Origin) (*Respo
 		return nil, e.rejected(err)
 	}
 	if c.Class == keys.ClassPass {
-		return e.pass(ctx, &c, origin)
+		return e.pass(ctx, &c, origin, FwdMethod)
 	}
 	return e.cacheable(ctx, &c, origin)
 }
@@ -47,12 +47,16 @@ func (e *Engine) rejected(err error) error {
 }
 
 // pass forwards a request that is never stored, streaming the response.
-func (e *Engine) pass(ctx context.Context, c *keys.Classified, origin Origin) (*Response, error) {
+func (e *Engine) pass(ctx context.Context, c *keys.Classified, origin Origin, fwd FwdReason) (*Response, error) {
 	res := e.fetch(ctx, (*Request)(&c.Forwarded), origin, false, nil)
 	if res.err != nil {
 		return nil, res.err
 	}
-	return e.finish(res.resp, CacheInfo{Fwd: FwdMethod, FwdStatus: res.resp.StatusCode}), nil
+	if c.Head { // a HEAD Range miss went forward as GET
+		closeBody(res.resp)
+		res.resp.Body = http.NoBody
+	}
+	return e.finish(res.resp, CacheInfo{Fwd: fwd, FwdStatus: res.resp.StatusCode}), nil
 }
 
 // lookupResult is what the store holds for a request (04 §6.3).
@@ -96,6 +100,9 @@ func (e *Engine) cacheable(ctx context.Context, c *keys.Classified, origin Origi
 	var prior *store.Entry  // the stale entry to validate
 	if lk.entry != nil {
 		st, staleness, _ := httpcc.Evaluate(lk.entry, lk.epoch, lk.epochOK, now)
+		if st == httpcc.Fresh && !c.ReqCC.OnlyIfCached && forcesValidation(&c.ReqCC) {
+			st, lk.fwd = httpcc.NeedsValidation, FwdRequest // RFC 9211 §2.2 fwd=request
+		}
 		switch st {
 		case httpcc.Fresh:
 			return e.fromEntry(c, lk.entry, now, CacheInfo{Hit: true, TTL: -staleness}), nil
@@ -108,6 +115,16 @@ func (e *Engine) cacheable(ctx context.Context, c *keys.Classified, origin Origi
 				prior = lk.entry
 			}
 		}
+	}
+	// ponytail: a StaleSWR entry fails only-if-cached until M5 serves it.
+	if c.ReqCC.OnlyIfCached { // FR-SRV-6
+		return nil, ErrOnlyIfCached
+	}
+	// FR-SRV-5, T-37: a Range request no entry answers passes through, even
+	// with a stale entry: not stored, not coalesced, no marker.
+	// ponytail: StaleSWR entries pass through too until M5 serves them.
+	if c.Range {
+		return e.pass(ctx, c.AsRangePass(), origin, lk.fwd)
 	}
 	res := e.fetch(ctx, (*Request)(&c.Forwarded), origin, true, prior)
 	if res.err != nil {
@@ -139,6 +156,13 @@ func (e *Engine) cacheable(ctx context.Context, c *keys.Classified, origin Origi
 		resp.Body = io.NopCloser(bytes.NewReader(res.body))
 	}
 	return e.finish(resp, ci), nil
+}
+
+// forcesValidation reports the request directives that turn a fresh entry
+// into one that needs validation. Classify clears them unless
+// Client.HonorRevalidation is set (FR-SRV-8, D5).
+func forcesValidation(cc *httpcc.RequestDirectives) bool {
+	return cc.NoCache || cc.MaxAge.Set && !cc.MaxAge.Invalid && cc.MaxAge.V == 0
 }
 
 // serverError reports the statuses that never create a hit-for-miss

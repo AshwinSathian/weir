@@ -1,7 +1,7 @@
 # Weir technical specification
 
 Status: v1.0, approved for Phase 0 and Phase 1 implementation
-Date: 2026-09-27
+Date: 2026-09-28
 Owner: Ashwin Sathian
 Module: `github.com/AshwinSathian/weir`
 Supersedes: the interface sketch in [00-design-doc.md §7.2](00-design-doc.md)
@@ -280,7 +280,7 @@ A response is stored only if all of the following hold. Each failed check increm
 - FR-SRV-2. For client conditional requests on a hit, Weir evaluates `If-None-Match` (weak comparison) and, if absent, `If-Modified-Since` against the stored response and answers 304 when the precondition fails (RFC 9111 §4.3.2, RFC 9110 §13.2.2). This applies only to stored 200 responses. `If-Modified-Since` without a stored `Last-Modified` uses the stored `Date`. The 304 carries the stored `Cache-Control`, `Content-Location`, `Date`, `ETag`, `Expires` and `Vary` fields (RFC 9110 §15.4.5), plus `Age` and `Cache-Status`.
 - FR-SRV-3. To validate a stored entry Weir sends `If-None-Match` with the stored `ETag` and `If-Modified-Since` with the stored `Last-Modified` when present. On 304, it freshens the entry per RFC 9111 §4.3.4 (stored headers updated from the 304 except `Content-Length`), recomputes freshness with new jitter, and serves it. If the 304 carries a strong `ETag` that differs from the stored one, the stored entry is not updated (§4.3.4) and Weir repeats the request unconditionally under the same limiter slot. On a full response it applies §5.4. On an origin-health failure it applies §5.8.
 - FR-SRV-4. `HEAD` requests are answered from `GET` entries without a body.
-- FR-SRV-5. A request with `Range` is answered from a stored entry with the full 200 response when the entry is fresh or servable under SWR (RFC 9110 lets a server ignore `Range`). Otherwise it is forwarded with its `Range` header, is not coalesced, is not stored, and does not create hit-for-miss markers.
+- FR-SRV-5. A request with `Range` is answered from a stored entry with the full 200 response when the entry is fresh or servable under SWR (RFC 9110 lets a server ignore `Range`). Otherwise it is forwarded with its `Range` and `If-Range` fields (so the origin applies `If-Range`, RFC 9110 §13.1.5), is not coalesced, is not stored, and does not create hit-for-miss markers.
 - FR-SRV-6. `only-if-cached` in the request is always honored: a usable stored response or `ErrOnlyIfCached`.
 - FR-SRV-7. Request `no-store` is always honored: the response is not stored.
 - FR-SRV-8. With `Client.HonorRevalidation` false (default), request `no-cache`, `max-age`, `min-fresh`, `max-stale` and `Pragma: no-cache` do not change lookup behavior. With it true, `no-cache`/`max-age=0`/`Pragma: no-cache` force validation of a stored entry; the validation still goes through coalescing and the limiter.

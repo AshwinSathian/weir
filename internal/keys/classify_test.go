@@ -408,3 +408,27 @@ func equalHeader(a, b http.Header) bool {
 	}
 	return true
 }
+
+// FR-SRV-5, FR-FWD-4, T-7: the Range pass-through adds the client's Range and
+// If-Range lines to a copy; the cacheable forward keeps neither.
+func TestAsRangePass(t *testing.T) {
+	h := http.Header{"Range": {"bytes=0-1", "bytes=5-6"}, "If-Range": {`"v1"`}}
+	c, err := Classify(classifyReq(http.MethodHead, h), classifyCfg())
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := c.AsRangePass()
+	if p.Class != ClassPass || p.Forwarded.Method != http.MethodGet {
+		t.Fatalf("class %v method %s, want ClassPass GET", p.Class, p.Forwarded.Method)
+	}
+	if got := p.Forwarded.Header["Range"]; !slices.Equal(got, h["Range"]) || p.Forwarded.Header.Get("If-Range") != `"v1"` {
+		t.Fatalf("pass forward header %v", p.Forwarded.Header)
+	}
+	if c.Forwarded.Header["Range"] != nil || c.Forwarded.Header["If-Range"] != nil {
+		t.Fatalf("cacheable forward changed: %v", c.Forwarded.Header)
+	}
+	p.Forwarded.Header["Range"][0] = "x"
+	if h["Range"][0] != "bytes=0-1" {
+		t.Fatal("pass forward aliases the client's Range lines")
+	}
+}
