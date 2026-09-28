@@ -383,3 +383,11 @@ Entry template:
 - Deviations: none yet; each card changes its spec text with its code.
 - Follow-ups: M1-17b, then M1-17c to M1-17e, then M1-18.
 - Context: low.
+
+## 2026-09-28 · M1-17b · done
+- Branch / PR: card/M1-17b-handler-origin / see STATUS
+- Done: `weirhttp.HandlerOrigin` runs the handler on its own goroutine writing into an `io.Pipe`; `Fetch` returns at headers. Cancel or body close cancels the handler and fails reads and writes. Enforces `Content-Length`, refuses 204/304 bodies, discards HEAD bodies, maps panics and `runtime.Goexit` to `ErrOrigin`, passes https as `r.TLS`, closes the request body.
+- Tests: TestHandlerOriginStreams (16 subtests), TestHandlerOriginCancel (4), TestHandlerOriginThroughEngine; `make check` passes.
+- Deviations: 04 §10 extended with cancel, panic, Content-Length, 204/304/HEAD, trailer and parse-failure behavior. No requirement or signature changed.
+- Follow-ups: context-values threat gap for the Caddy adapter (STATUS notes).
+- Context: medium; two adversarial review rounds found a must-fix (truncated and 204/304 bodies stored). Size S was right for the code, tight for the review loop.
