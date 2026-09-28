@@ -5,7 +5,7 @@ Phase: 1
 Current card: none
 Card state: awaiting-merge
 Branch: card/M1-16-pass-through-upgrades-trace
-PR: (filled after push)
+PR: #23 https://github.com/AshwinSathian/weir/pull/23
 Next card: M1-17
 
 ## Blockers
