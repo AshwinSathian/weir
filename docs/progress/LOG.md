@@ -385,7 +385,7 @@ Entry template:
 - Context: low.
 
 ## 2026-09-28 · M1-17b · done
-- Branch / PR: card/M1-17b-handler-origin / see STATUS
+- Branch / PR: card/M1-17b-handler-origin / #25
 - Done: `weirhttp.HandlerOrigin` runs the handler on its own goroutine writing into an `io.Pipe`; `Fetch` returns at headers. Cancel or body close cancels the handler and fails reads and writes. Enforces `Content-Length`, refuses 204/304 bodies, discards HEAD bodies, maps panics and `runtime.Goexit` to `ErrOrigin`, passes https as `r.TLS`, closes the request body.
 - Tests: TestHandlerOriginStreams (16 subtests), TestHandlerOriginCancel (4), TestHandlerOriginThroughEngine; `make check` passes.
 - Deviations: 04 §10 extended with cancel, panic, Content-Length, 204/304/HEAD, trailer and parse-failure behavior. No requirement or signature changed.

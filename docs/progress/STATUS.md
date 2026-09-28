@@ -5,7 +5,7 @@ Phase: 1
 Current card: none
 Card state: awaiting-merge
 Branch: card/M1-17b-handler-origin
-PR: none
+PR: #25 https://github.com/AshwinSathian/weir/pull/25
 Next card: M1-17c
 
 ## Blockers
