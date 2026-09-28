@@ -5,7 +5,7 @@ Phase: 1
 Current card: none
 Card state: awaiting-merge
 Branch: card/M1-15-invalidation-epochs
-PR: none
+PR: #22 https://github.com/AshwinSathian/weir/pull/22
 Next card: M1-16
 
 ## Blockers
