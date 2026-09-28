@@ -33,7 +33,7 @@ const (
 // request (FR-FWD-1).
 type ClientConditionals struct {
 	IfNoneMatch     []string  // entity-tags as sent, or just "*"; nil when absent, malformed or over MaxKeyedHeaderBytes
-	IfModifiedSince time.Time // zero when absent, repeated or not an HTTP-date
+	IfModifiedSince time.Time // zero when absent, repeated, not an HTTP-date, or If-None-Match is present
 }
 
 // Classified is a validated request with everything the engine needs to
@@ -113,7 +113,9 @@ func Classify(r *Request, c *Config) (Classified, error) {
 	out.Primary = PrimaryKey(&KeyInput{Method: http.MethodGet, Scheme: r.Scheme, Host: host, Path: path, Query: query,
 		CookieNames: c.Cookies, Cookies: cookies})
 	out.ClientCond = ClientConditionals{IfNoneMatch: parseIfNoneMatch(h["If-None-Match"], c)}
-	if ims := h["If-Modified-Since"]; len(ims) == 1 {
+	// RFC 9110 §13.1.3: If-Modified-Since is ignored whenever If-None-Match
+	// is present, even when that field is malformed or over the limit.
+	if ims := h["If-Modified-Since"]; len(ims) == 1 && h["If-None-Match"] == nil {
 		if t, err := http.ParseTime(ims[0]); err == nil {
 			out.ClientCond.IfModifiedSince = t
 		}

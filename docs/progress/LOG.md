@@ -301,3 +301,12 @@ Entry template:
 - Deviations: none.
 - Follow-ups: markers from other unkeyed forwarded inputs (Waiting on Ashwin).
 - Context: low.
+
+## 2026-09-28 · M1-13 · done
+- Branch / PR: card/M1-13-revalidation / #pending
+- Done: conditional validation of stale entries with ETag/Last-Modified, 304 freshening into a new entry (headers merged except Content-Length, freshness and jitter recomputed), strong-ETag-mismatch retry without conditionals, client If-None-Match/If-Modified-Since 304s on hits with the RFC 9110 §15.4.5 fields (conditional.go, fetch.go, serve.go, respond.go).
+- Tests: TestRevalidation304Freshens, TestStrongETagMismatchRetries, TestClientIfNoneMatch304, TestRevalidation304WithBody, TestStaleWithoutValidatorsRefetches; `make check` passes.
+- Review fixes: a 304 with an over-size body was streamed to the client (now closed and freshened); a malformed If-None-Match let If-Modified-Since produce a 304 (keys now drops IMS whenever If-None-Match is present, RFC 9110 §13.1.3).
+- Deviations: none. A 304 without Date dates the freshened entry at receipt (FR-STO-13), not with the stored Date.
+- Follow-ups: marker after validation relies on read-before-write (STATUS notes).
+- Context: medium; size M was right.

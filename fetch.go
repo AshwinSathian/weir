@@ -9,6 +9,8 @@ import (
 	"maps"
 	"net/http"
 	"time"
+
+	"github.com/AshwinSathian/weir/store"
 )
 
 var (
@@ -21,6 +23,7 @@ var (
 type fetchResult struct {
 	resp     *Response
 	body     []byte // buffered fetches: the whole body; nil when over
+	notMod   bool   // resp is a 304 validating the prior entry (FR-SRV-3)
 	over     bool   // buffered fetches: the body exceeded MaxObjectBytes and resp.Body streams it all
 	reqTime  time.Time
 	respTime time.Time // when the buffered body ended, or the headers arrived
@@ -32,10 +35,26 @@ type fetchResult struct {
 // caller to read; a buffered one reads up to MaxObjectBytes and, when the
 // body is larger, returns a stream of the whole body instead of storing it.
 // The origin timeout bounds the body read either way.
-func (e *Engine) fetch(ctx context.Context, req *Request, origin Origin, buffered bool) fetchResult {
+//
+// A non-nil prior, which must have validators, makes the fetch conditional
+// (FR-SRV-3). A 304 whose strong ETag differs from prior's is discarded and
+// the request repeated without conditionals under the same timeout (and,
+// from M4, the same limiter slot). A 304 to that retry is an origin
+// misbehaving; it passes through unstored like any other 304.
+func (e *Engine) fetch(ctx context.Context, req *Request, origin Origin, buffered bool, prior *store.Entry) fetchResult {
 	tctx, cancel := context.WithTimeoutCause(ctx, e.cfg.Timeouts.Origin, ErrOriginTimeout)
+	fwd := req
+	if prior != nil {
+		fwd = withValidators(req, prior)
+	}
 	reqTime := time.Now()
-	resp, err := safeFetch(tctx, origin, req)
+	resp, err := safeFetch(tctx, origin, fwd)
+	if err == nil && prior != nil && resp.StatusCode == http.StatusNotModified && strongETagMismatch(resp.Header, prior.ETag) {
+		closeBody(resp)
+		prior = nil
+		reqTime = time.Now()
+		resp, err = safeFetch(tctx, origin, req)
+	}
 	if err != nil {
 		cancel()
 		return fetchResult{err: timeoutOrOrigin(ctx, tctx, err)}
@@ -44,7 +63,14 @@ func (e *Engine) fetch(ctx context.Context, req *Request, origin Origin, buffere
 	// Serve adds Cache-Status; an Origin may reuse its header map (INV-4).
 	// Value slices stay shared, and only full slice expressions append to them.
 	resp.Header = maps.Clone(resp.Header)
-	res := fetchResult{resp: resp, reqTime: reqTime}
+	res := fetchResult{resp: resp, reqTime: reqTime, notMod: prior != nil && resp.StatusCode == http.StatusNotModified}
+	if res.notMod { // a 304 body means nothing; never read or stream it (04 §6.7)
+		closeBody(resp)
+		cancel()
+		resp.Body = http.NoBody
+		res.respTime = time.Now()
+		return res
+	}
 	if !buffered {
 		res.respTime = time.Now()
 		if resp.Body == http.NoBody {

@@ -218,8 +218,9 @@ func TestClassifyConditionalsParsed(t *testing.T) {
 			if !slices.Equal(c.ClientCond.IfNoneMatch, tt.want) {
 				t.Fatalf("IfNoneMatch = %q, want %q", c.ClientCond.IfNoneMatch, tt.want)
 			}
-			if !c.ClientCond.IfModifiedSince.Equal(ims) {
-				t.Fatalf("IfModifiedSince = %v", c.ClientCond.IfModifiedSince)
+			// RFC 9110 §13.1.3: any If-None-Match, parsed or not, hides If-Modified-Since.
+			if got := c.ClientCond.IfModifiedSince; got.Equal(ims) != (tt.inm == nil) {
+				t.Fatalf("IfModifiedSince = %v with If-None-Match %q", got, tt.inm)
 			}
 			if c.Forwarded.Header["If-None-Match"] != nil || c.Forwarded.Header["If-Modified-Since"] != nil {
 				t.Fatal("client conditionals forwarded")
