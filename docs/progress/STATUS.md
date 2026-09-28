@@ -5,7 +5,7 @@ Phase: 1
 Current card: none
 Card state: awaiting-merge
 Branch: card/M1-17e-responses
-PR: pending
+PR: #28 https://github.com/AshwinSathian/weir/pull/28
 Next card: M1-18
 
 ## Blockers
