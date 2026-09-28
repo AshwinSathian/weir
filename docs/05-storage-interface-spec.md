@@ -282,7 +282,7 @@ Every store implementation calls `storetest.Run` from its tests. Cases (each a s
 | `GetMissing` | `ErrNotFound` |
 | `SetGetRoundTrip` | every field of every kind survives (deep equality, times compared with `Equal`) |
 | `SetReplacesAnyKind` | response replaced by vary spec and back |
-| `ExpiredIsNotFound` | record with past `Expires` is not returned: 1 s expiry, then `time.Sleep(3 s)`, which is fake inside a bubble with `Synctest()` (memory) and real otherwise (remote, 2 s margin). `synctest.Test` forbids `t.Run` inside a bubble, so the bubble is per case, not around `Run` |
+| `ExpiredIsNotFound` | record with past `Expires` is not returned: 1 s expiry, then `time.Sleep(3 s)`, which is fake inside a bubble with `Synctest()` (memory) and real otherwise (remote, 2 s margin). Remote expiry runs on the server clock, so without `Synctest()` the case runs only under the `integration` build tag and skips otherwise (CLAUDE.md hard rule 6). `synctest.Test` forbids `t.Run` inside a bubble, so the bubble is per case, not around `Run` |
 | `SetPastExpiresIsNoop` | |
 | `DeleteMissingOK` | |
 | `ContextCanceled` | canceled context yields an error that `errors.Is` `ErrUnavailable` within 100 ms (remote stores; memory store may ignore context and succeed) |

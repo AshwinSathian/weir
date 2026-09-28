@@ -330,6 +330,7 @@ type Classified struct {
 	Authorized bool      // request carried Authorization
 	Unsafe     bool      // unsafe or unknown method: invalidate on 2xx/3xx
 	HasBody    bool      // the forwarded request carries a body (upload pool)
+	Unkeyed    bool      // the forward carries a Forward.Allow field, or ForwardAll (FR-STO-12, T-31)
 	Forwarded  Request   // keys.Request, see note
 	Primary    store.Key // zero for ClassPass
 	URITag     store.Tag
@@ -807,8 +808,8 @@ func (e *Engine) fetch(ctx, s, origin) fetchResult:
     decision := storability(s, resp, body)    // FR-STO-1..10
     ent := buildEntry(s, resp, body, t0, time.Now(), decision, e.rnd)
     if decision.ok: e.store(s, ent)
-    else if s.prior == nil && decision.responseDriven && !s.c.Authorized && !s.c.ReqCC.NoStore:
-        e.setMarker(s.ck)                    // FR-STO-12, T-31: only for response-driven reasons under keyed inputs
+    else if s.prior == nil && decision.responseDriven:
+        e.setMarker(s.ck)                    // FR-STO-12, T-31: storability clears responseDriven under Authorized, request no-store or Unkeyed
     return fetchResult{entry: ent, shareable: decision.ok, stored: ...}
 ```
 

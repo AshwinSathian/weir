@@ -34,7 +34,8 @@ func WithoutEpochs() Option { return func(o *options) { o.noEpochs = true } }
 
 // Synctest runs each time-dependent case inside its own synctest bubble, so
 // in-process stores that read time.Now expire records on the fake clock.
-// Without it those cases sleep on the real clock, as remote stores must.
+// Without it those cases sleep on the real clock, as remote stores must, and
+// run only under the integration build tag (CLAUDE.md hard rule 6).
 // (synctest.Test forbids t.Run inside a bubble, so the bubble is per case.)
 func Synctest() Option { return func(o *options) { o.synctest = true } }
 
@@ -265,6 +266,10 @@ func testExpiredIsNotFound(t *testing.T, newStore func(*testing.T) store.Store, 
 	if o.synctest {
 		synctest.Test(t, run)
 		return
+	}
+	if !integration {
+		// Remote expiry runs on the server clock, which synctest cannot fake.
+		t.Skip("real-clock case: run with -tags integration")
 	}
 	run(t)
 }

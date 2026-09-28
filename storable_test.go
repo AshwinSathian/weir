@@ -119,6 +119,35 @@ func TestAuthorizationRules(t *testing.T) {
 	}
 }
 
+func TestAuthorizationNeedsValidSMaxage(t *testing.T) {
+	// FR-STO-5, T-8: RFC 9111 §4.2.1 makes an invalid or conflicting
+	// s-maxage unusable, so it cannot grant the §3.5 permission.
+	cfg := storableConfig(t, nil)
+	for _, tc := range []struct {
+		name, cc string
+		ok       bool
+	}{
+		{"invalid s-maxage does not permit", "s-maxage=abc", false},
+		{"differing s-maxage values do not permit", "s-maxage=60, s-maxage=120", false},
+		{"repeated equal s-maxage permits", "s-maxage=60, s-maxage=60", true},
+		{"valid s-maxage beside invalid max-age does not permit", "s-maxage=600, max-age=abc, stale-if-error=86400", false},
+		{"valid s-maxage beside conflicting max-age does not permit", "s-maxage=600, max-age=60, max-age=0", false},
+		{"public with invalid s-maxage still permits", "public, s-maxage=abc, max-age=60", true},
+		{"must-revalidate with invalid s-maxage still permits", "must-revalidate, s-maxage=abc, max-age=60", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resp := originResp(200, "Cache-Control", tc.cc, "Etag", `"v1"`)
+			d := storability(cfg, classifiedGET("/", true), resp, nil, testRespTime)
+			if d.ok != tc.ok {
+				t.Fatalf("ok = %v, want %v (%+v)", d.ok, tc.ok, d)
+			}
+			if !tc.ok && (d.reason != "authorization" || d.responseDriven) {
+				t.Errorf("got %+v, want request-driven authorization", d)
+			}
+		})
+	}
+}
+
 func TestNoExtensionBasedCaching(t *testing.T) {
 	// FR-STO-8, T-6: storability comes from origin headers, never the path.
 	cfg := storableConfig(t, nil)

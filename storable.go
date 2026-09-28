@@ -32,7 +32,7 @@ func storability(cfg *Config, c *keys.Classified, resp *Response, body []byte, r
 		// T-31: under unkeyed inputs no reason is response-driven, whichever
 		// check happened to fail first.
 		d.reason = reason
-		d.responseDriven = responseDriven && !c.Authorized && !c.ReqCC.NoStore
+		d.responseDriven = responseDriven && !c.Authorized && !c.ReqCC.NoStore && !c.Unkeyed
 		return d
 	}
 	h := resp.Header
@@ -48,7 +48,7 @@ func storability(cfg *Config, c *keys.Classified, resp *Response, body []byte, r
 		return fail("no-store", true)
 	case d.cc.Private:
 		return fail("private", true)
-	case c.Authorized && !d.cc.Public && !d.cc.SMaxAge.Set && !d.cc.MustRevalidate:
+	case c.Authorized && !d.cc.Public && !validSMaxAge(&d.cc) && !d.cc.MustRevalidate:
 		// RFC 9111 §3.5, T-8. Request-driven: the credentials are unkeyed.
 		return fail("authorization", false)
 	case len(h["Set-Cookie"]) > 0 && !cfg.Storable.StripSetCookie:
@@ -64,6 +64,13 @@ func storability(cfg *Config, c *keys.Classified, resp *Response, body []byte, r
 	}
 	d.ok = true
 	return d
+}
+
+// validSMaxAge reports an s-maxage that can grant the RFC 9111 §3.5
+// permission (FR-STO-5). T-8: under an unusable field the lifetime is zero
+// (FR-FRS-2), and a zero-lifetime entry could be served stale to another user.
+func validSMaxAge(cc *httpcc.ResponseDirectives) bool {
+	return cc.SMaxAge.Set && !cc.Unusable()
 }
 
 // hasFreshness is FR-STO-8. 302 and 307 need explicit freshness (D39).

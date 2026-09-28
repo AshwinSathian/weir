@@ -25,7 +25,7 @@ type Config struct {
 // compared with each other; respTime stands in only when Date is absent or
 // invalid (T-30).
 func Lifetime(d ResponseDirectives, h http.Header, status int, respTime time.Time, cfg Config) (lt time.Duration, heuristic bool) {
-	if d.Duplicates || d.MaxAge.Invalid || d.SMaxAge.Invalid || d.SWR.Invalid || d.SIE.Invalid {
+	if d.Unusable() {
 		return 0, false // FR-FRS-2
 	}
 	switch {

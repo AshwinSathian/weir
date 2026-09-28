@@ -16,7 +16,7 @@ These phases start from draft specs. Each begins with one planning card that ver
 - Plan: 2.5.x · Size: S · Depends on: Phase 2 cards done
 - Read: 05 §7, §8; valkey-go docs via Context7
 - Touch: docs/05-storage-interface-spec.md, docs/cards/20-later.md
-- AC: client library and version chosen with the user; cards written (expected: connection and codec, Get/Set/Delete, epochs sketch in Lua, conformance in CI, engine suite re-run, vary CAS, multi-node guide)
+- AC: client library and version chosen with the user; cards written (expected: connection and codec, Get/Set/Delete, epochs sketch in Lua, conformance in CI with `-tags integration` (05 §8, else `ExpiredIsNotFound` skips), engine suite re-run, vary CAS, multi-node guide)
 
 ## Phase 3: Experiment dimensions
 
