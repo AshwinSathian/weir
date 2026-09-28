@@ -301,3 +301,20 @@ Entry template:
 - Deviations: none.
 - Follow-ups: markers from other unkeyed forwarded inputs (Waiting on Ashwin).
 - Context: low.
+
+## 2026-09-28 · M1-13 · done
+- Branch / PR: card/M1-13-revalidation / #20
+- Done: conditional validation of stale entries with ETag/Last-Modified, 304 freshening into a new entry (headers merged except Content-Length, freshness and jitter recomputed), strong-ETag-mismatch retry without conditionals, client If-None-Match/If-Modified-Since 304s on hits with the RFC 9110 §15.4.5 fields (conditional.go, fetch.go, serve.go, respond.go).
+- Tests: TestRevalidation304Freshens, TestStrongETagMismatchRetries, TestClientIfNoneMatch304, TestRevalidation304WithBody, TestStaleWithoutValidatorsRefetches; `make check` passes.
+- Review fixes: a 304 with an over-size body was streamed to the client (now closed and freshened); a malformed If-None-Match let If-Modified-Since produce a 304 (keys now drops IMS whenever If-None-Match is present, RFC 9110 §13.1.3).
+- Deviations: none. A 304 without Date dates the freshened entry at receipt (FR-STO-13), not with the stored Date.
+- Follow-ups: marker after validation relies on read-before-write (STATUS notes).
+- Context: medium; size M was right.
+
+## 2026-09-28 · M1-13 · review-fixes
+- Branch / PR: card/M1-13-revalidation / #20
+- Done: adversarial review before merge. A body stored from an `Authorization` request lost the FR-STO-5 permission check when a request without `Authorization` freshened it, so a 304 dropping `public` still stored it; freshening now evaluates storability as authorized when the prior entry carries `FlagFromAuthorized`. Probes with no findings: epochs and soft purge through validation, HEAD validation, request no-store during validation, 304 with Vary or Set-Cookie (served, not stored), header canonicalization of the 304, single retry bound.
+- Tests: TestFreshenKeepsAuthorizedRule (failed before the fix). `make check` passes.
+- Deviations: none.
+- Follow-ups: 304 relabelling Content-Encoding (Waiting on Ashwin).
+- Context: low.

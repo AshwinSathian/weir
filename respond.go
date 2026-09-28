@@ -13,15 +13,22 @@ import (
 	"github.com/AshwinSathian/weir/store"
 )
 
-// fromEntry serves ent at now (04 §6.10). The header map is a shallow
-// clone: stored value slices are clipped, so a caller's Add reallocates and
-// Set or Del only touch the clone (P4).
+// fromEntry serves ent at now (04 §6.10), or a 304 when the client's
+// preconditions fail (FR-SRV-2). The header map is a shallow clone: stored
+// value slices are clipped, so a caller's Add reallocates and Set or Del
+// only touch the clone (P4).
 func (e *Engine) fromEntry(c *keys.Classified, ent *store.Entry, now time.Time, ci CacheInfo) *Response {
+	age := []string{strconv.FormatInt(int64(httpcc.CurrentAge(ent, now)/time.Second), 10)} // FR-FRS-7
+	if clientNotModified(&c.ClientCond, ent) {
+		h := notModifiedHeader(ent.Header)
+		h["Age"] = age
+		return e.finish(&Response{StatusCode: http.StatusNotModified, Header: h, Body: http.NoBody}, ci)
+	}
 	h := maps.Clone(ent.Header)
 	if h == nil {
 		h = http.Header{}
 	}
-	h["Age"] = []string{strconv.FormatInt(int64(httpcc.CurrentAge(ent, now)/time.Second), 10)} // FR-FRS-7
+	h["Age"] = age
 	var body io.ReadCloser = http.NoBody
 	if !c.Head && len(ent.Body) > 0 {
 		body = io.NopCloser(bytes.NewReader(ent.Body))

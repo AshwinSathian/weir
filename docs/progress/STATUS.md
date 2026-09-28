@@ -4,9 +4,9 @@ Updated: 2026-09-28
 Phase: 1
 Current card: none
 Card state: awaiting-merge
-Branch: card/M1-12-serve
-PR: #19 https://github.com/AshwinSathian/weir/pull/19
-Next card: M1-13
+Branch: card/M1-13-revalidation
+PR: #20 https://github.com/AshwinSathian/weir/pull/20
+Next card: M1-14
 
 ## Blockers
 
@@ -30,9 +30,12 @@ none
 
 - Markers from other unkeyed inputs: FR-STO-12 and T-31 block markers only for `Authorization` and request `no-store`. Trace headers (default), `Forward.Allow` headers and `ForwardAll` also reach the origin unkeyed, so an origin that answers them with `Set-Cookie`, `private` or a non-storable status lets one client plant a 30 s marker for everyone (coalescing off from M2). Proposal: no marker when the forwarded request carried any unkeyed header other than trace headers, or drop markers entirely under `ForwardAll` (FR-STO-12 wording change).
 
+- 304 and Content-Encoding: FR-SRV-3 copies every 304 field except Content-Length into the stored entry, so a 304 that names a different `Content-Encoding` (or `Content-Type`) relabels the stored body, and every later hit serves bytes that do not match their coding. RFC 9111 §3.2 lets a cache keep fields the stored body depends on. Proposal: also keep the stored `Content-Encoding` on freshen (FR-SRV-3 wording change).
+
 ## Notes for the next session
 
-- `Serve` now classifies, looks up the primary key, serves `Fresh` via `fromEntry` (respond.go) and otherwise calls `fetch(..., buffered=true)` uncoalesced, then `storeResponse` (serve.go). M1-13 adds validation in `cacheable` where the `ponytail:` note says StaleSWR and NeedsValidation refetch unconditionally.
-- `fetch` returns `reqTime`/`respTime` and, buffered, the whole body or an over-size stream; 500/502/503/504 skip storability and markers (negative caching, M6).
+- `cacheable` (serve.go) validates StaleSWR and NeedsValidation entries that have validators via `fetch(..., prior)`; a 304 is merged by `freshened` (conditional.go) and stored through the normal `storeResponse` path. SWR still validates in the foreground (`ponytail:`, M5). Client conditionals are evaluated only in `fromEntry` (hits), not after a validation.
+- `fetch` retries a strong-ETag-mismatch 304 unconditionally under the same timeout; M4 must keep the retry under the same limiter slot. A 304 to that retry passes through unstored.
+- After a validation whose response is unstorable and response-driven, `setMarker` relies on the read-before-write to skip the marker (04 §6.7 says only when `prior == nil`); pass that through when M2 restructures fetch results.
 - Unowned events: no card emits `EvRequest`, `EvFetchStart`, `EvFetchEnd`, or `EvStoreError{epoch}` on epoch lookup failure (04 §6.3); over-size and 5xx responses emit no `EvNotStored`. Give them a card or fold into M1-16.
 - Carried: newest-wins store rule (M1-15); `New` must reject `Forward.Allow` entries naming keyed or hop-by-hop fields and compile query patterns; decide whether `Close` waits for foreground `Serve` calls (today a store write after Close closes the owned store just fails); codec header-name case; hard-epoch prune and S3-FIFO walk to measure in M1-18.

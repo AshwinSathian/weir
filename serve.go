@@ -48,7 +48,7 @@ func (e *Engine) rejected(err error) error {
 
 // pass forwards a request that is never stored, streaming the response.
 func (e *Engine) pass(ctx context.Context, c *keys.Classified, origin Origin) (*Response, error) {
-	res := e.fetch(ctx, (*Request)(&c.Forwarded), origin, false)
+	res := e.fetch(ctx, (*Request)(&c.Forwarded), origin, false, nil)
 	if res.err != nil {
 		return nil, res.err
 	}
@@ -87,11 +87,13 @@ func (e *Engine) lookup(ctx context.Context, c *keys.Classified, now time.Time) 
 }
 
 // cacheable serves a GET or HEAD from the store or through an uncoalesced
-// fetch (04 §6.2). Coalescing arrives in M2, validation in M1-13.
+// fetch (04 §6.2), validating a stale entry that has validators
+// (FR-SRV-3). Coalescing arrives in M2.
 func (e *Engine) cacheable(ctx context.Context, c *keys.Classified, origin Origin) (*Response, error) {
 	now := time.Now()
 	lk := e.lookup(ctx, c, now)
 	var purged *store.Entry // an unusable response a marker may replace
+	var prior *store.Entry  // the stale entry to validate
 	if lk.entry != nil {
 		st, staleness, _ := httpcc.Evaluate(lk.entry, lk.epoch, lk.epochOK, now)
 		switch st {
@@ -99,17 +101,30 @@ func (e *Engine) cacheable(ctx context.Context, c *keys.Classified, origin Origi
 			return e.fromEntry(c, lk.entry, now, CacheInfo{Hit: true, TTL: -staleness}), nil
 		case httpcc.Unusable: // FR-PRG-3: exactly a miss
 			purged, lk.entry, lk.fwd = lk.entry, nil, FwdURIMiss
+		default:
+			// ponytail: StaleSWR validates in the foreground until
+			// background refresh (M5) lands.
+			if hasValidators(lk.entry) {
+				prior = lk.entry
+			}
 		}
-		// ponytail: StaleSWR and NeedsValidation refetch in the foreground,
-		// unconditionally, until validation (M1-13) and background refresh
-		// (M5) land; Unusable is a plain miss either way.
 	}
-	res := e.fetch(ctx, (*Request)(&c.Forwarded), origin, true)
+	res := e.fetch(ctx, (*Request)(&c.Forwarded), origin, true, prior)
 	if res.err != nil {
 		return nil, res.err
 	}
+	ci := CacheInfo{Fwd: lk.fwd, FwdStatus: res.resp.StatusCode}
+	if res.notMod { // FR-SRV-3: the freshened entry is stored and served like a full response
+		res.resp, res.body = freshened(prior, res.resp), prior.Body
+		if prior.Flags&store.FlagFromAuthorized != 0 && !c.Authorized {
+			// FR-STO-5, T-8: the body answered an Authorization request, so
+			// the merged headers still need a shared-cache permission.
+			ac := *c
+			ac.Authorized = true
+			c = &ac
+		}
+	}
 	resp := res.resp
-	ci := CacheInfo{Fwd: lk.fwd, FwdStatus: resp.StatusCode}
 	if lk.marker {
 		ci.Detail = "hit-for-miss"
 	}
