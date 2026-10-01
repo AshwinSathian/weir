@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/AshwinSathian/weir/internal/breaker"
 	"github.com/AshwinSathian/weir/internal/keys"
 	"github.com/AshwinSathian/weir/internal/limiter"
 	"github.com/AshwinSathian/weir/store"
@@ -44,7 +45,9 @@ type fetchResult struct {
 // c.Forwarded holding a limiter slot of class for c's partition, from before
 // the request is sent until it returns: after the buffered body, or at the
 // headers of a stream (FR-LIM-1, T-18). Requests with a body take the slot
-// from the upload pool (FR-LIM-7, T-39). The breaker joins it in M5. A
+// from the upload pool (FR-LIM-7, T-39). The breaker admits the fetch before
+// the limiter and counts its outcome at the headers, or after a buffered
+// body (FR-CB-1, FR-CB-5). A
 // streamed fetch returns resp.Body for the caller to read; a buffered one
 // reads up to MaxObjectBytes and, when the body is larger, returns a stream
 // of the whole body instead of storing it. The origin timeout starts once
@@ -61,15 +64,27 @@ type fetchResult struct {
 // A non-nil held is a slot the caller already acquired from limFor(c);
 // fetch releases it like its own.
 func (e *Engine) fetch(ctx context.Context, c *keys.Classified, origin Origin, class limiter.Class, buffered bool, prior *store.Entry, held *limiter.Permit) fetchResult {
+	probe, err := e.cb.Allow()
+	if err == nil && class != limiter.Foreground && probe != (breaker.Probe{}) {
+		e.cb.Cancel(probe) // FR-CB-4: only foreground fetches probe
+		err = breaker.ErrCircuitOpen
+	}
+	if err != nil {
+		if held != nil {
+			held.Release()
+		}
+		return e.circuitOpen(c, class)
+	}
 	permit := held
 	if permit == nil {
-		var err error
 		if permit, err = e.limFor(c).Acquire(ctx, class, c.PartitionH); err != nil {
+			e.cb.Cancel(probe)
 			return e.shed(c, class, err)
 		}
 	}
 	defer permit.Release()
 	if err := ctx.Err(); err != nil { // granted as the caller left (04 §8.2): send nothing
+		e.cb.Cancel(probe)
 		return fetchResult{err: err}
 	}
 	req := (*Request)(&c.Forwarded)
@@ -90,7 +105,17 @@ func (e *Engine) fetch(ctx context.Context, c *keys.Classified, origin Origin, c
 		reqTime = time.Now()
 		resp, err = safeFetch(tctx, origin, req)
 	}
+	// The outcome is counted at the headers, or after a buffered body. A
+	// fetch whose caller left says nothing about the origin.
+	record := func(o breaker.Outcome) {
+		if o == breaker.Failure && ctx.Err() != nil {
+			e.cb.Cancel(probe)
+		} else {
+			e.cb.Record(probe, o)
+		}
+	}
 	if err != nil {
+		record(breaker.Failure)
 		cancel()
 		return fetchResult{err: timeoutOrOrigin(ctx, tctx, err)}
 	}
@@ -105,6 +130,9 @@ func (e *Engine) fetch(ctx context.Context, c *keys.Classified, origin Origin, c
 	// FR-FWD-7: strip once here, on the single origin path (P3), so no
 	// adapter or stored entry sees the origin connection's fields.
 	keys.DropHopByHop(resp.Header, resp.Header["Connection"])
+	if !buffered || res.notMod || isEventStream(res.received().Header, e.cfg.Storable.StreamTypes) {
+		record(outcome(resp))
+	}
 	if res.notMod { // a 304 body means nothing; never read or stream it (04 §6.7)
 		closeBody(resp)
 		cancel()
@@ -127,10 +155,12 @@ func (e *Engine) fetch(ctx context.Context, c *keys.Classified, origin Origin, c
 	body, rerr := io.ReadAll(io.LimitReader(resp.Body, limit+1))
 	res.respTime = time.Now()
 	if rerr != nil { // a truncated body is never stored or served
+		record(breaker.Failure)
 		closeBody(resp)
 		cancel()
 		return fetchResult{err: timeoutOrOrigin(ctx, tctx, rerr)}
 	}
+	record(outcome(resp))
 	if int64(len(body)) > limit {
 		rest := resp.Body
 		deadline.Stop()
@@ -173,6 +203,32 @@ func (e *Engine) shed(c *keys.Classified, class limiter.Class, err error) fetchR
 		emit(e.cfg.Observer, Event{Kind: EvRefreshDropped, Time: now, Partition: c.Partition, Reason: "no-slot"})
 	}
 	return fetchResult{err: &RetryError{Err: ErrShed, After: e.cfg.Limiter.MaxQueueWait}, bgDropped: class == limiter.Background}
+}
+
+// circuitOpen is the fetch result while the breaker refuses fetches
+// (FR-CB-5): ErrCircuitOpen with the rest of the open period as the
+// Retry-After hint (04 §1.3). A background refresh is dropped.
+func (e *Engine) circuitOpen(c *keys.Classified, class limiter.Class) fetchResult {
+	if class == limiter.Background {
+		emit(e.cfg.Observer, Event{Kind: EvRefreshDropped, Time: time.Now(), Partition: c.Partition, Reason: "circuit-open"})
+	}
+	// Half-open has no end time; a second keeps refused clients from all
+	// retrying at once against a recovering origin.
+	after := max(e.cb.Remaining(), time.Second)
+	return fetchResult{err: &RetryError{Err: ErrCircuitOpen, After: after}, bgDropped: class == limiter.Background}
+}
+
+// outcome classifies a response for the breaker (ADR-7): gateway statuses
+// are failures, 500 is the breaker's call. Transport errors, timeouts and
+// failed bodies are failures too; fetch records those itself.
+func outcome(resp *Response) breaker.Outcome {
+	switch {
+	case resp.StatusCode == http.StatusInternalServerError:
+		return breaker.Status500
+	case serverError(resp.StatusCode):
+		return breaker.Failure
+	}
+	return breaker.Success
 }
 
 // received returns resp with its header as the origin sent it. Engine

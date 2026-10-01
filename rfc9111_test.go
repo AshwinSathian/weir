@@ -342,7 +342,7 @@ var rfcRows = []rfcRow{
 		}},
 
 	// §5.2.2 response directives.
-	{sec: "9111 §5.2.2.2", name: "must-revalidate entry that cannot be validated is 504", tag: "M5", steps: []rfcStep{
+	{sec: "9111 §5.2.2.2", name: "must-revalidate entry that cannot be validated is 504", steps: []rfcStep{
 		{origin: bh(200, "a", "Cache-Control", "max-age=1, must-revalidate", "ETag", `"v1"`), calls: 1},
 		{after: 2 * time.Second, origin: &testorigin.Behavior{Err: errors.New("down")}, err: weir.ErrMustRevalidate, calls: 2},
 	}},
@@ -368,9 +368,28 @@ var rfcRows = []rfcRow{
 			sent: []string{"If-None-Match", `"v1"`}},
 		{after: time.Second, body: "a", calls: 2, cacheStatus: "Weir; hit; ttl=599"},
 	}},
-	{sec: "5861 §4", name: "stale-if-error serves stale on a 500", tag: "M5", steps: []rfcStep{
+	{sec: "5861 §4", name: "stale-if-error serves stale on a 500", steps: []rfcStep{
 		{origin: bh(200, "a", "Cache-Control", "max-age=600, stale-if-error=1200"), calls: 1},
-		{after: 900 * time.Second, origin: bh(500, ""), body: "a", calls: 2},
+		{after: 900 * time.Second, origin: bh(500, ""), body: "a", calls: 2,
+			cacheStatus: "Weir; hit; ttl=-300; detail=stale-if-error"},
+	}},
+	{sec: "5861 §4", name: "stale-if-error serves stale on a 502, 503 or 504", steps: []rfcStep{
+		{origin: bh(200, "a", "Cache-Control", "max-age=600, stale-if-error=1200"), calls: 1},
+		{after: 900 * time.Second, origin: bh(502, ""), body: "a", calls: 2},
+		{origin: bh(503, ""), body: "a", calls: 3},
+		{origin: bh(504, ""), body: "a", calls: 4},
+	}},
+	{sec: "5861 §4", name: "stale-if-error serves stale when the origin cannot be reached", steps: []rfcStep{
+		{origin: bh(200, "a", "Cache-Control", "max-age=600, stale-if-error=1200"), calls: 1},
+		{after: 900 * time.Second, origin: &testorigin.Behavior{Err: errors.New("down")}, body: "a", calls: 2},
+	}},
+	{sec: "5861 §4", name: "stale-if-error past its window passes the 500 through", steps: []rfcStep{
+		{origin: bh(200, "a", "Cache-Control", "max-age=600, stale-if-error=1200"), calls: 1},
+		{after: 1801 * time.Second, origin: bh(500, "e"), status: 500, body: "e", calls: 2},
+	}},
+	{sec: "5861 §4", name: "stale-if-error does not cover a 404", steps: []rfcStep{
+		{origin: bh(200, "a", "Cache-Control", "max-age=600, stale-if-error=1200"), calls: 1},
+		{after: 900 * time.Second, origin: bh(404, "nf"), status: 404, body: "nf", calls: 2},
 	}},
 
 	// RFC 9211 Cache-Status: FR-SRV-9.

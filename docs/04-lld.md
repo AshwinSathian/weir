@@ -806,7 +806,7 @@ func (e *Engine) fetch(ctx, s, origin) fetchResult:
     t0 := time.Now()
     resp, err := safeFetch(origin, tctx, req)      // recovers panics into *OriginError; (nil, nil) and statuses outside 200..999 (1xx, and what net/http would reject) become *OriginError; nil Header becomes empty, nil Body becomes http.NoBody
     outcome := classify(resp, err, tctx)            // success | gateway failure | other
-    e.cb.Record(probe, outcome)
+    e.cb.Record(probe, outcome)                     // a buffered fetch records after its body instead (§8.3)
 
     if err != nil: return errResult(timeoutOrOrigin(err, ctx, tctx), originHealth: true)   // §1.3
     recv := clone(resp.Header) if it has Connection    // decisions read recv: storability, buildEntry (Age, Date), isEventStream, invalidate (FR-FWD-7, T-8); a 304's is freshened too
@@ -1030,7 +1030,10 @@ func (b *Breaker) Allow() (Probe, error)
 func (b *Breaker) Record(p Probe, o Outcome)
 func (b *Breaker) Cancel(p Probe)
 func (b *Breaker) State() State
+func (b *Breaker) Remaining() time.Duration // rest of the open period; 0 unless Open
 ```
+
+`Remaining`, floored at 1 s (half-open has no end time, and a zero hint would send every refused client back at once), is the `After` of the `*RetryError` that wraps `ErrCircuitOpen` (§1.3). A buffered fetch is recorded after its body, so a body that fails after good headers counts as a `Failure` (FR-CB-1); streams are recorded at the headers. Only `Foreground` fetches probe (FR-CB-4): when `Allow` hands a `Background` or `Warm` fetch a probe, `fetch` cancels it and treats the breaker as open. A fetch whose caller left before the origin answered ends in `Cancel`, not `Record`, so disconnecting clients cannot trip the breaker.
 
 `Outcome` is `Success` (4xx included), `Failure` (transport error, timeout, 502, 503, 504) or `Status500`, which counts as a failure only with `CountStatus500`, so the rule lives in the breaker and the engine's `classify` only names what it saw. A probe carries the half-open period it was granted in: a probe still in flight when that period ended (it reopened, then a new period began) counts as an ordinary fetch and its `Cancel` frees nothing, so it cannot close or reopen a later period. `onChange` runs after the lock is released, so concurrent transitions may reach it out of order; anything that needs the current state reads `State()`. `rnd` is drawn once per open period, under the lock (`Config.Rand` must be safe for concurrent use and must not call the engine). Bucket times are monotonic offsets from the breaker's creation with a width of at least 1 ns, so any `Window` works and a wall-clock step cannot misplace a bucket. The trip check runs on every outcome, so a success that brings the window to `MinRequests` at `FailureRatio` trips it. A half-open period that lasts `MaxOpenFor` with its probes still held is replaced by a new one (new `gen`, probe count zero), so a probe that never reaches `Record` or `Cancel` cannot hold the breaker half-open forever. A doubling that overflows saturates at `MaxOpenFor`.
 

@@ -175,6 +175,9 @@ func TestCoalesceStuckLeader(t *testing.T) {
 		synctest.Test(t, func(t *testing.T) {
 			o := testorigin.NewChecked(t, wideSlots, wideSlots)
 			o.Default(testorigin.Behavior{Header: http.Header{"Cache-Control": {"max-age=1, stale-if-error=600"}}, Body: []byte("old")})
+			obs := &eventCounter{}
+			cfg := cfg
+			cfg.Observer = obs
 			e := newEngine(t, cfg)
 			defer closeEngine(t, e)
 			serve(t, e, getReq("/a"), o)
@@ -202,6 +205,9 @@ func TestCoalesceStuckLeader(t *testing.T) {
 			}
 			if n := o.TotalCalls(); n != 2 {
 				t.Fatalf("origin calls = %d, want the priming call and 1 flight", n)
+			}
+			if n := obs.count("stale-served/coalesce-timeout"); n != 100 {
+				t.Fatalf("EvStaleServed coalesce-timeout = %d, want 100", n)
 			}
 		})
 	})

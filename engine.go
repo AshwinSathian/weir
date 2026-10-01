@@ -10,7 +10,9 @@ import (
 	"slices"
 	"sync"
 	"sync/atomic"
+	"time"
 
+	"github.com/AshwinSathian/weir/internal/breaker"
 	"github.com/AshwinSathian/weir/internal/coalesce"
 	"github.com/AshwinSathian/weir/internal/keys"
 	"github.com/AshwinSathian/weir/internal/limiter"
@@ -42,6 +44,7 @@ type Engine struct {
 	flights  coalesce.Table
 	lim      *limiter.Limiter
 	upl      *limiter.Limiter // requests with a body (FR-LIM-7)
+	cb       *breaker.Breaker // nil when Breaker.Disable
 
 	mu        sync.Mutex  // orders setting closed against wg.Add in goBackground
 	closed    atomic.Bool // written under mu; read without it on the Serve path
@@ -89,8 +92,21 @@ func New(cfg Config) (*Engine, error) {
 		Max: l.MaxUpload, MaxQueue: l.MaxQueue, PerPartition: min(l.MaxPerPartition, l.MaxUpload),
 		MaxWait: l.MaxQueueWait,
 	})
+	if b := &c.Breaker; !b.Disable {
+		e.cb = breaker.New(breaker.Config{
+			Window: b.Window, MinRequests: b.MinRequests, FailureRatio: b.FailureRatio,
+			OpenFor: b.OpenFor, MaxOpenFor: b.MaxOpenFor, HalfOpenProbes: b.HalfOpenProbes,
+			CountStatus500: b.CountStatus500,
+		}, c.Rand, e.breakerChanged)
+	}
 	e.bgCtx, e.bgCancel = context.WithCancel(context.Background())
 	return e, nil
+}
+
+// breakerChanged reports a breaker transition (FR-CB-6).
+func (e *Engine) breakerChanged(from, to breaker.State) {
+	emit(e.cfg.Observer, Event{Kind: EvBreakerState, Time: time.Now(), Reason: to.String()})
+	e.cfg.Logger.Info("weir: origin breaker", "from", from.String(), "to", to.String())
 }
 
 // defaultStoreBytes sizes the default memory store from the Go memory limit

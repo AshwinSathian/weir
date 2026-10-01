@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"maps"
 	"net/http"
 	"time"
 
@@ -177,6 +178,10 @@ func (e *Engine) fetchStored(ctx context.Context, sp *fetchSpec, origin Origin) 
 	}
 	if sp.lk.marker {
 		fr.ci.Detail = "hit-for-miss"
+	}
+	if !res.over && !res.stream && serverError(res.resp.StatusCode) {
+		// Before Publish, so before the creator's respond writes to resp.
+		fr.errHeader = maps.Clone(res.resp.Header)
 	}
 	if !res.over && !res.stream && !serverError(res.resp.StatusCode) {
 		fr.entry, fr.ci.Stored = e.storeResponse(ctx, c, res, sp.found, sp.purged)

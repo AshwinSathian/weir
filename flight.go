@@ -1,9 +1,13 @@
 package weir
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"maps"
+	"net/http"
 	"time"
 
 	"github.com/AshwinSathian/weir/internal/coalesce"
@@ -32,6 +36,7 @@ type flightResult struct {
 	fetchResult              // the creator's response; only the creator touches resp
 	ci          CacheInfo    // for the creator's response
 	entry       *store.Entry // the storable entry followers share; nil when not shareable
+	errHeader   http.Header  // a buffered 5xx's header, which followers copy (04 §6.6)
 }
 
 // live reports whether resp.Body still streams from the origin, so exactly
@@ -90,10 +95,17 @@ func (e *Engine) fetchCoalesced(ctx context.Context, sp *fetchSpec, origin Origi
 		ck := c.Primary
 		return e.cacheable(ctx, c, origin, &ck)
 	}
-	if fr.err != nil { // FR-COA-6: every waiter gets the flight's error
+	owner := created && (!fr.live() || f.ClaimStream())
+	// FR-COA-6: every waiter gets the flight's error or buffered 5xx,
+	// through its own lookup's stale entry (01 §7.2). Followers of an
+	// over-size 5xx stream re-enter below and fetch once more.
+	if (owner || !fr.live()) && failed(ctx, fr) {
+		return e.onFetchError(sp, fr, owner)
+	}
+	if fr.err != nil {
 		return nil, fr.err
 	}
-	if created && (!fr.live() || f.ClaimStream()) {
+	if owner {
 		return e.respond(c, fr), nil
 	}
 	if fr.entry != nil {
@@ -109,9 +121,6 @@ func (e *Engine) fetchCoalesced(ctx context.Context, sp *fetchSpec, origin Origi
 	// c.Primary, cap re-entry at one attempt (a second unshareable flight
 	// under a new key would re-enter again), and add keys.VaryMatches above
 	// or a follower gets another variant (storability refuses Vary today).
-	// ponytail: a 5xx flight is not shared either, so every follower
-	// refetches from a failing origin; M5-03 gives waiters the flight's
-	// 5xx through the error table (04 §6.6).
 	ck := c.Primary
 	return e.cacheable(ctx, c, origin, &ck)
 }
@@ -196,15 +205,72 @@ func (e *Engine) staleOnTimeout(sp *fetchSpec) *Response {
 	}
 	now := time.Now()
 	if _, staleness, sieOK := httpcc.Evaluate(ent, sp.lk.epoch, sp.lk.epochOK, now); sieOK {
+		emit(e.cfg.Observer, Event{Kind: EvStaleServed, Time: now, Partition: sp.c.Partition, Reason: "coalesce-timeout"})
 		return e.fromEntry(sp.c, ent, now, CacheInfo{Hit: true, Stale: StaleCoalesceTimeout, TTL: -staleness})
 	}
 	return nil
+}
+
+// failed reports whether fr is an error condition for stale serving (01
+// §7.2): an error or a 5xx response. A caller that left gets nothing. It
+// reads ci, not resp, which the creator's caller may be writing to.
+func failed(ctx context.Context, fr *flightResult) bool {
+	return ctx.Err() == nil && (fr.err != nil || serverError(fr.ci.FwdStatus))
+}
+
+// onFetchError answers a request whose fetch failed (04 §6.6): the stale
+// entry when stale-if-error permits it, ErrMustRevalidate when the entry
+// forbids serving it and the origin gave no response (FR-STL-4), else the
+// error or the 5xx. own is true when the request owns fr.resp.
+// ponytail: no negative entry yet (01 §7.2 "negative entry"); M6-01 adds it
+// here per 04 §6.6.
+func (e *Engine) onFetchError(sp *fetchSpec, fr *flightResult, own bool) (*Response, error) {
+	if ent := sp.lk.entry; ent != nil {
+		now := time.Now()
+		if _, staleness, sieOK := httpcc.Evaluate(ent, sp.lk.epoch, sp.lk.epochOK, now); sieOK {
+			if own {
+				closeBody(fr.resp)
+			}
+			reason, ev := staleReason(fr.err)
+			emit(e.cfg.Observer, Event{Kind: EvStaleServed, Time: now, Partition: sp.c.Partition, Reason: ev})
+			return e.fromEntry(sp.c, ent, now, CacheInfo{Hit: true, Stale: reason, TTL: -staleness}), nil
+		}
+		if fr.err != nil && ent.Flags&(store.FlagMustRevalidate|store.FlagProxyRevalidate) != 0 {
+			return nil, ErrMustRevalidate
+		}
+	}
+	switch {
+	case fr.err != nil:
+		return nil, fr.err
+	case own:
+		return e.respond(sp.c, fr), nil
+	}
+	r := &Response{StatusCode: fr.ci.FwdStatus, Header: maps.Clone(fr.errHeader), Body: http.NoBody}
+	if !sp.c.Head && len(fr.body) > 0 {
+		r.Body = io.NopCloser(bytes.NewReader(fr.body))
+	}
+	return e.finish(r, CacheInfo{Fwd: sp.lk.fwd, FwdStatus: r.StatusCode, Collapsed: true}), nil
+}
+
+// staleReason maps a fetch error to the reason a stale entry is served for
+// it, and the EvStaleServed reason (04 §6.6, §9.2).
+func staleReason(err error) (StaleReason, string) {
+	if _, re := classify(err); re != nil {
+		if is(re.Err, ErrCircuitOpen) {
+			return StaleCircuitOpen, "circuit-open"
+		}
+		return StaleShed, "shed"
+	}
+	return StaleIfError, "sie"
 }
 
 // fetchDirect fetches and stores on the request goroutine, without a flight,
 // so it never blocks anyone else (04 §6.5).
 func (e *Engine) fetchDirect(ctx context.Context, sp *fetchSpec, origin Origin) (*Response, error) {
 	fr := e.fetchStored(ctx, sp, origin)
+	if failed(ctx, fr) {
+		return e.onFetchError(sp, fr, true)
+	}
 	if fr.err != nil {
 		return nil, fr.err
 	}

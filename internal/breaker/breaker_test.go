@@ -254,9 +254,29 @@ func TestBreakerNilReceiver(t *testing.T) {
 		b.Record(p, Failure)
 		b.Cancel(p)
 	}
-	if b.State() != Closed {
-		t.Fatalf("nil State = %v, want Closed", b.State())
+	if b.State() != Closed || b.Remaining() != 0 {
+		t.Fatalf("nil State = %v, Remaining = %v; want Closed, 0", b.State(), b.Remaining())
 	}
+}
+
+// FR-CB-5, 04 §1.3: Remaining is the rest of the open period, the Retry-After hint
+// for ErrCircuitOpen, and 0 once the breaker is not open.
+func TestBreakerRemaining(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		b := New(testConfig(), func() float64 { return 0.5 }, nil)
+		if d := b.Remaining(); d != 0 {
+			t.Fatalf("closed: Remaining = %v, want 0", d)
+		}
+		record(b, Failure, 20)
+		time.Sleep(time.Second)
+		if d := b.Remaining(); d != 4*time.Second {
+			t.Fatalf("1 s into a 5 s open period: Remaining = %v, want 4s", d)
+		}
+		time.Sleep(4 * time.Second)
+		if d := b.Remaining(); d != 0 {
+			t.Fatalf("half-open: Remaining = %v, want 0", d)
+		}
+	})
 }
 
 // FR-CB-4: a probe that never ends in Record or Cancel (a bug, or a fetch

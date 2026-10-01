@@ -4,9 +4,9 @@ Updated: 2026-10-01
 Phase: 1
 Current card: none
 Card state: awaiting-merge
-Branch: card/M5-02-swr
-PR: #40 https://github.com/AshwinSathian/weir/pull/40
-Next card: M5-03
+Branch: card/M5-03-stale-if-error
+PR: #41 https://github.com/AshwinSathian/weir/pull/41
+Next card: M5-04
 
 ## Blockers
 
@@ -20,6 +20,7 @@ none
 
 ## Decided 2026-10-01
 
+- Followers of a 5xx flight (#41 adversarial review): Ashwin approved amending FR-COA-5. A 500/502/503/504 flight response is an error condition, so every waiter gets it through §7.2 instead of refetching.
 - Limiter queue exhaustion (#34 review): Ashwin approved capping queued waiters per partition, shedding past it with `queue-full`. The #35 adversarial review measured `MaxPerPartition` (16) as too low for a legitimate one-path cold start (32 of 2 000 served vs 656 uncapped); Ashwin chose max(`MaxPerPartition`, `MaxQueue`/4). FR-LIM-3 and T-11 say so.
 
 ## Decided 2026-09-28 (delegated by Ashwin after the #24 adversarial review)
@@ -34,14 +35,15 @@ The cards' Notes give the reasons and the options rejected. All three come befor
 
 ## Notes for the next session
 
+- M5-03: `fetch` calls `e.cb.Allow` before the limiter; shed and caller-gone end in `Cancel`. Outcomes are recorded at the headers, or after the body for buffered fetches (a truncated body is a `Failure`). Only Foreground fetches probe; Background and Warm get `ErrCircuitOpen` while not Closed, and Background also emits `EvRefreshDropped{circuit-open}`.
+- M5-03: `ErrCircuitOpen`'s Retry-After is `breaker.Remaining()` floored at 1 s (half-open has no end time). `Remaining` is a new internal method in 04 §8.3; the earlier note asked to check a new accessor with Ashwin, so the PR flags it for confirmation.
+- M5-03: `onFetchError` (flight.go) applies 01 §7.2 for direct fetches and every flight waiter, each with its own lookup. Followers of a buffered 5xx get a copy built from `flightResult.errHeader` and `fr.ci.FwdStatus`; they must never read `fr.resp`, which the creator's caller owns. M6-01 adds the negative-entry write there (`ponytail:`).
+- M5-03: a flight cut short by `Close` (`ErrClosed`) serves a stale-if-error entry with reason `sie`; harmless, label could be its own.
+
 - M5-02: `cacheable` serves a `StaleSWR` entry before the only-if-cached and Range checks (it answers both, full 200 for Range) and calls `backgroundRefresh` unless the request is `Authorization` or `no-store`. A honored client `no-cache` turns `StaleSWR` into `NeedsValidation`.
 - M5-02: an SWR refresh whose response is unstorable (origin switched to `no-store`, or `no-freshness`) does not replace the stale entry (storeResponse keeps a found response), so the stale body is served until the SWR window ends, with one refresh flight at a time. RFC 5861 allows it; M6 negative caching or a marker policy may want to revisit.
 - M5-02: `runRFCRow` now calls `synctest.Wait()` before counting origin calls, so a row's `calls` includes the background refresh its step started.
-- M5-03: background refresh does not check the breaker yet (03 §2.3 "if the breaker is open the refresh is skipped"); see the probe note below.
 
-- M5-01: `internal/breaker` exists but nothing calls it. M5-03 wires it into `fetch` (04 §6.7): `Allow` before the limiter, `Cancel` on shed or caller gone, `Record` with `classify`'s `Success`/`Failure`/`Status500`; the breaker applies `CountStatus500` itself. Translate `breaker.ErrCircuitOpen` to `weir.ErrCircuitOpen` like the limiter's `ErrShed`.
-- M5-03 needs the remaining open time for `RetryError.After` (04 §1.3), and the breaker has no accessor yet. Adding one (`Allow` returning a duration, or a `RetryIn()`) changes §8.3 signatures: ask Ashwin.
-- M5-02/M5-03: `Allow` cannot tell foreground from background, so a background refresh could take the only half-open probe (FR-CB-4 says probes are foreground; FR-CB-5 drops background while open). Background callers should check `State()` and drop unless Closed, or `Allow` takes a class; decide in the engine card and write it into 04 §8.3.
 - M5-01: `New` accepts `Breaker.MaxOpenFor < OpenFor` (a reopen is then shorter than the first open). Reject it in `New` when wiring (config rule: ask Ashwin).
 - `EngineStats.BreakerState` can read `breaker.State()`; the State constants share weir.BreakerState's order.
 
@@ -74,7 +76,6 @@ The cards' Notes give the reasons and the options rejected. All three come befor
 - M3-01: the `JitterMinLifetime` gate compares the jittered lifetime, so a `max-age=10` entry jittered below 10 s never refreshes early. A fresh hit under `only-if-cached` can start a refresh (the cache's decision, RFC 9111 allows it).
 - M2-03: a follower of an unshareable flight result re-enters `cacheable` with `prevCK`; the same key fetches directly (FR-COA-5). Until M7-01 that equals `fetchDirect`. M7-01 must compare the lookup's coalescing key, cap re-entry at one attempt and add `keys.VaryMatches` (`ponytail:` in flight.go).
 - M2-03: followers share storable flight responses that need validation (`no-cache`, `max-age=0`); Ashwin decided 2026-10-01, written into FR-COA-5 and pinned by `TestCoalesceSharesNoCacheResponse`.
-- M5-03 AC now owns giving followers a flight's 5xx (today each refetches); M5-02 AC owns background flights marking their creator gone (moved from M2-03).
 - M4: until the limiter lands, a client disconnect no longer cancels the origin fetch (FR-COA-2), so flights per second times `Timeouts.Origin` bounds the table, not MaxConcurrent + MaxQueue. M4-02 must test the table size under a cold-start flood.
 - A panic while reading a buffered origin body is recovered in `runFlight` but the body is not closed; a `defer` in `fetch` around `io.ReadAll` would be the root fix. `BenchmarkServeMissCoalesced` (07 §10) still has no card.
 - `Publish` must be called exactly once per flight (a second call panics on the double close). `runFlight` is the only caller.

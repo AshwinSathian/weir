@@ -640,3 +640,19 @@ Entry template:
 - Deviations: none.
 - Follow-ups: a refresh whose response is unstorable (origin switched to `no-store`) leaves the stale entry in place, by storeResponse's existing rule, so it is served until the SWR window ends and each request in the window refreshes (one flight at a time). RFC 5861 allows it; noted in STATUS.
 - Context: low.
+
+## 2026-10-01 · M5-03 · done
+- Branch / PR: card/M5-03-stale-if-error / #41
+- Done: breaker wired into `fetch` (Allow before the limiter, Cancel on shed or caller gone, Record at headers or after a buffered body, foreground-only probes, background dropped with `EvRefreshDropped{circuit-open}`, `EvBreakerState` plus a log line). `onFetchError` applies 01 §7.2: stale-if-error with reasons `sie`/`shed`/`circuit-open`, `ErrMustRevalidate`, 5xx pass-through. Flight followers get the flight's buffered 5xx instead of refetching. `breaker.Remaining()` gives the Retry-After hint (floor 1 s).
+- Tests: TestStaleIfErrorOnOriginDown, TestMustRevalidate504, TestDefaultStaleWindowsOff, TestBreakerOpensHalfOpenCloses (engine), TestFollowersShareFlight5xx, TestFollowersDoNotReadCreatorResponse, TestInvalidatedEntryNotServedStaleOnError, TestBreakerCountsBodyFailures, TestBreakerHalfOpenRetryHint, TestBreakerRemaining; stale half of TestLimiterShedsWithStale; RFC 5861 §4 rows and the must-revalidate row untagged. `make check` passes.
+- Deviations: 04 §8.3 adds `Remaining`, the 1 s floor, foreground-only probes and body-failure recording; 04 §6.7 notes the buffered record point.
+- Follow-ups: negative entries from §7.2 in M6-01. Reviewer must-fix (followers read `fr.resp`, a data race) fixed test-first; should-fixes (half-open hint, body failures, FR-STL-5 engine test) fixed.
+- Context: medium; size M about right, touched flight.go, engine.go and internal/breaker beyond the card's list.
+
+## 2026-10-01 · M5-03 · review-fixes
+- Branch / PR: card/M5-03-stale-if-error / #41
+- Done: adversarial review of #41. A follower that served stale on coalesce timeout emitted no `EvStaleServed{coalesce-timeout}`; fixed and asserted in TestCoalesceStuckLeader. 01 FR-COA-5 said followers re-enter on an unstorable response, which conflicted with sharing a 5xx (card AC, 04 §6.6); Ashwin approved amending FR-COA-5.
+- Tests: probed and found correct: HEAD followers of a 5xx, event-stream 5xx with stale-if-error, Warm while open, must-revalidate with breaker open, client deadlines not tripping the breaker. 5 shuffled `-race` runs clean; `make check` passes.
+- Deviations: 01 FR-COA-5 amended.
+- Follow-ups: none.
+- Context: low.
