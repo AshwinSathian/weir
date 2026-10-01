@@ -47,7 +47,7 @@ func clampDelta(d time.Duration) time.Duration { return min(max(d, time.Millisec
 // that finds a flight running holds nothing; with no slot outside the
 // reserve the refresh is dropped (FR-LIM-4).
 func (e *Engine) backgroundRefresh(ctx context.Context, c *keys.Classified, lk lookupResult, origin Origin) {
-	f, created := e.flights.Join(c.Primary, time.Now(), e.cfg.Coalesce.LeaderMaxAge)
+	f, created := e.flights.Join(lk.ck, time.Now(), e.cfg.Coalesce.LeaderMaxAge)
 	if !created {
 		return
 	}

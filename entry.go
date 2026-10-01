@@ -46,6 +46,7 @@ func buildEntry(cfg *Config, c *keys.Classified, resp *Response, body []byte, re
 		ETag:                etag,
 		LastModified:        lm,
 		FetchDuration:       max(respTime.Sub(reqTime), 0),
+		VaryNames:           d.varyNames,
 		Tags:                []store.Tag{store.TagGlobal(), c.OriginTag, c.URITag},
 		Owner:               c.OriginTag,
 	}

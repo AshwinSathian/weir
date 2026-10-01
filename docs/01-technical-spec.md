@@ -1,7 +1,7 @@
 # Weir technical specification
 
 Status: v1.0, approved for Phase 0 and Phase 1 implementation
-Date: 2026-10-01
+Date: 2026-10-02
 Owner: Ashwin Sathian
 Module: `github.com/AshwinSathian/weir`
 Supersedes: the interface sketch in [00-design-doc.md §7.2](00-design-doc.md)
@@ -73,7 +73,7 @@ These were settled with the project owner on 2026-09-27 and are not reopened by 
 | D21 | `Key.AcceptEncoding` default stays `["gzip"]`; docs steer operators to list what their origin produces. |
 | D22 | Negative caching on by default, 2 s. |
 | D23 | Prometheus is the first exporter module. |
-| D24 | Repository private on GitHub from Phase 0, public with `v0.x` tags from M1, `v1.0.0` at the end of Phase 1. |
+| D24 | Repository private on GitHub from Phase 0, public with `v0.x` tags once the key-boundary security review (M7-05) merges, `v1.0.0` at the end of Phase 1. Amended 2026-10-02 from "from M1": the M7 key-boundary work kept finding poisoning paths (#44), and a public `v0.1.0` invites adoption before the review closes them. |
 | D25 | Requests that carry a body use a separate upload limiter pool; adapters must bound request bodies and read time (§14.1). |
 | D26 | Origin timeout covers headers and buffered bodies; streamed bodies are bounded by an idle timeout, not a total (§14.2). |
 | D27 | Upgrade and `CONNECT` requests are rejected by `Serve`; adapters route them around Weir (§14.3). |
@@ -89,7 +89,7 @@ These were settled with the project owner on 2026-09-27 and are not reopened by 
 | D37 | Vary overflow refuses new variants and reclaims slots of expired or evicted ones. |
 | D38 | Hit-for-miss TTL stays 30 s. |
 | D39 | 302 and 307 are storable by default, only with explicit freshness. |
-| D40 | Vulnerabilities reported through GitHub private vulnerability reporting; `SECURITY.md` at M1. |
+| D40 | Vulnerabilities reported through GitHub private vulnerability reporting; `SECURITY.md` in the repository before it goes public (D24). |
 | D41 | License Apache-2.0. |
 | D42 | Support the two latest Go releases; the minimum rises only when it leaves that window. |
 
@@ -193,7 +193,7 @@ Errors (all comparable with `errors.Is`):
 | `ErrInvalidRequest` (wrapped in `*RequestError` carrying a reason) | the request failed input validation (§5.1) | 400 |
 | `ErrShed` | no origin slot within the queue budget and nothing stale to serve | 503 |
 | `ErrCircuitOpen` | breaker open and nothing stale to serve | 503 |
-| `ErrOriginTimeout` | the origin did not answer within `Timeouts.Origin` | 504 |
+| `ErrOriginTimeout` | the origin did not answer within `Timeouts.Origin` (`Timeouts.Background` for background refresh and `Warm`) | 504 |
 | `ErrMustRevalidate` | a `must-revalidate` entry could not be validated | 504 |
 | `ErrOnlyIfCached` | `only-if-cached` request with no usable stored response | 504 |
 | `ErrOrigin` (wrapped in `*OriginError`) | the origin returned a transport error | 502 |
@@ -228,7 +228,7 @@ Package `store` (import path `github.com/AshwinSathian/weir/store`) defines `Sto
 - FR-KEY-8. `Vary: *` MUST prevent storage (RFC 9111 §4.1).
 - FR-KEY-9. In `VaryAuto` mode (default), any header named in `Vary` is folded into the variant key, except the sensitive set `Cookie`, `Authorization` and `Proxy-Authorization`, which prevent storage unless listed in `Key.VaryAllow`. In `VaryStrict` mode, a response whose `Vary` names any header not in `Key.VaryAllow` MUST NOT be stored. No configuration can make Weir store a response under a key that omits a header its `Vary` names.
 - FR-KEY-10. A response whose `Vary` lists more than `Key.MaxVaryHeaders` (default 8) names MUST NOT be stored. When a primary key already has `Key.MaxVariants` (default 8) live variants, a response for a new variant MUST NOT be stored; the request is answered and counted as `vary-overflow`. A variant is live while its ref has not passed `Expires` and its record still exists in the store; dead refs are dropped at the next spec update, freeing their slots (D37).
-- FR-KEY-11. Secondary header normalization for Vary follows RFC 9111 §4.1: lines combined with `, `, optional whitespace around commas removed, leading and trailing whitespace removed. Headers with a registered normalizer (§5.2.3) use it. An absent header only matches absent.
+- FR-KEY-11. Secondary header values for Vary are matched exactly as forwarded: the same lines, in the same order, byte for byte. Weir does not apply RFC 9111 §4.1's optional normalizations (combining lines, removing whitespace) itself, because a generic normalizer cannot know where a field's syntax allows whitespace (a comma inside a quoted string), and an origin that reads one line answers two lines and their combination differently; a key that treats them as equal would serve one client's answer to the other (T-15). Not matching is always permitted (§4.1), so the cost is a split variant, never wrong content. Headers with a registered normalizer (§5.2.3) are already normalized in the forwarded request (the `Accept-Encoding` bucket, keyed cookies), so their keyed value is that normal form. An absent header only matches absent.
 - FR-KEY-12. The key builder MUST be deterministic across processes (no per-process seed in key bytes) so a shared store in Phase 2.5 sees the same keys from every node.
 
 #### 5.2.3 Header normalizers
@@ -271,7 +271,7 @@ A response is stored only if all of the following hold. Each failed check increm
 - FR-FRS-3. Heuristic lifetime applies only to statuses in the heuristically cacheable set without explicit freshness, and is `Freshness.HeuristicFraction` (default 0.1) of `Date` minus `Last-Modified`, capped at `Freshness.HeuristicMax` (default 1 h). Without `Last-Modified` the heuristic lifetime is `Freshness.DefaultTTL` (default 0, meaning not stored unless FR-STO-8 allows it via a validator).
 - FR-FRS-4. Age follows RFC 9111 §4.2.3 using the `corrected_age_value` form the RFC permits: `corrected_initial_age = age_value + response_delay`, `current_age = corrected_initial_age + (now - response_time)`. The conservative `max(apparent_age, ...)` form is not used, because `apparent_age` compares the origin's `Date` with the local clock: an origin whose clock runs 10 minutes slow would otherwise make every `max-age=300` response stale on arrival and turn the cache off (T-30).
 - FR-FRS-5. Jitter (T6.1): when a response is stored or freshened, Weir computes `lifetime_eff = lifetime × (1 − Freshness.Jitter × U)` with `U` uniform in [0, 1) and `Freshness.Jitter` defaulting to 0.10. Jitter applies only when `lifetime ≥ Freshness.JitterMinLifetime` (default 10 s) and is disabled by `Freshness.NoJitter`. It MUST NOT lengthen any lifetime. Stale windows are measured from the jittered expiry.
-- FR-FRS-6. Early refresh (XFetch): on a fresh hit whose remaining lifetime is `r`, Weir starts a background refresh when `−Δ × Freshness.EarlyRefreshBeta × ln(U) ≥ r`, where `Δ` is the entry's last fetch duration clamped to [1 ms, 10 s] and `U` is uniform in (0, 1]. Default beta is 1.0. Disabled by `Freshness.NoEarlyRefresh`, and never triggered for lifetimes below `Freshness.JitterMinLifetime`.
+- FR-FRS-6. Early refresh (XFetch): on a fresh hit whose remaining lifetime is `r`, Weir starts a background refresh when `−Δ × Freshness.EarlyRefreshBeta × ln(U) ≥ r`, where `Δ` is the entry's last fetch duration clamped to [1 ms, 10 s] and `U` is uniform in (0, 1]. Default beta is 1.0. Disabled by `Freshness.NoEarlyRefresh`, and never triggered for lifetimes below `Freshness.JitterMinLifetime`, nor by a request that carries `Authorization` or a `no-store` directive: the refresh would forward that request, so its credentials would decide a shared entry (T-8) and its `no-store` would be overridden (T-31).
 - FR-FRS-7. Every response served from a stored entry MUST carry an `Age` header equal to its current age in whole seconds (RFC 9111 §4).
 - FR-FRS-8. In-process time arithmetic (age, staleness, epoch comparison in the memory store) uses Go's monotonic clock readings, so a wall-clock step does not extend freshness or make a purge miss entries. Negative intermediate ages clamp to zero. Wall-clock values are used only where they cross a process boundary (codec, remote stores) or come from the origin (`Date`, `Expires`, `Last-Modified`).
 
@@ -290,7 +290,7 @@ A response is stored only if all of the following hold. Each failed check increm
 ### 5.7 Coalescing (T6.2, T6.2a)
 
 - FR-COA-1. Concurrent requests that resolve to the same coalescing key share one flight. The coalescing key is the variant key when a vary spec is already stored, otherwise the primary key.
-- FR-COA-2. The origin fetch of a flight runs on its own goroutine with a context detached from every requester (`context.WithoutCancel` plus `Timeouts.Origin`). No requester's cancellation cancels the shared fetch.
+- FR-COA-2. The origin fetch of a flight runs on its own goroutine with a context detached from every requester (`context.WithoutCancel` plus `Timeouts.Origin`, or `Timeouts.Background` for background and warm flights). No requester's cancellation cancels the shared fetch.
 - FR-COA-3. A flight older than `Coalesce.LeaderMaxAge` (default 10 s) is aged. New requests for that key do not join an aged flight; the first one starts a new flight. At most one new flight per key per `LeaderMaxAge` results.
 - FR-COA-4. A follower waits at most `Coalesce.FollowerMaxWait` (default 10 s), bounded by its own context. On timeout it serves a stale entry if §5.8 permits (reason `coalesce-timeout`), otherwise it performs its own fetch through the limiter, and that fetch's storable result is stored.
 - FR-COA-5. When a flight's response is not reusable for a follower (not storable, oversized, or its Vary does not match the follower), the follower re-enters lookup once. A 500, 502, 503 or 504 flight response is an error condition, not an unreusable one: every waiter gets it through §7.2, as stale from its own lookup when stale-if-error permits, else the response itself, so followers never refetch from a failing origin (decided 2026-10-01). On the second pass it may coalesce again only if its coalescing key changed (typically because the first flight stored a vary spec and the follower now resolves to a different variant key), otherwise it fetches independently. Followers never wait on each other serially. A storable flight response is shared even when it needs validation before its next reuse (`no-cache`, `max-age=0`), as Varnish and nginx do: a strict reading of RFC 9111 §4 would have each follower refetch, which ends coalescing for typical `no-cache` HTML (decided 2026-10-01).
@@ -301,7 +301,7 @@ A response is stored only if all of the following hold. Each failed check increm
 
 ### 5.8 Stale serving and errors (T6.6)
 
-- FR-STL-1. Stale-while-revalidate: a stale entry whose staleness is within its SWR window is served immediately and a background refresh is started (if none is in flight for the key). SWR is permitted by the response's `stale-while-revalidate`, or by `Freshness.DefaultStaleWhileRevalidate` when the response has none of `stale-while-revalidate`, `must-revalidate`, `proxy-revalidate`, `no-cache`, `s-maxage`.
+- FR-STL-1. Stale-while-revalidate: a stale entry whose staleness is within its SWR window is served immediately and a background refresh is started (if none is in flight for the key), except for a request that carries `Authorization` or a `no-store` directive, for the reasons in FR-FRS-6; such a request is still served the stale entry. SWR is permitted by the response's `stale-while-revalidate`, or by `Freshness.DefaultStaleWhileRevalidate` when the response has none of `stale-while-revalidate`, `must-revalidate`, `proxy-revalidate`, `no-cache`, `s-maxage`.
 - FR-STL-2. Stale-if-error: on an error condition, a stale entry whose staleness is within its SIE window is served. Error conditions are: origin-health failure, status 500, breaker open, shed, and follower coalesce timeout. SIE is permitted by the response's `stale-if-error`, or by `Freshness.DefaultStaleIfError` when the response has none of `stale-if-error`, `must-revalidate`, `proxy-revalidate`, `no-cache`, `s-maxage`. Each default is decided on its own: an origin `stale-while-revalidate` does not suppress `DefaultStaleIfError`, and the reverse.
 - FR-STL-3. Stale serving is forbidden for entries with `must-revalidate`, `proxy-revalidate`, or unqualified `no-cache`. `s-maxage` without an explicit stale directive also forbids it. An explicit origin `stale-while-revalidate` or `stale-if-error` is honored alongside `s-maxage`.
 - FR-STL-4. A `must-revalidate` or `proxy-revalidate` entry whose validation cannot complete (origin-health failure, shed, or breaker open) yields `ErrMustRevalidate` (504), per RFC 9111 §5.2.2.2. When the origin itself answered with a 5xx response, that response is passed through instead.
@@ -310,7 +310,7 @@ A response is stored only if all of the following hold. Each failed check increm
 
 ### 5.9 Bypass
 
-- FR-BYP-1. `Bypass` rules (`Bypass.Cookies []string`: presence of any named cookie; `Bypass.Headers []string`: presence of any named header) mark a `GET`/`HEAD` request as bypassed. Bypassed requests are forwarded per FR-FWD-3, never stored, never coalesced, never served from cache, and still go through the limiter and breaker. `Cache-Status` reports `fwd=bypass`.
+- FR-BYP-1. `Bypass` rules (`Bypass.Cookies []string`: presence of any named cookie; `Bypass.Headers []string`: presence of any named header) mark a `GET`/`HEAD` request as bypassed. Bypassed requests are forwarded per FR-FWD-3, never stored, never coalesced, never served from cache, and still go through the limiter and breaker. `Cache-Status` reports `fwd=bypass`. A bypassed request with `only-if-cached` gets `ErrOnlyIfCached` and contacts nothing (FR-SRV-6: the client forbids the origin, and bypass forbids the cache).
 
 ### 5.10 Origin concurrency limiter (T6.3, T6.4, T6.5, T6.8)
 
@@ -350,7 +350,7 @@ A response is stored only if all of the following hold. Each failed check increm
 
 - FR-NEG-1. When a foreground fetch ends in an origin-health failure and no stored response exists for the coalescing key (servable or not; a negative entry must never overwrite a response that could later be revalidated), Weir records a negative entry under the coalescing key for `Negative.TTL` (default 2 s). Disabled by `Negative.Disable`.
 - FR-NEG-2. A negative entry holds only a status (502, 503 or 504) and an optional `Retry-After`. It never holds the origin's body or headers, so it never stores anything the origin marked `no-store`.
-- FR-NEG-3. Requests that find a live negative entry and no servable stale entry get a synthesized response with that status, `Cache-Status: Weir; hit; detail=negative`, and no origin contact.
+- FR-NEG-3. Requests that find a live negative entry and no servable stale entry get a synthesized response with that status, `Cache-Status: Weir; hit; ttl=<seconds until the negative entry expires>; detail=negative`, and no origin contact.
 - FR-NEG-4. Negative entries are never created for 500, 4xx, bypassed requests, range requests, unsafe methods, requests that carried `Authorization` or a `no-store` directive, or requests whose forward carried input the key does not cover (a `Forward.Allow` field, or `ForwardAll`) (T-17, T-31). Background refresh and warm fetches never create them (FR-NEG-1 says foreground).
 
 ### 5.15 Miss-rate signal (T6.8)
@@ -604,7 +604,7 @@ Open: none that block any milestone before Phase 3.
 
 ### 14.2 Timeouts (D26)
 
-- FR-TMO-1. `Timeouts.Origin` bounds the time from sending the request to receiving response headers, and, for buffered bodies (at most `MaxObjectBytes`), the whole body read. A drip-feeding origin therefore cannot hold a limiter slot beyond it (T-41).
+- FR-TMO-1. `Timeouts.Origin` bounds the time from sending the request to receiving response headers, and, for buffered bodies (at most `MaxObjectBytes`), the whole body read. A drip-feeding origin therefore cannot hold a limiter slot beyond it (T-41). `Timeouts.Background` (default 30 s) replaces `Timeouts.Origin` for background refresh and `Warm`, which no request waits on, so an operator can fail foreground fetches fast and still give refreshes a slow origin's full answer time.
 - FR-TMO-2. Streamed bodies (pass-through, oversized) have no total deadline. Each read that makes no progress for `Timeouts.StreamIdle` (default 60 s) fails the stream. Their limiter slot was already released at headers (FR-LIM-1).
 
 ### 14.3 Upgrades and CONNECT (D27)
@@ -626,8 +626,8 @@ Open: none that block any milestone before Phase 3.
 ### 14.7 Incident modes (D33)
 
 - FR-MODE-1. `Engine.SetMode(m Mode, ttl time.Duration) error` switches between `ModeNormal`, `ModeStaleOnError` and `ModeBypass`. `ttl` is required, at most 24 h; the mode reverts to normal when it expires. Modes are not persisted across restarts. Every change emits `EvMode` and a log line.
-- FR-MODE-2. `ModeStaleOnError`: on any error condition (FR-STL-2), a stored entry may be served stale even without an SIE window, up to 24 h of staleness. It still never serves entries that are hard-purged, invalidated, or marked `must-revalidate`, `proxy-revalidate` or `no-cache` (RFC 9111 §4.2.4 allows stale when disconnected but not against those directives).
-- FR-MODE-3. `ModeBypass`: every request is handled as pass-through (FR-FWD-3), still through the limiter and breaker, never stored. Existing entries are untouched.
+- FR-MODE-2. `ModeStaleOnError`: on any error condition (FR-STL-2), a stored entry may be served stale even without an SIE window, up to 24 h of staleness. It still never serves entries that are hard-purged, invalidated, or marked `must-revalidate`, `proxy-revalidate`, `no-cache` or `s-maxage` (RFC 9111 §4.2.4 allows stale when disconnected but not against those directives; §5.2.2.10 gives `s-maxage` the semantics of `proxy-revalidate`); an explicit `stale-if-error` on such an entry still applies within its own window (FR-STL-3). The mode widens what may be served, not what is kept: retention (04 §4.2) holds an entry past its lifetime only for its SWR or SIE window plus `Freshness.Keep` (5 min) when it has a validator, so by default the reach is minutes, not 24 h. Operators who want deeper incident reach raise `Freshness.Keep` or `Freshness.DefaultStaleIfError` ahead of time.
+- FR-MODE-3. `ModeBypass`: every request is handled as pass-through (FR-FWD-3), still through the limiter and breaker, never stored. Existing entries are untouched. The one exception is `only-if-cached`, which gets `ErrOnlyIfCached` without contacting the origin (FR-SRV-6); the stored entry is not served, since the mode exists for when the cache is suspect.
 
 ### 14.8 Memory sizing (D35)
 

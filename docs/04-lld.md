@@ -1,7 +1,7 @@
 # Weir low-level design
 
 Status: v1.0
-Date: 2026-10-01
+Date: 2026-10-02
 Depends on: [01-technical-spec.md](01-technical-spec.md), [02-architecture.md](02-architecture.md), [03-hld.md](03-hld.md)
 
 This document is written for the person (or agent) implementing a milestone. It gives exact type definitions, algorithms, locking rules and pseudo-code. Code may differ in naming of unexported identifiers; exported names, behavior, bounds and locking rules may not change without updating this document in the same commit.
@@ -351,7 +351,7 @@ type ClientConditionals struct {
 }
 ```
 
-A nil `Request.Header` is treated as empty. `internal/keys` cannot import `weir` (import cycle). It defines its own `Request` struct with the same fields, and the root package converts with a field copy. The copy is cheap (strings and a header map reference).
+A nil `Request.Header` is treated as empty. A header with any non-canonical key (`x-custom`, possible for library callers; net/http canonicalizes) is replaced, in a shallow copy of the request, by `keys.CanonicalHeader`, which merges duplicates canonical-first, the same function `Serve` applies to origin responses. Every keyed, Vary and hop-by-hop read uses canonical names, so without it a lowercase field would reach the origin under `ForwardAll` while the key read it as absent (INV-1, T-15). `internal/keys` cannot import `weir` (import cycle). It defines its own `Request` struct with the same fields, and the root package converts with a field copy. The copy is cheap (strings and a header map reference).
 
 Classification order:
 
@@ -391,12 +391,12 @@ Implementation uses a pooled `[]byte` builder (`sync.Pool` of `*[]byte`, reset l
 
 ```
 buf = "weir/variant/v1" + Primary[:]
-for name in VaryNames (lowercased, sorted, deduplicated at spec creation):
-    field(0x30, name); presence; if present: field(0x31, normalizedValue(name, fwd.Header))
+for name in VaryNames (canonical form as http.CanonicalHeaderKey, sorted, deduplicated at spec creation):
+    field(0x30, name); presence; if present: 0x31, uvarint(len(lines)), then each line length-prefixed (fwd.Header[name], as forwarded)
 Variant = sha256(buf)
 ```
 
-`normalizedValue` uses the registered normalizer for `Accept-Encoding` (its value in the forwarded request is already the bucket token, so this is identity) and the generic list normalizer otherwise (FR-KEY-11).
+Values are keyed exactly as forwarded, with no whitespace or line normalization (FR-KEY-11): the forwarded request already carries the registered normal forms (`Accept-Encoding` bucket, keyed cookies), and any other field reaches the origin as received, so the key must not equate renderings the origin can tell apart. The line count is encoded so `["a", "b"]` and `["a,b"]` differ. Names are kept in canonical form rather than lowercased so the hit path reads `fwd.Header[name]` without converting each name. With no names the variant key is `Primary` itself.
 
 ### 3.4 Query rewrite
 
@@ -686,9 +686,9 @@ func (e *Engine) fetchCoalesced(ctx, c, lk, origin, attempt):
         if res.err != nil: return e.onFetchError(c, lk, res)  // §6.6
         if created && res.entry != nil:
             return e.fromFetched(c, res, collapsed: false)     // the creator's own request was forwarded; storable or not
-        if res.shareable && keys.VaryMatches(res.entry, c.Forwarded.Header):
+        if res.shareable && keys.VariantKey(c.Primary, res.entry.VaryNames, c.Forwarded.Header) == res.vk:   // res.vk: the creator's variant key
             return e.fromFetched(c, res, collapsed: true)
-        return e.cacheable(ctx, c, origin, attempt+1)          // FR-COA-5
+        return e.cacheable(ctx, c, origin, attempt+1)          // FR-COA-5; once: a second pass fetches directly
     case <-timer.C:
         if f.Done() is closed: use the result as above   // the flight published as the timer fired
         if lk.entry != nil && staleIfErrorOK(lk):
@@ -854,7 +854,7 @@ Both stream paths stop the origin deadline at headers and hand the context to `i
 
 `e.store(s, ent)` first reads the record currently at the target key; if it is a response whose `Date` (then `ResponseTime`) is later than the new entry's, the write is skipped, so a slow, aged flight finishing late never replaces a newer response (RFC 9111 §4: the most recent response wins). The record the request itself found at lookup is exempt: it was already judged stale or unusable, and an origin whose clock once ran ahead would otherwise pin a purged or invalidated entry until it expires. A record past its `Expires` that a store still returns lazily is exempt too. The read-then-write is not atomic; the race window can only let an older response win when two writes land within the same store round trip, and the next refresh corrects it. It then writes the variant entry first, then the vary spec (or the entry under the primary key when there is no `Vary`), so a concurrent reader that finds the spec usually finds the variant. When the response's `Vary` differs from the stored spec, the new spec replaces it and older variants age out.
 
-Marker and negative writes share `setUnlessResponse`, a read-before-write: they skip the write when the current record at the key is a response that has not passed its `Expires` (an expired one a store returns lazily is a miss to `lookup`), so a marker or negative entry never replaces a response that a concurrent fetch just stored.
+Marker and negative writes share `setUnlessResponse`, a read-before-write: they skip the write when the current record at the key is a response that has not passed its `Expires` (an expired one a store returns lazily is a miss to `lookup`), so a marker or negative entry never replaces a response that a concurrent fetch just stored. A live vary spec is kept the same way, since a record at the primary key would hide every variant. Both are written under the lookup's key (`lk.ck`), the variant key when a spec exists.
 
 `fromStream` for a `HEAD` client closes the stream immediately and returns headers only; the origin transfer is canceled rather than downloaded for nothing.
 
@@ -1111,7 +1111,7 @@ type Event struct {
 | `EvStoreError` | guard saw `ErrUnavailable` | `get`, `set`, `epoch`, `set-epoch` |
 | `EvStoreBreaker` | store guard opened or closed | `open`, `closed` |
 | `EvKeyRejected` | validation failed | `RequestError.Reason` values |
-| `EvNotStored` | storability failed | `method` (defensive: cacheable forwards are always GET), `status`, `no-store`, `private`, `authorization`, `set-cookie`, `vary-star`, `vary-sensitive`, `vary-strict`, `vary-too-many`, `no-freshness`, `too-large`, `incomplete`, `groups`, and `vary-unsupported` in M1 to M6 only (removed by M7) |
+| `EvNotStored` | storability failed | `method` (defensive: cacheable forwards are always GET), `status`, `no-store`, `private`, `authorization`, `set-cookie`, `vary-star`, `vary-sensitive`, `vary-strict`, `vary-too-many`, `no-freshness`, `too-large`, `incomplete`, `groups` |
 | `EvVaryOverflow` | variant cap reached | |
 | `EvNegativeServed` | negative entry used | |
 | `EvPurge` | `Purge` or invalidation wrote epochs | `soft`, `hard`, `invalid` |

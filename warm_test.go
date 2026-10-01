@@ -328,3 +328,34 @@ func TestWarmStopsOnClose(t *testing.T) {
 		}
 	})
 }
+
+// FR-TMO-1, 04 §6.7: fetches no request waits on (Warm, background
+// refresh) are bounded by Timeouts.Background, foreground ones by
+// Timeouts.Origin.
+func TestTimeoutByClass(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		o := testorigin.NewChecked(t, 64, 16)
+		b := cacheable("slow")
+		b.Delay = 20 * time.Second
+		o.Default(b)
+		cfg := cacheCfg
+		cfg.Timeouts.Origin = 10 * time.Second
+		cfg.Timeouts.Background = 30 * time.Second
+		e := newEngine(t, cfg)
+		defer closeEngine(t, e)
+
+		if _, err := e.Serve(t.Context(), getReq("/fg"), o); !errors.Is(err, weir.ErrOriginTimeout) {
+			t.Fatalf("foreground: err %v, want ErrOriginTimeout", err)
+		}
+		if st, err := e.Warm(t.Context(), warmReqs("/bg"), o); err != nil || st != (weir.WarmStats{Fetched: 1}) {
+			t.Fatalf("Warm = %+v, %v; want 1 fetched under Timeouts.Background", st, err)
+		}
+
+		cfg.Timeouts.Background = 5 * time.Second
+		e2 := newEngine(t, cfg)
+		defer closeEngine(t, e2)
+		if st, _ := e2.Warm(t.Context(), warmReqs("/bg2"), o); st != (weir.WarmStats{Failed: 1}) {
+			t.Fatalf("Warm with a 5 s Background timeout = %+v, want 1 failed", st)
+		}
+	})
+}

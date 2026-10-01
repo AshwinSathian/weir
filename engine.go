@@ -7,7 +7,6 @@ import (
 	"math"
 	"net/http"
 	"runtime/debug"
-	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -201,38 +200,8 @@ func normalizeResponse(r *Response) {
 	if r.Header == nil {
 		r.Header = http.Header{}
 	}
-	r.Header = canonicalHeader(r.Header)
+	r.Header = keys.CanonicalHeader(r.Header)
 	if r.Body == nil {
 		r.Body = http.NoBody
 	}
-}
-
-// canonicalHeader returns h with every key canonical, merging duplicates
-// canonical-first and then in sorted key order. storability and
-// ParseResponse read canonical keys, so a custom Origin's "set-cookie" or
-// "cache-control: private" must not slip past them (INV-4, T-8). h is
-// returned as is when already canonical; otherwise a new map is built and
-// no value array of h is written, since an Origin may reuse them.
-func canonicalHeader(h http.Header) http.Header {
-	var odd []string
-	for k := range h {
-		if http.CanonicalHeaderKey(k) != k {
-			odd = append(odd, k)
-		}
-	}
-	if len(odd) == 0 {
-		return h
-	}
-	out := make(http.Header, len(h))
-	for k, v := range h {
-		if http.CanonicalHeaderKey(k) == k {
-			out[k] = v
-		}
-	}
-	slices.Sort(odd)
-	for _, k := range odd {
-		ck := http.CanonicalHeaderKey(k)
-		out[ck] = append(slices.Clip(out[ck]), h[k]...)
-	}
-	return out
 }

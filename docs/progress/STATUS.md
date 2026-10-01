@@ -1,12 +1,12 @@
 # Status
 
-Updated: 2026-10-01
+Updated: 2026-10-02
 Phase: 1
 Current card: none
 Card state: awaiting-merge
-Branch: card/M6-01-negative-caching
-PR: #43 https://github.com/AshwinSathian/weir/pull/43
-Next card: M7-01
+Branch: card/M7-01-vary-variants
+PR: #44 https://github.com/AshwinSathian/weir/pull/44
+Next card: M7-02
 
 ## Blockers
 
@@ -14,16 +14,22 @@ none
 
 ## Waiting on Ashwin
 
-- M6-01: FR-NEG-4 was widened without prior sign-off. Negative entries are now also never created for requests with a `no-store` directive, after a forwarded `Forward.Allow` field or under `ForwardAll` (T-17, T-31, same rule as markers), or by background refresh and warm fetches. It only narrows when entries are written. Approve, or say which exclusion to drop.
-- M6-01: FR-NEG-3 says `Cache-Status: Weir; hit; detail=negative`; 04 §6.6 and the code add `ttl=<remaining>`. Proposed: FR-NEG-3 names `ttl` too.
-- #42 adversarial review: FR-MODE-3 ("every request is handled as pass-through") conflicts with FR-SRV-6 ("only-if-cached is always honored") for an `only-if-cached` request in bypass. The fix follows FR-SRV-6: `ErrOnlyIfCached`, origin not contacted (04 §14). Proposed fix: FR-MODE-3 adds "except `only-if-cached`, which gets `ErrOnlyIfCached`". FR-BYP-1 (M7-03) has the same question.
-- #42 adversarial review: by default `ModeStaleOnError` can only serve entries the store still holds. An entry without an SWR or SIE window is kept only `Freshness.Keep` (5 min) past expiry, and only with a validator. So "up to 24 h of staleness" is reachable only with longer windows or a larger `Keep`. Should FR-MODE-2 say so, or should the default retention change? (A retention change is a default, so it needs your approval.)
+none
 
-- M5-04: `ModeStaleOnError` also refuses entries with `s-maxage` (FR-STL-3; RFC 9111 §5.2.2.10 makes s-maxage imply proxy-revalidate), even ones with an explicit `stale-if-error` (their own window still applies). FR-MODE-2 lists only must-revalidate, proxy-revalidate and no-cache. Should FR-MODE-2 name s-maxage too?
+## Decided 2026-10-02
 
-- `Timeouts.Background` (public field, default 30s) is never read: every fetch uses `Timeouts.Origin`. The spec does not say which classes it bounds. Should it replace `Timeouts.Origin` for `limiter.Background` only, or for Warm too? M5-02 left it unwired.
-- FR-STL-1 says an SWR hit starts a refresh; M5-02 skips it for `Authorization` and `no-store` requests (same gate as early refresh, T-8, T-31, now in 04 §6.8). Should 01 FR-STL-1 and FR-FRS-6 say so?
-- M1-18 closes M1, which triggers PLAN P0.0: add `SECURITY.md`, flip the repo to public, enable private vulnerability reporting (D40), tag `v0.1.0` (D24). The card says to ask before flipping visibility. After merging #29, say whether to do P0.0 now (and in which session) or hold it.
+Every item that was waiting on Ashwin, decided under his delegation after an adversarial review (PR #44):
+
+- FR-NEG-4 exclusions (M6-01): approved as written. Each one keeps a client from writing a negative entry everyone else then gets (T-17, T-31); background and warm fetches never have a waiting client to protect. The cost, more origin calls from excluded requests during an outage, is bounded by the limiter and breaker.
+- FR-NEG-3: names `ttl` (seconds until the negative entry expires), as the code and 04 §6.6 already emit.
+- FR-MODE-3 and FR-BYP-1: `only-if-cached` gets `ErrOnlyIfCached` in bypass mode and under bypass rules; the stored entry is not served, because both exist for when the cache must not answer.
+- FR-MODE-2 reach: no default change. Keeping every entry 24 h past expiry for an incident mode that is rarely on would hold dead entries in remote stores and keep validator-less responses only for this. FR-MODE-2 now says the mode widens what may be served, not what is kept, and how to buy more reach (`Freshness.Keep`, `DefaultStaleIfError`). Pinned by `TestModeStaleOnErrorReachIsRetention`.
+- FR-MODE-2 names `s-maxage` (RFC 9111 §5.2.2.10); an explicit `stale-if-error` keeps its own window.
+- `Timeouts.Background` is wired: it bounds background refresh and Warm fetches, `Timeouts.Origin` foreground ones (FR-TMO-1, FR-COA-2). Removing the field was rejected: it is the knob that lets foreground fetches fail fast while refreshes wait for a slow origin. Pinned by `TestTimeoutByClass`.
+- FR-STL-1 and FR-FRS-6 state the refresh gate for `Authorization` and `no-store` requests (T-8, T-31).
+- P0.0: hold the public flip. D24 amended: public with `v0.1.0` once M7-05 (key-boundary security review) merges, since #44 found key-boundary poisoning paths and M7-02..05 are still open. `SECURITY.md` is added now. The M7-05 card tells the session after it to confirm the irreversible flip in chat and run it.
+
+- FR-KEY-11 (delegated by Ashwin after the #44 review): Vary values are keyed exactly as forwarded, no line combining or whitespace removal. A generic normalizer cannot know a field's syntax (commas in quoted strings), and an origin reading one line answers `a` + `b` lines differently from `a,b`, so equating them served one client's answer to another. RFC 9111 §4.1 always permits not matching; the cost is a split variant. Rejected: forwarding the normalized form (rewrites values origins depend on, and Vary is unknown at forward time); documenting the gap under T-31 (leaves a poisoning primitive). 01 FR-KEY-11, 04 §3.3, 06 T-15 and 07 updated.
 
 ## Decided 2026-10-01
 
@@ -41,6 +47,11 @@ Already built, now confirmed: the weirhttp default transport (compression off, n
 The cards' Notes give the reasons and the options rejected. All three come before M1-18, because closing M1 makes the repo public.
 
 ## Notes for the next session
+
+- M7-01: `lookup` sets `lk.ck` (variant key under a spec, else Primary); flights, early refresh, warm, markers and negative entries all key on it. `storeResponse` writes the variant, then the spec (`setVariant`, serve.go); `setUnlessResponse` also keeps a live spec. Followers share only when `keys.VariantKey(...) == fr.vk`, else `reenter` (one more pass, then `fetchDirect`).
+- M7-02 scope left: `vary-sensitive` and `vary-strict` landed in M7-01 at storability level (`TestVaryPolicyStorability`, reviewer should-fix: strict mode must not be bypassable on main). M7-02 still adds the engine tests (strict part of TestVaryUnconfiguredHeader, TestVarySensitiveNotStored), `TestVaryOverflow`, and reclaim of refs whose record is gone (`ponytail:` in `setVariant`; expired refs are already dropped and the `MaxVariants` cap is enforced). `vary-overflow` in Cache-Status is not done.
+- M7-01: a request forwarding a `Forward.Allow` field stays `Unkeyed` even when the response's Vary keys that field, so it gets no marker or negative entry. M7-03 may refine `Unkeyed` against the spec's names. The Accept-Encoding bucket is still keyed only through Vary (04 §3.3); the marker note below holds for the first response of a URI, before a spec exists.
+- M7-01 review nits open: `VaryNames` allocates for every name before the `vary-too-many` check (origin-controlled, bounded by response header limits); the LLD's `lk.spec`/`fetchSpec.spec` are not in the code (`setVariant` rereads the primary key).
 
 - M6-01: negative writes happen in `setNegative` (negative.go), called by `fetchStored` before the flight publishes; `lookup` returns a live negative record as `lk.neg` and `cacheable` serves it before the only-if-cached and Range checks. Markers and negative entries share `setUnlessResponse` (serve.go), which replaces only a hard-purged or expired response.
 - M6-01: tests whose next request must reach the origin after a 502/503/504 or transport failure set `Negative.Disable` (coalesce, stale, serve, weirhttp handler-origin tests). New engine tests with failing origins need the same.
@@ -74,7 +85,6 @@ The cards' Notes give the reasons and the options rejected. All three come befor
 
 - M4-03: `fetch` takes the slot from `e.upl` (upload pool, `MaxUpload` slots, partition cap min(`MaxPerPartition`, `MaxUpload`), own `MaxQueue` queue, no reserve) when `c.HasBody`. EvShed does not name the pool; add it when observability wants to tell an upload flood from main-pool saturation.
 - M4-03: the origin deadline is an `AfterFunc` timer on a `WithCancelCause` context. Streams (pass-through, oversized, event-stream) stop it at headers and wrap the body in `idleBody`: each `Read` arms `StreamIdle`, time between reads is not counted (04 §14). Total stream duration is unbounded by design (FR-TMO-2).
-- `Timeouts.Background` is defaulted and validated but never read (04 §6.7 says `timeoutFor(s.class)`); question under Waiting on Ashwin.
 - Streams have no total deadline and the idle timer counts only a Read in progress, so a client that keeps reading slowly holds an origin connection (not a slot) without limit. Adapter docs (M10) should tell operators to set `http.Server.WriteTimeout` or rely on Caddy's write timeout.
 - M4-03: PLAN M4.3b stays unticked: its AC lists `TestBodylessBypassUsesMainPool`, which M7-03 owns. `HasBody` trusts a declared `Content-Length: 0` even with a real body; only direct library callers can do that (net/http gives NoBody). Consider in M7-03.
 
@@ -87,7 +97,7 @@ The cards' Notes give the reasons and the options rejected. All three come befor
 - M8: the `throttled` cap overrides go into `capFor` (04 §8.2 comment).
 
 - M3-01: early refresh lives in background.go. `tryAcquireBackground` is a stub that always returns true and runs before `flights.Join`. M4-02 must acquire inside `fetch`, after Join (04 §6.8); acquiring before Join would hold a slot for every hit that finds a flight already running. Until M4-02 nothing bounds refresh fetches below one per distinct key near expiry.
-- M3-01: early refresh skips `Authorization` and request `no-store` requests (same rule as leading a flight, T-8, T-31), now in 04 §6.8 and pinned by `TestEarlyRefreshGates`. FR-FRS-6 itself does not list this exclusion; Ashwin to decide whether 01 should say so.
+- M3-01: early refresh skips `Authorization` and request `no-store` requests (same rule as leading a flight, T-8, T-31), now in 04 §6.8 and pinned by `TestEarlyRefreshGates`. FR-FRS-6 now states it (decided 2026-10-02).
 - M3-01 adversarial review: early-refresh flights already mark their creator gone and close an unclaimed stream (`TestEarlyRefreshClosesUnclaimedStream`); M5-02's AC item for this is met for early refresh, M5-02 must keep it for SWR refresh. Hits skip the `Rand` draw when more than 37·Δ·β is left (`TestEarlyRefreshShortcutIsExact`), which brought `BenchmarkServeHitSmall` back to its pre-card cost.
 - M3-01: the `JitterMinLifetime` gate compares the jittered lifetime, so a `max-age=10` entry jittered below 10 s never refreshes early. A fresh hit under `only-if-cached` can start a refresh (the cache's decision, RFC 9111 allows it).
 - M2-03: a follower of an unshareable flight result re-enters `cacheable` with `prevCK`; the same key fetches directly (FR-COA-5). Until M7-01 that equals `fetchDirect`. M7-01 must compare the lookup's coalescing key, cap re-entry at one attempt and add `keys.VaryMatches` (`ponytail:` in flight.go).

@@ -170,7 +170,7 @@ type WarmConfig struct{ Concurrency int } // 0: min(4, MaxConcurrent-ReserveFore
 // TimeoutsConfig bounds origin and store calls (FR-TMO).
 type TimeoutsConfig struct {
 	Origin     time.Duration // 0: 30s
-	Background time.Duration // 0: 30s
+	Background time.Duration // 0: 30s; background refresh and Warm (FR-TMO-1)
 	Store      time.Duration // 0: 50ms (remote stores only)
 	StreamIdle time.Duration // 0: 60s (D26)
 }

@@ -1,7 +1,7 @@
 # Weir threat model
 
 Status: v1.0
-Date: 2026-10-01
+Date: 2026-10-02
 Depends on: [01-technical-spec.md](01-technical-spec.md), [02-architecture.md](02-architecture.md)
 
 The seed's §7.3 makes the cache key a security boundary. This document says what that boundary protects, from whom, how each known attack class is answered, and what remains the operator's problem. Every threat has an ID so tests and code comments can cite it (`// T-3: ...`).
@@ -56,7 +56,7 @@ Each row: the attack, where it comes from, Weir's answer, the requirement or ADR
 | T-12 | Cache busting across many distinct paths | global cap bounds origin load; legitimate misses on other paths may shed. Residual: this is rate-limiting territory (for example `caddy-ratelimit` in front of Weir) | ADR-8 | `TestPathFloodOriginBounded` |
 | T-13 | Malformed keyed header forcing bypass (CVE-2024-35296, `Accept-Encoding`) | normalizers map any malformed value to one canonical bucket, both in key and forward; never a bypass, never an error. The `Cookie` limit counts keyed pairs only, so a large unkeyed cookie cannot push a keyed one to absent | FR-VAL-3, §5.2.3 | `TestCVE202435296`, `FuzzAcceptEncoding`, `TestKeyedCookieLimitCountsKeyedPairs` |
 | T-14 | Client revalidation directives as a bypass (`Cache-Control: no-cache`, `Pragma: no-cache`) | ignored by default | D5, FR-SRV-8 | `TestClientNoCacheIgnored` |
-| T-15 | Vary explosion: origin varies on `User-Agent`, attacker cycles values | variants capped per primary key; over the cap new variants are not stored (answered, not cached) | FR-KEY-10 | `TestVaryOverflow` |
+| T-15 | Vary explosion: origin varies on `User-Agent`, attacker cycles values. Variant confusion: two renderings of a Vary field that the origin answers differently (two lines vs one, a comma in a quoted string, a non-canonical name) share a variant | variants capped per primary key; over the cap new variants are not stored (answered, not cached). Vary values keyed exactly as forwarded and request names canonicalized before keying, so the variant always reflects what the origin saw | FR-KEY-10, FR-KEY-11, INV-1 | `TestVaryOverflow`, `TestVaryKeysExactLines`, `TestVaryNonCanonicalRequestKey` |
 | T-16 | Breaker tripping: attacker triggers origin errors to open the breaker site-wide | only gateway failures count, by ratio with minimum volume; 500 excluded | ADR-7, FR-CB-2 | `TestBreaker500DoesNotTrip`, `TestBreakerNeedsVolume` |
 | T-17 | Negative-cache poisoning: attacker-induced failure cached for everyone | negative entries only for gateway failures, status-only, 2 s, and the failing request's inputs are all keyed (strict forwarding), so the negative entry sits on the attacker's own key | FR-NEG-*, D4 | `TestNegativeScopedToKey` |
 | T-18 | Slow-reader slot pinning on streamed responses | streamed fetches release their slot at headers; stream bounded by origin timeout | FR-LIM-1 | `TestSlowReaderDoesNotPinSlots` |

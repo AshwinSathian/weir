@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"slices"
 	"strings"
@@ -472,5 +473,30 @@ func TestH2CKeyedLikePlainRequest(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+func TestClassifyCanonicalizesRequestKeys(t *testing.T) {
+	// INV-1, FR-FWD-2, §5.2.3, T-15: keys in any case are read as their
+	// canonical field. Under ForwardAll a lowercase accept-encoding must not
+	// reach the origin next to the bucket, nor a lowercase hop-by-hop field.
+	cfg := classifyCfg()
+	cfg.ForwardAll = true
+	h := http.Header{"accept-encoding": {"br"}, "connection": {"x-hop"}, "x-hop": {"1"}, "keep-alive": {"5"}, "x-a": {"1"}, "X-A": {"2"}}
+	r := classifyReq("GET", maps.Clone(h))
+	c, err := Classify(r, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fh := c.Forwarded.Header
+	want := http.Header{"Accept-Encoding": {"identity"}, "X-A": {"2", "1"}}
+	if !maps.EqualFunc(fh, want, slices.Equal) {
+		t.Fatalf("forwarded %v, want %v", fh, want)
+	}
+	if !maps.EqualFunc(r.Header, h, slices.Equal) || len(h) != 6 { // h's keys stay as sent
+		t.Fatalf("caller's header changed: %v", r.Header)
+	}
+	if pc, _ := Classify(classifyReq("POST", http.Header{"connection": {"close"}, "upgrade-insecure-requests": {"1"}}), cfg); len(pc.Forwarded.Header["Connection"]) != 0 {
+		t.Fatalf("pass forward kept Connection: %v", pc.Forwarded.Header)
 	}
 }

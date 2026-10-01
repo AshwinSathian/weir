@@ -52,7 +52,7 @@ func (e *Engine) setNegative(ctx context.Context, sp *fetchSpec, res *fetchResul
 	if res.err == nil {
 		neg.RetryAfter = retryAfter(res.resp.Header.Get("Retry-After"), now)
 	}
-	e.setUnlessResponse(context.WithoutCancel(ctx), c.Primary, sp.purged, neg)
+	e.setUnlessResponse(context.WithoutCancel(ctx), sp.lk.ck, sp.purged, neg)
 }
 
 // retryAfter parses a Retry-After value (RFC 9110 §10.2.3), delay-seconds or

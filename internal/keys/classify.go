@@ -70,6 +70,13 @@ var partitionSeed = maphash.MakeSeed()
 // r and its Header are never modified; the forwarded request of a
 // cacheable request has a fresh Header map.
 func Classify(r *Request, c *Config) (Classified, error) {
+	// INV-1, T-15: library callers may send keys in any case; the origin
+	// would see a "x-custom" that every keyed and Vary read below misses.
+	if !canonicalKeys(r.Header) {
+		cr := *r
+		cr.Header = CanonicalHeader(r.Header)
+		r = &cr
+	}
 	host, err := Validate(r, c)
 	if err != nil {
 		return Classified{}, err

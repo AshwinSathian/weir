@@ -688,3 +688,35 @@ Entry template:
 - Deviations: none beyond the doc alignment above.
 - Follow-ups: Accept-Encoding bucket note for M7-01 in STATUS; FR-NEG-4 and FR-NEG-3 wording still under Waiting on Ashwin.
 - Context: low.
+
+## 2026-10-02 · M7-01 · done
+- Branch / PR: card/M7-01-vary-variants / #44
+- Done: internal/keys/variant.go (`VaryNames`, `VariantKey`, FR-KEY-11 normalizer). Two-level lookup through the vary spec; variant then spec writes with a `MaxVariants` cap (expired refs dropped); flights, refresh, warm, markers and negatives key on `lk.ck`; followers of another variant re-enter once and coalesce on their own key. Storability: `vary-star`, `vary-too-many`, `vary-sensitive`, `vary-strict`; `vary-unsupported` removed.
+- Tests: TestVaryUnconfiguredHeader (auto), TestVaryStar, TestVaryFollowersRecoalesce, TestVaryNormalizesValues, TestVaryTooManyNames, TestVaryNegativeStaysInVariant, TestWarmFollowerOfOtherVariant, TestVaryPolicyStorability, TestVaryNames, TestVariantKey, FuzzVaryNames (8 seeds); RFC row "Vary selects the stored variant" untagged. `make check` passes.
+- Deviations: 04 §3.3 names kept in canonical case, not lowercase; 04 §6.4 follower check compares variant keys; 04 §6.7 marker and negative writes keep a live spec and go to `lk.ck`.
+- Follow-ups: reviewer should-fixes 1, 2, 4 fixed (sensitive/strict refusal pulled from M7-02, pool buffer cap, 10 KiB seed); finding 3 (normalized key vs raw forward) under Waiting on Ashwin.
+- Context: medium; size M right, slightly over by pulling M7-02's cap and policy checks.
+
+## 2026-10-02 · M7-01 · review-fixes
+- Branch / PR: card/M7-01-vary-variants / #44
+- Done: adversarial review of #44. Found a cache-poisoning path: a request key in non-canonical case (`x-custom`, library callers) reached the origin under `ForwardAll` while `VariantKey` read `X-Custom` as absent, so the origin's answer to it was served to every client without the field. Same root cause let a lowercase `accept-encoding` or `connection` slip past the bucket rewrite and hop-by-hop removal. `keys.Classify` now canonicalizes request keys first (`keys.CanonicalHeader`, moved from engine.go, also used for responses).
+- Tests: TestVaryNonCanonicalRequestKey, TestClassifyCanonicalizesRequestKeys (both fail without the fix). Vary/warm/coalesce/negative/RFC tests 15× under race and shuffle; FuzzForwardEqualsKey, FuzzValidateRequest, FuzzVaryNames, FuzzMalformedHeaderAbsent, FuzzKeyEncodingInjective 20 s each, clean. BenchmarkServeHitSmall ~910 to ~985 ns/op, 14 allocs unchanged. `make check` passes.
+- Deviations: 04 §3.1 documents the canonicalization.
+- Follow-ups: FR-KEY-11 normalized key vs raw forwarded lines (quoted strings with commas included) stays under Waiting on Ashwin.
+- Context: low.
+
+## 2026-10-02 · M7-01 · review-fixes
+- Branch / PR: card/M7-01-vary-variants / #44
+- Done: decided the open FR-KEY-11 question (delegated by Ashwin): `VariantKey` keys Vary values exactly as forwarded (line count plus each line length-prefixed) instead of a generic list normalization that equated renderings the origin can tell apart.
+- Tests: TestVaryKeysExactLines, TestVariantKey (two lines vs one, quoted comma, moved line boundary), RFC row "values match only as forwarded". Both fail on the normalizing code. FuzzVaryNames 20 s clean. `make check` passes.
+- Deviations: 01 FR-KEY-11 rewritten, 04 §3.3, 06 T-15, 07 §7 wording; dates bumped.
+- Follow-ups: none from this PR. Older Waiting on Ashwin items untouched.
+- Context: low.
+
+## 2026-10-02 · M7-01 · review-fixes
+- Branch / PR: card/M7-01-vary-variants / #44
+- Done: decided every Waiting on Ashwin item (delegated). Code: `timeoutFor` (fetch.go) applies `Timeouts.Background` to background refresh and Warm. Docs: 01 FR-NEG-3, FR-MODE-2, FR-MODE-3, FR-BYP-1, FR-STL-1, FR-FRS-6, FR-TMO-1, FR-COA-2, D24, D40, error table; PLAN P0.0; M7-05 card; new SECURITY.md.
+- Tests: TestTimeoutByClass, TestModeStaleOnErrorReachIsRetention. `make check` passes.
+- Deviations: requirement and decision-table text changed under Ashwin's delegation (STATUS "Decided 2026-10-02").
+- Follow-ups: P0.0 after M7-05 merges.
+- Context: low.

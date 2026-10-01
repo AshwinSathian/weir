@@ -7,6 +7,7 @@ import (
 	"io"
 	"maps"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/AshwinSathian/weir/internal/httpcc"
@@ -76,6 +77,7 @@ func (e *Engine) pass(ctx context.Context, c *keys.Classified, origin Origin, fw
 
 // lookupResult is what the store holds for a request (04 §6.3).
 type lookupResult struct {
+	ck      store.Key    // the key the records below live under: Primary, or the variant key under a vary spec
 	entry   *store.Entry // a response record, not yet evaluated
 	marker  bool         // a hit-for-miss marker
 	neg     *store.Entry // a negative entry (FR-NEG-3)
@@ -84,13 +86,22 @@ type lookupResult struct {
 	fwd     FwdReason // reason to report if the request goes forward
 }
 
-// lookup reads the primary key. Store errors read as a miss. Vary specs
-// (M7-01) are not written yet, so they read as a miss too.
+// lookup reads the primary key and, under a vary spec, the variant key
+// (FR-KEY-7, ADR-2). Store errors read as a miss.
 func (e *Engine) lookup(ctx context.Context, c *keys.Classified, now time.Time) lookupResult {
-	lk := lookupResult{fwd: FwdURIMiss}
+	lk := lookupResult{ck: c.Primary, fwd: FwdURIMiss}
 	rec, err := e.sg.get(ctx, c.Primary)
 	if err != nil || rec.Expires.Before(now) { // stores may return expired records lazily
 		return lk
+	}
+	if rec.Kind == store.KindVarySpec {
+		// Secondary values come from the forwarded request, which is what
+		// the origin sees (FR-KEY-7, INV-1).
+		lk.ck = keys.VariantKey(c.Primary, rec.VaryNames, c.Forwarded.Header)
+		if rec, err = e.sg.get(ctx, lk.ck); err != nil || rec.Expires.Before(now) {
+			lk.fwd = FwdVaryMiss
+			return lk
+		}
 	}
 	switch rec.Kind {
 	case store.KindResponse:
@@ -151,13 +162,13 @@ func (e *Engine) cacheable(ctx context.Context, c *keys.Classified, origin Origi
 	if c.Range {
 		return e.pass(ctx, c.AsRangePass(), origin, lk.fwd)
 	}
-	sp := &fetchSpec{c: c, lk: lk, prior: prior, found: found, purged: purged}
+	sp := &fetchSpec{c: c, lk: lk, prior: prior, found: found, purged: purged, reentered: prevCK != nil}
 	// FR-COA-8, FR-STO-12. A no-store request's response is never shared,
 	// so leading a flight would only make its followers wait and refetch
 	// (T-31: one client must not disable coalescing for everyone).
 	// FR-COA-5: a re-entering follower coalesces again only under a new
 	// key, so followers never wait on each other serially.
-	if c.Authorized || c.ReqCC.NoStore || lk.marker || prevCK != nil && *prevCK == c.Primary {
+	if c.Authorized || c.ReqCC.NoStore || lk.marker || prevCK != nil && *prevCK == lk.ck {
 		return e.fetchDirect(ctx, sp, origin)
 	}
 	return e.fetchCoalesced(ctx, sp, origin)
@@ -196,7 +207,10 @@ func (e *Engine) fetchStored(ctx context.Context, sp *fetchSpec, origin Origin) 
 		fr.errHeader = maps.Clone(res.resp.Header)
 	}
 	if !res.over && !res.stream && !serverError(res.resp.StatusCode) {
-		fr.entry, fr.ci.Stored = e.storeResponse(ctx, c, res, sp.found, sp.purged)
+		fr.entry, fr.ci.Stored = e.storeResponse(ctx, c, res, sp)
+		if fr.entry != nil {
+			fr.vk = keys.VariantKey(c.Primary, fr.entry.VaryNames, c.Forwarded.Header)
+		}
 	}
 	return fr
 }
@@ -236,9 +250,9 @@ func serverError(status int) bool {
 // hit-for-miss marker when the response itself is the reason (FR-STO-12,
 // T-31). It returns the entry when storable, which followers may share, and
 // reports whether it was stored. The client's own
-// response keeps every origin field (FR-STO-6). found is the response the
+// response keeps every origin field (FR-STO-6). sp.found is the response the
 // lookup returned, which this request already judged not fresh.
-func (e *Engine) storeResponse(ctx context.Context, c *keys.Classified, res *fetchResult, found, purged *store.Entry) (*store.Entry, bool) {
+func (e *Engine) storeResponse(ctx context.Context, c *keys.Classified, res *fetchResult, sp *fetchSpec) (*store.Entry, bool) {
 	ctx = context.WithoutCancel(ctx) // a client leaving after the body arrived does not undo the store
 	recv := res.received()           // T-8: a field Connection names still refuses storage
 	d := storability(&e.cfg, c, recv, res.body, res.respTime)
@@ -246,22 +260,59 @@ func (e *Engine) storeResponse(ctx context.Context, c *keys.Classified, res *fet
 		emit(e.cfg.Observer, Event{Kind: EvNotStored, Time: res.respTime, Partition: c.Partition, Reason: d.reason})
 		if d.responseDriven {
 			now := res.respTime
-			e.setUnlessResponse(ctx, c.Primary, purged,
+			e.setUnlessResponse(ctx, sp.lk.ck, sp.purged,
 				&store.Entry{Kind: store.KindHitForMiss, StoredAt: now, Expires: now.Add(e.cfg.Coalesce.HitForMissTTL)})
 		}
 		return nil, false
 	}
 	ent := buildEntry(&e.cfg, c, recv, res.body, res.reqTime, res.respTime, d)
+	vk := keys.VariantKey(c.Primary, d.varyNames, c.Forwarded.Header)
 	// RFC 9111 §4: a slow fetch never replaces a more recent response that
 	// another fetch stored meanwhile (04 §6.7). The record this request
 	// found is exempt: it is stale or unusable, and an origin clock that
 	// once ran ahead would otherwise pin it until it expires. So is a
 	// record past its Expires that a lazy store still returns.
-	if cur, err := e.sg.get(ctx, c.Primary); err == nil && cur.Kind == store.KindResponse &&
-		cur.Expires.After(res.respTime) && !sameRecord(cur, found) && newer(cur, ent) {
+	if cur, err := e.sg.get(ctx, vk); err == nil && cur.Kind == store.KindResponse &&
+		cur.Expires.After(res.respTime) && !sameRecord(cur, sp.found) && newer(cur, ent) {
 		return ent, false
 	}
-	return ent, e.sg.set(ctx, c.Primary, ent) == nil
+	if vk == c.Primary {
+		return ent, e.sg.set(ctx, vk, ent) == nil
+	}
+	return ent, e.setVariant(ctx, c, vk, ent)
+}
+
+// setVariant stores ent under its variant key vk, then the vary spec under
+// the primary key that lists it (04 §6.7). Variant first, so a reader that
+// finds the spec usually finds the variant. A spec with other names is
+// replaced and its variants age out. Refs past their Expires are dropped,
+// freeing their slots (D37); a new variant past MaxVariants live ones is
+// not stored (FR-KEY-10, NFR-3).
+func (e *Engine) setVariant(ctx context.Context, c *keys.Classified, vk store.Key, ent *store.Entry) bool {
+	now := ent.StoredAt
+	var refs []store.VariantRef // a new slice: the stored spec is immutable (P4)
+	if cur, err := e.sg.get(ctx, c.Primary); err == nil && cur.Kind == store.KindVarySpec && slices.Equal(cur.VaryNames, ent.VaryNames) {
+		for _, r := range cur.Variants {
+			if r.Key != vk && r.Expires.After(now) {
+				refs = append(refs, r)
+			}
+		}
+	}
+	// ponytail: refs whose record is gone still hold a slot until they
+	// expire; M7-02 adds the per-ref read (04 §14 reclaim) and its test.
+	if len(refs) >= e.cfg.Key.MaxVariants {
+		emit(e.cfg.Observer, Event{Kind: EvVaryOverflow, Time: now, Partition: c.Partition})
+		return false
+	}
+	if e.sg.set(ctx, vk, ent) != nil {
+		return false
+	}
+	refs = append(refs, store.VariantRef{Key: vk, Expires: ent.Expires})
+	spec := &store.Entry{Kind: store.KindVarySpec, StoredAt: now, VaryNames: ent.VaryNames, Variants: refs}
+	for _, r := range refs { // 04 §4.2: a spec lives as long as its longest variant
+		spec.Expires = later(spec.Expires, r.Expires)
+	}
+	return e.sg.set(ctx, c.Primary, spec) == nil
 }
 
 // sameRecord reports whether a and b are the same stored response. Stores
@@ -285,14 +336,16 @@ func newer(a, b *store.Entry) bool {
 
 // setUnlessResponse writes a hit-for-miss marker or negative entry unless
 // the key holds a response, which a concurrent fetch may just have stored
-// (04 §6.7) and which may still be revalidated (FR-NEG-1). purged, the
+// (04 §6.7) and which may still be revalidated (FR-NEG-1), or a vary spec,
+// whose variants a record at the primary key would hide. purged, the
 // hard-purged response this request found, may be replaced: it can never be
 // served or revalidated (FR-STO-12). Stores that decode a fresh copy per Get
 // never match it, which only costs the record. A record past its Expires
 // that a store still returns lazily is a miss to lookup, so it is replaced
 // too, or a lazy store would never get a negative entry (T6.10).
 func (e *Engine) setUnlessResponse(ctx context.Context, k store.Key, purged, rec *store.Entry) {
-	if cur, err := e.sg.get(ctx, k); err == nil && cur.Kind == store.KindResponse && cur != purged && !cur.Expires.Before(time.Now()) {
+	if cur, err := e.sg.get(ctx, k); err == nil && (cur.Kind == store.KindResponse && cur != purged || cur.Kind == store.KindVarySpec) &&
+		!cur.Expires.Before(time.Now()) {
 		return
 	}
 	// A failed write only costs the record's benefit: the next miss refetches.

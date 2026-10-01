@@ -1,7 +1,7 @@
 # Weir testing strategy
 
 Status: v1.0
-Date: 2026-10-01
+Date: 2026-10-02
 Depends on: [01-technical-spec.md](01-technical-spec.md), [06-threat-model.md](06-threat-model.md)
 Seed name: `03-testing-strategy.md` (renumbered, see [docs/README.md](README.md))
 
@@ -280,7 +280,7 @@ Named in [06-threat-model.md](06-threat-model.md), [01-technical-spec.md](01-tec
 
 ## 7. RFC behavior tables
 
-`rfc9111_test.go` in the root package holds table tests, one row per normative statement Weir implements, citing the section: storage conditions (§3), header storage exclusions (§3.1), Authorization (§3.5), Age generation (§4), Vary matching and normalization (§4.1), lifetime precedence and invalid directives (§4.2.1), heuristic limits (§4.2.2), age calculation with the RFC's own example values (§4.2.3), validation headers sent (§4.3.1), client conditionals (§4.3.2), 304 freshening (§4.3.4), invalidation (§4.4), `only-if-cached` (§5.2.1.7), `must-revalidate` 504 (§5.2.2.2), `must-understand` (§5.2.2.3), RFC 5861 examples verbatim (§3.1 and §4.1 of that RFC), and RFC 9211 examples for the parameters Weir emits.
+`rfc9111_test.go` in the root package holds table tests, one row per normative statement Weir implements, citing the section: storage conditions (§3), header storage exclusions (§3.1), Authorization (§3.5), Age generation (§4), Vary matching, exact as forwarded (§4.1, FR-KEY-11), lifetime precedence and invalid directives (§4.2.1), heuristic limits (§4.2.2), age calculation with the RFC's own example values (§4.2.3), validation headers sent (§4.3.1), client conditionals (§4.3.2), 304 freshening (§4.3.4), invalidation (§4.4), `only-if-cached` (§5.2.1.7), `must-revalidate` 504 (§5.2.2.2), `must-understand` (§5.2.2.3), RFC 5861 examples verbatim (§3.1 and §4.1 of that RFC), and RFC 9211 examples for the parameters Weir emits.
 
 ## 8. External conformance: http-tests/cache-tests
 

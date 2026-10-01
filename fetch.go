@@ -91,7 +91,7 @@ func (e *Engine) fetch(ctx context.Context, c *keys.Classified, origin Origin, c
 	// A timer, not WithTimeout, so a stream can drop the deadline at its
 	// headers and keep the context (04 §14).
 	tctx, cancelCause := context.WithCancelCause(ctx)
-	deadline := time.AfterFunc(e.cfg.Timeouts.Origin, func() { cancelCause(ErrOriginTimeout) })
+	deadline := time.AfterFunc(e.timeoutFor(class), func() { cancelCause(ErrOriginTimeout) })
 	cancel := func() { deadline.Stop(); cancelCause(nil) }
 	fwd := req
 	if prior != nil {
@@ -350,4 +350,15 @@ func (c *cancelOnClose) Close() error {
 	err := c.ReadCloser.Close()
 	c.cancel()
 	return err
+}
+
+// timeoutFor is the origin deadline of a fetch of class (FR-TMO-1):
+// Timeouts.Origin when a request waits on it, else Timeouts.Background, so
+// an operator can fail foreground fetches fast and still give refreshes
+// and Warm a slow origin's full answer time.
+func (e *Engine) timeoutFor(class limiter.Class) time.Duration {
+	if class == limiter.Foreground {
+		return e.cfg.Timeouts.Origin
+	}
+	return e.cfg.Timeouts.Background
 }

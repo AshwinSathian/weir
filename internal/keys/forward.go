@@ -143,3 +143,40 @@ func lowerHex(s string) bool {
 	}
 	return true
 }
+
+// CanonicalHeader returns h with every key canonical, merging duplicates
+// canonical-first and then in sorted key order. Every decision reads
+// canonical keys: a custom Origin's "set-cookie" or "cache-control: private"
+// must not slip past storability (INV-4, T-8), and a caller's "x-custom"
+// must not reach the origin while the key reads "X-Custom" (INV-1, T-15).
+// h is returned as is when already canonical; otherwise a new map is built
+// and no value array of h is written, since callers may reuse them.
+func CanonicalHeader(h http.Header) http.Header {
+	if canonicalKeys(h) {
+		return h
+	}
+	out := make(http.Header, len(h))
+	var odd []string
+	for k, v := range h {
+		if http.CanonicalHeaderKey(k) == k {
+			out[k] = v
+		} else {
+			odd = append(odd, k)
+		}
+	}
+	slices.Sort(odd)
+	for _, k := range odd {
+		ck := http.CanonicalHeaderKey(k)
+		out[ck] = append(slices.Clip(out[ck]), h[k]...)
+	}
+	return out
+}
+
+func canonicalKeys(h http.Header) bool {
+	for k := range h {
+		if http.CanonicalHeaderKey(k) != k {
+			return false
+		}
+	}
+	return true
+}
