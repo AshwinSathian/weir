@@ -130,6 +130,20 @@ func (b *Breaker) Allow() (Probe, error) {
 	return p, err
 }
 
+// Remaining returns how long the current open period lasts, or 0 when the
+// breaker is not open. The engine sends it as the Retry-After hint (04 §1.3).
+func (b *Breaker) Remaining() time.Duration {
+	if b == nil {
+		return 0
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.state != Open {
+		return 0
+	}
+	return max(time.Until(b.openUntil), 0)
+}
+
 // Record counts the outcome of a fetch Allow admitted. A probe's success
 // closes the breaker and its failure reopens it (FR-CB-4). A probe from an
 // earlier half-open period counts as an ordinary fetch.

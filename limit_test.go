@@ -43,6 +43,7 @@ func (c *eventCounter) count(key string) int {
 type timedServe struct {
 	err     error
 	elapsed time.Duration
+	stale   weir.StaleReason
 }
 
 func serveTimed(t *testing.T, e *weir.Engine, req *weir.Request, o weir.Origin) <-chan timedServe {
@@ -50,11 +51,13 @@ func serveTimed(t *testing.T, e *weir.Engine, req *weir.Request, o weir.Origin) 
 	go func() {
 		start := time.Now()
 		resp, err := e.Serve(t.Context(), req, o)
+		var stale weir.StaleReason
 		if err == nil {
+			stale = resp.Cache.Stale
 			_, err = io.Copy(io.Discard, resp.Body)
 			resp.Body.Close()
 		}
-		ch <- timedServe{err, time.Since(start)}
+		ch <- timedServe{err, time.Since(start), stale}
 	}()
 	return ch
 }
@@ -100,18 +103,16 @@ func TestLimiterCap5000Keys(t *testing.T) {
 	})
 }
 
-// FR-LIM-2, FR-LIM-5, T6.3: with a short queue, requests the limiter cannot
-// hold get ErrShed in a *RetryError with a MaxQueueWait hint, and none
-// waits longer than MaxQueueWait plus its own origin time.
-// ponytail: the stale half (SIE entries serve stale with detail=shed)
-// completes in M5-03.
+// FR-LIM-2, FR-LIM-5, FR-STL-2, T6.3: with a short queue, requests the
+// limiter cannot hold get ErrShed in a *RetryError with a MaxQueueWait hint,
+// unless their key holds a stale entry within stale-if-error, which is
+// served with detail=shed. None waits longer than MaxQueueWait plus its own
+// origin time.
 func TestLimiterShedsWithStale(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		const delay, wait = 50 * time.Millisecond, 2 * time.Second
 		o := testorigin.NewChecked(t, 64, 16)
-		b := cacheable("v")
-		b.Delay = delay
-		o.Default(b)
+		o.Default(testorigin.Behavior{Header: http.Header{"Cache-Control": {"max-age=1, stale-if-error=600"}}, Body: []byte("s")})
 		obs := &eventCounter{}
 		cfg := cacheCfg
 		cfg.Observer = obs
@@ -119,30 +120,44 @@ func TestLimiterShedsWithStale(t *testing.T) {
 		e := newEngine(t, cfg)
 		defer closeEngine(t, e)
 
-		chs := make([]<-chan timedServe, 5000)
+		const n = 5000
+		for i := 0; i < n; i += 2 { // even keys hold an entry that goes stale
+			serve(t, e, getReq(fmt.Sprintf("/k%d", i)), o)
+		}
+		time.Sleep(2 * time.Second)
+		b := cacheable("v")
+		b.Delay = delay
+		o.Default(b)
+
+		chs := make([]<-chan timedServe, n)
 		for i := range chs {
 			chs[i] = serveTimed(t, e, getReq(fmt.Sprintf("/k%d", i)), o)
 		}
-		var ok, shed int
+		var ok, shed, staleShed int
 		for i, ch := range chs {
 			r := <-ch
 			switch {
-			case r.err == nil:
+			case r.err == nil && r.stale == weir.StaleShed:
+				staleShed++
+			case r.err == nil && r.stale == weir.StaleNone:
 				ok++
-			case isShed(r.err, wait):
+			case i%2 == 1 && isShed(r.err, wait):
 				shed++
 			default:
-				t.Fatalf("request %d: %v, want success or a shed", i, r.err)
+				t.Fatalf("request %d: err = %v, stale = %v; want success, a stale shed for even keys, a shed for odd", i, r.err, r.stale)
 			}
 			if r.elapsed > wait+delay {
 				t.Fatalf("request %d took %v, more than MaxQueueWait %v plus the origin delay", i, r.elapsed, wait)
 			}
 		}
-		if ok < 164 || shed == 0 {
-			t.Fatalf("ok = %d, shed = %d; want at least the 164 slots and queue places served, and some shed", ok, shed)
+		if ok < 164 || shed == 0 || staleShed == 0 {
+			t.Fatalf("ok = %d, shed = %d, stale shed = %d; want at least the 164 slots and queue places served, and both kinds of shed", ok, shed, staleShed)
 		}
-		if n := obs.count("shed/queue-full"); n != shed {
-			t.Fatalf("EvShed queue-full = %d, want %d", n, shed)
+		if n := obs.count("shed/queue-full"); n != shed+staleShed {
+			t.Fatalf("EvShed queue-full = %d, want %d", n, shed+staleShed)
+		}
+		if n := obs.count("stale-served/shed"); n != staleShed {
+			t.Fatalf("EvStaleServed shed = %d, want %d", n, staleShed)
 		}
 	})
 }
