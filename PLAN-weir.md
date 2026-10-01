@@ -112,7 +112,7 @@ Refs: FR-FRS-5, FR-FRS-6, T6.1.
 
 Refs: FR-LIM-*, FR-STF-*, FR-WRM-*, T6.3, T6.4, T6.5, T-18.
 
-- [ ] M4.1 `internal/limiter` ([04 §8.2](docs/04-lld.md)). AC: `TestLimiterSkipsFullPartition`, `TestLimiterQueueTimeout`, `TestLimiterCancel`, `TestLimiterGrantRace`, `BenchmarkLimiterAcquireRelease` pass.
+- [x] M4.1 `internal/limiter` ([04 §8.2](docs/04-lld.md)). AC: `TestLimiterSkipsFullPartition`, `TestLimiterQueueTimeout`, `TestLimiterCancel`, `TestLimiterGrantRace`, `BenchmarkLimiterAcquireRelease` pass.
 - [ ] M4.2 Wire limiter into the fetch function; streaming slot release at headers. AC: `TestLimiterCap5000Keys`, `TestPartitionFairness`, `TestSlowReaderDoesNotPinSlots`, `TestColdStartBounded` pass; `testorigin.NewChecked` used in all engine tests from here on.
 - [ ] M4.3 Store guard with remote timeouts and store breaker ([04 §5.2](docs/04-lld.md)). AC: `TestStoreOutageStillCoalescedAndLimited`, `TestStoreSlowRemote` pass.
 - [ ] M4.3b Upload pool and timeout split (D25, D26). AC: `TestSlowUploadsDoNotStarveMisses`, `TestBodylessBypassUsesMainPool`, `TestDripOriginReleasesSlot`, `TestStreamIdleTimeout` pass.

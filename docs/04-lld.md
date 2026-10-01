@@ -857,7 +857,7 @@ func (e *Engine) backgroundRefresh(c, lk, origin):
     go func() { defer e.wg.Done(); e.runFlight(f, spec, origin) }()
 ```
 
-The limiter's `Background` class uses `TryAcquire`. If it fails, `fetch` returns `ErrShed` with `bgDropped` set, the flight publishes that result, and nothing else happens (`EvRefreshDropped`). Foreground requests that joined this flight in the meantime see `bgDropped` and re-enter lookup as a direct foreground fetch (they may queue), rather than being shed by a rule meant only for background work.
+The limiter's `Background` class never queues: `Acquire(ctx, Background, part)` returns `ErrShed` at once when no slot is free outside the reserve. If it fails, `fetch` returns `ErrShed` with `bgDropped` set, the flight publishes that result, and nothing else happens (`EvRefreshDropped`). Foreground requests that joined this flight in the meantime see `bgDropped` and re-enter lookup as a direct foreground fetch (they may queue), rather than being shed by a rule meant only for background work.
 
 `maybeEarlyRefresh` draws `u := 1 - e.rnd()` (so `u` is in (0, 1]) and calls `backgroundRefresh` when `-float64(Δ) * beta * math.Log(u) >= float64(remaining)`. It returns first when `NoEarlyRefresh` is set, when the entry's (jittered) lifetime is below `JitterMinLifetime`, and for the requests that never lead a flight in `cacheable`: one carrying `Authorization` or `no-store`. Their forwarded request would put one client's credentials, or a request that refused storage, behind a refresh of a shared entry (T-8, T-31).
 
@@ -939,41 +939,49 @@ Shard selection by key byte is safe here (unlike the store) because flights are 
 ```go
 type Class uint8 // Foreground, Background, Warm
 
+type Config struct {
+	Max, MaxQueue, PerPartition, Reserve int
+	MaxWait                              time.Duration
+}
+
 type Limiter struct {
-	mu         sync.Mutex
-	max        int
-	reserve    int
-	perPart    int
-	inflight   int
-	byPart     map[uint64]int32        // only partitions with inflight > 0; len <= max
-	throttled  map[uint64]int32        // cap overrides from missrate; bounded by TopK
-	queue      list[*waiter]           // FIFO, len <= maxQueue
-	maxQueue   int
-	maxWait    time.Duration
+	mu       sync.Mutex
+	cfg      Config
+	inflight int
+	byPart   map[uint64]int  // only partitions with inflight > 0; len <= Max
+	queue    []*waiter       // FIFO, len <= MaxQueue
+	// M8 adds throttled map[uint64]int: cap overrides from missrate, bounded by TopK, read in capFor.
 }
 
 type waiter struct {
-	part  uint64
-	class Class
-	ready chan struct{} // closed when granted
+	part    uint64
+	class   Class
+	ready   chan struct{} // closed when granted
 	granted bool
 }
 
+var ErrShed = errors.New("weir: limiter shed")       // background found no slot
+var ErrQueueFull = fmt.Errorf("%w: queue full", ErrShed)
+var ErrQueueTimeout = fmt.Errorf("%w: queue timeout", ErrShed)
+
+func New(cfg Config) *Limiter
 func (l *Limiter) Acquire(ctx context.Context, c Class, part uint64) (*Permit, error)
-func (p *Permit) Release()
+func (p *Permit) Release() // idempotent
 ```
 
-Admission check `canRun(class, part)`: `inflight < max`, and for `Background` and `Warm` `inflight < max - reserve`, and `byPart[part] < capFor(part)`.
+The engine fills `Config` from `LimiterConfig` and maps all three errors to its own `ErrShed`; the sentinel says which `EvShed` detail applies (`background`, `queue-full`, `queue-timeout`). The global cap is read only through `limit()` and the partition cap only through `capFor(part)` (D13).
+
+Admission check `canRun(class, part)`: `inflight < limit()`, and for `Background` and `Warm` `inflight < limit() - Reserve`, and `byPart[part] < capFor(part)`.
 
 `Acquire`:
 
-1. Lock. If `canRun` and no queued waiter is eligible ahead of us (FIFO fairness only among runnable waiters), take the slot, unlock, return.
+1. Lock. If `canRun`, take the slot, unlock, return. No queued waiter can be runnable at this point, because `Release` grants every runnable waiter before it unlocks and nothing else frees capacity, so `canRun` alone keeps FIFO order among runnable waiters. Anything that later raises `limit()` or `capFor` (D13 adaptive limits, an M8 throttle expiring) must run the same grant walk, or this invariant breaks. `TestLimiterInvariants` checks it after every random step.
 2. `Background`: unlock, return `ErrShed` (never queues).
-3. Queue full: unlock, return `ErrShed`.
-4. Append a waiter, unlock. `select` on `ready`, `ctx.Done()`, and a timer of `maxWait` (`Warm` waits on `ctx` only).
-5. On timeout or cancellation: lock; if `granted` became true in the race, keep the slot and return it; else remove the waiter; unlock; return `ErrShed` or `ctx.Err()`.
+3. Queue full: unlock, return `ErrQueueFull`.
+4. Append a waiter, unlock. `select` on `ready`, `ctx.Done()`, and a timer of `MaxWait` (`Warm` waits on `ctx` only).
+5. On timeout or cancellation: lock; if `granted` became true in the race, keep the slot and return the permit with a nil error; else remove the waiter; unlock; return `ErrQueueTimeout` or `ctx.Err()`. A caller granted with a done context should check `ctx.Err()` before using the slot.
 
-`Release`: lock; decrement `inflight` and `byPart[part]` (delete at zero); walk the queue from the head and grant every waiter for which `canRun` holds, marking `granted`, updating counters and closing `ready`; unlock. Waiters whose partition is at its cap are skipped, not dropped, so one saturated partition does not block others (FR-LIM-3). The walk is O(queue length) in the worst case; with `MaxQueue = 1024` this is acceptable, and the benchmark in M4 checks it.
+`Release`: lock; decrement `inflight` and `byPart[part]` (delete at zero); walk the queue from the head and grant every waiter for which `canRun` holds, marking `granted`, updating counters and closing `ready`; compact the queue slice in place; unlock. Waiters whose partition is at its cap are skipped, not dropped, so one saturated partition does not block others (FR-LIM-3). The walk is O(queue length); `BenchmarkLimiterAcquireRelease/full_queue` measures it with 1 023 parked waiters (about 3 µs per release on an M4 Pro, `ponytail:` in limiter.go).
 
 Waiting uses a channel and a timer, both durably blocking inside a synctest bubble (P8).
 
