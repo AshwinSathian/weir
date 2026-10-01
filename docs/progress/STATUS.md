@@ -5,7 +5,7 @@ Phase: 1
 Current card: none
 Card state: awaiting-merge
 Branch: card/M5-04-incident-modes
-PR: pending
+PR: #42 https://github.com/AshwinSathian/weir/pull/42
 Next card: M6-01
 
 ## Blockers
