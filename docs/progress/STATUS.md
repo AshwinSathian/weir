@@ -14,6 +14,7 @@ none
 
 ## Waiting on Ashwin
 
+- Limiter queue exhaustion (adversarial review of #34, M4-01). FR-LIM-3 says a request over its partition cap "queues like any other", so a flood on one path (T-11: random query strings) fills all `MaxQueue` (1024) slots with waiters that cannot run. Origin load stays bounded at `MaxPerPartition`, but once legitimate load uses the other 48 slots, every other path sheds at once with `queue-full` instead of waiting up to 2 s. It costs about 512 requests per second to keep the queue full, and each release walks the 1 023 parked waiters (about 3 µs under the lock). An M8 throttle (cap 1) makes it worse. Proposed fix, with no new config field: cap the queued waiters per partition (for example at `MaxPerPartition`) and shed past that with `queue-full`. This changes FR-LIM-3 and T-11, so it needs your approval; the fix fits in M4-02.
 - M1-18 closes M1, which triggers PLAN P0.0: add `SECURITY.md`, flip the repo to public, enable private vulnerability reporting (D40), tag `v0.1.0` (D24). The card says to ask before flipping visibility. After merging #29, say whether to do P0.0 now (and in which session) or hold it.
 
 ## Decided 2026-09-28 (delegated by Ashwin after the #24 adversarial review)

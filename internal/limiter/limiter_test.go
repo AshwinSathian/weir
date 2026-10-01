@@ -5,6 +5,7 @@ import (
 	"errors"
 	"math/rand/v2"
 	"runtime"
+	"slices"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -293,6 +294,84 @@ func TestLimiterStateBounded(t *testing.T) {
 			t.Fatalf("state: inflight=%d queued=%d parts=%d", in, q, parts)
 		}
 	})
+}
+
+// FR-LIM-1, FR-LIM-3, FR-LIM-4, FR-LIM-6, P8: a randomized model check.
+// After every step of random acquires (all classes, short deadlines),
+// releases and clock advances: inflight stays within Max and equals the
+// permits handed out, partition counts stay within the cap and sum to
+// inflight, and no queued waiter is left runnable (the FIFO invariant the
+// fast path in Acquire relies on). 200 seeds.
+func TestLimiterInvariants(t *testing.T) {
+	for seed := range uint64(200) {
+		synctest.Test(t, func(t *testing.T) {
+			r := rand.New(rand.NewPCG(seed, 7))
+			slots, per := 1+r.IntN(6), 1+r.IntN(3)
+			l := New(Config{
+				Max: slots, MaxQueue: 1 + r.IntN(6), PerPartition: per,
+				Reserve: r.IntN(slots), MaxWait: time.Duration(1+r.IntN(5)) * time.Millisecond,
+			})
+			var held []*Permit
+			got := make(chan *Permit, 256)
+			check := func() {
+				t.Helper()
+				l.mu.Lock()
+				defer l.mu.Unlock()
+				sum := 0
+				for part, n := range l.byPart {
+					if n <= 0 || n > per {
+						t.Fatalf("seed %d: partition %d count %d, cap %d", seed, part, n, per)
+					}
+					sum += n
+				}
+				if l.inflight > slots || sum != l.inflight || l.inflight != len(held) {
+					t.Fatalf("seed %d: inflight %d, max %d, partition sum %d, permits %d",
+						seed, l.inflight, slots, sum, len(held))
+				}
+				for _, w := range l.queue {
+					if l.canRun(w.class, w.part) {
+						t.Fatalf("seed %d: runnable waiter left in the queue", seed)
+					}
+				}
+			}
+			for range 200 {
+				switch r.IntN(4) {
+				case 0, 1:
+					c, part := Class(r.IntN(3)), uint64(r.IntN(4))
+					ctx, cancel := context.WithTimeout(t.Context(), time.Duration(r.IntN(8))*time.Millisecond)
+					go func() {
+						defer cancel()
+						if p, err := l.Acquire(ctx, c, part); err == nil {
+							got <- p
+						}
+					}()
+				case 2:
+					if len(held) > 0 {
+						i := r.IntN(len(held))
+						held[i].Release()
+						held = slices.Delete(held, i, i+1)
+					}
+				case 3:
+					time.Sleep(time.Duration(r.IntN(3)) * time.Millisecond)
+				}
+				synctest.Wait()
+				for len(got) > 0 {
+					held = append(held, <-got)
+				}
+				check()
+			}
+			for _, p := range held {
+				p.Release()
+			}
+			held = nil
+			time.Sleep(time.Second) // every waiter's deadline passes
+			synctest.Wait()
+			for len(got) > 0 {
+				(<-got).Release()
+			}
+			check()
+		})
+	}
 }
 
 // BenchmarkLimiterAcquireRelease measures the fast path, and Release's

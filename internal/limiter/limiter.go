@@ -78,6 +78,10 @@ func New(cfg Config) *Limiter {
 func (l *Limiter) limit() int { return l.cfg.Max }
 
 // capFor is the cap for one partition; M8 adds missrate throttles here.
+//
+// Whatever changes limit or capFor later (an adaptive policy, a throttle
+// expiring) must run Release's grant walk when a cap rises, or queued
+// waiters stay parked while the fast path in Acquire admits newcomers.
 func (l *Limiter) capFor(uint64) int { return l.cfg.PerPartition }
 
 // canRun reports whether a fetch of class c for part may take a slot now.

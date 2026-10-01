@@ -519,3 +519,11 @@ Entry template:
 - Deviations: 04 §8.2 rewritten to the code (Config/New, slice queue, int counts, three sentinels, FIFO invariant, `throttled` deferred to M8); 04 §6.8 no longer mentions `TryAcquire`.
 - Follow-ups: none new; M4-02 notes in STATUS.
 - Context: low; size M was right. card-reviewer: 0 must-fix, 4 should-fix fixed (FIFO test, shed detail sentinels, LLD sync, queued benchmark), 4 nits noted for M4-02.
+
+## 2026-10-01 · M4-01 · review-fixes
+- Branch / PR: card/M4-01-limiter / #34
+- Done: adversarial review of #34. Added a randomized model check (200 seeds, every class, short deadlines): inflight within Max and equal to the permits handed out, partition counts within the cap, no runnable waiter left queued. Documented in code and 04 §8.2 that raising `limit()`/`capFor` later must run the grant walk.
+- Tests: TestLimiterInvariants; 8 hand mutants (no walk, LIFO walk, Warm ignores reserve, Warm times out, Background queues, no partition cap, race-grant leak, double release, waiter left queued) each fail a test. `make check` passes.
+- Deviations: none.
+- Follow-ups: a flood on one partition can fill the shared queue (FR-LIM-3 as written); a fix is proposed under Waiting on Ashwin, to land in M4-02 if approved.
+- Context: low.

@@ -975,7 +975,7 @@ Admission check `canRun(class, part)`: `inflight < limit()`, and for `Background
 
 `Acquire`:
 
-1. Lock. If `canRun`, take the slot, unlock, return. No queued waiter can be runnable at this point, because `Release` grants every runnable waiter before it unlocks and nothing else frees capacity, so `canRun` alone keeps FIFO order among runnable waiters.
+1. Lock. If `canRun`, take the slot, unlock, return. No queued waiter can be runnable at this point, because `Release` grants every runnable waiter before it unlocks and nothing else frees capacity, so `canRun` alone keeps FIFO order among runnable waiters. Anything that later raises `limit()` or `capFor` (D13 adaptive limits, an M8 throttle expiring) must run the same grant walk, or this invariant breaks. `TestLimiterInvariants` checks it after every random step.
 2. `Background`: unlock, return `ErrShed` (never queues).
 3. Queue full: unlock, return `ErrQueueFull`.
 4. Append a waiter, unlock. `select` on `ready`, `ctx.Done()`, and a timer of `MaxWait` (`Warm` waits on `ctx` only).
