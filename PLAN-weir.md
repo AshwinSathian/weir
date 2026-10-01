@@ -105,8 +105,8 @@ Refs: FR-COA-*, FR-STO-12, T6.2, T6.2a, T-19, T-31.
 
 Refs: FR-FRS-5, FR-FRS-6, T6.1.
 
-- [ ] M3.1 Jitter at store and freshen time. AC: `TestJitterSpread`, `TestJitterNeverLengthens`, `TestBatchWriteExpirySpread` pass.
-- [ ] M3.2 Early refresh draw on fresh hits using background flights (the background class is a no-op `TryAcquire` until M4). AC: `TestEarlyRefreshProbability`, `TestEarlyRefreshSingleFlight` pass.
+- [x] M3.1 Jitter at store and freshen time. AC: `TestJitterSpread`, `TestJitterNeverLengthens`, `TestBatchWriteExpirySpread` pass.
+- [x] M3.2 Early refresh draw on fresh hits using background flights (the background class is a no-op `TryAcquire` until M4). AC: `TestEarlyRefreshProbability`, `TestEarlyRefreshSingleFlight` pass.
 
 #### M4 Limiter, storage failure, warm (~2 weeks)
 
