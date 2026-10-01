@@ -16,10 +16,12 @@ import (
 // and stores what is storable (FR-WRM-1, T6.4). Warm.Concurrency workers
 // fetch at once; each waits for a limiter slot outside the foreground
 // reserve until ctx ends. A request with a fresh entry, or whose key
-// another request's flight fetches and stores, counts as skipped (FR-WRM-2). Requests Weir
-// would never store (unsafe methods, Range, only-if-cached) are not sent
-// and count as not stored. Warm stops at the first ctx cancellation and
-// returns ctx's error, or ErrClosed when Close ends it.
+// another request's flight fetches and stores, counts as skipped
+// (FR-WRM-2). Requests Weir would never store (unsafe methods, Range,
+// only-if-cached) are not sent and count as not stored. Warm stops at the
+// first ctx cancellation and returns ctx's error. Once Close starts, it
+// takes no new request, lets running fetches finish within Close's grace,
+// and returns ErrClosed.
 func (e *Engine) Warm(ctx context.Context, reqs iter.Seq[*Request], origin Origin) (WarmStats, error) {
 	if e.closed.Load() {
 		return WarmStats{}, ErrClosed
@@ -29,11 +31,16 @@ func (e *Engine) Warm(ctx context.Context, reqs iter.Seq[*Request], origin Origi
 	wctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	work := make(chan *Request)
+	// closing is closed by the first worker that sees Close start. Running
+	// fetches finish within Close's grace; no new request is taken.
+	closing := make(chan struct{})
 	var (
-		mu    sync.Mutex
-		total WarmStats
-		wg    sync.WaitGroup
+		mu       sync.Mutex
+		total    WarmStats
+		wg       sync.WaitGroup
+		stopOnce sync.Once
 	)
+	stop := func() { stopOnce.Do(func() { close(closing) }) }
 	for range e.cfg.Warm.Concurrency {
 		wg.Add(1)
 		started := e.goBackground(func(bg context.Context) {
@@ -56,7 +63,15 @@ func (e *Engine) Warm(ctx context.Context, reqs iter.Seq[*Request], origin Origi
 					if !ok {
 						return
 					}
+					if e.closed.Load() {
+						stop()
+						return
+					}
 					e.warmOne(wctx, req, origin, &st)
+					if e.closed.Load() { // warmOne may have stopped on it
+						stop()
+						return
+					}
 				case <-wctx.Done():
 					return
 				}
@@ -64,7 +79,7 @@ func (e *Engine) Warm(ctx context.Context, reqs iter.Seq[*Request], origin Origi
 		})
 		if !started {
 			wg.Done()
-			cancel()
+			stop()
 		}
 	}
 feed:
@@ -73,6 +88,8 @@ feed:
 		case work <- req:
 		case <-wctx.Done():
 			break feed
+		case <-closing:
+			break feed
 		}
 	}
 	close(work)
@@ -80,7 +97,7 @@ feed:
 	switch {
 	case ctx.Err() != nil:
 		return total, ctx.Err()
-	case wctx.Err() != nil:
+	case wctx.Err() != nil, isClosed(closing):
 		return total, ErrClosed
 	}
 	return total, nil
@@ -152,6 +169,7 @@ func (e *Engine) warmOne(ctx context.Context, req *Request, origin Origin, st *W
 	// ctx is both its cancellation and its values (FR-COA-9).
 	if !e.goBackground(func(context.Context) { e.runFlight(ctx, ctx, f, sp, origin) }) {
 		f.Publish(&flightResult{fetchResult: fetchResult{err: ErrClosed}})
+		return // Close started after the worker checked; Warm reports ErrClosed
 	}
 	<-f.Done() // ctx ending cancels the fetch, so this returns promptly
 	fr := f.Result().(*flightResult)
@@ -181,5 +199,14 @@ func (e *Engine) warmFollow(ctx context.Context, f *coalesce.Flight, st *WarmSta
 		st.Skipped++
 	default:
 		st.NotStored++
+	}
+}
+
+func isClosed(ch <-chan struct{}) bool {
+	select {
+	case <-ch:
+		return true
+	default:
+		return false
 	}
 }

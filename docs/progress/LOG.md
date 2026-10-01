@@ -583,3 +583,11 @@ Entry template:
 - Deviations: 04 §6.8a added (warm flow and counting rules); 04 §6.7 fetchSpec comment updated.
 - Follow-ups: two questions in STATUS "Waiting on Ashwin" (01 wording for warm skips; ReserveForeground >= MaxConcurrent).
 - Context: medium; size S was about right. card-reviewer: 2 must-fix (Close hung on a blocked iterator; direct path unrecovered panic) fixed, 4 should-fix fixed (priority inversion via queued warm flight, 30 s sleep, bgDropped untested, running-flight skip untested), nit on 04 comment fixed; 01 wording and queue-bound note left to Ashwin (STATUS).
+
+## 2026-10-01 · M4-05 · review-fixes
+- Branch / PR: card/M4-05-warm / #38
+- Done: adversarial review of #38. Probe found `Close` during a long `Warm` let the workers walk every remaining URL (each `goBackground` failed fast), count them `Failed` and return nil. Workers now stop taking requests once `closed` is set and signal the feed loop; running fetches finish within the grace; `Warm` returns `ErrClosed`. Probes also checked: over-size and event-stream warm bodies are closed (2 of 2), a stale ETag entry revalidates with one 304 and is stored, a queued warm waiter does not block foreground behind it in the FIFO.
+- Tests: TestWarmStopsOnClose (failed before the fix: 92 counted `Failed`, nil error). Race ×20 on warm tests, ×3 on the whole module. `make check` passes.
+- Deviations: 04 §6.8a states the Close behavior.
+- Follow-ups (not fixed): a warm call that joins another Warm's or a background refresh's flight that drops counts `Failed`, though it could fetch itself (background refresh only runs on fresh entries, which Warm skips, so the window is small). `Warm.Concurrency` above `MaxQueue` sheds the excess as `queue-full`; `New` does not cap it.
+- Context: low.

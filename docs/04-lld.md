@@ -869,7 +869,7 @@ The limiter's `Background` class never queues: `Acquire(ctx, Background, part)` 
 
 ### 6.8a Warm
 
-`Warm` (warm.go) feeds `reqs` from the caller's goroutine to `Warm.Concurrency` workers started with `goBackground`. Their context is the caller's, canceled also when `bgCtx` is (Close after its grace period). Workers `select` on that context as well as the work channel, so a caller's iterator that never yields again cannot hold `Close` (FR-LCY-2). Each worker classifies, looks up and evaluates like `cacheable`, then:
+`Warm` (warm.go) feeds `reqs` from the caller's goroutine to `Warm.Concurrency` workers started with `goBackground`. Their context is the caller's, canceled also when `bgCtx` is (Close after its grace period). Workers `select` on that context as well as the work channel, so a caller's iterator that never yields again cannot hold `Close` (FR-LCY-2). Once `closed` is set, a worker takes no new request and signals the feed loop to stop; fetches already running finish within Close's grace, requests never tried are not counted, and `Warm` returns `ErrClosed`. Each worker classifies, looks up and evaluates like `cacheable`, then:
 
 - pass-class, `Range` and `only-if-cached` requests are not sent and count as `NotStored`; classification errors count as `Failed` (with `EvKeyRejected`);
 - a fresh entry counts as `Skipped`; `no-cache` and `max-age=0` do not force validation here;

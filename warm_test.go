@@ -253,3 +253,36 @@ func TestWarmOriginBodyPanic(t *testing.T) {
 		}
 	})
 }
+
+// FR-LCY-2, 01 §4 (Close rejects new Warm work): once Close starts, Warm
+// stops taking requests and returns ErrClosed. Requests it never tried are
+// not counted, and the fetches already running finish within the grace.
+func TestWarmStopsOnClose(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		o := testorigin.NewChecked(t, 64, 16)
+		b := cacheable("v")
+		b.Delay = time.Second
+		o.Default(b)
+		e := newEngine(t, cacheCfg)
+
+		var paths []string
+		for i := range 100 {
+			paths = append(paths, fmt.Sprintf("/p%d", i))
+		}
+		type warmResult struct {
+			st  weir.WarmStats
+			err error
+		}
+		warmed := make(chan warmResult, 1)
+		go func() {
+			st, err := e.Warm(t.Context(), warmReqs(paths...), o)
+			warmed <- warmResult{st, err}
+		}()
+		time.Sleep(1500 * time.Millisecond) // 4 fetched, 4 in flight
+		closeEngine(t, e)
+		r := <-warmed
+		if !errors.Is(r.err, weir.ErrClosed) || r.st != (weir.WarmStats{Fetched: 8}) || o.TotalCalls() != 8 {
+			t.Fatalf("Warm = %+v, %v with %d origin calls; want ErrClosed, 8 fetched, 8 calls", r.st, r.err, o.TotalCalls())
+		}
+	})
+}
