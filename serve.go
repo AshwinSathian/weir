@@ -10,6 +10,7 @@ import (
 
 	"github.com/AshwinSathian/weir/internal/httpcc"
 	"github.com/AshwinSathian/weir/internal/keys"
+	"github.com/AshwinSathian/weir/internal/limiter"
 	"github.com/AshwinSathian/weir/store"
 )
 
@@ -52,7 +53,7 @@ func (e *Engine) rejected(err error) error {
 
 // pass forwards a request that is never stored, streaming the response.
 func (e *Engine) pass(ctx context.Context, c *keys.Classified, origin Origin, fwd FwdReason) (*Response, error) {
-	res := e.fetch(ctx, (*Request)(&c.Forwarded), origin, false, nil)
+	res := e.fetch(ctx, c, origin, limiter.Foreground, false, nil)
 	if res.err != nil {
 		return nil, res.err
 	}
@@ -153,7 +154,11 @@ func (e *Engine) cacheable(ctx context.Context, c *keys.Classified, origin Origi
 // (fetchDirect).
 func (e *Engine) fetchStored(ctx context.Context, sp *fetchSpec, origin Origin) *flightResult {
 	c, prior := sp.c, sp.prior
-	fr := &flightResult{fetchResult: e.fetch(ctx, (*Request)(&c.Forwarded), origin, true, prior)}
+	class := limiter.Foreground
+	if sp.bg {
+		class = limiter.Background
+	}
+	fr := &flightResult{fetchResult: e.fetch(ctx, c, origin, class, true, prior)}
 	res := &fr.fetchResult
 	if res.err != nil {
 		return fr

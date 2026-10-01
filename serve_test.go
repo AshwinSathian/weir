@@ -44,7 +44,7 @@ func cacheable(body string) testorigin.Behavior {
 // FR-SRV-1: a fresh entry is served without contacting the origin.
 func TestFreshHitNoOrigin(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		o := testorigin.New()
+		o := testorigin.NewChecked(t, 64, 16)
 		o.Default(cacheable("hello"))
 		e := newEngine(t, cacheCfg)
 		defer closeEngine(t, e)
@@ -66,7 +66,7 @@ func TestFreshHitNoOrigin(t *testing.T) {
 // forward again.
 func TestMissStoresThenHits(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		o := testorigin.New()
+		o := testorigin.NewChecked(t, 64, 16)
 		v1 := cacheable("v1")
 		v1.Header.Set("ETag", `"1"`) // a validator keeps the entry past its lifetime
 		o.Default(v1)
@@ -103,7 +103,7 @@ func TestMissStoresThenHits(t *testing.T) {
 // age in whole seconds, including the Age the origin sent.
 func TestAgeHeader(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		o := testorigin.New()
+		o := testorigin.NewChecked(t, 64, 16)
 		o.Default(testorigin.Behavior{Header: http.Header{"Cache-Control": {"max-age=60"}, "Age": {"7"}}, Delay: 2 * time.Second})
 		e := newEngine(t, cacheCfg)
 		defer closeEngine(t, e)
@@ -125,7 +125,7 @@ func TestAgeHeader(t *testing.T) {
 // origin's own Cache-Status members stay in front of ours.
 func TestCacheStatusNoKey(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		o := testorigin.New()
+		o := testorigin.NewChecked(t, 64, 16)
 		o.Route("/stored", cacheable("x"))
 		o.Route("/private", testorigin.Behavior{Header: http.Header{"Cache-Control": {"private"}}})
 		o.Route("/upstream", testorigin.Behavior{Header: http.Header{"Cache-Status": {"CDN; hit"}, "Cache-Control": {"max-age=5"}}})
@@ -167,7 +167,7 @@ func TestCacheStatusNoKey(t *testing.T) {
 // leaves the stored entry, and so the next hit, unchanged.
 func TestServedHeaderMutationDoesNotLeak(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		o := testorigin.New()
+		o := testorigin.NewChecked(t, 64, 16)
 		o.Default(testorigin.Behavior{Header: http.Header{"Cache-Control": {"max-age=60"}, "X-A": {"1"}, "X-B": {"2"}, "X-C": {"3", "4"}}})
 		e := newEngine(t, cacheCfg)
 		defer closeEngine(t, e)
@@ -221,7 +221,7 @@ func TestInvalidRequestsCostNothing(t *testing.T) {
 		}
 		st := &countingStore{Store: m}
 		defer m.Close()
-		o := testorigin.New()
+		o := testorigin.NewChecked(t, 64, 16)
 		e := newEngine(t, weir.Config{Store: st})
 		defer closeEngine(t, e)
 
@@ -262,7 +262,7 @@ func TestInvalidRequestsCostNothing(t *testing.T) {
 // a response varying on it without Vary cannot poison the key.
 func TestKettleUserAgent(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		o := testorigin.New()
+		o := testorigin.NewChecked(t, 64, 16)
 		o.Default(testorigin.Behavior{Func: func(r *weir.Request) (*weir.Response, error) {
 			body := "ua=" + r.Header.Get("User-Agent")
 			return &weir.Response{StatusCode: 200, Header: http.Header{"Cache-Control": {"max-age=60"}},
@@ -290,7 +290,7 @@ func TestKettleUserAgent(t *testing.T) {
 // T-5, FR-FWD-1: the body of a GET never reaches the origin.
 func TestFatGETBodyDropped(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		o := testorigin.New()
+		o := testorigin.NewChecked(t, 64, 16)
 		o.Default(cacheable("x"))
 		e := newEngine(t, cacheCfg)
 		defer closeEngine(t, e)
@@ -343,7 +343,7 @@ func TestBufferedBodyFailures(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
-				o := testorigin.New()
+				o := testorigin.NewChecked(t, 64, 16)
 				o.Default(b)
 				e := newEngine(t, weir.Config{Timeouts: weir.TimeoutsConfig{Origin: time.Second}})
 				defer closeEngine(t, e)
@@ -373,7 +373,7 @@ func TestHardPurgedEntryIsMiss(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer m.Close()
-		o := testorigin.New()
+		o := testorigin.NewChecked(t, 64, 16)
 		o.Default(cacheable("v1"))
 		e := newEngine(t, weir.Config{Store: m, Freshness: weir.FreshnessConfig{NoJitter: true}})
 		defer closeEngine(t, e)
@@ -412,7 +412,7 @@ func headReq(path string) *weir.Request {
 // gets headers only, and a later HEAD or GET is answered from that entry.
 func TestHeadFromGetEntry(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		o := testorigin.New()
+		o := testorigin.NewChecked(t, 64, 16)
 		o.Default(cacheable("hello"))
 		e := newEngine(t, cacheCfg)
 		defer closeEngine(t, e)
@@ -443,7 +443,7 @@ func TestHeadFromGetEntry(t *testing.T) {
 // marker, and a Range request on a fresh entry gets the full 200.
 func TestRangeGarbageNotPoisoning(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		o := testorigin.New()
+		o := testorigin.NewChecked(t, 64, 16)
 		o.Default(testorigin.Behavior{Func: func(r *weir.Request) (*weir.Response, error) {
 			if r.Header.Get("Range") != "" { // an origin that chokes on bad ranges
 				return respond(http.StatusBadRequest, http.Header{"Cache-Control": {"max-age=60"}}, "bad range"), nil
@@ -501,7 +501,7 @@ func TestRangeGarbageNotPoisoning(t *testing.T) {
 // ErrOnlyIfCached (504) without contacting the origin.
 func TestOnlyIfCached(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		o := testorigin.New()
+		o := testorigin.NewChecked(t, 64, 16)
 		o.Default(cacheable("hello"))
 		e := newEngine(t, cacheCfg)
 		defer closeEngine(t, e)
@@ -533,7 +533,7 @@ func TestOnlyIfCached(t *testing.T) {
 // fresh entry even when no-cache would otherwise force validation.
 func TestOnlyIfCachedBeatsNoCache(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		o := testorigin.New()
+		o := testorigin.NewChecked(t, 64, 16)
 		o.Default(cacheable("hello"))
 		cfg := cacheCfg
 		cfg.Client.HonorRevalidation = true
@@ -552,7 +552,7 @@ func TestOnlyIfCachedBeatsNoCache(t *testing.T) {
 // response is served but not stored, and no marker is left behind (T-31).
 func TestRequestNoStore(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		o := testorigin.New()
+		o := testorigin.NewChecked(t, 64, 16)
 		o.Default(cacheable("hello"))
 		e := newEngine(t, cacheCfg)
 		defer closeEngine(t, e)
@@ -588,7 +588,7 @@ func TestNoMarkerAfterUnkeyedInput(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
-				o := testorigin.New()
+				o := testorigin.NewChecked(t, 64, 16)
 				o.Default(testorigin.Behavior{Header: http.Header{"Cache-Control": {"private"}}, Body: []byte("p")})
 				e := newEngine(t, tc.cfg)
 				defer closeEngine(t, e)
@@ -616,7 +616,7 @@ func TestClientNoCacheIgnored(t *testing.T) {
 	for _, d := range directives {
 		t.Run(d.name+" "+d.value+" is a hit by default", func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
-				o := testorigin.New()
+				o := testorigin.NewChecked(t, 64, 16)
 				o.Default(cacheable("hello"))
 				e := newEngine(t, cacheCfg)
 				defer closeEngine(t, e)
@@ -633,7 +633,7 @@ func TestClientNoCacheIgnored(t *testing.T) {
 		}
 		t.Run(d.name+" "+d.value+" validates with HonorRevalidation", func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
-				o := testorigin.New()
+				o := testorigin.NewChecked(t, 64, 16)
 				b := cacheable("hello")
 				b.Header.Set("ETag", `"1"`)
 				o.Default(b)
@@ -660,7 +660,7 @@ func TestClientNoCacheIgnored(t *testing.T) {
 // response on arrival.
 func TestOriginClockSkewDoesNotStale(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		o := testorigin.New()
+		o := testorigin.NewChecked(t, 64, 16)
 		o.Default(testorigin.Behavior{Header: http.Header{
 			"Cache-Control": {"max-age=300"},
 			"Date":          {time.Now().Add(-10 * time.Minute).UTC().Format(http.TimeFormat)},
@@ -684,7 +684,7 @@ func TestNewerResponseWins(t *testing.T) {
 		gate := make(chan struct{})
 		var mu sync.Mutex
 		n := 0
-		o := testorigin.New()
+		o := testorigin.NewChecked(t, 64, 16)
 		o.Default(testorigin.Behavior{Func: func(*weir.Request) (*weir.Response, error) {
 			date := time.Now().UTC().Format(http.TimeFormat)
 			mu.Lock()
@@ -736,7 +736,7 @@ func TestNewerResponseWinsSkipsPurgedEntry(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer m.Close()
-		o := testorigin.New()
+		o := testorigin.NewChecked(t, 64, 16)
 		ahead := cacheable("v1")
 		ahead.Header.Set("Date", time.Now().Add(5*time.Minute).UTC().Format(http.TimeFormat))
 		o.Default(ahead)
@@ -787,7 +787,7 @@ func (s *lazyStore) Set(_ context.Context, k store.Key, e *store.Entry) error {
 // otherwise fail path validation) never reaches the origin.
 func TestConnectRejected(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		o := testorigin.New()
+		o := testorigin.NewChecked(t, 64, 16)
 		e := newEngine(t, cacheCfg)
 		defer closeEngine(t, e)
 
@@ -807,7 +807,7 @@ func TestConnectRejected(t *testing.T) {
 // reaches the origin.
 func TestUpgradeRejected(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		o := testorigin.New()
+		o := testorigin.NewChecked(t, 64, 16)
 		e := newEngine(t, cacheCfg)
 		defer closeEngine(t, e)
 
@@ -827,7 +827,7 @@ func TestUpgradeRejected(t *testing.T) {
 // read after Serve returns) and never stored, marker included.
 func TestEventStreamNeverBuffered(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		o := testorigin.New()
+		o := testorigin.NewChecked(t, 64, 16)
 		stream := testorigin.Behavior{
 			Header:    http.Header{"Content-Type": {"text/event-stream"}, "Cache-Control": {"max-age=60"}},
 			Body:      []byte("data: hi\n\n"),
@@ -867,7 +867,7 @@ func TestEventStreamNeverBuffered(t *testing.T) {
 func TestTraceparentValidated(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		const tp = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
-		o := testorigin.New()
+		o := testorigin.NewChecked(t, 64, 16)
 		o.Default(cacheable("x"))
 		e := newEngine(t, cacheCfg)
 		defer closeEngine(t, e)
@@ -908,7 +908,7 @@ func TestNewerResponseWinsSkipsExpiredRecord(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer m.Close()
-		o := testorigin.New()
+		o := testorigin.NewChecked(t, 64, 16)
 		o.Default(testorigin.Behavior{Header: http.Header{
 			"Cache-Control": {"max-age=1"},
 			"Date":          {time.Now().Add(5 * time.Minute).UTC().Format(http.TimeFormat)},
@@ -952,7 +952,7 @@ func TestFetchDropsHopByHop(t *testing.T) {
 				h := hop.Clone()
 				h.Set("Cache-Control", tt.cc)
 				h.Set("Content-Type", tt.ct)
-				o := testorigin.New()
+				o := testorigin.NewChecked(t, 64, 16)
 				o.Default(testorigin.Behavior{Header: h, Body: []byte("x")})
 				e := newEngine(t, cacheCfg)
 				defer closeEngine(t, e)
@@ -978,7 +978,7 @@ func TestFetchDropsHopByHop(t *testing.T) {
 // forces validation only when the request has no Cache-Control.
 func TestPragmaIgnoredWithCacheControl(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		o := testorigin.New()
+		o := testorigin.NewChecked(t, 64, 16)
 		b := cacheable("hello")
 		b.Header.Set("ETag", `"1"`)
 		o.Default(b)
@@ -1013,7 +1013,7 @@ func TestConnectionNamedFieldsStillDecideStorage(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
-				o := testorigin.New()
+				o := testorigin.NewChecked(t, 64, 16)
 				o.Default(testorigin.Behavior{Header: tt.h, Body: []byte("x")})
 				e := newEngine(t, cacheCfg)
 				defer closeEngine(t, e)
@@ -1034,7 +1034,7 @@ func TestConnectionNamedFieldsStillDecideStorage(t *testing.T) {
 func TestConnectionNamedFieldsStillInform(t *testing.T) {
 	t.Run("age", func(t *testing.T) {
 		synctest.Test(t, func(t *testing.T) {
-			o := testorigin.New()
+			o := testorigin.NewChecked(t, 64, 16)
 			o.Default(testorigin.Behavior{Header: http.Header{
 				"Connection": {"Age"}, "Age": {"50"}, "Cache-Control": {"max-age=60"},
 			}, Body: []byte("x")})
@@ -1050,7 +1050,7 @@ func TestConnectionNamedFieldsStillInform(t *testing.T) {
 	})
 	t.Run("event stream", func(t *testing.T) {
 		synctest.Test(t, func(t *testing.T) {
-			o := testorigin.New()
+			o := testorigin.NewChecked(t, 64, 16)
 			o.Default(testorigin.Behavior{
 				Header:    http.Header{"Connection": {"Content-Type"}, "Content-Type": {"text/event-stream"}},
 				Body:      []byte("data: hi\n\n"),
@@ -1068,7 +1068,7 @@ func TestConnectionNamedFieldsStillInform(t *testing.T) {
 	})
 	t.Run("location", func(t *testing.T) {
 		synctest.Test(t, func(t *testing.T) {
-			o := testorigin.New()
+			o := testorigin.NewChecked(t, 64, 16)
 			o.Default(cacheable("v"))
 			o.Route("/a", unsafeAnswer(http.StatusCreated, http.Header{"Connection": {"Location"}, "Location": {"/b"}}, "a"))
 			e := newEngine(t, cacheCfg)
@@ -1088,7 +1088,7 @@ func TestConnectionNamedFieldsStillInform(t *testing.T) {
 // keys or bypass the cache.
 func TestCVE202435296(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		o := testorigin.New()
+		o := testorigin.NewChecked(t, 64, 16)
 		o.Default(cacheable("hello"))
 		e := newEngine(t, cacheCfg)
 		defer closeEngine(t, e)

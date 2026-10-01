@@ -44,7 +44,7 @@ func getReq(path string) *weir.Request {
 // the origin through the single fetch function.
 func TestServePassThroughStub(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		o := testorigin.New()
+		o := testorigin.NewChecked(t, 64, 16)
 		o.Default(testorigin.Behavior{Status: 201, Header: http.Header{"X-A": {"1"}}, Body: []byte("hello")})
 		e := newEngine(t, weir.Config{})
 		defer closeEngine(t, e)
@@ -131,7 +131,7 @@ func TestServeCallerCanceled(t *testing.T) {
 // returns.
 func TestServeStreamBoundedByOriginTimeout(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		o := testorigin.New()
+		o := testorigin.NewChecked(t, 64, 16)
 		o.Default(testorigin.Behavior{Body: []byte("x"), BodyDelay: time.Hour})
 		e := newEngine(t, weir.Config{Timeouts: weir.TimeoutsConfig{Origin: time.Second}})
 		defer closeEngine(t, e)
@@ -219,7 +219,7 @@ func TestCloseRacingGoBackground(t *testing.T) {
 // FR-LCY-2: Serve after Close fails with ErrClosed and never reaches the origin.
 func TestServeAfterClose(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		o := testorigin.New()
+		o := testorigin.NewChecked(t, 64, 16)
 		e := newEngine(t, weir.Config{})
 		closeEngine(t, e)
 		resp, err := e.Serve(t.Context(), getReq("/"), o)

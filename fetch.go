@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/AshwinSathian/weir/internal/keys"
+	"github.com/AshwinSathian/weir/internal/limiter"
 	"github.com/AshwinSathian/weir/store"
 )
 
@@ -33,20 +34,35 @@ type fetchResult struct {
 	reqTime  time.Time
 	respTime time.Time // when the buffered body ended, or the headers arrived
 	err      error
+	// bgDropped: a background fetch found no limiter slot. Foreground
+	// requests that joined its flight fetch again rather than fail (04 §6.8).
+	bgDropped bool
 }
 
-// fetch is the only caller of Origin.Fetch (P3, 04 §6.7). The limiter and
-// breaker join it in their cards. A streamed fetch returns resp.Body for the
-// caller to read; a buffered one reads up to MaxObjectBytes and, when the
-// body is larger, returns a stream of the whole body instead of storing it.
-// The origin timeout bounds the body read either way.
+// fetch is the only caller of Origin.Fetch (P3, 04 §6.7). It forwards
+// c.Forwarded holding a limiter slot of class for c's partition, from before
+// the request is sent until it returns: after the buffered body, or at the
+// headers of a stream (FR-LIM-1, T-18). The breaker joins it in M5. A
+// streamed fetch returns resp.Body for the caller to read; a buffered one
+// reads up to MaxObjectBytes and, when the body is larger, returns a stream
+// of the whole body instead of storing it. The origin timeout, which starts
+// once the slot is held, bounds the body read either way.
 //
 // A non-nil prior, which must have validators, makes the fetch conditional
 // (FR-SRV-3). A 304 whose strong ETag differs from prior's is discarded and
-// the request repeated without conditionals under the same timeout (and,
-// from M4, the same limiter slot). A 304 to that retry is an origin
-// misbehaving; it passes through unstored like any other 304.
-func (e *Engine) fetch(ctx context.Context, req *Request, origin Origin, buffered bool, prior *store.Entry) fetchResult {
+// the request repeated without conditionals under the same timeout and
+// limiter slot. A 304 to that retry is an origin misbehaving; it passes
+// through unstored like any other 304.
+func (e *Engine) fetch(ctx context.Context, c *keys.Classified, origin Origin, class limiter.Class, buffered bool, prior *store.Entry) fetchResult {
+	permit, err := e.lim.Acquire(ctx, class, c.PartitionH)
+	if err != nil {
+		return e.shed(c, class, err)
+	}
+	defer permit.Release()
+	if err := ctx.Err(); err != nil { // granted as the caller left (04 §8.2): send nothing
+		return fetchResult{err: err}
+	}
+	req := (*Request)(&c.Forwarded)
 	tctx, cancel := context.WithTimeoutCause(ctx, e.cfg.Timeouts.Origin, ErrOriginTimeout)
 	fwd := req
 	if prior != nil {
@@ -111,6 +127,27 @@ func (e *Engine) fetch(ctx context.Context, req *Request, origin Origin, buffere
 	resp.Body = http.NoBody
 	res.body = body
 	return res
+}
+
+// shed maps a limiter refusal to the fetch result (FR-LIM-5, 04 §8.2). A
+// context error is the caller's own and passes through.
+func (e *Engine) shed(c *keys.Classified, class limiter.Class, err error) fetchResult {
+	if !errors.Is(err, limiter.ErrShed) {
+		return fetchResult{err: err}
+	}
+	now := time.Now()
+	reason := "background"
+	switch {
+	case errors.Is(err, limiter.ErrQueueFull):
+		reason = "queue-full"
+	case errors.Is(err, limiter.ErrQueueTimeout):
+		reason = "queue-timeout"
+	}
+	emit(e.cfg.Observer, Event{Kind: EvShed, Time: now, Partition: c.Partition, Reason: reason})
+	if class == limiter.Background {
+		emit(e.cfg.Observer, Event{Kind: EvRefreshDropped, Time: now, Partition: c.Partition, Reason: "no-slot"})
+	}
+	return fetchResult{err: &RetryError{Err: ErrShed, After: e.cfg.Limiter.MaxQueueWait}, bgDropped: class == limiter.Background}
 }
 
 // received returns resp with its header as the origin sent it. Engine

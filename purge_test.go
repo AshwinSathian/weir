@@ -37,7 +37,7 @@ func unsafeAnswer(status int, h http.Header, body string) testorigin.Behavior {
 // entry with a validator is revalidated, not refetched in full.
 func TestUnsafeMethodInvalidates(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		o := testorigin.New()
+		o := testorigin.NewChecked(t, 64, 16)
 		o.Default(cacheable("v"))
 		o.Route("/a", unsafeAnswer(http.StatusCreated, http.Header{
 			"Location":         {"b?q=1"},
@@ -122,7 +122,7 @@ func TestPurgeDuringInflightFetch(t *testing.T) {
 		gate := make(chan struct{})
 		var mu sync.Mutex
 		gets := 0
-		o := testorigin.New()
+		o := testorigin.NewChecked(t, 64, 16)
 		o.Default(testorigin.Behavior{Func: func(r *weir.Request) (*weir.Response, error) {
 			if r.Method == http.MethodPost {
 				return &weir.Response{StatusCode: http.StatusNoContent, Body: http.NoBody}, nil

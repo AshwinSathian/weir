@@ -399,7 +399,7 @@ func runRFCRow(t *testing.T, row rfcRow) {
 	}
 	e := newEngine(t, cfg)
 	defer closeEngine(t, e)
-	o := testorigin.New()
+	o := testorigin.NewChecked(t, 64, 16)
 
 	for i, s := range row.steps {
 		time.Sleep(s.after)

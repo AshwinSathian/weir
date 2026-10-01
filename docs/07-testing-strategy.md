@@ -1,7 +1,7 @@
 # Weir testing strategy
 
 Status: v1.0
-Date: 2026-09-28
+Date: 2026-10-01
 Depends on: [01-technical-spec.md](01-technical-spec.md), [06-threat-model.md](06-threat-model.md)
 Seed name: `03-testing-strategy.md` (renumbered, see [docs/README.md](README.md))
 
@@ -119,8 +119,13 @@ Each seed taxonomy entry maps to the tests below. "Engine" tests run under synct
 ### T6.3 Cross-key stampede
 
 - `TestLimiterCap5000Keys` (engine): 5 000 cold keys on 5 000 distinct paths (so the per-partition cap does not bind) requested at once, origin delay 50 ms, `MaxConcurrent = 64`, `MaxQueue = 10000`, `MaxQueueWait = 1 min`; origin max in-flight is exactly 64; all 5 000 succeed.
-- `TestLimiterShedsWithStale` (engine): same, with `MaxQueue = 100` and stale entries with SIE present for half the keys; those serve stale with `detail=shed`; the rest get `ErrShed` or succeed; none waits beyond `MaxQueueWait`.
-- `TestPartitionFairness` (engine): 1 000 requests to unique query strings on `/search` plus 50 requests to distinct other paths; `/search` never exceeds `MaxPerPartition` in-flight; all 50 other requests complete without shedding.
+- `TestLimiterShedsWithStale` (engine): same, with `MaxQueue = 100` and stale entries with SIE present for half the keys; those serve stale with `detail=shed`; the rest get `ErrShed` or succeed; none waits beyond `MaxQueueWait` plus its own origin time.
+- `TestPartitionFairness` (engine): `MaxQueue = 100`; 1 000 requests to unique query strings on `/search`, then 50 requests to distinct other paths; `/search` never exceeds `MaxPerPartition` in-flight and gets exactly `MaxPerPartition + max(MaxPerPartition, MaxQueue/4)` = 41 served (in flight plus queued), the rest shed; all 50 other requests complete without shedding.
+- `TestLimiterPartitionQueueCapQuarter` (component): with `MaxQueue/4 > PerPartition` a partition queues `MaxQueue/4` waiters.
+- `TestFlightTableBoundedUnderFlood` (engine): 5 000 cold keys with a gated origin and clients that leave; the flight table holds exactly `MaxConcurrent + MaxQueue` flights, and none once the origin answers.
+- `TestLimiterPartitionQueueCap` (component): a partition holds at most max(`PerPartition`, `MaxQueue/4`) queued waiters; the next gets `ErrQueueFull` while other partitions still queue; a waiter leaving by timeout or grant frees its place.
+- `TestBackgroundRefreshDroppedWithoutSlot` (engine): with `MaxConcurrent − ReserveForeground` slots busy, an early refresh is dropped with `EvRefreshDropped` `no-slot` and the hit is still served.
+- `TestBackgroundDroppedFollowerFetches` (engine): a request that joined a background flight which found no slot gets a foreground fetch, not `ErrShed`.
 - `TestLimiterSkipsFullPartition` (component): queue head blocked by its partition cap does not block a later waiter of another partition.
 - `TestLimiterQueueTimeout`, `TestLimiterCancel`, `TestLimiterGrantRace` (component): the grant-versus-timeout race returns the slot exactly once (run 1 000 times with shuffled timings inside the bubble).
 
@@ -224,7 +229,7 @@ Named in [06-threat-model.md](06-threat-model.md), [01-technical-spec.md](01-tec
 | `TestCacheStatusNoKey` (engine) | no emitted `Cache-Status` contains `key=` |
 | `TestGroupsScopedByOrigin` (engine) | group `g` purged on `https://a.example` does not affect `g` on `https://b.example` |
 | `TestPathFloodOriginBounded` (engine) | 10 000 requests to distinct paths: origin in-flight never exceeds `MaxConcurrent`; shed requests get `ErrShed` quickly |
-| `TestSlowReaderDoesNotPinSlots` (engine) | 200 pass-through responses whose consumers never read the body: limiter in-flight returns to 0 once headers arrived; streams end at `Timeouts.Origin` |
+| `TestSlowReaderDoesNotPinSlots` (engine) | 200 pass-through responses whose consumers never read the body: limiter in-flight returns to 0 once headers arrived, so the next request never queues (no fake time passes); streams end at `Timeouts.Origin` |
 | `TestRefreshNeverExceedsReserve` (engine) | under SWR load, background fetches never push in-flight above `MaxConcurrent - ReserveForeground` |
 | `TestOversizedStreamedNotBuffered` (engine) | a 50 MiB response is streamed to the creator; engine heap growth stays below 2 × `MaxObjectBytes`; followers re-enter and fetch themselves |
 | `TestShardDistributionAdversarial` (component) | 100 000 keys chosen to share their first 8 bytes spread across shards within 20% of uniform |
