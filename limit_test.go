@@ -445,6 +445,9 @@ type dripBody struct {
 }
 
 func (b *dripBody) Read(p []byte) (int, error) {
+	if err := b.ctx.Err(); err != nil {
+		return 0, err
+	}
 	if len(b.burst) > 0 {
 		n := copy(p, b.burst)
 		b.burst = b.burst[n:]
@@ -624,8 +627,8 @@ func TestDripOriginReleasesSlot(t *testing.T) {
 	})
 }
 
-// FR-TMO-2: streamed bodies (pass-through and oversized) have no total
-// deadline. A 2-minute stream that keeps sending survives Timeouts.Origin;
+// FR-TMO-2, FR-STR-1: streamed bodies (pass-through, oversized and event
+// streams) have no total deadline. A 2-minute stream that keeps sending survives Timeouts.Origin;
 // one that stalls ends StreamIdle after its last byte.
 func TestStreamIdleTimeout(t *testing.T) {
 	const limit = 1 << 10
@@ -633,9 +636,11 @@ func TestStreamIdleTimeout(t *testing.T) {
 		name  string
 		req   func() *weir.Request
 		burst int
+		ctype string
 	}{
-		{"pass-through", func() *weir.Request { return postReq("/s") }, 0},
-		{"oversized", func() *weir.Request { return getReq("/s") }, limit + 1},
+		{"pass-through", func() *weir.Request { return postReq("/s") }, 0, ""},
+		{"oversized", func() *weir.Request { return getReq("/s") }, limit + 1, ""},
+		{"event stream", func() *weir.Request { return getReq("/s") }, 0, "text/event-stream"},
 	} {
 		for _, stall := range []bool{false, true} {
 			name := tc.name + " sending"
@@ -649,8 +654,11 @@ func TestStreamIdleTimeout(t *testing.T) {
 						if stall {
 							b.stallAfter = 1
 						}
-						return &weir.Response{StatusCode: http.StatusOK,
-							Header: http.Header{"Cache-Control": {"max-age=60"}}, Body: b}, nil
+						h := http.Header{"Cache-Control": {"max-age=60"}}
+						if tc.ctype != "" {
+							h.Set("Content-Type", tc.ctype)
+						}
+						return &weir.Response{StatusCode: http.StatusOK, Header: h, Body: b}, nil
 					})
 					cfg := cacheCfg
 					cfg.Storable.MaxObjectBytes = limit
@@ -678,4 +686,37 @@ func TestStreamIdleTimeout(t *testing.T) {
 			})
 		}
 	}
+}
+
+// FR-TMO-2, T-18: only a Read in progress counts toward StreamIdle. A
+// consumer that waits 90 s between reads of a stream whose origin has the
+// bytes ready keeps it; a Close during a blocked Read ends that Read.
+func TestStreamIdleCountsOnlyReads(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		origin := weir.OriginFunc(func(ctx context.Context, _ *weir.Request) (*weir.Response, error) {
+			return &weir.Response{StatusCode: http.StatusOK, Header: http.Header{},
+				Body: &dripBody{ctx: ctx, burst: []byte("abcde"), n: 1, tick: math.MaxInt64}}, nil
+		})
+		e := newEngine(t, cacheCfg)
+		defer closeEngine(t, e)
+
+		resp, err := e.Serve(t.Context(), postReq("/s"), origin)
+		if err != nil {
+			t.Fatalf("Serve: %v", err)
+		}
+		buf := make([]byte, 1)
+		for i := range 5 {
+			time.Sleep(90 * time.Second)
+			if _, err := resp.Body.Read(buf); err != nil {
+				t.Fatalf("read %d after a 90 s pause: %v", i, err)
+			}
+		}
+		done := make(chan error, 1)
+		go func() { _, err := resp.Body.Read(buf); done <- err }() // the origin never sends the last byte
+		time.Sleep(time.Second)
+		resp.Body.Close()
+		if err := <-done; err == nil {
+			t.Fatal("Read blocked across Close returned no error")
+		}
+	})
 }
