@@ -656,3 +656,19 @@ Entry template:
 - Deviations: 01 FR-COA-5 amended.
 - Follow-ups: none.
 - Context: low.
+
+## 2026-10-01 · M5-04 · done
+- Branch / PR: card/M5-04-incident-modes / #42
+- Done: mode.go: `SetMode` (ttl in (0, 24 h], `EvMode` and a log line on change and on expiry), `currentMode` on an `atomic.Pointer[modeState]`, `staleOK` widening stale-if-error under `ModeStaleOnError` (staleness in [0, 24 h], no hard or invalidating epoch, none of must-revalidate, proxy-revalidate, no-cache, s-maxage) for `onFetchError` and `staleOnTimeout`. `ModeBypass` forwards through `pass()` with the new `keys.Classified.AsBypass()` (request as received, FR-FWD-3).
+- Tests: TestSetModeRejectsInvalid, TestModeExpires, TestModeStaleOnErrorLimits, TestModeBypass (asserts the forwarded request), TestModeBypassThroughBreaker, TestModeStaleOnErrorFreshForcedValidation, TestCoalesceStuckLeader "stale-on-error mode" subtest. `make check` passes.
+- Deviations: 04 §14 modes bullet now names `staleOK`, `staleOnTimeout`, `AsBypass` and the full flag list.
+- Follow-ups: FR-MODE-2 and s-maxage under Waiting on Ashwin. Reviewer must-fix (bypass sent the normalized cacheable forward) and should-fixes (fresh entry served on forced validation, missing tests, LLD drift) fixed.
+- Context: low; resumed an uncommitted start from an earlier session. Touched internal/keys and coalesce_test.go beyond the card's list.
+
+## 2026-10-01 · M5-04 · review-fixes
+- Branch / PR: card/M5-04-incident-modes / #42
+- Done: adversarial review of #42. An `only-if-cached` request in bypass went to the origin; FR-SRV-6 always honors it, so it now gets `ErrOnlyIfCached`. FuzzMalformedHeaderAbsent failed on `main`: its oracle measured the raw Cookie line, but FR-VAL-3 counts the keyed pair after OWS trimming. The oracle is fixed and the seed is kept.
+- Tests: TestModeBypass checks only-if-cached; TestModeExpires checks expiry at exactly ttl; TestSetModeRejectsInvalid adds `ModeBypass+1`. 16 hand mutants: 15 killed, 1 survives (a non-CAS expiry can emit duplicate EvMode under a race; cosmetic). Race tests with shuffle passed 5 times; every fuzz target ran clean, keys cookie target for 60 s. `make check` passes.
+- Deviations: 04 §14 notes only-if-cached in bypass.
+- Follow-ups: FR-MODE-3 vs FR-SRV-6 wording, and stale-on-error reach under default retention, under Waiting on Ashwin.
+- Context: low.

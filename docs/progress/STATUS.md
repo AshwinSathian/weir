@@ -4,15 +4,20 @@ Updated: 2026-10-01
 Phase: 1
 Current card: none
 Card state: awaiting-merge
-Branch: card/M5-03-stale-if-error
-PR: #41 https://github.com/AshwinSathian/weir/pull/41
-Next card: M5-04
+Branch: card/M5-04-incident-modes
+PR: #42 https://github.com/AshwinSathian/weir/pull/42
+Next card: M6-01
 
 ## Blockers
 
 none
 
 ## Waiting on Ashwin
+
+- #42 adversarial review: FR-MODE-3 ("every request is handled as pass-through") conflicts with FR-SRV-6 ("only-if-cached is always honored") for an `only-if-cached` request in bypass. The fix follows FR-SRV-6: `ErrOnlyIfCached`, origin not contacted (04 §14). Proposed fix: FR-MODE-3 adds "except `only-if-cached`, which gets `ErrOnlyIfCached`". FR-BYP-1 (M7-03) has the same question.
+- #42 adversarial review: by default `ModeStaleOnError` can only serve entries the store still holds. An entry without an SWR or SIE window is kept only `Freshness.Keep` (5 min) past expiry, and only with a validator. So "up to 24 h of staleness" is reachable only with longer windows or a larger `Keep`. Should FR-MODE-2 say so, or should the default retention change? (A retention change is a default, so it needs your approval.)
+
+- M5-04: `ModeStaleOnError` also refuses entries with `s-maxage` (FR-STL-3; RFC 9111 §5.2.2.10 makes s-maxage imply proxy-revalidate), even ones with an explicit `stale-if-error` (their own window still applies). FR-MODE-2 lists only must-revalidate, proxy-revalidate and no-cache. Should FR-MODE-2 name s-maxage too?
 
 - `Timeouts.Background` (public field, default 30s) is never read: every fetch uses `Timeouts.Origin`. The spec does not say which classes it bounds. Should it replace `Timeouts.Origin` for `limiter.Background` only, or for Warm too? M5-02 left it unwired.
 - FR-STL-1 says an SWR hit starts a refresh; M5-02 skips it for `Authorization` and `no-store` requests (same gate as early refresh, T-8, T-31, now in 04 §6.8). Should 01 FR-STL-1 and FR-FRS-6 say so?
@@ -34,6 +39,10 @@ Already built, now confirmed: the weirhttp default transport (compression off, n
 The cards' Notes give the reasons and the options rejected. All three come before M1-18, because closing M1 makes the repo public.
 
 ## Notes for the next session
+
+- M5-04: `staleOK` (mode.go) is the single stale-on-error test for `onFetchError` and `staleOnTimeout`; M6-01's negative-entry path in `onFetchError` sits after it. The mode widens only entries still stored, so it helps entries with a validator (kept `Freshness.Keep`) or an SIE/SWR window.
+- M5-04: bypass uses `keys.Classified.AsBypass()`, which re-runs the `ClassPass` builder on the original request. M7-03 bypass rules (FR-BYP-1) can call the same method.
+- M5-04: mode expiry is noticed lazily by the next `Serve`; a racing `SetMode` and expiry can emit `EvMode` events out of order (rare, cosmetic).
 
 - M5-03: `fetch` calls `e.cb.Allow` before the limiter; shed and caller-gone end in `Cancel`. Outcomes are recorded at the headers, or after the body for buffered fetches (a truncated body is a `Failure`). Only Foreground fetches probe; Background and Warm get `ErrCircuitOpen` while not Closed, and Background also emits `EvRefreshDropped{circuit-open}`.
 - M5-03: `ErrCircuitOpen`'s Retry-After is `breaker.Remaining()` floored at 1 s (half-open has no end time). `Remaining` is a new internal method in 04 §8.3; the earlier note asked to check a new accessor with Ashwin, so the PR flags it for confirmation.
