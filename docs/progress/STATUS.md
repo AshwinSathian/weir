@@ -14,7 +14,6 @@ none
 
 ## Waiting on Ashwin
 
-- M7-01 review: FR-KEY-11 normalizes Vary values in the variant key only; the forwarded request keeps the client's raw lines (hard rule 4 says normalization rewrites the request). Example: `X-Custom: a` plus `X-Custom: b` keys as `a,b`, but an origin using `Header.Get` sees `a`. Affects only `Forward.Allow` fields (already unkeyed input, T-31). Options: forward Allow fields that a Vary names in normalized one-line form, or record the gap under 06 T-31.
 - M6-01: FR-NEG-4 was widened without prior sign-off. Negative entries are now also never created for requests with a `no-store` directive, after a forwarded `Forward.Allow` field or under `ForwardAll` (T-17, T-31, same rule as markers), or by background refresh and warm fetches. It only narrows when entries are written. Approve, or say which exclusion to drop.
 - M6-01: FR-NEG-3 says `Cache-Status: Weir; hit; detail=negative`; 04 §6.6 and the code add `ttl=<remaining>`. Proposed: FR-NEG-3 names `ttl` too.
 - #42 adversarial review: FR-MODE-3 ("every request is handled as pass-through") conflicts with FR-SRV-6 ("only-if-cached is always honored") for an `only-if-cached` request in bypass. The fix follows FR-SRV-6: `ErrOnlyIfCached`, origin not contacted (04 §14). Proposed fix: FR-MODE-3 adds "except `only-if-cached`, which gets `ErrOnlyIfCached`". FR-BYP-1 (M7-03) has the same question.
@@ -25,6 +24,10 @@ none
 - `Timeouts.Background` (public field, default 30s) is never read: every fetch uses `Timeouts.Origin`. The spec does not say which classes it bounds. Should it replace `Timeouts.Origin` for `limiter.Background` only, or for Warm too? M5-02 left it unwired.
 - FR-STL-1 says an SWR hit starts a refresh; M5-02 skips it for `Authorization` and `no-store` requests (same gate as early refresh, T-8, T-31, now in 04 §6.8). Should 01 FR-STL-1 and FR-FRS-6 say so?
 - M1-18 closes M1, which triggers PLAN P0.0: add `SECURITY.md`, flip the repo to public, enable private vulnerability reporting (D40), tag `v0.1.0` (D24). The card says to ask before flipping visibility. After merging #29, say whether to do P0.0 now (and in which session) or hold it.
+
+## Decided 2026-10-02
+
+- FR-KEY-11 (delegated by Ashwin after the #44 review): Vary values are keyed exactly as forwarded, no line combining or whitespace removal. A generic normalizer cannot know a field's syntax (commas in quoted strings), and an origin reading one line answers `a` + `b` lines differently from `a,b`, so equating them served one client's answer to another. RFC 9111 §4.1 always permits not matching; the cost is a split variant. Rejected: forwarding the normalized form (rewrites values origins depend on, and Vary is unknown at forward time); documenting the gap under T-31 (leaves a poisoning primitive). 01 FR-KEY-11, 04 §3.3, 06 T-15 and 07 updated.
 
 ## Decided 2026-10-01
 

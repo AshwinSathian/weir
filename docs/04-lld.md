@@ -392,11 +392,11 @@ Implementation uses a pooled `[]byte` builder (`sync.Pool` of `*[]byte`, reset l
 ```
 buf = "weir/variant/v1" + Primary[:]
 for name in VaryNames (canonical form as http.CanonicalHeaderKey, sorted, deduplicated at spec creation):
-    field(0x30, name); presence; if present: field(0x31, normalizedValue(name, fwd.Header))
+    field(0x30, name); presence; if present: 0x31, uvarint(len(lines)), then each line length-prefixed (fwd.Header[name], as forwarded)
 Variant = sha256(buf)
 ```
 
-`normalizedValue` uses the registered normalizer for `Accept-Encoding` (its value in the forwarded request is already the bucket token, so this is identity) and the generic list normalizer otherwise (FR-KEY-11). Names are kept in canonical form rather than lowercased so the hit path reads `fwd.Header[name]` without converting each name. With no names the variant key is `Primary` itself.
+Values are keyed exactly as forwarded, with no whitespace or line normalization (FR-KEY-11): the forwarded request already carries the registered normal forms (`Accept-Encoding` bucket, keyed cookies), and any other field reaches the origin as received, so the key must not equate renderings the origin can tell apart. The line count is encoded so `["a", "b"]` and `["a,b"]` differ. Names are kept in canonical form rather than lowercased so the hit path reads `fwd.Header[name]` without converting each name. With no names the variant key is `Primary` itself.
 
 ### 3.4 Query rewrite
 

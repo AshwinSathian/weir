@@ -168,6 +168,12 @@ var rfcRows = []rfcRow{
 			{hdr: []string{"Accept-Language", "en"}, calls: 1, cacheStatus: "Weir; hit; ttl=60"},
 			{hdr: []string{"Accept-Language", "fr"}, calls: 2, cacheStatus: "Weir; fwd=vary-miss; fwd-status=200; stored"},
 		}},
+	{sec: "9111 §4.1", name: "values match only as forwarded: two lines are not their combination",
+		cfg: func(c *weir.Config) { c.Forward.Allow = []string{"Accept-Language"} }, steps: []rfcStep{
+			{origin: bh(200, "x", "Cache-Control", "max-age=60", "Vary", "Accept-Language"), hdr: []string{"Accept-Language", "en", "Accept-Language", "fr"}, calls: 1},
+			{hdr: []string{"Accept-Language", "en", "Accept-Language", "fr"}, calls: 1},
+			{hdr: []string{"Accept-Language", "en, fr"}, calls: 2},
+		}},
 	{sec: "9111 §4.1", name: "a field the cache does not forward matches as absent",
 		steps: []rfcStep{
 			{origin: bh(200, "en", "Cache-Control", "max-age=60", "Vary", "Accept-Language"), hdr: []string{"Accept-Language", "en"}, calls: 1},

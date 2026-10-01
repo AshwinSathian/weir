@@ -45,9 +45,9 @@ func VaryNames(lines []string) (names []string, star bool) {
 
 // VariantKey returns the key of the variant of primary selected by the
 // forwarded header h under names, as VaryNames returns them (FR-KEY-7). It
-// is primary itself when names is empty. T-3: names and values are tagged
-// and length-prefixed, and absence is its own byte, so no value list can
-// pass for another, and absent never matches empty (FR-KEY-11).
+// is primary itself when names is empty. T-3: names, line counts and lines
+// are tagged or length-prefixed, and absence is its own byte, so no line
+// list can pass for another, and absent never matches empty (FR-KEY-11).
 func VariantKey(primary store.Key, names []string, h http.Header) store.Key {
 	if len(names) == 0 {
 		return primary
@@ -64,7 +64,7 @@ func VariantKey(primary store.Key, names []string, h http.Header) store.Key {
 			continue
 		}
 		b = append(b, 1, tagVaryValue)
-		b = appendNormalized(b, lines)
+		b = appendLines(b, lines)
 	}
 	k := store.Key(sha256.Sum256(b))
 	// Vary values are forwarded fields that MaxKeyedHeaderBytes does not
@@ -76,31 +76,18 @@ func VariantKey(primary store.Key, names []string, h http.Header) store.Key {
 	return k
 }
 
-// appendNormalized appends the FR-KEY-11 normal form of a field's lines,
-// length-prefixed: lines joined with ",", whitespace around every comma and
-// at both ends removed. Accept-Encoding needs no normalizer of its own here:
-// its forwarded value is already the bucket token (§5.2.3). The first pass
-// only measures, so the prefix can precede the value without a scratch
-// buffer.
-func appendNormalized(b []byte, lines []string) []byte {
-	var n uint64
-	first := true
-	forEachMember(lines, func(m string) {
-		if !first {
-			n++ // the comma
-		}
-		first = false
-		n += uint64(len(m))
-	})
-	b = binary.AppendUvarint(b, n)
-	first = true
-	forEachMember(lines, func(m string) {
-		if !first {
-			b = append(b, ',')
-		}
-		first = false
-		b = append(b, m...)
-	})
+// appendLines appends a field's lines exactly as forwarded: their count,
+// then each line length-prefixed (FR-KEY-11). No whitespace or line
+// normalization: only the field's own syntax says where whitespace is
+// insignificant (RFC 9111 §4.1), and an origin that reads one line, or
+// quoted strings with commas, would answer two "equal" forms differently.
+// A value the key treats as equal must be one the origin cannot tell apart.
+// Accept-Encoding is the bucket token here, already normalized (§5.2.3).
+func appendLines(b []byte, lines []string) []byte {
+	b = binary.AppendUvarint(b, uint64(len(lines)))
+	for _, l := range lines {
+		b = appendLenPrefixed(b, l)
+	}
 	return b
 }
 

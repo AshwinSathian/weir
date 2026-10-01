@@ -33,34 +33,39 @@ func TestVaryNames(t *testing.T) {
 	}
 }
 
-// FR-KEY-7, FR-KEY-11, T-3: equal normal forms give one key; anything else
-// gives another.
+// FR-KEY-7, FR-KEY-11, T-3: only lines the origin receives identically
+// select the same variant; any other rendering is another variant.
 func TestVariantKey(t *testing.T) {
 	p1, p2 := store.Key{1}, store.Key{2}
 	names := []string{"Accept-Language", "X-A"}
 	k := func(p store.Key, h http.Header) store.Key { return VariantKey(p, names, h) }
 	base := k(p1, http.Header{"Accept-Language": {"en, fr"}, "X-A": {"1"}})
 
-	same := map[string]http.Header{
-		"whitespace around commas and ends": {"Accept-Language": {" en ,\tfr "}, "X-A": {"1"}},
-		"lines combined":                    {"Accept-Language": {"en", "fr"}, "X-A": {"1"}},
-		"unnamed field ignored":             {"Accept-Language": {"en, fr"}, "X-A": {"1"}, "X-B": {"2"}},
-	}
-	for name, h := range same {
-		if k(p1, h) != base {
-			t.Errorf("%s: key differs", name)
-		}
+	if k(p1, http.Header{"Accept-Language": {"en, fr"}, "X-A": {"1"}, "X-B": {"2"}}) != base {
+		t.Error("a field Vary does not name changed the key")
 	}
 	differ := map[string]http.Header{
-		"other value":               {"Accept-Language": {"en"}, "X-A": {"1"}},
-		"order of members":          {"Accept-Language": {"fr, en"}, "X-A": {"1"}},
-		"absent is not empty":       {"Accept-Language": {"en, fr"}},
-		"value moved between names": {"Accept-Language": {"en, fr1"}, "X-A": {""}},
+		"other value":                      {"Accept-Language": {"en"}, "X-A": {"1"}},
+		"order of members":                 {"Accept-Language": {"fr, en"}, "X-A": {"1"}},
+		"whitespace around a comma":        {"Accept-Language": {"en,fr"}, "X-A": {"1"}},
+		"two lines vs one":                 {"Accept-Language": {"en", "fr"}, "X-A": {"1"}},
+		"absent is not empty":              {"Accept-Language": {"en, fr"}},
+		"value moved between names":        {"Accept-Language": {"en, fr1"}, "X-A": {""}},
+		"line boundary moved within field": {"Accept-Language": {"en, f", "r"}, "X-A": {"1"}},
 	}
 	for name, h := range differ {
 		if k(p1, h) == base {
 			t.Errorf("%s: key collides", name)
 		}
+	}
+	// T-15: an origin reading only the first line, or a quoted string,
+	// answers these differently, so they must never share a variant.
+	q := []string{"X-A"}
+	if VariantKey(p1, q, http.Header{"X-A": {"a", "b"}}) == VariantKey(p1, q, http.Header{"X-A": {"a,b"}}) {
+		t.Error("lines a, b share a variant with a,b")
+	}
+	if VariantKey(p1, q, http.Header{"X-A": {`"x, y"`}}) == VariantKey(p1, q, http.Header{"X-A": {`"x,y"`}}) {
+		t.Error("quoted string with comma collapsed")
 	}
 	if k(p2, http.Header{"Accept-Language": {"en, fr"}, "X-A": {"1"}}) == base {
 		t.Error("primary key not in the variant key")
@@ -68,8 +73,7 @@ func TestVariantKey(t *testing.T) {
 	if VariantKey(p1, nil, http.Header{"X-A": {"1"}}) != p1 {
 		t.Error("no names must give the primary key")
 	}
-	empty, absent := k(p1, http.Header{"X-A": {""}}), k(p1, http.Header{})
-	if empty == absent {
+	if k(p1, http.Header{"X-A": {""}}) == k(p1, http.Header{}) {
 		t.Error("an empty value matches absent")
 	}
 }

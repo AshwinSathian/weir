@@ -704,3 +704,11 @@ Entry template:
 - Deviations: 04 §3.1 documents the canonicalization.
 - Follow-ups: FR-KEY-11 normalized key vs raw forwarded lines (quoted strings with commas included) stays under Waiting on Ashwin.
 - Context: low.
+
+## 2026-10-02 · M7-01 · review-fixes
+- Branch / PR: card/M7-01-vary-variants / #44
+- Done: decided the open FR-KEY-11 question (delegated by Ashwin): `VariantKey` keys Vary values exactly as forwarded (line count plus each line length-prefixed) instead of a generic list normalization that equated renderings the origin can tell apart.
+- Tests: TestVaryKeysExactLines, TestVariantKey (two lines vs one, quoted comma, moved line boundary), RFC row "values match only as forwarded". Both fail on the normalizing code. FuzzVaryNames 20 s clean. `make check` passes.
+- Deviations: 01 FR-KEY-11 rewritten, 04 §3.3, 06 T-15, 07 §7 wording; dates bumped.
+- Follow-ups: none from this PR. Older Waiting on Ashwin items untouched.
+- Context: low.

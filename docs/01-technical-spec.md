@@ -1,7 +1,7 @@
 # Weir technical specification
 
 Status: v1.0, approved for Phase 0 and Phase 1 implementation
-Date: 2026-10-01
+Date: 2026-10-02
 Owner: Ashwin Sathian
 Module: `github.com/AshwinSathian/weir`
 Supersedes: the interface sketch in [00-design-doc.md §7.2](00-design-doc.md)
@@ -228,7 +228,7 @@ Package `store` (import path `github.com/AshwinSathian/weir/store`) defines `Sto
 - FR-KEY-8. `Vary: *` MUST prevent storage (RFC 9111 §4.1).
 - FR-KEY-9. In `VaryAuto` mode (default), any header named in `Vary` is folded into the variant key, except the sensitive set `Cookie`, `Authorization` and `Proxy-Authorization`, which prevent storage unless listed in `Key.VaryAllow`. In `VaryStrict` mode, a response whose `Vary` names any header not in `Key.VaryAllow` MUST NOT be stored. No configuration can make Weir store a response under a key that omits a header its `Vary` names.
 - FR-KEY-10. A response whose `Vary` lists more than `Key.MaxVaryHeaders` (default 8) names MUST NOT be stored. When a primary key already has `Key.MaxVariants` (default 8) live variants, a response for a new variant MUST NOT be stored; the request is answered and counted as `vary-overflow`. A variant is live while its ref has not passed `Expires` and its record still exists in the store; dead refs are dropped at the next spec update, freeing their slots (D37).
-- FR-KEY-11. Secondary header normalization for Vary follows RFC 9111 §4.1: lines combined with `, `, optional whitespace around commas removed, leading and trailing whitespace removed. Headers with a registered normalizer (§5.2.3) use it. An absent header only matches absent.
+- FR-KEY-11. Secondary header values for Vary are matched exactly as forwarded: the same lines, in the same order, byte for byte. Weir does not apply RFC 9111 §4.1's optional normalizations (combining lines, removing whitespace) itself, because a generic normalizer cannot know where a field's syntax allows whitespace (a comma inside a quoted string), and an origin that reads one line answers two lines and their combination differently; a key that treats them as equal would serve one client's answer to the other (T-15). Not matching is always permitted (§4.1), so the cost is a split variant, never wrong content. Headers with a registered normalizer (§5.2.3) are already normalized in the forwarded request (the `Accept-Encoding` bucket, keyed cookies), so their keyed value is that normal form. An absent header only matches absent.
 - FR-KEY-12. The key builder MUST be deterministic across processes (no per-process seed in key bytes) so a shared store in Phase 2.5 sees the same keys from every node.
 
 #### 5.2.3 Header normalizers

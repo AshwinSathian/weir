@@ -64,22 +64,29 @@ func TestVaryUnconfiguredHeader(t *testing.T) {
 	})
 }
 
-// FR-KEY-11: list values that differ only in whitespace around commas and
-// at the ends select the same variant.
-func TestVaryNormalizesValues(t *testing.T) {
+// FR-KEY-11, T-15: values are keyed exactly as forwarded. Two lines a and
+// b reach an origin that reads only the first line as "a", so a stored
+// answer to them must not serve a request sending the single line "a,b".
+func TestVaryKeysExactLines(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		o := testorigin.NewChecked(t, 64, 16)
-		o.Default(varyBody("X-Custom", 0))
+		o.Default(varyBody("X-Custom", 0)) // the body is Header.Get: the first line
 		cfg := cacheCfg
 		cfg.Forward.Allow = []string{"X-Custom"}
 		e := newEngine(t, cfg)
 		defer closeEngine(t, e)
 
-		serve(t, e, varyReq("/v", "X-Custom", "a,b"), o)
-		r := getReq("/v")
-		r.Header["X-Custom"] = []string{" a ", "\tb "}
-		if resp, _ := serve(t, e, r, o); !resp.Cache.Hit {
-			t.Fatalf("combined lines missed: %+v", resp.Cache)
+		two := getReq("/v")
+		two.Header["X-Custom"] = []string{"a", "b"}
+		if _, body := serve(t, e, two, o); body != "a" {
+			t.Fatalf("two lines: body %q", body)
+		}
+		resp, body := serve(t, e, varyReq("/v", "X-Custom", "a,b"), o)
+		if resp.Cache.Hit || body != "a,b" {
+			t.Fatalf("one line a,b: hit=%v body %q, want its own answer", resp.Cache.Hit, body)
+		}
+		if resp, _ := serve(t, e, varyReq("/v", "X-Custom", "a,b"), o); !resp.Cache.Hit {
+			t.Fatalf("identical lines missed: %+v", resp.Cache)
 		}
 	})
 }
