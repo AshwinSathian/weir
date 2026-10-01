@@ -447,3 +447,19 @@ Entry template:
 - Deviations: FR-FWD-7 now says every engine decision reads the received response; docs/04 §6.7, docs/07 row.
 - Follow-ups: none.
 - Context: low.
+
+## 2026-10-01 · M1-18 · done
+- Branch / PR: card/M1-18-rfc-bench / #29
+- Done: `rfc9111_test.go` RFC behavior table (62 rows; 57 run, 5 tagged M5/M7/M9 skip) over 07 §7's sections; `BenchmarkServeHitSmall`, `BenchmarkKeyBuild`, `BenchmarkAcceptEncoding`, `BenchmarkMemoryStoreGetParallel`; `docs/benchmarks.md` baseline (M4 Pro, Go 1.27.1).
+- Tests: TestRFC9111, TestCVE202435296 (missing M1.5 AC test, no owning card); `make check` passes.
+- Deviations: benchmarks live in three packages, not one `bench_test.go`, because two measure unexported code. PLAN M1.5 and M1.7 ticked: M1 is complete.
+- Follow-ups: P0.0 (public repo, SECURITY.md, v0.1.0) waits on Ashwin; no card owns `BenchmarkServeHitVary` or `BenchmarkServeMissCoalesced`.
+- Context: medium; size S was right. card-reviewer: 0 must-fix, 5 should-fix fixed (three rows could not fail), nits mostly fixed.
+
+## 2026-10-01 · M1-18 · review-fixes
+- Branch / PR: card/M1-18-rfc-bench / #29
+- Done: adversarial review by mutation testing (40 hand mutants of the engine against `TestRFC9111`). Five survivors were real gaps and are now killed: a 302 stored through its validator, a conditional on a stored non-200, a 304 without `Date`, only-if-cached against a forced validation, and a vacuous cross-origin Location row (steps now take a `host`).
+- Tests: rows added for the non-200 conditional and for only-if-cached under HonorRevalidation; 64 rows, 59 run; `make check` passes.
+- Deviations: none.
+- Follow-ups: the engine returns forwarded responses without `Date` (RFC 9110 §6.6.1 MUST; the wire is fine through net/http); CI lacks the D42 two-version matrix. Both are in STATUS.
+- Context: low.

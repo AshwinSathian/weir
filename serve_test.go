@@ -3,6 +3,7 @@ package weir_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -1074,5 +1075,32 @@ func TestConnectionNamedFieldsStillInform(t *testing.T) {
 				t.Fatalf("Location named in Connection did not invalidate /b: %+v", resp.Cache)
 			}
 		})
+	})
+}
+
+// §5.2.3, FR-VAL-3; T-13 (CVE-2024-35296): 1 000 distinct malformed
+// Accept-Encoding values all collapse to one entry, so they cannot mint
+// keys or bypass the cache.
+func TestCVE202435296(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		o := testorigin.New()
+		o.Default(cacheable("hello"))
+		e := newEngine(t, cacheCfg)
+		defer closeEngine(t, e)
+
+		shapes := []string{"gzip;q=%d.x", "\x80gzip%d", "br;q=-%d", "gzip;;q=%d", "%d" + strings.Repeat("x", 2048), "zstd;q=1.%04d"}
+		for i := range 1000 {
+			ae := fmt.Sprintf(shapes[i%len(shapes)], i)
+			resp, body := serve(t, e, withHeader(getReq("/a"), "Accept-Encoding", ae), o)
+			if body != "hello" || (i > 0 && !resp.Cache.Hit) {
+				t.Fatalf("request %d (%q): body %q hit=%v", i, ae, body, resp.Cache.Hit)
+			}
+		}
+		if n := o.Calls("/a"); n != 1 {
+			t.Fatalf("origin calls = %d, want 1", n)
+		}
+		if got := o.Requests()[0].Header.Values("Accept-Encoding"); len(got) != 1 || got[0] != "identity" {
+			t.Fatalf("forwarded Accept-Encoding = %q, want [identity]", got)
+		}
 	})
 }
