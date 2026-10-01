@@ -790,14 +790,16 @@ type fetchResult struct {
 func (e *Engine) fetch(ctx, s, origin) fetchResult:
     probe, err := e.cb.Allow()              // ErrCircuitOpen when open
     if err: return errResult(ErrCircuitOpen)
-    permit, err := e.lim.Acquire(ctx, s.class, s.partition)
+    pool := e.lim; if s.hasBody: pool = e.upl   // FR-LIM-7, T-39
+    permit, err := pool.Acquire(ctx, s.class, s.partition)
     if err: e.cb.Cancel(probe); return errResult(ErrShed, bgDropped: s.class == Background)
     released := false
     release := func() { if !released { released = true; permit.Release() } }
     defer release()
 
-    tctx, cancel := context.WithTimeoutCause(ctx, timeoutFor(s.class), ErrOriginTimeout)   // ctx: request ctx for direct/pass, detached ctx for flights; the cause tells the origin timeout from the caller's deadline
-    defer cancel()                           // not deferred for streaming; see below
+    tctx, cancelCause := context.WithCancelCause(ctx)   // ctx: request ctx for direct/pass, detached ctx for flights
+    deadline := time.AfterFunc(timeoutFor(s.class), func() { cancelCause(ErrOriginTimeout) })   // the cause tells the origin timeout from the caller's deadline
+    defer { deadline.Stop(); cancelCause(nil) }   // not deferred for streaming; see below
     req := toWeirRequest(s.fwd); addConditionals(req, s.prior)
     t0 := time.Now()
     resp, err := safeFetch(origin, tctx, req)      // recovers panics into *OriginError; (nil, nil) and statuses outside 200..999 (1xx, and what net/http would reject) become *OriginError; nil Header becomes empty, nil Body becomes http.NoBody
@@ -809,7 +811,8 @@ func (e *Engine) fetch(ctx, s, origin) fetchResult:
     resp.Header = clone(resp.Header); dropHopByHop(resp.Header)   // FR-FWD-7: every path below, streams included
     if s.streaming:
         release()                            // slot released at headers (FR-LIM-1)
-        resp.Body = cancelOnClose(resp.Body, cancel)  // origin timeout still bounds the stream
+        deadline.Stop()                      // FR-TMO-2: no total deadline on a stream
+        resp.Body = newIdleBody(tctx, resp.Body, cancelCause, StreamIdle)
         return fetchResult{resp: resp}
     if resp.StatusCode == 304 && s.prior != nil:
         drain(resp.Body)
@@ -821,7 +824,8 @@ func (e *Engine) fetch(ctx, s, origin) fetchResult:
     body, over, rerr := readUpTo(resp.Body, e.cfg.Storable.MaxObjectBytes)
     if rerr != nil: return errResult(ErrOrigin, originHealth: true)   // truncated body is never stored
     if over:
-        return fetchResult{resp: resp, stream: multiReadCloser(body, resp.Body, cancel)} // cancel deferred to stream close
+        deadline.Stop()
+        return fetchResult{resp: resp, stream: newIdleBody(tctx, multiReader(body, resp.Body), cancelCause, StreamIdle)} // cancel deferred to stream close
     if isGatewayFailure(resp.StatusCode) || resp.StatusCode == 500:
         return fetchResult{resp: headOnly(resp), respBody: body, err: statusErr, originHealthFailure: gateway}
     decision := storability(s, resp, body)    // FR-STO-1..10
@@ -832,7 +836,7 @@ func (e *Engine) fetch(ctx, s, origin) fetchResult:
     return fetchResult{entry: ent, shareable: decision.ok, stored: ...}
 ```
 
-`cancelOnClose` and the oversized path keep the timeout context alive until the consumer closes the body; `defer cancel()` is skipped on those paths (the implementation uses a flag, not two code paths with different defers).
+Both stream paths stop the origin deadline at headers and hand the context to `idleBody`, which cancels it on `Close` or after a `Read` makes no progress for `StreamIdle` (§14); the deferred cancel is skipped on those paths.
 
 `e.store(s, ent)` first reads the record currently at the target key; if it is a response whose `Date` (then `ResponseTime`) is later than the new entry's, the write is skipped, so a slow, aged flight finishing late never replaces a newer response (RFC 9111 §4: the most recent response wins). The record the request itself found at lookup is exempt: it was already judged stale or unusable, and an origin whose clock once ran ahead would otherwise pin a purged or invalidated entry until it expires. A record past its `Expires` that a store still returns lazily is exempt too. The read-then-write is not atomic; the race window can only let an older response win when two writes land within the same store round trip, and the next refresh corrects it. It then writes the variant entry first, then the vary spec (or the entry under the primary key when there is no `Vary`), so a concurrent reader that finds the spec usually finds the variant. When the response's `Vary` differs from the stored spec, the new spec replaces it and older variants age out.
 
@@ -1182,8 +1186,8 @@ Limiter: `byHost map[uint64]int32` alongside `byPart`; `canRun` adds `byHost[hos
 
 ## 14. Designs for decisions D25 to D42
 
-- Upload pool (FR-LIM-7): the limiter holds two independent pools with the same algorithm (§8.2): `main` and `upload`. `Classify` sets `HasBody` for `ClassPass` requests when `Request.Body` is neither nil nor `http.NoBody` and the request did not declare `Content-Length: 0`. A cacheable request never has one: its body is not forwarded (T-5), so a fat GET cannot take an upload slot. Partition and host caps apply within each pool.
-- Timeouts (FR-TMO-*): the fetch context carries `Timeouts.Origin` until the buffered body is read. For streams, `fetch` swaps the deadline context for a cancel-only context once headers arrive, and wraps the body in an idle-timeout reader: each `Read` arms a timer of `StreamIdle` (reset per successful read) whose expiry cancels the context. Timers are durably blocking in synctest, so the idle behavior is testable.
+- Upload pool (FR-LIM-7): the limiter holds two independent pools with the same algorithm (§8.2): `main` and `upload`. `Classify` sets `HasBody` for `ClassPass` requests when `Request.Body` is neither nil nor `http.NoBody` and the request did not declare `Content-Length: 0`. A cacheable request never has one: its body is not forwarded (T-5), so a fat GET cannot take an upload slot. Partition and host caps apply within each pool. The upload pool has `MaxUpload` slots, a partition cap of min(`MaxPerPartition`, `MaxUpload`), its own queue of `MaxQueue` waiters with the same `MaxQueueWait`, and no reserve (only foreground pass requests carry a body).
+- Timeouts (FR-TMO-*): the fetch context carries `Timeouts.Origin` until the buffered body is read. The deadline is an `AfterFunc` timer that cancels the fetch context with `ErrOriginTimeout`, so for streams `fetch` stops it once headers arrive and keeps the context. It then wraps the body in an idle-timeout reader: each `Read` arms a timer of `StreamIdle`, stopped when the `Read` returns, whose expiry cancels the context. Time the consumer spends between reads does not count; a slow client is the adapter's write timeout (T-18). Timers are durably blocking in synctest, so the idle behavior is testable.
 - Upgrades (FR-UPG-1, except a lone `h2c`): checked first in `Classify`, before validation of the path (so `CONNECT host:port` authority-form targets never hit the path validator).
 - Event streams (FR-STR-1): checked in `fetch` right after headers, before `readUpTo`; such a response takes the streaming path with `shareable = false` and no marker.
 - Trace headers (FR-FWD-6): `internal/keys` validates `traceparent` with a fixed-length byte check (55 bytes, lowercase hex, version `00`, non-zero ids) and copies the three headers into the forwarded request after the allowlist step.

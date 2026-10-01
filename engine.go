@@ -41,6 +41,7 @@ type Engine struct {
 	ownStore bool
 	flights  coalesce.Table
 	lim      *limiter.Limiter
+	upl      *limiter.Limiter // requests with a body (FR-LIM-7)
 
 	mu        sync.Mutex  // orders setting closed against wg.Add in goBackground
 	closed    atomic.Bool // written under mu; read without it on the Serve path
@@ -81,6 +82,12 @@ func New(cfg Config) (*Engine, error) {
 	e.lim = limiter.New(limiter.Config{
 		Max: l.MaxConcurrent, MaxQueue: l.MaxQueue, PerPartition: l.MaxPerPartition,
 		Reserve: l.ReserveForeground, MaxWait: l.MaxQueueWait,
+	})
+	// Only foreground pass requests carry a body, so the upload pool has no
+	// reserve (04 §14).
+	e.upl = limiter.New(limiter.Config{
+		Max: l.MaxUpload, MaxQueue: l.MaxQueue, PerPartition: min(l.MaxPerPartition, l.MaxUpload),
+		MaxWait: l.MaxQueueWait,
 	})
 	e.bgCtx, e.bgCancel = context.WithCancel(context.Background())
 	return e, nil

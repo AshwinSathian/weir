@@ -42,11 +42,14 @@ type fetchResult struct {
 // fetch is the only caller of Origin.Fetch (P3, 04 §6.7). It forwards
 // c.Forwarded holding a limiter slot of class for c's partition, from before
 // the request is sent until it returns: after the buffered body, or at the
-// headers of a stream (FR-LIM-1, T-18). The breaker joins it in M5. A
+// headers of a stream (FR-LIM-1, T-18). Requests with a body take the slot
+// from the upload pool (FR-LIM-7, T-39). The breaker joins it in M5. A
 // streamed fetch returns resp.Body for the caller to read; a buffered one
 // reads up to MaxObjectBytes and, when the body is larger, returns a stream
-// of the whole body instead of storing it. The origin timeout, which starts
-// once the slot is held, bounds the body read either way.
+// of the whole body instead of storing it. The origin timeout starts once
+// the slot is held and bounds the headers and a buffered body (FR-TMO-1,
+// T-41). A stream has no total deadline; a read that makes no progress for
+// StreamIdle fails it (FR-TMO-2).
 //
 // A non-nil prior, which must have validators, makes the fetch conditional
 // (FR-SRV-3). A 304 whose strong ETag differs from prior's is discarded and
@@ -54,7 +57,11 @@ type fetchResult struct {
 // limiter slot. A 304 to that retry is an origin misbehaving; it passes
 // through unstored like any other 304.
 func (e *Engine) fetch(ctx context.Context, c *keys.Classified, origin Origin, class limiter.Class, buffered bool, prior *store.Entry) fetchResult {
-	permit, err := e.lim.Acquire(ctx, class, c.PartitionH)
+	lim := e.lim
+	if c.HasBody {
+		lim = e.upl
+	}
+	permit, err := lim.Acquire(ctx, class, c.PartitionH)
 	if err != nil {
 		return e.shed(c, class, err)
 	}
@@ -63,7 +70,11 @@ func (e *Engine) fetch(ctx context.Context, c *keys.Classified, origin Origin, c
 		return fetchResult{err: err}
 	}
 	req := (*Request)(&c.Forwarded)
-	tctx, cancel := context.WithTimeoutCause(ctx, e.cfg.Timeouts.Origin, ErrOriginTimeout)
+	// A timer, not WithTimeout, so a stream can drop the deadline at its
+	// headers and keep the context (04 §14).
+	tctx, cancelCause := context.WithCancelCause(ctx)
+	deadline := time.AfterFunc(e.cfg.Timeouts.Origin, func() { cancelCause(ErrOriginTimeout) })
+	cancel := func() { deadline.Stop(); cancelCause(nil) }
 	fwd := req
 	if prior != nil {
 		fwd = withValidators(req, prior)
@@ -104,7 +115,8 @@ func (e *Engine) fetch(ctx context.Context, c *keys.Classified, origin Origin, c
 		if resp.Body == http.NoBody {
 			cancel() // nothing left to bound; keeps NoBody visible to adapters
 		} else {
-			resp.Body = &cancelOnClose{ReadCloser: resp.Body, cancel: cancel}
+			deadline.Stop()
+			resp.Body = newIdleBody(tctx, resp.Body, cancelCause, e.cfg.Timeouts.StreamIdle)
 		}
 		return res
 	}
@@ -118,7 +130,8 @@ func (e *Engine) fetch(ctx context.Context, c *keys.Classified, origin Origin, c
 	}
 	if int64(len(body)) > limit {
 		rest := resp.Body
-		resp.Body = &cancelOnClose{ReadCloser: readCloser{io.MultiReader(bytes.NewReader(body), rest), rest}, cancel: cancel}
+		deadline.Stop()
+		resp.Body = newIdleBody(tctx, readCloser{io.MultiReader(bytes.NewReader(body), rest), rest}, cancelCause, e.cfg.Timeouts.StreamIdle)
 		res.over = true
 		return res
 	}
@@ -223,8 +236,43 @@ func timeoutOrOrigin(ctx, tctx context.Context, err error) error {
 	return &OriginError{Err: err}
 }
 
-// cancelOnClose keeps the origin timeout context alive until the consumer
-// closes the body.
+// idleBody is a streamed origin body (FR-TMO-2). Each Read arms a timer of
+// idle; a Read still blocked when it fires cancels the fetch context with
+// ErrOriginTimeout. Time the consumer spends between reads does not count.
+// Close cancels the context.
+type idleBody struct {
+	io.ReadCloser
+	ctx    context.Context
+	cancel context.CancelCauseFunc
+	idle   time.Duration
+	timer  *time.Timer
+}
+
+func newIdleBody(ctx context.Context, rc io.ReadCloser, cancel context.CancelCauseFunc, idle time.Duration) *idleBody {
+	b := &idleBody{ReadCloser: rc, ctx: ctx, cancel: cancel, idle: idle}
+	b.timer = time.AfterFunc(idle, func() { cancel(ErrOriginTimeout) })
+	b.timer.Stop()
+	return b
+}
+
+func (b *idleBody) Read(p []byte) (int, error) {
+	b.timer.Reset(b.idle)
+	n, err := b.ReadCloser.Read(p)
+	b.timer.Stop()
+	if err != nil && !errors.Is(err, io.EOF) && b.ctx.Err() != nil {
+		err = context.Cause(b.ctx) // the origin's own error cannot pose as the timeout (04 §1.3)
+	}
+	return n, err
+}
+
+func (b *idleBody) Close() error {
+	b.timer.Stop()
+	err := b.ReadCloser.Close()
+	b.cancel(nil)
+	return err
+}
+
+// cancelOnClose runs cancel after the body closes.
 type cancelOnClose struct {
 	io.ReadCloser
 	cancel context.CancelFunc

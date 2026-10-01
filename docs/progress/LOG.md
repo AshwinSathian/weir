@@ -543,3 +543,11 @@ Entry template:
 - Deviations: FR-LIM-3, T-11, 04 §8.2 and 07 T6.3 updated to the quarter cap (approved).
 - Follow-ups: `MaxQueueWait` above `LeaderMaxAge`/`FollowerMaxWait` defeats coalescing under load (STATUS note).
 - Context: low.
+
+## 2026-10-01 · M4-03 · done
+- Branch / PR: card/M4-03-upload-pool / see STATUS
+- Done: upload pool (engine.go `upl`, picked in `fetch` by `c.HasBody`, FR-LIM-7, T-39). Origin deadline is now an `AfterFunc` timer, so streams drop it at headers and use `idleBody` with `StreamIdle` per Read (FR-TMO-2); buffered bodies stay under `Timeouts.Origin` (FR-TMO-1, T-41).
+- Tests: TestSlowUploadsDoNotStarveMisses, TestBodylessPassUsesMainPool, TestDripOriginReleasesSlot, TestStreamIdleTimeout; TestSlowReaderDoesNotPinSlots now expects streams to outlive `Timeouts.Origin`. `make check` passes.
+- Deviations: 04 §14 records the upload pool's queue rules (01 says only "its own queue rules"); 04 §6.7 pseudocode and §14 timeouts bullet updated to the timer and idle reader.
+- Follow-ups: PLAN M4.3b waits on M7-03 (`TestBodylessBypassUsesMainPool`).
+- Context: low; size M was right. card-reviewer: 0 must-fix, 2 should-fix (04 §6.7, §14 wording) fixed, 4 nits left (deadline/idle boundary races on the real clock, EvShed pool name, Content-Length: 0 trust).
