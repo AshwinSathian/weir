@@ -473,7 +473,7 @@ Entry template:
 - Context: low; size S was right. card-reviewer: 0 must-fix, 1 should-fix fixed, 2 nits handled.
 
 ## 2026-10-01 · M2-02 · done
-- Branch / PR: card/M2-02-coalesced-fetch / see STATUS
+- Branch / PR: card/M2-02-coalesced-fetch / #31
 - Done: flight.go (coalesced fetch, detached flight context with values from the creator and cancel only from `Close`, follower timeout to stale-if-error or direct fetch, stream hand-off via `leaveFlight`, panic recovery including body reads); serve.go split into `fetchStored` and `respond`; engine flight table. Authorized and marker requests fetch directly.
 - Tests: TestCoalesceColdKey1000, TestCoalesceCreatorCancel, TestCoalesceStuckLeader, TestCoalesceLeaderAging, TestCoalescePanic, TestCoalesceSkipsDirectRequests, TestCoalesceCanceledByClose; TestNewerResponseWins now uses LeaderMaxAge 1s; `make check` passes.
 - Deviations: 04 §6.4: on timeout without stale the creator keeps waiting on its own flight instead of refetching (default FollowerMaxWait equals Timeouts.Origin under 10 s; refetching doubled origin load). Followers unchanged (FR-COA-4).

@@ -5,7 +5,7 @@ Phase: 1
 Current card: none
 Card state: awaiting-merge
 Branch: card/M2-02-coalesced-fetch
-PR: none
+PR: #31 https://github.com/AshwinSathian/weir/pull/31
 Next card: M2-03
 
 ## Blockers
