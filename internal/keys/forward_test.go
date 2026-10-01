@@ -119,7 +119,9 @@ func FuzzMalformedHeaderAbsent(f *testing.F) {
 		}
 		w := strings.TrimRight(v, " \t")
 		var want []Cookie
-		if visibleASCII(w) && len(line) <= cfg.MaxKeyedHeaderBytes {
+		// FR-VAL-3: the limit counts the keyed pair as forwarded, after OWS
+		// trimming, not the received line.
+		if visibleASCII(w) && len("lang=")+len(w) <= cfg.MaxKeyedHeaderBytes {
 			want = []Cookie{{"lang", w}}
 		}
 		if got := c.Forwarded.Header.Get("Cookie"); got != cookieHeader(want) {
