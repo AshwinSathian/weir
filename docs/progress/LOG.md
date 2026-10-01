@@ -642,7 +642,7 @@ Entry template:
 - Context: low.
 
 ## 2026-10-01 · M5-03 · done
-- Branch / PR: card/M5-03-stale-if-error / PR pending
+- Branch / PR: card/M5-03-stale-if-error / #41
 - Done: breaker wired into `fetch` (Allow before the limiter, Cancel on shed or caller gone, Record at headers or after a buffered body, foreground-only probes, background dropped with `EvRefreshDropped{circuit-open}`, `EvBreakerState` plus a log line). `onFetchError` applies 01 §7.2: stale-if-error with reasons `sie`/`shed`/`circuit-open`, `ErrMustRevalidate`, 5xx pass-through. Flight followers get the flight's buffered 5xx instead of refetching. `breaker.Remaining()` gives the Retry-After hint (floor 1 s).
 - Tests: TestStaleIfErrorOnOriginDown, TestMustRevalidate504, TestDefaultStaleWindowsOff, TestBreakerOpensHalfOpenCloses (engine), TestFollowersShareFlight5xx, TestFollowersDoNotReadCreatorResponse, TestInvalidatedEntryNotServedStaleOnError, TestBreakerCountsBodyFailures, TestBreakerHalfOpenRetryHint, TestBreakerRemaining; stale half of TestLimiterShedsWithStale; RFC 5861 §4 rows and the must-revalidate row untagged. `make check` passes.
 - Deviations: 04 §8.3 adds `Remaining`, the 1 s floor, foreground-only probes and body-failure recording; 04 §6.7 notes the buffered record point.

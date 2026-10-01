@@ -5,7 +5,7 @@ Phase: 1
 Current card: none
 Card state: awaiting-merge
 Branch: card/M5-03-stale-if-error
-PR: none
+PR: #41 https://github.com/AshwinSathian/weir/pull/41
 Next card: M5-04
 
 ## Blockers
