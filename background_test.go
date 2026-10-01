@@ -62,3 +62,17 @@ func TestEarlyRefreshDeltaClamp(t *testing.T) {
 		})
 	}
 }
+
+// FR-FRS-6: the draw is skipped only where no u in (0, 1] that a Rand in
+// [0, 1) can produce would trigger, so the shortcut never changes a decision.
+func TestEarlyRefreshShortcutIsExact(t *testing.T) {
+	minU := 1 - math.Nextafter(1, 0) // the smallest u: 2^-53
+	for _, delta := range []time.Duration{0, time.Millisecond, 500 * time.Millisecond, 10 * time.Second, time.Hour} {
+		for _, beta := range []float64{0.01, 1, 3.5} {
+			bound := time.Duration(37 * float64(clampDelta(delta)) * beta)
+			if xfetch(bound+1, delta, beta, minU) {
+				t.Fatalf("Δ=%v β=%v: triggers past the shortcut bound %v", delta, beta, bound)
+			}
+		}
+	}
+}

@@ -503,3 +503,11 @@ Entry template:
 - Deviations: 04 §6.8 now states the gates (NoEarlyRefresh, JitterMinLifetime, Authorization, request no-store). The stub acquire runs before Join, unlike 04 §6.8; M4-02 moves it (STATUS note).
 - Follow-ups: FR-FRS-6 wording for the Authorization/no-store exclusion (ask Ashwin).
 - Context: low; size S was right. card-reviewer: 0 must-fix, 4 should-fix fixed (gate tests, LLD line, STATUS note, bound in ponytail comment), 1 nit fixed, 3 nits noted.
+
+## 2026-10-01 · M3-01 · review-fixes
+- Branch / PR: card/M3-01-jitter-early-refresh / #33
+- Done: adversarial review of #33. Fixed: every fresh hit paid a `Rand` draw and `math.Log` (+35 ns/op on `BenchmarkServeHitSmall`); hits with more than 37·Δ·β left now skip the draw, which can never trigger there (u >= 2^-53). Added tests for Close canceling a stuck refresh and for an event-stream refresh answer being closed (no creator claims it).
+- Tests: TestEarlyRefreshShortcutIsExact, TestEarlyRefreshNoDrawFarFromExpiry, TestCloseCancelsEarlyRefresh, TestEarlyRefreshClosesUnclaimedStream; shortcut and CreatorGone mutants each fail a test. Forcing the default Rand to always trigger breaks no existing test (no flake exposure); 40 shuffled runs clean. `make check` passes.
+- Deviations: none.
+- Follow-ups: none new.
+- Context: low.

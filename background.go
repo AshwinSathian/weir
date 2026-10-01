@@ -21,6 +21,12 @@ func (e *Engine) maybeEarlyRefresh(ctx context.Context, c *keys.Classified, lk l
 	if c.Authorized || c.ReqCC.NoStore {
 		return
 	}
+	// Hot path: for any Rand in [0, 1), u >= 2^-53, so -ln(u) < 37 and an
+	// entry with more than 37·Δ·β left can never trigger. Skipping the draw
+	// keeps Rand and math.Log off most hits.
+	if 37*float64(clampDelta(lk.entry.FetchDuration))*f.EarlyRefreshBeta < float64(remaining) {
+		return
+	}
 	if xfetch(remaining, lk.entry.FetchDuration, f.EarlyRefreshBeta, 1-e.cfg.Rand()) {
 		e.backgroundRefresh(ctx, c, lk, origin)
 	}
@@ -29,9 +35,10 @@ func (e *Engine) maybeEarlyRefresh(ctx context.Context, c *keys.Classified, lk l
 // xfetch is the FR-FRS-6 trigger: -Δ·β·ln(u) >= remaining, with Δ clamped
 // to [1 ms, 10 s] and u in (0, 1].
 func xfetch(remaining, delta time.Duration, beta, u float64) bool {
-	delta = min(max(delta, time.Millisecond), 10*time.Second)
-	return -float64(delta)*beta*math.Log(u) >= float64(remaining)
+	return -float64(clampDelta(delta))*beta*math.Log(u) >= float64(remaining)
 }
+
+func clampDelta(d time.Duration) time.Duration { return min(max(d, time.Millisecond), 10*time.Second) }
 
 // backgroundRefresh fetches c's key on a flight no request waits on, unless
 // one is already fetching it (04 §6.8). ctx lends its values only (FR-COA-9).
