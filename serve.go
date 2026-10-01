@@ -53,7 +53,7 @@ func (e *Engine) rejected(err error) error {
 
 // pass forwards a request that is never stored, streaming the response.
 func (e *Engine) pass(ctx context.Context, c *keys.Classified, origin Origin, fwd FwdReason) (*Response, error) {
-	res := e.fetch(ctx, c, origin, limiter.Foreground, false, nil)
+	res := e.fetch(ctx, c, origin, limiter.Foreground, false, nil, nil)
 	if res.err != nil {
 		return nil, res.err
 	}
@@ -154,11 +154,7 @@ func (e *Engine) cacheable(ctx context.Context, c *keys.Classified, origin Origi
 // (fetchDirect).
 func (e *Engine) fetchStored(ctx context.Context, sp *fetchSpec, origin Origin) *flightResult {
 	c, prior := sp.c, sp.prior
-	class := limiter.Foreground
-	if sp.bg {
-		class = limiter.Background
-	}
-	fr := &flightResult{fetchResult: e.fetch(ctx, c, origin, class, true, prior)}
+	fr := &flightResult{fetchResult: e.fetch(ctx, c, origin, sp.class, true, prior, sp.permit)}
 	res := &fr.fetchResult
 	if res.err != nil {
 		return fr

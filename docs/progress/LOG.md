@@ -575,3 +575,27 @@ Entry template:
 - Deviations: none.
 - Follow-ups (not fixed): `EvStoreBreaker` open is emitted again on each reopen with no `closed` between, and events are emitted after unlocking, so observers may see them out of order; a gauge must not assume open/closed pairs. Invalidation epochs (`setEpoch`) skipped while the breaker is open are lost with no event, as they were when the store failed (T-9 family). A corrupt remote record on a hot key counts as a store failure (S-3) and can help open the breaker in low traffic.
 - Context: low.
+
+## 2026-10-01 · M4-05 · done
+- Branch / PR: card/M4-05-warm / #38
+- Done: warm.go: `Engine.Warm` with `Warm.Concurrency` engine-owned workers, Warm-class slot acquired before the flight is joined, fetch via `runFlight` on its own goroutine (panic and Goexit safe). `fetchSpec.bg` became `class` plus `permit`; `fetch` takes a held permit; `limFor` picks the pool; `coalesce.NewFlight` for flights outside the table. A warm flight its caller leaves publishes `bgDropped`.
+- Tests: TestWarm, TestWarmDoesNotUseReserve, TestWarmCanceledFollowerFetches, TestWarmJoinsRunningFlight, TestCloseDuringBlockedWarm, TestWarmOriginBodyPanic. Mutants (Warm as Foreground class, no bgDropped on cancel) fail a test. `make check` passes.
+- Deviations: 04 §6.8a added (warm flow and counting rules); 04 §6.7 fetchSpec comment updated.
+- Follow-ups: two questions in STATUS "Waiting on Ashwin" (01 wording for warm skips; ReserveForeground >= MaxConcurrent).
+- Context: medium; size S was about right. card-reviewer: 2 must-fix (Close hung on a blocked iterator; direct path unrecovered panic) fixed, 4 should-fix fixed (priority inversion via queued warm flight, 30 s sleep, bgDropped untested, running-flight skip untested), nit on 04 comment fixed; 01 wording and queue-bound note left to Ashwin (STATUS).
+
+## 2026-10-01 · M4-05 · review-fixes
+- Branch / PR: card/M4-05-warm / #38
+- Done: adversarial review of #38. Probe found `Close` during a long `Warm` let the workers walk every remaining URL (each `goBackground` failed fast), count them `Failed` and return nil. Workers now stop taking requests once `closed` is set and signal the feed loop; running fetches finish within the grace; `Warm` returns `ErrClosed`. Probes also checked: over-size and event-stream warm bodies are closed (2 of 2), a stale ETag entry revalidates with one 304 and is stored, a queued warm waiter does not block foreground behind it in the FIFO.
+- Tests: TestWarmStopsOnClose (failed before the fix: 92 counted `Failed`, nil error). Race ×20 on warm tests, ×3 on the whole module. `make check` passes.
+- Deviations: 04 §6.8a states the Close behavior.
+- Follow-ups (not fixed): a warm call that joins another Warm's or a background refresh's flight that drops counts `Failed`, though it could fetch itself (background refresh only runs on fresh entries, which Warm skips, so the window is small). `Warm.Concurrency` above `MaxQueue` sheds the excess as `queue-full`; `New` does not cap it.
+- Context: low.
+
+## 2026-10-01 · M4-05 · review-fixes
+- Branch / PR: card/M4-05-warm / #38
+- Done: resolved the open questions (Ashwin delegated). 01 FR-WRM-1/2 state the not-sent and skip rules. `New` rejects `ReserveForeground >= MaxConcurrent` (it disabled background refresh and hung Warm) and `Warm.Concurrency` above `MaxConcurrent - ReserveForeground` (extra workers could only hold queue places); the default is lowered to fit, like the coalesce defaults. Warm looks up again after its slot arrives, and retries once when a flight it joined was dropped by another warm caller leaving.
+- Tests: TestWarmConcurrencyDefault, TestWarmRetriesDroppedFlight, three TestInvalidConfigRejected rows; TestWarmDoesNotUseReserve now expects Skipped with one origin call. Mutants (no recheck, no retry) fail. Race x30 on warm tests, x2 on the module. `make check` passes.
+- Deviations: 01 §5.16, FR-LCY-1 and the defaults table; 04 §1 WarmConfig comment and §6.8a.
+- Follow-ups: none.
+- Context: low.

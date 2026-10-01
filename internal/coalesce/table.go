@@ -60,6 +60,10 @@ func (t *Table) Join(k store.Key, now time.Time, maxAge time.Duration) (f *Fligh
 	return f, true
 }
 
+// NewFlight returns a flight outside any table, for a fetch no one may
+// join that still needs runFlight's publishing and recovery.
+func NewFlight() *Flight { return &Flight{done: make(chan struct{})} }
+
 // Len returns the number of joinable flights in the table.
 func (t *Table) Len() int {
 	n := 0
@@ -84,11 +88,13 @@ func (f *Flight) Result() any { return f.res }
 func (f *Flight) Publish(res any) {
 	f.res = res
 	f.published.Store(true)
-	f.sh.mu.Lock()
-	if f.sh.m[f.key] == f {
-		delete(f.sh.m, f.key)
+	if f.sh != nil {
+		f.sh.mu.Lock()
+		if f.sh.m[f.key] == f {
+			delete(f.sh.m, f.key)
+		}
+		f.sh.mu.Unlock()
 	}
-	f.sh.mu.Unlock()
 	close(f.done)
 }
 

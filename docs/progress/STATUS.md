@@ -4,9 +4,9 @@ Updated: 2026-10-01
 Phase: 1
 Current card: none
 Card state: awaiting-merge
-Branch: card/M4-04-store-guard
-PR: #37 https://github.com/AshwinSathian/weir/pull/37
-Next card: M4-05
+Branch: card/M4-05-warm
+PR: #38 https://github.com/AshwinSathian/weir/pull/38
+Next card: M5-01
 
 ## Blockers
 
@@ -31,6 +31,10 @@ Already built, now confirmed: the weirhttp default transport (compression off, n
 The cards' Notes give the reasons and the options rejected. All three come before M1-18, because closing M1 makes the repo public.
 
 ## Notes for the next session
+
+- M4-05: `Warm` acquires its `Warm` slot before joining a flight (`fetchSpec.permit`, the new last `fetch` argument `held`), so a queued warm fetch never holds a flight. Every warm fetch runs `runFlight` on its own engine goroutine; no-flight requests use `coalesce.NewFlight()` (outside the table).
+- M4-05: decided 2026-10-01 (delegated by Ashwin): 01 FR-WRM-1/2 now state the not-sent and skip rules; `New` rejects `ReserveForeground >= MaxConcurrent` and `Warm.Concurrency > MaxConcurrent - ReserveForeground` (default lowered to fit). Concurrent Warm calls each take up to `Warm.Concurrency` queue places (04 §6.8a).
+- M4-05: a warm fetch looks up twice (before the wait, to skip fast; after the slot, to catch live traffic), so remote stores see one more Get and NewestEpoch per fetched URL.
 
 - M4-04: every store call goes through `e.sg` (storeguard.go). Use `e.sg.get/set/newestEpoch/setEpoch`, never `e.sg.s` directly, except `Close`. Delete and Scrub are not wrapped; whoever first calls them (M9 purges) adds a guard method.
 - M4-04: any store error except `ErrNotFound` counts toward the breaker (05 S-3), unless the caller's context ended first (05 S-2 makes stores return `ErrUnavailable` then; counting it would let disconnecting clients open the breaker). After an open period all calls go through, no single half-open probe.

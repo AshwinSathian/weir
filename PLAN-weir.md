@@ -116,7 +116,7 @@ Refs: FR-LIM-*, FR-STF-*, FR-WRM-*, T6.3, T6.4, T6.5, T-18.
 - [x] M4.2 Wire limiter into the fetch function; streaming slot release at headers. AC: `TestLimiterCap5000Keys`, `TestPartitionFairness`, `TestSlowReaderDoesNotPinSlots`, `TestColdStartBounded` pass; `testorigin.NewChecked` used in all engine tests from here on.
 - [x] M4.3 Store guard with remote timeouts and store breaker ([04 §5.2](docs/04-lld.md)). AC: `TestStoreOutageStillCoalescedAndLimited`, `TestStoreSlowRemote` pass.
 - [ ] M4.3b Upload pool and timeout split (D25, D26). AC: `TestSlowUploadsDoNotStarveMisses`, `TestBodylessBypassUsesMainPool`, `TestDripOriginReleasesSlot`, `TestStreamIdleTimeout` pass.
-- [ ] M4.4 `Warm`. AC: `TestWarm`, `TestWarmDoesNotUseReserve` pass.
+- [x] M4.4 `Warm`. AC: `TestWarm`, `TestWarmDoesNotUseReserve` pass.
 
 #### M5 Stale serving and circuit breaker (~2 weeks)
 
