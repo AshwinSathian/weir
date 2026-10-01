@@ -108,7 +108,9 @@ func TestDefaultStaleWindowsOff(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		o := testorigin.NewChecked(t, 64, 16)
 		o.Default(ccBehavior(200, "max-age=10", "a"))
-		e := newEngine(t, cacheCfg)
+		cfg := cacheCfg
+		cfg.Negative.Disable = true // the expired entry is gone, so each failure would leave one
+		e := newEngine(t, cfg)
 		defer closeEngine(t, e)
 
 		serve(t, e, getReq("/a"), o)

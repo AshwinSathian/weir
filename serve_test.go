@@ -345,7 +345,7 @@ func TestBufferedBodyFailures(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				o := testorigin.NewChecked(t, 64, 16)
 				o.Default(b)
-				e := newEngine(t, weir.Config{Timeouts: weir.TimeoutsConfig{Origin: time.Second}})
+				e := newEngine(t, weir.Config{Timeouts: weir.TimeoutsConfig{Origin: time.Second}, Negative: weir.NegativeConfig{Disable: true}})
 				defer closeEngine(t, e)
 				want := weir.ErrOrigin
 				if name == "timeout" {

@@ -672,3 +672,11 @@ Entry template:
 - Deviations: 04 §14 notes only-if-cached in bypass.
 - Follow-ups: FR-MODE-3 vs FR-SRV-6 wording, and stale-on-error reach under default retention, under Waiting on Ashwin.
 - Context: low.
+
+## 2026-10-01 · M6-01 · done
+- Branch / PR: card/M6-01-negative-caching / #(see STATUS)
+- Done: negative.go (`setNegative`, `healthStatus`, `retryAfter`, `fromNegative`): a foreground 502/503/504 or transport failure on a key with no response writes a status-only entry for `Negative.TTL`; hits get a synthesized response with `detail=negative`. Marker and negative writes share `setUnlessResponse`.
+- Tests: TestNegativeCacheBurst, TestNegativeFromTransportFailure, TestNegativeNotFor500, TestNegativePrefersStale, TestNegativeScopedToKey, TestNegativeNeverReplacesResponse, TestNegativeReplacesExpiredRecord. `make check` passes.
+- Deviations: 01 FR-NEG-4 lists the extra exclusions (request no-store, unkeyed forward, background and warm), 04 §6.6 moves the write from `onFetchError` to `fetchStored`, 06 T-31 drops "markers also". FR-NEG-4 needs Ashwin's approval (STATUS).
+- Follow-ups: reviewer should-fix (an expired record a lazy store returns blocked the negative write) fixed test-first. FR-NEG-4 approval and FR-NEG-3 `ttl` wording under Waiting on Ashwin.
+- Context: low; size S right. Touched four existing test files to disable negative caching where a test expects repeated origin calls.

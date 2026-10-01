@@ -304,7 +304,9 @@ func TestCoalescePanic(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				o := testorigin.NewChecked(t, 64, 16)
 				o.Default(tt.b)
-				e := newEngine(t, cacheCfg)
+				cfg := cacheCfg
+				cfg.Negative.Disable = true // the next request must reach the origin
+				e := newEngine(t, cfg)
 				defer closeEngine(t, e)
 
 				var wg sync.WaitGroup

@@ -402,7 +402,8 @@ func TestHandlerOriginThroughEngine(t *testing.T) {
 			}
 			_, _ = io.WriteString(w, "hello")
 		})}
-		e, err := weir.New(weir.Config{Freshness: weir.FreshnessConfig{NoJitter: true}})
+		// Negative caching off: each truncated fetch must reach the origin.
+		e, err := weir.New(weir.Config{Freshness: weir.FreshnessConfig{NoJitter: true}, Negative: weir.NegativeConfig{Disable: true}})
 		if err != nil {
 			t.Fatalf("New: %v", err)
 		}
