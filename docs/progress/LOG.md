@@ -487,3 +487,11 @@ Entry template:
 - Deviations: 04 §6.4 and §6.5 updated for the three fixes.
 - Follow-ups: none new; follower sharing of `no-cache`/`max-age=0` responses left as is (common CDN practice; strict RFC 9111 §4 reading would stop it), noted in STATUS.
 - Context: low.
+
+## 2026-10-01 · M2-03 · done
+- Branch / PR: card/M2-03-markers-reentry / #32
+- Done: FR-COA-5 re-entry: a follower of an unshareable flight result (not storable, over-size, stream, purged) re-enters lookup once with `prevCK`, and the same key fetches directly. Markers, Authorization and request no-store rules were already in place from M2-02; this card pins them.
+- Tests: TestUncacheableNotSerialized, TestAuthorizedNotCoalesced, TestMarkerNotFromAuthorizedRequest, TestMarkerNotFromRequestNoStore, TestOversizedStreamedNotBuffered, TestMarkerNeverReplacesResponse, TestCoalesceSharesNoCacheResponse; each guard checked by a mutant; `make check` passes.
+- Deviations: 01 FR-COA-5 records that storable responses needing validation are shared (Ashwin's decision). 04 §6.2 direct-fetch condition aligned with the code (Authorized always direct, request no-store).
+- Follow-ups: "background flights mark creator gone" moved to M5-02 AC; followers of a 5xx flight refetch until M5-03 (AC added); M7-01 re-entry key and attempt cap (`ponytail:`).
+- Context: low; size M was generous, since M2-02 had built most of it. card-reviewer: 2 must-fix (test gaps) fixed, 3 should-fix fixed or moved to cards, 2 nits handled.

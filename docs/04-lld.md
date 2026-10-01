@@ -628,7 +628,7 @@ func (e *Engine) cacheable(ctx, c, origin, attempt):
     if c.ReqCC.OnlyIfCached: return nil, ErrOnlyIfCached
     if lk.negative != nil && !(lk.entry != nil && sieOK): return e.fromNegative(lk.negative)
     if c.Range: return e.pass(ctx, c.AsRangePass(), origin)   // FR-SRV-5: even with a stale entry (T-37); adds the client's Range and If-Range lines
-    if lk.marker || c.Authorized && lk.entry == nil || attempt > 0 && lk.ck == prevCK:
+    if lk.marker || c.Authorized || c.ReqCC.NoStore || attempt > 0 && lk.ck == prevCK:
         return e.fetchDirect(ctx, c, lk, origin)          // §6.5, no coalescing
     return e.fetchCoalesced(ctx, c, lk, origin, attempt)  // §6.4; prevCK is the previous attempt's coalescing key
 ```

@@ -91,11 +91,20 @@ func (e *Engine) fetchCoalesced(ctx context.Context, sp *fetchSpec, origin Origi
 		return e.fromEntry(c, fr.entry, time.Now(),
 			CacheInfo{Fwd: sp.lk.fwd, FwdStatus: fr.ci.FwdStatus, Stored: fr.ci.Stored, Collapsed: true}), nil
 	}
-	// ponytail: M2-03 adds the re-entry rule (FR-COA-5); until then a
-	// follower of an unshareable result fetches on its own. Safe without
-	// keys.VaryMatches only while storability refuses Vary; M7-01 must add
-	// the check above or a follower gets another variant.
-	return e.fetchDirect(ctx, sp, origin)
+	// FR-COA-5: not storable, over-size, an event stream, or purged during
+	// the flight. Re-enter lookup once: the flight may have left a marker
+	// or, under Vary, moved this request to another key. Until M7-01 the
+	// key never changes, so this equals fetchDirect and no test can tell
+	// them apart (TestVaryFollowersRecoalesce, M7-01).
+	// ponytail: M7-01 must compare the lookup's coalescing key, not
+	// c.Primary, cap re-entry at one attempt (a second unshareable flight
+	// under a new key would re-enter again), and add keys.VaryMatches above
+	// or a follower gets another variant (storability refuses Vary today).
+	// ponytail: a 5xx flight is not shared either, so every follower
+	// refetches from a failing origin; M5-03 gives waiters the flight's
+	// 5xx through the error table (04 §6.6).
+	ck := c.Primary
+	return e.cacheable(ctx, c, origin, &ck)
 }
 
 // published reports whether f's result is ready without waiting.

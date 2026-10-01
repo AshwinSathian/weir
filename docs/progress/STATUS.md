@@ -4,9 +4,9 @@ Updated: 2026-10-01
 Phase: 1
 Current card: none
 Card state: awaiting-merge
-Branch: card/M2-02-coalesced-fetch
-PR: #31 https://github.com/AshwinSathian/weir/pull/31
-Next card: M2-03
+Branch: card/M2-03-markers-reentry
+PR: #32 https://github.com/AshwinSathian/weir/pull/32
+Next card: M3-01
 
 ## Blockers
 
@@ -28,11 +28,9 @@ The cards' Notes give the reasons and the options rejected. All three come befor
 
 ## Notes for the next session
 
-- M2-02: `flight.go` holds `fetchCoalesced`, `runFlight`, `leaveFlight`, `staleOnTimeout`, `fetchDirect`; `serve.go` splits `fetchStored` (fetch, freshen, store) from `respond`. Followers are served `fromEntry(fr.entry)`; a follower of an unshareable result calls `fetchDirect` (`ponytail:`). M2-03 replaces that with the FR-COA-5 re-entry rule.
-- M2-02: `cacheable` sends `c.Authorized` and marker requests to `fetchDirect` (FR-COA-8, FR-STO-12), pinned by `TestCoalesceSkipsDirectRequests`. M2-03 adds its named tests (`TestAuthorizedNotCoalesced` etc.) and the marker rules on top.
-- M2-02: on follower timeout without a stale-if-error entry, the creator keeps waiting on its own flight (04 §6.4 updated): the default `FollowerMaxWait` equals `Timeouts.Origin` below 10 s, so refetching doubled origin load.
-- #31 adversarial review: followers share entries the store would keep but that need validation before reuse (`no-cache`, `max-age=0`), as Varnish and nginx do. A strict RFC 9111 §4 reading says they should not; changing it would stop coalescing for typical `no-cache` HTML. Decide in M2-03 whether to gate sharing on `Evaluate` being Fresh.
-- M7-01: followers get `fr.entry` without `keys.VaryMatches`; safe only while storability refuses Vary. Add the check in `fetchCoalesced` (comment there).
+- M2-03: a follower of an unshareable flight result re-enters `cacheable` with `prevCK`; the same key fetches directly (FR-COA-5). Until M7-01 that equals `fetchDirect`. M7-01 must compare the lookup's coalescing key, cap re-entry at one attempt and add `keys.VaryMatches` (`ponytail:` in flight.go).
+- M2-03: followers share storable flight responses that need validation (`no-cache`, `max-age=0`); Ashwin decided 2026-10-01, written into FR-COA-5 and pinned by `TestCoalesceSharesNoCacheResponse`.
+- M5-03 AC now owns giving followers a flight's 5xx (today each refetches); M5-02 AC owns background flights marking their creator gone (moved from M2-03).
 - M4: until the limiter lands, a client disconnect no longer cancels the origin fetch (FR-COA-2), so flights per second times `Timeouts.Origin` bounds the table, not MaxConcurrent + MaxQueue. M4-02 must test the table size under a cold-start flood.
 - A panic while reading a buffered origin body is recovered in `runFlight` but the body is not closed; a `defer` in `fetch` around `io.ReadAll` would be the root fix. `BenchmarkServeMissCoalesced` (07 §10) still has no card.
 - `Publish` must be called exactly once per flight (a second call panics on the double close). `runFlight` is the only caller.
