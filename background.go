@@ -58,6 +58,7 @@ func (e *Engine) backgroundRefresh(ctx context.Context, c *keys.Classified, lk l
 	}
 	sp := &fetchSpec{c: c, lk: lk, prior: prior, found: lk.entry, class: limiter.Background}
 	if !e.goBackground(func(bg context.Context) { e.runFlight(bg, ctx, f, sp, origin) }) {
+		emit(e.cfg.Observer, Event{Kind: EvRefreshDropped, Time: time.Now(), Partition: c.Partition, Reason: "closed"})
 		f.Publish(&flightResult{fetchResult: fetchResult{err: ErrClosed}})
 	}
 }

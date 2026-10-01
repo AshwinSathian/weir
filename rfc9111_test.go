@@ -362,6 +362,12 @@ var rfcRows = []rfcRow{
 			cacheStatus: "Weir; hit; ttl=-10; detail=stale-while-revalidate"},
 		{after: time.Second, body: "b", calls: 2},
 	}},
+	{sec: "5861 §3", name: "stale-while-revalidate refresh validates and freshens on 304", steps: []rfcStep{
+		{origin: bh(200, "a", "Cache-Control", "max-age=600, stale-while-revalidate=30", "ETag", `"v1"`), calls: 1},
+		{after: 610 * time.Second, origin: bh(304, "", "Cache-Control", "max-age=600", "ETag", `"v1"`), body: "a", calls: 2,
+			sent: []string{"If-None-Match", `"v1"`}},
+		{after: time.Second, body: "a", calls: 2, cacheStatus: "Weir; hit; ttl=599"},
+	}},
 	{sec: "5861 §4", name: "stale-if-error serves stale on a 500", tag: "M5", steps: []rfcStep{
 		{origin: bh(200, "a", "Cache-Control", "max-age=600, stale-if-error=1200"), calls: 1},
 		{after: 900 * time.Second, origin: bh(500, ""), body: "a", calls: 2},

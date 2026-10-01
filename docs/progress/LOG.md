@@ -629,3 +629,14 @@ Entry template:
 - Deviations: 04 §6.8 states the Authorization/no-store refresh gate for SWR.
 - Follow-ups: `Timeouts.Background` unwired and the FR-STL-1 gate wording, both under Waiting on Ashwin. Reviewer should-fixes (Cache-Status, Range/only-if-cached rows, STATUS record) fixed.
 - Context: low; size M was generous (most plumbing existed from M3-01/M4-02).
+
+## 2026-10-01 · M5-02 · review-fixes
+- Branch / PR: card/M5-02-swr / #40
+- Done: adversarial review of #40. Found and fixed:
+  - An SWR hit emitted no `EvStaleServed` (04 §12 lists reason `swr`). It does now.
+  - A refresh that loses the race with `Close` published `ErrClosed` silently. It now emits `EvRefreshDropped{closed}` (04 §12), for SWR and early refresh alike.
+  - No test covered the SWR refresh's conditional request or the 304 freshen. An RFC 5861 §3 row does now.
+- Tests: TestSWRRefreshDroppedOnClose; TestSWRServesAndRefreshesOnce counts EvStaleServed. 9 hand mutants (gates, forced validation, detail, ttl sign, refresh, validators, CreatorGone, class), all killed. Probed and found correct: HEAD SWR (refresh is GET), unsafe-method invalidation (never SWR, FR-STL-5), `s-maxage` with a default SWR window (no stale), window end, Close during refresh. `make check` passes.
+- Deviations: none.
+- Follow-ups: a refresh whose response is unstorable (origin switched to `no-store`) leaves the stale entry in place, by storeResponse's existing rule, so it is served until the SWR window ends and each request in the window refreshes (one flight at a time). RFC 5861 allows it; noted in STATUS.
+- Context: low.

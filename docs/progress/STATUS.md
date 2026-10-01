@@ -35,6 +35,7 @@ The cards' Notes give the reasons and the options rejected. All three come befor
 ## Notes for the next session
 
 - M5-02: `cacheable` serves a `StaleSWR` entry before the only-if-cached and Range checks (it answers both, full 200 for Range) and calls `backgroundRefresh` unless the request is `Authorization` or `no-store`. A honored client `no-cache` turns `StaleSWR` into `NeedsValidation`.
+- M5-02: an SWR refresh whose response is unstorable (origin switched to `no-store`, or `no-freshness`) does not replace the stale entry (storeResponse keeps a found response), so the stale body is served until the SWR window ends, with one refresh flight at a time. RFC 5861 allows it; M6 negative caching or a marker policy may want to revisit.
 - M5-02: `runRFCRow` now calls `synctest.Wait()` before counting origin calls, so a row's `calls` includes the background refresh its step started.
 - M5-03: background refresh does not check the breaker yet (03 §2.3 "if the breaker is open the refresh is skipped"); see the probe note below.
 

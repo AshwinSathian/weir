@@ -252,7 +252,9 @@ func TestSWRServesAndRefreshesOnce(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		o := testorigin.NewChecked(t, 64, 16)
 		o.Default(swr("a"))
+		obs := &eventCounter{}
 		cfg := cacheCfg
+		cfg.Observer = obs
 		cfg.Freshness.NoEarlyRefresh = true
 		e := newEngine(t, cfg)
 		defer closeEngine(t, e)
@@ -272,6 +274,9 @@ func TestSWRServesAndRefreshesOnce(t *testing.T) {
 		synctest.Wait()
 		if n := o.Calls("/k"); n != 2 {
 			t.Fatalf("origin calls = %d, want 2 (fill and one refresh)", n)
+		}
+		if n := obs.count("stale-served/swr"); n != 10 { // 04 §12
+			t.Fatalf("EvStaleServed swr = %d, want 10", n)
 		}
 		close(gate)
 		synctest.Wait()
@@ -370,5 +375,37 @@ func TestRefreshNeverExceedsReserve(t *testing.T) {
 			t.Fatalf("EvRefreshDropped no-slot = %d, want %d", n, keys-3)
 		}
 		close(gate)
+	})
+}
+
+// FR-LCY-2, 04 §12: an SWR hit racing Close is still served, and its refresh
+// is dropped with EvRefreshDropped closed instead of starting a goroutine
+// Close no longer waits for.
+func TestSWRRefreshDroppedOnClose(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		o := testorigin.NewChecked(t, 64, 16)
+		o.Default(swr("a"))
+		// The request blocks in its stale-served event, before the refresh.
+		obs := &holdObserver{key: "stale-served/swr", hold: make(chan struct{})}
+		cfg := cacheCfg
+		cfg.Observer = obs
+		cfg.Freshness.NoEarlyRefresh = true
+		e := newEngine(t, cfg)
+
+		serve(t, e, getReq("/k"), o)
+		time.Sleep(70 * time.Second)
+		ch := serveAsync(t.Context(), e, getReq("/k"), o)
+		synctest.Wait()
+		closeEngine(t, e)
+		close(obs.hold)
+		if s := <-ch; s.err != nil || s.body != "a" {
+			t.Fatalf("racing request: %v, %q; want the stale entry", s.err, s.body)
+		}
+		if n := obs.count("refresh-dropped/closed"); n != 1 {
+			t.Fatalf("EvRefreshDropped closed = %d, want 1", n)
+		}
+		if n := o.Calls("/k"); n != 1 {
+			t.Fatalf("origin calls = %d, want 1", n)
+		}
 	})
 }
