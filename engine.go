@@ -37,7 +37,7 @@ func (f OriginFunc) Fetch(ctx context.Context, req *Request) (*Response, error) 
 type Engine struct {
 	cfg      Config      // defaults applied, immutable after New
 	kcfg     keys.Config // compiled from cfg
-	store    store.Store
+	sg       *storeGuard
 	ownStore bool
 	flights  coalesce.Table
 	lim      *limiter.Limiter
@@ -77,7 +77,7 @@ func New(cfg Config) (*Engine, error) {
 		return nil, invalid("Storable.MaxObjectBytes", fmt.Sprintf("above the store's limit of %d", sz.MaxObjectBytes()))
 	}
 	warnForwarding(c)
-	e := &Engine{cfg: c, kcfg: keysConfig(&c), store: c.Store, ownStore: own, closeDone: make(chan struct{})}
+	e := &Engine{cfg: c, kcfg: keysConfig(&c), sg: newStoreGuard(c.Store, c.Timeouts.Store, c.Observer), ownStore: own, closeDone: make(chan struct{})}
 	l := &c.Limiter
 	e.lim = limiter.New(limiter.Config{
 		Max: l.MaxConcurrent, MaxQueue: l.MaxQueue, PerPartition: l.MaxPerPartition,
@@ -173,7 +173,7 @@ func (e *Engine) Close(ctx context.Context) error {
 	<-done
 	var storeErr error
 	if e.ownStore {
-		storeErr = e.store.Close()
+		storeErr = e.sg.s.Close()
 	}
 	return errors.Join(graceErr, storeErr)
 }

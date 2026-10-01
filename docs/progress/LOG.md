@@ -559,3 +559,11 @@ Entry template:
 - Deviations: none.
 - Follow-ups: `Timeouts.Background` unused (STATUS note); adapter docs to require a write timeout (STATUS note).
 - Context: low.
+
+## 2026-10-01 · M4-04 · done
+- Branch / PR: card/M4-04-store-guard / (filled below)
+- Done: storeguard.go: every engine store call goes through `storeGuard` (`Timeouts.Store` deadline for remote stores only, FR-STF-1; breaker after 5 consecutive failures, 1 s doubling to 30 s, FR-STF-2; `EvStoreError` per op and `EvStoreBreaker` open/closed). engine.go `store` field became `sg`.
+- Tests: TestStoreOutageStillCoalescedAndLimited, TestStoreSlowRemote, TestEpochLookupErrorEmitsEvent, plus internal TestStoreGuardCallerCancelNotCounted, TestStoreGuardBackoff. Mutants (cancel counted, no 30 s cap, openTil kept on success) fail a test. Hit benchmark unchanged (847 ns, 14 allocs). `make check` passes.
+- Deviations: 04 §5.2 records the error rule (05 S-3 plus caller-cancel exemption), no half-open probe, openTil reset. 07 T6.5 `TestStoreSlowRemote` wording changed from "each request" to "each store call" (a miss makes four).
+- Follow-ups: per-request store budget question (STATUS note).
+- Context: low; size S was right. card-reviewer: 2 must-fix (caller cancel opened the breaker; 04 vs 05 S-3 conflict) fixed, 4 should-fix fixed (openTil, local-deadline test, cap/consecutive test, 07 wording), 3 nits fixed.

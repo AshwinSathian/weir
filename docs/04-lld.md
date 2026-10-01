@@ -561,14 +561,15 @@ type storeGuard struct {
 	s       store.Store
 	remote  bool
 	timeout time.Duration
+	obs     Observer
+	fails   atomic.Int32 // read without mu, so a healthy store's calls never lock
 	mu      sync.Mutex
-	fails   int
 	openTil time.Time
 	backoff time.Duration // 1s doubling to 30s
 }
 ```
 
-`get`, `set`, `newestEpoch`, `setEpoch`: if the guard is open, return `ErrUnavailable` immediately. If `remote`, wrap the context with `Timeouts.Store`. Map `context.DeadlineExceeded` to `ErrUnavailable`. On `ErrUnavailable` increment `fails`; at 5 open for `backoff` and double it. On success reset `fails` and `backoff`. `ErrNotFound` is a success for guard purposes.
+`get`, `set`, `newestEpoch`, `setEpoch`: if the guard is open, return `ErrUnavailable` immediately. If `remote`, wrap the context with `Timeouts.Store` (`context.WithTimeoutCause`). Any error other than `ErrNotFound` is a failure (05 S-3), except when the caller's context ended before the guard's own deadline: a store then returns `ErrUnavailable` (S-2), but a client leaving says nothing about the store, and counting it would let disconnecting clients open the breaker. On a failure emit `EvStoreError` with the operation and increment `fails`; at 5, or on any failure after an open period ended, open for `backoff`, double it and emit `EvStoreBreaker{open}`. A call already in flight that fails while the breaker is open neither reopens it nor doubles the backoff (with `Timeouts.Store` above 1 s, one could fail after the period ended and count as a new failure). After an open period every call goes through; there is no single half-open probe. On success reset `fails`, `openTil` and `backoff`, emitting `EvStoreBreaker{closed}` when the breaker had opened. `ErrNotFound` is a success for guard purposes.
 
 ## 6. Engine internals (package `weir`)
 

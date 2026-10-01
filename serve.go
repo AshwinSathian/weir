@@ -81,7 +81,7 @@ type lookupResult struct {
 // miss too.
 func (e *Engine) lookup(ctx context.Context, c *keys.Classified, now time.Time) lookupResult {
 	lk := lookupResult{fwd: FwdURIMiss}
-	rec, err := e.store.Get(ctx, c.Primary)
+	rec, err := e.sg.get(ctx, c.Primary)
 	if err != nil || rec.Expires.Before(now) { // stores may return expired records lazily
 		return lk
 	}
@@ -90,7 +90,7 @@ func (e *Engine) lookup(ctx context.Context, c *keys.Classified, now time.Time) 
 		lk.entry = rec
 		lk.fwd = FwdStale // used only if the request ends up forwarded
 		// T-9: an epoch lookup error fails open, as "no epoch".
-		lk.epoch, lk.epochOK, err = e.store.NewestEpoch(ctx, rec.Tags, rec.RequestTime)
+		lk.epoch, lk.epochOK, err = e.sg.newestEpoch(ctx, rec.Tags, rec.RequestTime)
 		lk.epochOK = lk.epochOK && err == nil
 	case store.KindHitForMiss:
 		lk.marker = true
@@ -240,11 +240,11 @@ func (e *Engine) storeResponse(ctx context.Context, c *keys.Classified, res *fet
 	// found is exempt: it is stale or unusable, and an origin clock that
 	// once ran ahead would otherwise pin it until it expires. So is a
 	// record past its Expires that a lazy store still returns.
-	if cur, err := e.store.Get(ctx, c.Primary); err == nil && cur.Kind == store.KindResponse &&
+	if cur, err := e.sg.get(ctx, c.Primary); err == nil && cur.Kind == store.KindResponse &&
 		cur.Expires.After(res.respTime) && !sameRecord(cur, found) && newer(cur, ent) {
 		return ent, false
 	}
-	return ent, e.store.Set(ctx, c.Primary, ent) == nil
+	return ent, e.sg.set(ctx, c.Primary, ent) == nil
 }
 
 // sameRecord reports whether a and b are the same stored response. Stores
@@ -272,11 +272,11 @@ func newer(a, b *store.Entry) bool {
 // served or revalidated (FR-STO-12). Stores that decode a fresh copy per Get
 // never match it, which only costs the marker.
 func (e *Engine) setMarker(ctx context.Context, k store.Key, now time.Time, purged *store.Entry) {
-	if cur, err := e.store.Get(ctx, k); err == nil && cur.Kind == store.KindResponse && cur != purged {
+	if cur, err := e.sg.get(ctx, k); err == nil && cur.Kind == store.KindResponse && cur != purged {
 		return
 	}
 	// A failed write only costs the marker's benefit: the next miss refetches.
-	_ = e.store.Set(ctx, k, &store.Entry{Kind: store.KindHitForMiss, StoredAt: now, Expires: now.Add(e.cfg.Coalesce.HitForMissTTL)})
+	_ = e.sg.set(ctx, k, &store.Entry{Kind: store.KindHitForMiss, StoredAt: now, Expires: now.Add(e.cfg.Coalesce.HitForMissTTL)})
 }
 
 // keysConfig compiles the key and forwarding settings for keys.Classify.
