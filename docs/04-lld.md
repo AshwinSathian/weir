@@ -723,7 +723,7 @@ func (e *Engine) leaveFlight(f):
         if res := f.Result(); res.stream != nil && f.AbandonStream(): res.stream.Close()
 ```
 
-`Publish` stores `published` before loading `creatorGone` (via `CreatorIsGone`), and `CreatorGone` stores `creatorGone` before loading `published`. Go atomics are sequentially consistent, so at least one side sees both flags; the CAS keeps the close single.
+`Publish` stores `published`, and `runFlight` loads `creatorGone` (through `CreatorIsGone`) only after `Publish` returns. `CreatorGone` stores `creatorGone` before loading `published`. Go atomics are sequentially consistent, so at least one side sees both flags; the CAS keeps the close single.
 
 ### 6.5 Direct fetch
 

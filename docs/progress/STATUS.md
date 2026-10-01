@@ -29,6 +29,7 @@ The cards' Notes give the reasons and the options rejected. All three come befor
 ## Notes for the next session
 
 - M2-01: `internal/coalesce` is done. `Flight.CreatorGone()` returns `published bool`; M2-02's timeout and cancel branches call `leaveFlight` (04 §6.4), which closes an oversized stream when the flight published before the creator left. `Result()` returns `any`; M2-02 defines the engine's flight result type and asserts it.
+- M2-02 (from the #30 adversarial review): when the timer and `Done` are both ready, `select` may take the timer branch. The creator then discards a result that is already published and fetches again. Have the timer and cancel branches check `leaveFlight`'s published flag (or poll `Done` first) and use the result when it can be reused.
 - M2-01: the flight table's bound (MaxConcurrent + MaxQueue flights, P5) comes from the limiter. M4-02 should test the table size under a cold-start flood.
 - `Publish` must be called exactly once per flight (a second call panics on the double close). `runFlight` is the only caller.
 
