@@ -746,8 +746,6 @@ func (e *Engine) onFetchError(c, lk, res):
         if sieOK: return e.fromEntry(c, lk.entry, staleInfo(res.staleReason()))
         if lk.entry.Flags.Has(FlagMustRevalidate|FlagProxyRevalidate) && res.resp == nil:
             return nil, ErrMustRevalidate
-    if res.originHealthFailure && lk.entry == nil && !c.Authorized && !e.cfg.Negative.Disable && !c.Range:   // FR-NEG-1, FR-NEG-4, T-31
-        e.sg.set(ctx, lk.ck, negativeEntry(res))
     if res.resp != nil: return e.passResponse(c, res)   // origin's 5xx: fresh reader over res.respBody per waiter
     return nil, res.err                                 // ErrOrigin, ErrOriginTimeout, ErrShed, ErrCircuitOpen
 ```
@@ -755,6 +753,20 @@ func (e *Engine) onFetchError(c, lk, res):
 `res.staleReason()` maps: shed to `StaleShed`, breaker open to `StaleCircuitOpen`, everything else to `StaleIfError`.
 
 A 500 response goes through the same function: it is an error condition for stale serving (RFC 5861) but not an origin-health failure, so it never writes a negative entry.
+
+The negative entry is written by `fetchStored`, right after `fetch` returns and before the flight publishes, so a flight writes it once for all its waiters (FR-NEG-1, FR-NEG-4, T-17, T-31):
+
+```
+func (e *Engine) setNegative(ctx, sp, res):
+    if Negative.Disable || sp.class != Foreground || sp.lk.entry != nil ||
+       c.Authorized || c.ReqCC.NoStore || c.Unkeyed || c.Range: return
+    st := healthStatus(ctx, res)   // 502/504 from ErrOrigin/ErrOriginTimeout, or the 502/503/504 response; 0 otherwise or when ctx ended
+    if st == 0: return
+    e.setUnlessResponse(ctx, c.Primary, sp.purged,
+        Entry{Kind: KindNegative, Status: st, RetryAfter: parsed Retry-After (whole seconds), Expires: now + Negative.TTL})
+```
+
+`setUnlessResponse` is the marker write's guard (§6.7): it re-reads the key and never replaces a live response other than the hard-purged one this request found. `lookup` returns a live negative record as `lk.neg`; `cacheable` serves it before the only-if-cached and Range checks with `fromNegative`: the status, the recorded `Retry-After` less the entry's age (rounded up; omitted once it has passed), an empty body, `Cache-Status: Weir; hit; ttl=<remaining>; detail=negative`, and `EvNegativeServed`.
 
 ### 6.7 The fetch function (P3)
 
@@ -834,7 +846,7 @@ func (e *Engine) fetch(ctx, s, origin) fetchResult:
     ent := buildEntry(s, resp, body, t0, time.Now(), decision, e.rnd)
     if decision.ok: e.store(s, ent)
     else if s.prior == nil && decision.responseDriven:
-        e.setMarker(s.ck)                    // FR-STO-12, T-31: storability clears responseDriven under Authorized, request no-store or Unkeyed
+        e.setUnlessResponse(s.ck, marker) // FR-STO-12, T-31: storability clears responseDriven under Authorized, request no-store or Unkeyed
     return fetchResult{entry: ent, shareable: decision.ok, stored: ...}
 ```
 
@@ -842,7 +854,7 @@ Both stream paths stop the origin deadline at headers and hand the context to `i
 
 `e.store(s, ent)` first reads the record currently at the target key; if it is a response whose `Date` (then `ResponseTime`) is later than the new entry's, the write is skipped, so a slow, aged flight finishing late never replaces a newer response (RFC 9111 §4: the most recent response wins). The record the request itself found at lookup is exempt: it was already judged stale or unusable, and an origin whose clock once ran ahead would otherwise pin a purged or invalidated entry until it expires. A record past its `Expires` that a store still returns lazily is exempt too. The read-then-write is not atomic; the race window can only let an older response win when two writes land within the same store round trip, and the next refresh corrects it. It then writes the variant entry first, then the vary spec (or the entry under the primary key when there is no `Vary`), so a concurrent reader that finds the spec usually finds the variant. When the response's `Vary` differs from the stored spec, the new spec replaces it and older variants age out.
 
-`setMarker` and negative writes use the same read-before-write: they skip the write when the current record at the key is a response, so a marker or negative entry never replaces a response that a concurrent fetch just stored.
+Marker and negative writes share `setUnlessResponse`, a read-before-write: they skip the write when the current record at the key is a response that has not passed its `Expires` (an expired one a store returns lazily is a miss to `lookup`), so a marker or negative entry never replaces a response that a concurrent fetch just stored.
 
 `fromStream` for a `HEAD` client closes the stream immediately and returns headers only; the origin transfer is canceled rather than downloaded for nothing.
 

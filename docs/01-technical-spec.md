@@ -351,7 +351,7 @@ A response is stored only if all of the following hold. Each failed check increm
 - FR-NEG-1. When a foreground fetch ends in an origin-health failure and no stored response exists for the coalescing key (servable or not; a negative entry must never overwrite a response that could later be revalidated), Weir records a negative entry under the coalescing key for `Negative.TTL` (default 2 s). Disabled by `Negative.Disable`.
 - FR-NEG-2. A negative entry holds only a status (502, 503 or 504) and an optional `Retry-After`. It never holds the origin's body or headers, so it never stores anything the origin marked `no-store`.
 - FR-NEG-3. Requests that find a live negative entry and no servable stale entry get a synthesized response with that status, `Cache-Status: Weir; hit; detail=negative`, and no origin contact.
-- FR-NEG-4. Negative entries are never created for 500, 4xx, bypassed requests, range requests, unsafe methods, or requests that carried `Authorization` (T-31).
+- FR-NEG-4. Negative entries are never created for 500, 4xx, bypassed requests, range requests, unsafe methods, requests that carried `Authorization` or a `no-store` directive, or requests whose forward carried input the key does not cover (a `Forward.Allow` field, or `ForwardAll`) (T-17, T-31). Background refresh and warm fetches never create them (FR-NEG-1 says foreground).
 
 ### 5.15 Miss-rate signal (T6.8)
 
@@ -473,7 +473,7 @@ Evaluated in order after validation, bypass check, and store lookup.
 | follower wait expired | serve stale | fetch independently (FR-COA-4) |
 | any of the above on a `must-revalidate` or `proxy-revalidate` entry | not permitted | `ErrMustRevalidate` (504), except a 500/502/503/504 response is passed through |
 
-"Negative entry" in this table means: written only when no stored response exists for the key and the request carried no `Authorization` (FR-NEG-1, FR-NEG-4).
+"Negative entry" in this table means: written only by a foreground fetch, when no stored response exists for the key and none of the FR-NEG-4 exclusions apply (`Authorization`, request `no-store`, unkeyed forwarded input) (FR-NEG-1, FR-NEG-4).
 
 ## 8. RFC conformance summary
 

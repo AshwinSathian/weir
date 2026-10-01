@@ -4,9 +4,9 @@ Updated: 2026-10-01
 Phase: 1
 Current card: none
 Card state: awaiting-merge
-Branch: card/M5-04-incident-modes
-PR: #42 https://github.com/AshwinSathian/weir/pull/42
-Next card: M6-01
+Branch: card/M6-01-negative-caching
+PR: #43 https://github.com/AshwinSathian/weir/pull/43
+Next card: M7-01
 
 ## Blockers
 
@@ -14,6 +14,8 @@ none
 
 ## Waiting on Ashwin
 
+- M6-01: FR-NEG-4 was widened without prior sign-off. Negative entries are now also never created for requests with a `no-store` directive, after a forwarded `Forward.Allow` field or under `ForwardAll` (T-17, T-31, same rule as markers), or by background refresh and warm fetches. It only narrows when entries are written. Approve, or say which exclusion to drop.
+- M6-01: FR-NEG-3 says `Cache-Status: Weir; hit; detail=negative`; 04 §6.6 and the code add `ttl=<remaining>`. Proposed: FR-NEG-3 names `ttl` too.
 - #42 adversarial review: FR-MODE-3 ("every request is handled as pass-through") conflicts with FR-SRV-6 ("only-if-cached is always honored") for an `only-if-cached` request in bypass. The fix follows FR-SRV-6: `ErrOnlyIfCached`, origin not contacted (04 §14). Proposed fix: FR-MODE-3 adds "except `only-if-cached`, which gets `ErrOnlyIfCached`". FR-BYP-1 (M7-03) has the same question.
 - #42 adversarial review: by default `ModeStaleOnError` can only serve entries the store still holds. An entry without an SWR or SIE window is kept only `Freshness.Keep` (5 min) past expiry, and only with a validator. So "up to 24 h of staleness" is reachable only with longer windows or a larger `Keep`. Should FR-MODE-2 say so, or should the default retention change? (A retention change is a default, so it needs your approval.)
 
@@ -40,13 +42,18 @@ The cards' Notes give the reasons and the options rejected. All three come befor
 
 ## Notes for the next session
 
-- M5-04: `staleOK` (mode.go) is the single stale-on-error test for `onFetchError` and `staleOnTimeout`; M6-01's negative-entry path in `onFetchError` sits after it. The mode widens only entries still stored, so it helps entries with a validator (kept `Freshness.Keep`) or an SIE/SWR window.
+- M6-01: negative writes happen in `setNegative` (negative.go), called by `fetchStored` before the flight publishes; `lookup` returns a live negative record as `lk.neg` and `cacheable` serves it before the only-if-cached and Range checks. Markers and negative entries share `setUnlessResponse` (serve.go), which replaces only a hard-purged or expired response.
+- M6-01: tests whose next request must reach the origin after a 502/503/504 or transport failure set `Negative.Disable` (coalesce, stale, serve, weirhttp handler-origin tests). New engine tests with failing origins need the same.
+- M6-01 adversarial review: `FuzzRetryAfter` (seeds in testdata/fuzz) covers the origin `Retry-After` parser; the served value counts down with the entry's age. Mutants of the `sp.lk.entry != nil` and `ctx.Err() == nil` guards survive because `setUnlessResponse` and `timeoutOrOrigin` already enforce them; they stay as cheap early exits.
+- M7: the `Accept-Encoding` bucket is forwarded but not in `PrimaryKey`, so an origin that fails only for one coding writes a negative entry every coding sees (2 s, same bound as the marker note below). Keying the bucket in M7-01 closes it.
+
+- M5-04: `staleOK` (mode.go) is the single stale-on-error test for `onFetchError` and `staleOnTimeout`; The mode widens only entries still stored, so it helps entries with a validator (kept `Freshness.Keep`) or an SIE/SWR window.
 - M5-04: bypass uses `keys.Classified.AsBypass()`, which re-runs the `ClassPass` builder on the original request. M7-03 bypass rules (FR-BYP-1) can call the same method.
 - M5-04: mode expiry is noticed lazily by the next `Serve`; a racing `SetMode` and expiry can emit `EvMode` events out of order (rare, cosmetic).
 
 - M5-03: `fetch` calls `e.cb.Allow` before the limiter; shed and caller-gone end in `Cancel`. Outcomes are recorded at the headers, or after the body for buffered fetches (a truncated body is a `Failure`). Only Foreground fetches probe; Background and Warm get `ErrCircuitOpen` while not Closed, and Background also emits `EvRefreshDropped{circuit-open}`.
 - M5-03: `ErrCircuitOpen`'s Retry-After is `breaker.Remaining()` floored at 1 s (half-open has no end time). `Remaining` is a new internal method in 04 §8.3; the earlier note asked to check a new accessor with Ashwin, so the PR flags it for confirmation.
-- M5-03: `onFetchError` (flight.go) applies 01 §7.2 for direct fetches and every flight waiter, each with its own lookup. Followers of a buffered 5xx get a copy built from `flightResult.errHeader` and `fr.ci.FwdStatus`; they must never read `fr.resp`, which the creator's caller owns. M6-01 adds the negative-entry write there (`ponytail:`).
+- M5-03: `onFetchError` (flight.go) applies 01 §7.2 for direct fetches and every flight waiter, each with its own lookup. Followers of a buffered 5xx get a copy built from `flightResult.errHeader` and `fr.ci.FwdStatus`; they must never read `fr.resp`, which the creator's caller owns.
 - M5-03: a flight cut short by `Close` (`ErrClosed`) serves a stale-if-error entry with reason `sie`; harmless, label could be its own.
 
 - M5-02: `cacheable` serves a `StaleSWR` entry before the only-if-cached and Range checks (it answers both, full 200 for Range) and calls `backgroundRefresh` unless the request is `Authorization` or `no-store`. A honored client `no-cache` turns `StaleSWR` into `NeedsValidation`.

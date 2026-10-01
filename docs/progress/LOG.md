@@ -672,3 +672,19 @@ Entry template:
 - Deviations: 04 §14 notes only-if-cached in bypass.
 - Follow-ups: FR-MODE-3 vs FR-SRV-6 wording, and stale-on-error reach under default retention, under Waiting on Ashwin.
 - Context: low.
+
+## 2026-10-01 · M6-01 · done
+- Branch / PR: card/M6-01-negative-caching / #43
+- Done: negative.go (`setNegative`, `healthStatus`, `retryAfter`, `fromNegative`): a foreground 502/503/504 or transport failure on a key with no response writes a status-only entry for `Negative.TTL`; hits get a synthesized response with `detail=negative`. Marker and negative writes share `setUnlessResponse`.
+- Tests: TestNegativeCacheBurst, TestNegativeFromTransportFailure, TestNegativeNotFor500, TestNegativePrefersStale, TestNegativeScopedToKey, TestNegativeNeverReplacesResponse, TestNegativeReplacesExpiredRecord. `make check` passes.
+- Deviations: 01 FR-NEG-4 lists the extra exclusions (request no-store, unkeyed forward, background and warm), 04 §6.6 moves the write from `onFetchError` to `fetchStored`, 06 T-31 drops "markers also". FR-NEG-4 needs Ashwin's approval (STATUS).
+- Follow-ups: reviewer should-fix (an expired record a lazy store returns blocked the negative write) fixed test-first. FR-NEG-4 approval and FR-NEG-3 `ttl` wording under Waiting on Ashwin.
+- Context: low; size S right. Touched four existing test files to disable negative caching where a test expects repeated origin calls.
+
+## 2026-10-01 · M6-01 · review-fixes
+- Branch / PR: card/M6-01-negative-caching / #43
+- Done: adversarial review of #43. Hard rule 8 gap: the origin `Retry-After` parser had no fuzz target; added `FuzzRetryAfter` with seeds. The served `Retry-After` now counts down from the origin's value (rounded up) instead of repeating it for the whole TTL. 01 §7.2's "negative entry" note and 04 §6.6 match FR-NEG-4.
+- Tests: TestParseRetryAfter, FuzzRetryAfter (30 s clean), TestNegativeRetryAfterAges. 10 hand mutants of `setNegative`/`retryAfter`: 7 killed, 3 equivalent survivors (guards duplicated downstream). Negative, coalesce and stale tests passed 30 times under race and shuffle. `make check` passes.
+- Deviations: none beyond the doc alignment above.
+- Follow-ups: Accept-Encoding bucket note for M7-01 in STATUS; FR-NEG-4 and FR-NEG-3 wording still under Waiting on Ashwin.
+- Context: low.

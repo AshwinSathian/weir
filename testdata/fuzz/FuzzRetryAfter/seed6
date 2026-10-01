@@ -1,0 +1,2 @@
+go test fuzz v1
+string("Sunday, 06-Nov-94 08:49:37 GMT")

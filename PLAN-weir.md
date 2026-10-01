@@ -131,7 +131,7 @@ Refs: FR-STL-*, FR-CB-*, T6.6, T-16, T-20.
 
 Refs: FR-NEG-*, T6.10, T-17.
 
-- [ ] M6.1 Negative entries and synthesized responses. AC: `TestNegativeCacheBurst`, `TestNegativeNotFor500`, `TestNegativePrefersStale`, `TestNegativeScopedToKey`, `TestNegativeNeverReplacesResponse` pass.
+- [x] M6.1 Negative entries and synthesized responses. AC: `TestNegativeCacheBurst`, `TestNegativeNotFor500`, `TestNegativePrefersStale`, `TestNegativeScopedToKey`, `TestNegativeNeverReplacesResponse` pass.
 
 #### M7 Vary, keyed headers and cookies, bypass (~2 weeks)
 

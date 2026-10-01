@@ -220,9 +220,8 @@ func failed(ctx context.Context, fr *flightResult) bool {
 // onFetchError answers a request whose fetch failed (04 §6.6): the stale
 // entry when stale-if-error permits it, ErrMustRevalidate when the entry
 // forbids serving it and the origin gave no response (FR-STL-4), else the
-// error or the 5xx. own is true when the request owns fr.resp.
-// ponytail: no negative entry yet (01 §7.2 "negative entry"); M6-01 adds it
-// here per 04 §6.6.
+// error or the 5xx. own is true when the request owns fr.resp. The flight
+// already wrote any negative entry (fetchStored), once for all waiters.
 func (e *Engine) onFetchError(sp *fetchSpec, fr *flightResult, own bool) (*Response, error) {
 	if ent := sp.lk.entry; ent != nil {
 		now := time.Now()
