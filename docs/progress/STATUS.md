@@ -20,6 +20,7 @@ none
 
 ## Decided 2026-10-01
 
+- Followers of a 5xx flight (#41 adversarial review): Ashwin approved amending FR-COA-5. A 500/502/503/504 flight response is an error condition, so every waiter gets it through §7.2 instead of refetching.
 - Limiter queue exhaustion (#34 review): Ashwin approved capping queued waiters per partition, shedding past it with `queue-full`. The #35 adversarial review measured `MaxPerPartition` (16) as too low for a legitimate one-path cold start (32 of 2 000 served vs 656 uncapped); Ashwin chose max(`MaxPerPartition`, `MaxQueue`/4). FR-LIM-3 and T-11 say so.
 
 ## Decided 2026-09-28 (delegated by Ashwin after the #24 adversarial review)

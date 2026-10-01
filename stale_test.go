@@ -128,7 +128,7 @@ func TestDefaultStaleWindowsOff(t *testing.T) {
 	})
 }
 
-// FR-COA-6, 04 §6.4, §6.6: followers of a flight whose origin answered with a
+// FR-COA-5, 04 §6.4, §6.6: followers of a flight whose origin answered with a
 // 5xx receive that 5xx, each with its own body, instead of refetching.
 func TestFollowersShareFlight5xx(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
