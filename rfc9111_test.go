@@ -26,6 +26,7 @@ type rfcStep struct {
 	origin *testorigin.Behavior // replaces the origin's behavior from this step on
 	method string               // default GET
 	path   string               // default /r
+	host   string               // default example.com
 	hdr    []string             // request header name/value pairs
 
 	status      int      // expected status; 0 means 200
@@ -104,7 +105,8 @@ var rfcRows = []rfcRow{
 		{calls: 2},
 	}},
 	{sec: "9111 §3", name: "302 is stored only with explicit freshness", steps: []rfcStep{
-		{origin: bh(302, "", "Location", "/x", "Last-Modified", rfcDate(-10*time.Hour)), status: 302, calls: 1},
+		{origin: bh(302, "", "Location", "/x", "Last-Modified", rfcDate(-10*time.Hour)), status: 302, calls: 1,
+			cacheStatus: "Weir; fwd=uri-miss; fwd-status=302"},
 		{status: 302, calls: 2},
 		{origin: bh(302, "", "Location", "/x", "Cache-Control", "max-age=60"), path: "/r2", status: 302, calls: 3},
 		{path: "/r2", status: 302, calls: 3},
@@ -242,6 +244,10 @@ var rfcRows = []rfcRow{
 		{origin: bh(200, "a", "Cache-Control", "max-age=60", "ETag", `"v1"`), calls: 1},
 		{hdr: []string{"If-None-Match", `"v2"`}, calls: 1, body: "a"},
 	}},
+	{sec: "9111 §4.3.2", name: "a stored non-200 answers a matching conditional in full", steps: []rfcStep{
+		{origin: bh(404, "gone", "Cache-Control", "max-age=60", "ETag", `"v1"`), status: 404, calls: 1},
+		{hdr: []string{"If-None-Match", `"v1"`}, status: 404, calls: 1, body: "gone"},
+	}},
 	{sec: "9110 §13.2.2", name: "If-None-Match takes precedence over If-Modified-Since", steps: []rfcStep{
 		{origin: bh(200, "a", "Cache-Control", "max-age=60", "ETag", `"v1"`, "Last-Modified", rfcDate(-time.Hour)), calls: 1},
 		{hdr: []string{"If-None-Match", `"v2"`, "If-Modified-Since", rfcDate(0)}, calls: 1, body: "a"},
@@ -257,7 +263,8 @@ var rfcRows = []rfcRow{
 		{origin: bh(200, "a", "Cache-Control", "max-age=1", "ETag", `"v1"`, "X-Ver", "1", "Content-Type", "text/plain"), calls: 1},
 		{after: 2 * time.Second, origin: bh(304, "", "Cache-Control", "max-age=60", "ETag", `"v1"`, "X-Ver", "2", "Content-Type", "text/html"),
 			calls: 2, body: "a", resp: []string{"X-Ver", "2", "Content-Type", "text/plain"}},
-		{after: 30 * time.Second, calls: 2, body: "a"},
+		// a 304 without Date dates the freshened entry at receipt (FR-STO-13)
+		{after: 30 * time.Second, calls: 2, body: "a", resp: []string{"Date", rfcDate(2 * time.Second)}},
 	}},
 	{sec: "9111 §4.3.4", name: "304 with a different strong ETag is retried unconditionally", steps: []rfcStep{
 		{origin: bh(200, "a", "Cache-Control", "max-age=1", "ETag", `"v1"`), calls: 1},
@@ -302,9 +309,9 @@ var rfcRows = []rfcRow{
 		{path: "/other", origin: bh(200, "a", "Cache-Control", "max-age=60"), calls: 3},
 	}},
 	{sec: "9111 §4.4", name: "cross-origin Location is not invalidated", steps: []rfcStep{
-		{path: "/other", origin: bh(200, "a", "Cache-Control", "max-age=60"), calls: 1},
-		{method: "POST", origin: bh(201, "", "Location", "https://evil.example/other"), status: 201, calls: 2},
-		{path: "/other", calls: 2},
+		{host: "other.example", path: "/other", origin: bh(200, "a", "Cache-Control", "max-age=60"), calls: 1},
+		{method: "POST", origin: bh(201, "", "Location", "https://other.example/other"), status: 201, calls: 2},
+		{host: "other.example", path: "/other", calls: 2},
 	}},
 	{sec: "9875 §3", name: "Cache-Group-Invalidation invalidates the group", tag: "M9", steps: []rfcStep{
 		{path: "/other", origin: bh(200, "a", "Cache-Control", "max-age=60", "Cache-Groups", `"g"`), calls: 1},
@@ -319,6 +326,11 @@ var rfcRows = []rfcRow{
 		{hdr: []string{"Cache-Control", "only-if-cached"}, calls: 1, body: "a"},
 		{after: 61 * time.Second, hdr: []string{"Cache-Control", "only-if-cached"}, err: weir.ErrOnlyIfCached, calls: 1},
 	}},
+	{sec: "9111 §5.2.1.7", name: "only-if-cached wins over a forced validation",
+		cfg: func(c *weir.Config) { c.Client.HonorRevalidation = true }, steps: []rfcStep{
+			{origin: bh(200, "a", "Cache-Control", "max-age=60", "ETag", `"v1"`), calls: 1},
+			{hdr: []string{"Cache-Control", "only-if-cached, no-cache"}, calls: 1, body: "a"},
+		}},
 	{sec: "9111 §5.2.1.4", name: "request no-cache is advisory by default", steps: []rfcStep{
 		{origin: bh(200, "a", "Cache-Control", "max-age=60", "ETag", `"v1"`), calls: 1},
 		{hdr: []string{"Cache-Control", "no-cache"}, calls: 1},
@@ -396,6 +408,7 @@ func runRFCRow(t *testing.T, row rfcRow) {
 		}
 		req := getReq(cmp.Or(s.path, "/r"))
 		req.Method = cmp.Or(s.method, "GET")
+		req.Host = cmp.Or(s.host, req.Host)
 		for j := 0; j+1 < len(s.hdr); j += 2 {
 			req.Header.Add(s.hdr[j], s.hdr[j+1])
 		}
