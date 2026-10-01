@@ -30,7 +30,7 @@ func (e *Engine) Serve(ctx context.Context, req *Request, origin Origin) (*Respo
 	if c.Class == keys.ClassPass {
 		return e.pass(ctx, &c, origin, FwdMethod)
 	}
-	return e.cacheable(ctx, &c, origin)
+	return e.cacheable(ctx, &c, origin, nil)
 }
 
 // rejected maps a classification error to the public one (04 §6.2).
@@ -99,8 +99,9 @@ func (e *Engine) lookup(ctx context.Context, c *keys.Classified, now time.Time) 
 
 // cacheable serves a GET or HEAD from the store or through a coalesced
 // fetch (04 §6.2), validating a stale entry that has validators
-// (FR-SRV-3).
-func (e *Engine) cacheable(ctx context.Context, c *keys.Classified, origin Origin) (*Response, error) {
+// (FR-SRV-3). prevCK is the coalescing key of the flight a follower
+// re-enters from (FR-COA-5), nil on the first pass.
+func (e *Engine) cacheable(ctx context.Context, c *keys.Classified, origin Origin, prevCK *store.Key) (*Response, error) {
 	now := time.Now()
 	lk := e.lookup(ctx, c, now)
 	found := lk.entry       // the response this request found; it may always be replaced
@@ -138,7 +139,9 @@ func (e *Engine) cacheable(ctx context.Context, c *keys.Classified, origin Origi
 	// FR-COA-8, FR-STO-12. A no-store request's response is never shared,
 	// so leading a flight would only make its followers wait and refetch
 	// (T-31: one client must not disable coalescing for everyone).
-	if c.Authorized || c.ReqCC.NoStore || lk.marker {
+	// FR-COA-5: a re-entering follower coalesces again only under a new
+	// key, so followers never wait on each other serially.
+	if c.Authorized || c.ReqCC.NoStore || lk.marker || prevCK != nil && *prevCK == c.Primary {
 		return e.fetchDirect(ctx, sp, origin)
 	}
 	return e.fetchCoalesced(ctx, sp, origin)

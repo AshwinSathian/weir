@@ -1,7 +1,7 @@
 # Weir technical specification
 
 Status: v1.0, approved for Phase 0 and Phase 1 implementation
-Date: 2026-09-28
+Date: 2026-10-01
 Owner: Ashwin Sathian
 Module: `github.com/AshwinSathian/weir`
 Supersedes: the interface sketch in [00-design-doc.md §7.2](00-design-doc.md)
@@ -293,7 +293,7 @@ A response is stored only if all of the following hold. Each failed check increm
 - FR-COA-2. The origin fetch of a flight runs on its own goroutine with a context detached from every requester (`context.WithoutCancel` plus `Timeouts.Origin`). No requester's cancellation cancels the shared fetch.
 - FR-COA-3. A flight older than `Coalesce.LeaderMaxAge` (default 10 s) is aged. New requests for that key do not join an aged flight; the first one starts a new flight. At most one new flight per key per `LeaderMaxAge` results.
 - FR-COA-4. A follower waits at most `Coalesce.FollowerMaxWait` (default 10 s), bounded by its own context. On timeout it serves a stale entry if §5.8 permits (reason `coalesce-timeout`), otherwise it performs its own fetch through the limiter, and that fetch's storable result is stored.
-- FR-COA-5. When a flight's response is not reusable for a follower (not storable, oversized, or its Vary does not match the follower), the follower re-enters lookup once. On the second pass it may coalesce again only if its coalescing key changed (typically because the first flight stored a vary spec and the follower now resolves to a different variant key), otherwise it fetches independently. Followers never wait on each other serially.
+- FR-COA-5. When a flight's response is not reusable for a follower (not storable, oversized, or its Vary does not match the follower), the follower re-enters lookup once. On the second pass it may coalesce again only if its coalescing key changed (typically because the first flight stored a vary spec and the follower now resolves to a different variant key), otherwise it fetches independently. Followers never wait on each other serially. A storable flight response is shared even when it needs validation before its next reuse (`no-cache`, `max-age=0`), as Varnish and nginx do: a strict reading of RFC 9111 §4 would have each follower refetch, which ends coalescing for typical `no-cache` HTML (decided 2026-10-01).
 - FR-COA-6. A panic in `Origin.Fetch` is recovered, converted to `*OriginError`, and delivered to every waiter. The limiter slot and flight entry are always released.
 - FR-COA-7. The flight table is independent of the store. Coalescing keeps working while the store is unavailable.
 - FR-COA-8. A request carrying `Authorization` that finds no usable stored entry is not coalesced; it fetches directly. A response fetched with one client's credentials is shared with another request only through the store, and only when FR-STO-5 allowed storing it.

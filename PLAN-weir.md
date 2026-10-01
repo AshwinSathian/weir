@@ -99,7 +99,7 @@ Refs: FR-VAL-*, FR-KEY-1..6, FR-KEY-8, FR-KEY-12, FR-FWD-*, FR-STO-* (except Var
 Refs: FR-COA-*, FR-STO-12, T6.2, T6.2a, T-19, T-31.
 
 - [x] M2.1 `internal/coalesce` table with aging and stream hand-off state. AC: component tests for join, aging replacement, publish-removes-only-current, claim/abandon exactly-once (run 1 000 iterations).
-- [ ] M2.2 Engine coalesced fetch, detached flight context (values from creator, cancel from `Close`), follower wait, re-entry, direct fetch, hit-for-miss markers, `Authorization` rule, panic recovery. AC: `TestCoalesceColdKey1000`, `TestCoalesceCreatorCancel`, `TestCoalesceStuckLeader`, `TestCoalesceLeaderAging`, `TestCoalescePanic`, `TestUncacheableNotSerialized`, `TestAuthorizedNotCoalesced`, `TestMarkerNotFromAuthorizedRequest`, `TestMarkerNotFromRequestNoStore` pass.
+- [x] M2.2 Engine coalesced fetch, detached flight context (values from creator, cancel from `Close`), follower wait, re-entry, direct fetch, hit-for-miss markers, `Authorization` rule, panic recovery. AC: `TestCoalesceColdKey1000`, `TestCoalesceCreatorCancel`, `TestCoalesceStuckLeader`, `TestCoalesceLeaderAging`, `TestCoalescePanic`, `TestUncacheableNotSerialized`, `TestAuthorizedNotCoalesced`, `TestMarkerNotFromAuthorizedRequest`, `TestMarkerNotFromRequestNoStore` pass.
 
 #### M3 Jitter and early refresh (~0.5 week)
 

@@ -6,6 +6,8 @@ import (
 	"io"
 	"net/http"
 	"runtime"
+	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -438,6 +440,300 @@ func TestCoalesceNoStoreRequestNotLeader(t *testing.T) {
 		}
 		if n := o.TotalCalls(); n != 2 || collapsed != 4 {
 			t.Fatalf("origin calls = %d, collapsed = %d; want 2 (no-store direct, one flight) and 4", n, collapsed)
+		}
+	})
+}
+
+// T6.2, FR-COA-5, FR-STO-12: a flight whose response is not storable does
+// not hold its followers in line. They re-enter, find the marker the flight
+// left and fetch concurrently; later requests skip coalescing entirely.
+func TestUncacheableNotSerialized(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		o := testorigin.New()
+		o.Default(testorigin.Behavior{Header: http.Header{"Cache-Control": {"private"}}, Body: []byte("p"), Delay: 100 * time.Millisecond})
+		e := newEngine(t, cacheCfg)
+		defer closeEngine(t, e)
+
+		run := func(gate chan struct{}) (collapsed int) {
+			chs := make([]<-chan served, 50)
+			for i := range chs {
+				chs[i] = serveAsync(t.Context(), e, getReq("/p"), o)
+			}
+			if gate != nil {
+				synctest.Wait()
+				if n := o.TotalCalls(); n != 50 {
+					t.Fatalf("origin calls with the marker = %d, want 50 at once", n)
+				}
+				close(gate)
+			}
+			for _, ch := range chs {
+				s := <-ch
+				if s.err != nil || s.body != "p" {
+					t.Fatalf("got %v, %q; want p", s.err, s.body)
+				}
+				if s.resp.Cache.Collapsed {
+					collapsed++
+				}
+			}
+			return collapsed
+		}
+		if c := run(nil); c != 0 || o.TotalCalls() != 50 {
+			t.Fatalf("first wave: collapsed = %d, origin calls = %d; want 0 and 50", c, o.TotalCalls())
+		}
+		if m := o.MaxInflight(); m <= 1 {
+			t.Fatalf("origin max in flight = %d, want followers fetching concurrently", m)
+		}
+		resp, _ := serve(t, e, getReq("/p"), o)
+		if resp.Cache.Detail != "hit-for-miss" {
+			t.Fatalf("no marker after the flight: %+v", resp.Cache)
+		}
+		o.Reset()
+		gate := make(chan struct{})
+		o.Default(testorigin.Behavior{Header: http.Header{"Cache-Control": {"private"}}, Body: []byte("p"), Gate: gate})
+		if c := run(gate); c != 0 || o.TotalCalls() != 50 {
+			t.Fatalf("second wave: collapsed = %d, origin calls = %d; want 0 and 50", c, o.TotalCalls())
+		}
+	})
+}
+
+// FR-COA-8, T-8: concurrent Authorization requests on a cold key each fetch
+// with their own credentials; no response crosses between them.
+func TestAuthorizedNotCoalesced(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		gate := make(chan struct{})
+		o := testorigin.New()
+		o.Default(testorigin.Behavior{Gate: gate, Func: func(r *weir.Request) (*weir.Response, error) {
+			return &weir.Response{StatusCode: http.StatusOK, Header: http.Header{"Cache-Control": {"max-age=60"}},
+				Body: io.NopCloser(strings.NewReader("for " + r.Header.Get("Authorization")))}, nil
+		}})
+		e := newEngine(t, cacheCfg)
+		defer closeEngine(t, e)
+
+		chs := make([]<-chan served, 50)
+		for i := range chs {
+			chs[i] = serveAsync(t.Context(), e, withHeader(getReq("/me"), "Authorization", "Bearer "+strconv.Itoa(i)), o)
+		}
+		synctest.Wait()
+		if n := o.TotalCalls(); n != 50 {
+			t.Fatalf("origin calls = %d, want 50", n)
+		}
+		close(gate)
+		for i, ch := range chs {
+			s := <-ch
+			if want := "for Bearer " + strconv.Itoa(i); s.err != nil || s.body != want || s.resp.Cache.Collapsed {
+				t.Fatalf("request %d: %v, %q, collapsed=%v; want its own %q", i, s.err, s.body, s.resp.Cache.Collapsed, want)
+			}
+		}
+	})
+}
+
+// markerProbe sends one request with header set, whose response is a 401
+// (refused for storage whatever the request), then 100 concurrent anonymous
+// ones, and returns the origin calls the anonymous ones made.
+func markerProbe(t *testing.T, name, value string) int {
+	var calls atomic.Int32
+	o := testorigin.New()
+	o.Default(testorigin.Behavior{Delay: 100 * time.Millisecond, Func: func(*weir.Request) (*weir.Response, error) {
+		if calls.Add(1) == 1 {
+			return &weir.Response{StatusCode: http.StatusUnauthorized, Header: http.Header{}, Body: http.NoBody}, nil
+		}
+		return &weir.Response{StatusCode: http.StatusOK, Header: http.Header{"Cache-Control": {"max-age=60"}},
+			Body: io.NopCloser(strings.NewReader("pub"))}, nil
+	}})
+	e := newEngine(t, cacheCfg)
+	defer closeEngine(t, e)
+
+	serve(t, e, withHeader(getReq("/a"), name, value), o)
+	o.Reset()
+	chs := make([]<-chan served, 100)
+	for i := range chs {
+		chs[i] = serveAsync(t.Context(), e, getReq("/a"), o)
+	}
+	for _, ch := range chs {
+		if s := <-ch; s.err != nil || s.body != "pub" {
+			t.Fatalf("got %v, %q; want pub", s.err, s.body)
+		}
+	}
+	return o.TotalCalls()
+}
+
+// FR-STO-12, T-31: junk credentials on a cold URL get a 401 that is not
+// storable, but plant no marker that would switch coalescing off.
+func TestMarkerNotFromAuthorizedRequest(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		if n := markerProbe(t, "Authorization", "junk"); n != 1 {
+			t.Fatalf("origin calls = %d, want 1", n)
+		}
+	})
+}
+
+// FR-STO-12, T-31: a request no-store keeps the response out of the store
+// but plants no marker either.
+func TestMarkerNotFromRequestNoStore(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		if n := markerProbe(t, "Cache-Control", "no-store"); n != 1 {
+			t.Fatalf("origin calls = %d, want 1", n)
+		}
+	})
+}
+
+// zeros reads as an endless run of zero bytes without allocating.
+type zeros struct{}
+
+func (zeros) Read(p []byte) (int, error) {
+	clear(p)
+	return len(p), nil
+}
+
+// FR-COA-5, FR-STO-9, NFR-3: a body over MaxObjectBytes streams to the
+// creator without being buffered, and followers re-enter and fetch it
+// themselves instead of sharing the single-consumer stream.
+func TestOversizedStreamedNotBuffered(t *testing.T) {
+	const size = 50 << 20
+	// big serves the body; the first call waits for first, later ones for rest.
+	big := func(first, rest chan struct{}) testorigin.Behavior {
+		var calls atomic.Int32
+		return testorigin.Behavior{Func: func(*weir.Request) (*weir.Response, error) {
+			if calls.Add(1) == 1 {
+				<-first
+			} else {
+				<-rest
+			}
+			return &weir.Response{StatusCode: http.StatusOK, Header: http.Header{"Cache-Control": {"max-age=60"}},
+				Body: io.NopCloser(io.LimitReader(zeros{}, size))}, nil
+		}}
+	}
+
+	t.Run("creator's stream stays below 2 x MaxObjectBytes of heap", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			open := make(chan struct{})
+			close(open)
+			o := testorigin.New()
+			o.Default(big(open, open))
+			e := newEngine(t, cacheCfg) // MaxObjectBytes defaults to 1 MiB
+			defer closeEngine(t, e)
+
+			var before, during runtime.MemStats
+			runtime.GC()
+			runtime.ReadMemStats(&before)
+			resp, err := e.Serve(t.Context(), getReq("/big"), o)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer resp.Body.Close()
+			if _, err := io.CopyN(io.Discard, resp.Body, 10<<20); err != nil {
+				t.Fatal(err)
+			}
+			runtime.GC()
+			runtime.ReadMemStats(&during)
+			if grew := int64(during.HeapAlloc) - int64(before.HeapAlloc); grew >= 2<<20 {
+				t.Fatalf("heap grew %d bytes mid-stream, want < %d", grew, 2<<20)
+			}
+			n, err := io.Copy(io.Discard, resp.Body)
+			if err != nil || n+10<<20 != size {
+				t.Fatalf("read %d more bytes, %v; want the whole %d", n, err, size)
+			}
+		})
+	})
+
+	t.Run("followers re-enter and fetch themselves", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			first, rest := make(chan struct{}), make(chan struct{})
+			o := testorigin.New()
+			o.Default(big(first, rest))
+			e := newEngine(t, cacheCfg)
+			defer closeEngine(t, e)
+
+			type result struct {
+				n         int64
+				collapsed bool
+				err       error
+			}
+			chs := make([]chan result, 4)
+			for i := range chs {
+				chs[i] = make(chan result, 1)
+				go func() {
+					resp, err := e.Serve(t.Context(), getReq("/big"), o)
+					if err != nil {
+						chs[i] <- result{err: err}
+						return
+					}
+					n, err := io.Copy(io.Discard, resp.Body)
+					resp.Body.Close()
+					chs[i] <- result{n, resp.Cache.Collapsed, err}
+				}()
+			}
+			synctest.Wait()
+			if n := o.TotalCalls(); n != 1 {
+				t.Fatalf("origin calls before release = %d, want 1 flight", n)
+			}
+			close(first)
+			synctest.Wait()
+			// Followers never wait on each other serially: all three are at
+			// the origin at once.
+			if n := o.TotalCalls(); n != 4 {
+				t.Fatalf("origin calls after the flight = %d, want 4 (one flight, three re-entries)", n)
+			}
+			close(rest)
+			for _, ch := range chs {
+				if r := <-ch; r.err != nil || r.n != size || r.collapsed {
+					t.Fatalf("got %d bytes, %v, collapsed=%v; want %d of its own", r.n, r.err, r.collapsed, size)
+				}
+			}
+		})
+	})
+}
+
+// FR-STO-12, 04 §6.7: a marker never replaces a stored response. A stale
+// entry kept for stale-if-error is refetched; the origin now answers
+// private, and the stale response stays rather than a marker taking its
+// place.
+func TestMarkerNeverReplacesResponse(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		o := testorigin.New()
+		o.Default(testorigin.Behavior{Header: http.Header{"Cache-Control": {"max-age=1, stale-if-error=60"}}, Body: []byte("a")})
+		e := newEngine(t, cacheCfg)
+		defer closeEngine(t, e)
+
+		serve(t, e, getReq("/a"), o)
+		time.Sleep(2 * time.Second)
+		o.Default(testorigin.Behavior{Header: http.Header{"Cache-Control": {"private"}}, Body: []byte("p")})
+		serve(t, e, getReq("/a"), o)
+		if resp, _ := serve(t, e, getReq("/a"), o); resp.Cache.Detail == "hit-for-miss" {
+			t.Fatalf("a marker replaced the stored response: %+v", resp.Cache)
+		}
+	})
+}
+
+// FR-COA-5 (decided 2026-10-01): a storable flight response that needs
+// validation before its next reuse (no-cache) is still shared with the
+// followers waiting on it.
+func TestCoalesceSharesNoCacheResponse(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		gate := make(chan struct{})
+		o := testorigin.New()
+		o.Default(testorigin.Behavior{Gate: gate, Header: http.Header{"Cache-Control": {"no-cache"}, "Etag": {`"1"`}}, Body: []byte("n")})
+		e := newEngine(t, cacheCfg)
+		defer closeEngine(t, e)
+
+		chs := make([]<-chan served, 5)
+		for i := range chs {
+			chs[i] = serveAsync(t.Context(), e, getReq("/n"), o)
+		}
+		synctest.Wait()
+		close(gate)
+		collapsed := 0
+		for _, ch := range chs {
+			s := <-ch
+			if s.err != nil || s.body != "n" {
+				t.Fatalf("got %v, %q; want n", s.err, s.body)
+			}
+			if s.resp.Cache.Collapsed {
+				collapsed++
+			}
+		}
+		if n := o.TotalCalls(); n != 1 || collapsed != 4 {
+			t.Fatalf("origin calls = %d, collapsed = %d; want 1 and 4", n, collapsed)
 		}
 	})
 }
