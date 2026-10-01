@@ -240,3 +240,172 @@ func TestEarlyRefreshClosesUnclaimedStream(t *testing.T) {
 		}
 	})
 }
+
+// swr is a response that may be served stale for 30s after 60s of life.
+func swr(body string) testorigin.Behavior {
+	return testorigin.Behavior{Header: http.Header{"Cache-Control": {"max-age=60, stale-while-revalidate=30"}}, Body: []byte(body)}
+}
+
+// FR-STL-1, FR-STL-6, 03 §2.3: requests inside the SWR window get the stale
+// entry at once, and only one background refresh runs however many arrive.
+func TestSWRServesAndRefreshesOnce(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		o := testorigin.NewChecked(t, 64, 16)
+		o.Default(swr("a"))
+		obs := &eventCounter{}
+		cfg := cacheCfg
+		cfg.Observer = obs
+		cfg.Freshness.NoEarlyRefresh = true
+		e := newEngine(t, cfg)
+		defer closeEngine(t, e)
+
+		serve(t, e, getReq("/k"), o)
+		gate := make(chan struct{})
+		next := swr("b")
+		next.Gate = gate
+		o.Default(next)
+		time.Sleep(70 * time.Second) // 10s stale, inside the 30s window
+		for i := range 10 {
+			resp, body := serve(t, e, getReq("/k"), o)
+			if body != "a" || !resp.Cache.Hit || resp.Cache.Stale != weir.StaleWhileRevalidate || resp.Cache.TTL != -10*time.Second {
+				t.Fatalf("request %d: body %q cache %+v; want the stale entry, ttl=-10s", i, body, resp.Cache)
+			}
+		}
+		synctest.Wait()
+		if n := o.Calls("/k"); n != 2 {
+			t.Fatalf("origin calls = %d, want 2 (fill and one refresh)", n)
+		}
+		if n := obs.count("stale-served/swr"); n != 10 { // 04 §12
+			t.Fatalf("EvStaleServed swr = %d, want 10", n)
+		}
+		close(gate)
+		synctest.Wait()
+		if resp, body := serve(t, e, getReq("/k"), o); body != "b" || !resp.Cache.Hit || resp.Cache.Stale != weir.StaleNone {
+			t.Fatalf("after refresh: body %q cache %+v; want the fresh entry", body, resp.Cache)
+		}
+	})
+}
+
+// FR-STL-1, FR-SRV-5, FR-SRV-6, T-7, T-8, T-31, FR-SRV-8: an Authorization or no-store request gets
+// the stale entry but starts no refresh; a client no-cache honored under
+// HonorRevalidation validates in the foreground instead. Only-if-cached
+// and Range requests are answered from the stale entry.
+func TestSWRGates(t *testing.T) {
+	cases := []struct {
+		name  string
+		hdr   []string
+		honor bool
+		body  string
+		calls int
+	}{
+		{name: "authorization request serves stale without refresh", hdr: []string{"Authorization", "Bearer x"}, body: "a", calls: 1},
+		{name: "no-store request serves stale without refresh", hdr: []string{"Cache-Control", "no-store"}, body: "a", calls: 1},
+		{name: "honored no-cache fetches in the foreground", hdr: []string{"Cache-Control", "no-cache"}, honor: true, body: "b", calls: 2},
+		{name: "only-if-cached serves stale and refreshes", hdr: []string{"Cache-Control", "only-if-cached"}, body: "a", calls: 2},
+		{name: "range request serves the stale entry and refreshes without range", hdr: []string{"Range", "bytes=0-0"}, body: "a", calls: 2},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				o := testorigin.NewChecked(t, 64, 16)
+				fill := swr("a")
+				fill.Header.Set("Cache-Control", "public, max-age=60, stale-while-revalidate=30")
+				o.Default(fill)
+				cfg := cacheCfg
+				cfg.Freshness.NoEarlyRefresh = true
+				cfg.Client.HonorRevalidation = tc.honor
+				e := newEngine(t, cfg)
+				defer closeEngine(t, e)
+
+				serve(t, e, getReq("/k"), o)
+				o.Default(swr("b"))
+				time.Sleep(70 * time.Second)
+				req := getReq("/k")
+				req.Header.Set(tc.hdr[0], tc.hdr[1])
+				if _, body := serve(t, e, req, o); body != tc.body {
+					t.Fatalf("body %q, want %q", body, tc.body)
+				}
+				synctest.Wait()
+				if n := o.Calls("/k"); n != tc.calls {
+					t.Fatalf("origin calls = %d, want %d", n, tc.calls)
+				}
+				if reqs := o.Requests(); reqs[len(reqs)-1].Header.Get("Range") != "" { // T-7
+					t.Fatal("refresh forwarded the client's Range")
+				}
+			})
+		})
+	}
+}
+
+// FR-LIM-4, FR-STL-1: a burst of SWR refreshes takes at most
+// MaxConcurrent - ReserveForeground slots; the rest are dropped and counted,
+// and every request is still served stale.
+func TestRefreshNeverExceedsReserve(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		const keys = 20
+		o := testorigin.NewChecked(t, 3, 3) // MaxConcurrent - ReserveForeground
+		o.Default(swr("a"))
+		obs := &eventCounter{}
+		cfg := cacheCfg
+		cfg.Observer = obs
+		cfg.Freshness.NoEarlyRefresh = true
+		cfg.Limiter = weir.LimiterConfig{MaxConcurrent: 4, ReserveForeground: 1}
+		e := newEngine(t, cfg)
+		defer closeEngine(t, e)
+
+		for i := range keys {
+			serve(t, e, getReq("/k"+strconv.Itoa(i)), o)
+		}
+		gate := make(chan struct{})
+		next := swr("b")
+		next.Gate = gate
+		o.Default(next)
+		time.Sleep(70 * time.Second)
+		for i := range keys {
+			resp, body := serve(t, e, getReq("/k"+strconv.Itoa(i)), o)
+			if body != "a" || resp.Cache.Stale != weir.StaleWhileRevalidate {
+				t.Fatalf("/k%d: body %q stale %v; want the stale entry", i, body, resp.Cache.Stale)
+			}
+		}
+		synctest.Wait()
+		if n := o.MaxInflight(); n != 3 {
+			t.Fatalf("origin max in-flight = %d, want 3", n)
+		}
+		if n := obs.count("refresh-dropped/no-slot"); n != keys-3 {
+			t.Fatalf("EvRefreshDropped no-slot = %d, want %d", n, keys-3)
+		}
+		close(gate)
+	})
+}
+
+// FR-LCY-2, 04 §12: an SWR hit racing Close is still served, and its refresh
+// is dropped with EvRefreshDropped closed instead of starting a goroutine
+// Close no longer waits for.
+func TestSWRRefreshDroppedOnClose(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		o := testorigin.NewChecked(t, 64, 16)
+		o.Default(swr("a"))
+		// The request blocks in its stale-served event, before the refresh.
+		obs := &holdObserver{key: "stale-served/swr", hold: make(chan struct{})}
+		cfg := cacheCfg
+		cfg.Observer = obs
+		cfg.Freshness.NoEarlyRefresh = true
+		e := newEngine(t, cfg)
+
+		serve(t, e, getReq("/k"), o)
+		time.Sleep(70 * time.Second)
+		ch := serveAsync(t.Context(), e, getReq("/k"), o)
+		synctest.Wait()
+		closeEngine(t, e)
+		close(obs.hold)
+		if s := <-ch; s.err != nil || s.body != "a" {
+			t.Fatalf("racing request: %v, %q; want the stale entry", s.err, s.body)
+		}
+		if n := obs.count("refresh-dropped/closed"); n != 1 {
+			t.Fatalf("EvRefreshDropped closed = %d, want 1", n)
+		}
+		if n := o.Calls("/k"); n != 1 {
+			t.Fatalf("origin calls = %d, want 1", n)
+		}
+	})
+}

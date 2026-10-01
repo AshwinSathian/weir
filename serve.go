@@ -110,30 +110,32 @@ func (e *Engine) cacheable(ctx context.Context, c *keys.Classified, origin Origi
 	var prior *store.Entry  // the stale entry to validate
 	if lk.entry != nil {
 		st, staleness, _ := httpcc.Evaluate(lk.entry, lk.epoch, lk.epochOK, now)
-		if st == httpcc.Fresh && !c.ReqCC.OnlyIfCached && forcesValidation(&c.ReqCC) {
+		if (st == httpcc.Fresh || st == httpcc.StaleSWR) && !c.ReqCC.OnlyIfCached && forcesValidation(&c.ReqCC) {
 			st, lk.fwd = httpcc.NeedsValidation, FwdRequest // RFC 9211 §2.2 fwd=request
 		}
 		switch st {
 		case httpcc.Fresh:
 			e.maybeEarlyRefresh(ctx, c, lk, -staleness, origin)
 			return e.fromEntry(c, lk.entry, now, CacheInfo{Hit: true, TTL: -staleness}), nil
+		case httpcc.StaleSWR: // FR-STL-1, 03 §2.3; before only-if-cached and Range, which it answers
+			emit(e.cfg.Observer, Event{Kind: EvStaleServed, Time: now, Partition: c.Partition, Reason: "swr"})
+			if !c.Authorized && !c.ReqCC.NoStore { // the early-refresh gate (T-8, T-31)
+				e.backgroundRefresh(ctx, c, lk, origin)
+			}
+			return e.fromEntry(c, lk.entry, now, CacheInfo{Hit: true, Stale: StaleWhileRevalidate, TTL: -staleness}), nil
 		case httpcc.Unusable: // FR-PRG-3: exactly a miss
 			purged, lk.entry, lk.fwd = lk.entry, nil, FwdURIMiss
 		default:
-			// ponytail: StaleSWR validates in the foreground until
-			// background refresh (M5) lands.
 			if hasValidators(lk.entry) {
 				prior = lk.entry
 			}
 		}
 	}
-	// ponytail: a StaleSWR entry fails only-if-cached until M5 serves it.
 	if c.ReqCC.OnlyIfCached { // FR-SRV-6
 		return nil, ErrOnlyIfCached
 	}
 	// FR-SRV-5, T-37: a Range request no entry answers passes through, even
 	// with a stale entry: not stored, not coalesced, no marker.
-	// ponytail: StaleSWR entries pass through too until M5 serves them.
 	if c.Range {
 		return e.pass(ctx, c.AsRangePass(), origin, lk.fwd)
 	}

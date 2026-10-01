@@ -356,10 +356,17 @@ var rfcRows = []rfcRow{
 	}},
 
 	// RFC 5861: FR-STL-1, FR-STL-2, M5.
-	{sec: "5861 §3", name: "stale-while-revalidate serves stale and refreshes", tag: "M5", steps: []rfcStep{
+	{sec: "5861 §3", name: "stale-while-revalidate serves stale and refreshes", steps: []rfcStep{
 		{origin: bh(200, "a", "Cache-Control", "max-age=600, stale-while-revalidate=30"), calls: 1},
-		{after: 610 * time.Second, origin: bh(200, "b", "Cache-Control", "max-age=600"), body: "a", calls: 2},
+		{after: 610 * time.Second, origin: bh(200, "b", "Cache-Control", "max-age=600"), body: "a", calls: 2,
+			cacheStatus: "Weir; hit; ttl=-10; detail=stale-while-revalidate"},
 		{after: time.Second, body: "b", calls: 2},
+	}},
+	{sec: "5861 §3", name: "stale-while-revalidate refresh validates and freshens on 304", steps: []rfcStep{
+		{origin: bh(200, "a", "Cache-Control", "max-age=600, stale-while-revalidate=30", "ETag", `"v1"`), calls: 1},
+		{after: 610 * time.Second, origin: bh(304, "", "Cache-Control", "max-age=600", "ETag", `"v1"`), body: "a", calls: 2,
+			sent: []string{"If-None-Match", `"v1"`}},
+		{after: time.Second, body: "a", calls: 2, cacheStatus: "Weir; hit; ttl=599"},
 	}},
 	{sec: "5861 §4", name: "stale-if-error serves stale on a 500", tag: "M5", steps: []rfcStep{
 		{origin: bh(200, "a", "Cache-Control", "max-age=600, stale-if-error=1200"), calls: 1},
@@ -437,6 +444,7 @@ func runRFCRow(t *testing.T, row rfcRow) {
 			}
 			checkHeader(t, i, "response", resp.Header, s.resp)
 		}
+		synctest.Wait() // count a background refresh in the step that started it
 		if n := o.TotalCalls(); n != s.calls {
 			t.Fatalf("step %d: origin calls %d, want %d", i, n, s.calls)
 		}
