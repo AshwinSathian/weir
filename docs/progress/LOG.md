@@ -567,3 +567,11 @@ Entry template:
 - Deviations: 04 §5.2 records the error rule (05 S-3 plus caller-cancel exemption), no half-open probe, openTil reset. 07 T6.5 `TestStoreSlowRemote` wording changed from "each request" to "each store call" (a miss makes four).
 - Follow-ups: per-request store budget question (STATUS note).
 - Context: low; size S was right. card-reviewer: 2 must-fix (caller cancel opened the breaker; 04 vs 05 S-3 conflict) fixed, 4 should-fix fixed (openTil, local-deadline test, cap/consecutive test, 07 wording), 3 nits fixed.
+
+## 2026-10-01 · M4-04 · review-fixes
+- Branch / PR: card/M4-04-store-guard / #37
+- Done: adversarial review of #37. Found `fails` growing without bound while the store stays down: an `atomic.Int32` wraps negative after 2^31 failed calls, after which the breaker never opens again. It now stops at the threshold. Stress probe (64 goroutines, 0 / 100 / 50 % failure phases, caller deadlines shorter and longer than `Timeouts.Store`): healthy phases always end closed with `fails` 0, a dead store always opens it. Open-breaker path costs 33 ns (141 ns at 12 cores, global mutex), 0 allocs; left as is.
+- Tests: TestStoreGuardBackoff checks `fails` stays at 5 after 100 failures while open. `make check` passes.
+- Deviations: none.
+- Follow-ups (not fixed): `EvStoreBreaker` open is emitted again on each reopen with no `closed` between, and events are emitted after unlocking, so observers may see them out of order; a gauge must not assume open/closed pairs. Invalidation epochs (`setEpoch`) skipped while the breaker is open are lost with no event, as they were when the store failed (T-9 family). A corrupt remote record on a hot key counts as a store failure (S-3) and can help open the breaker in low traffic.
+- Context: low.

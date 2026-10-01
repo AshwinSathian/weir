@@ -97,6 +97,12 @@ func TestStoreGuardBackoff(t *testing.T) {
 		for range 5 {
 			call(other)
 		}
+		for range 100 {
+			call(other)
+		}
+		if n := g.fails.Load(); n != storeBreakerFails {
+			t.Fatalf("fails after 100 failures while open = %d, want it held at %d", n, storeBreakerFails)
+		}
 		want := []time.Duration{1, 2, 4, 8, 16, 30, 30, 30, 1}
 		for i := range want {
 			want[i] *= time.Second

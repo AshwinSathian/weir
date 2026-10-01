@@ -137,7 +137,11 @@ func (g *storeGuard) succeed() {
 func (g *storeGuard) fail() {
 	g.mu.Lock()
 	now := time.Now()
-	if g.fails.Add(1) < storeBreakerFails || now.Before(g.openTil) {
+	// fails stops at the threshold: a long outage would otherwise wrap it
+	// negative and leave the breaker closed for good.
+	n := min(g.fails.Load()+1, storeBreakerFails)
+	g.fails.Store(n)
+	if n < storeBreakerFails || now.Before(g.openTil) {
 		g.mu.Unlock()
 		return
 	}
