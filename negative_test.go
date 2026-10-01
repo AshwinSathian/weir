@@ -234,3 +234,27 @@ func TestNegativeReplacesExpiredRecord(t *testing.T) {
 		}
 	})
 }
+
+// FR-NEG-2, RFC 9110 §10.2.3: the served Retry-After counts down from the
+// origin's value as the negative entry ages, so a client is not told to wait
+// longer than the origin asked.
+func TestNegativeRetryAfterAges(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		o := testorigin.NewChecked(t, 64, 16)
+		o.Default(testorigin.Behavior{Status: 503, Header: http.Header{"Retry-After": {"7"}}})
+		cfg := cacheCfg
+		cfg.Negative.TTL = 10 * time.Second
+		e := newEngine(t, cfg)
+		defer closeEngine(t, e)
+
+		serve(t, e, getReq("/a"), o)
+		time.Sleep(2500 * time.Millisecond)
+		if resp, _ := serve(t, e, getReq("/a"), o); resp.Header.Get("Retry-After") != "5" {
+			t.Fatalf("Retry-After = %q after 2.5 s, want 5", resp.Header.Get("Retry-After"))
+		}
+		time.Sleep(5 * time.Second)
+		if resp, _ := serve(t, e, getReq("/a"), o); resp.Cache.Detail != "negative" || resp.Header.Get("Retry-After") != "" {
+			t.Fatalf("after Retry-After passed: %+v %q, want negative hit without Retry-After", resp.Cache, resp.Header.Get("Retry-After"))
+		}
+	})
+}

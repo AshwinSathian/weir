@@ -44,7 +44,8 @@ The cards' Notes give the reasons and the options rejected. All three come befor
 
 - M6-01: negative writes happen in `setNegative` (negative.go), called by `fetchStored` before the flight publishes; `lookup` returns a live negative record as `lk.neg` and `cacheable` serves it before the only-if-cached and Range checks. Markers and negative entries share `setUnlessResponse` (serve.go), which replaces only a hard-purged or expired response.
 - M6-01: tests whose next request must reach the origin after a 502/503/504 or transport failure set `Negative.Disable` (coalesce, stale, serve, weirhttp handler-origin tests). New engine tests with failing origins need the same.
-- M6-01 review nits left open: `retryAfter` has no fuzz target (strconv and `http.ParseTime` only); the served `Retry-After` is not reduced as the entry ages.
+- M6-01 adversarial review: `FuzzRetryAfter` (seeds in testdata/fuzz) covers the origin `Retry-After` parser; the served value counts down with the entry's age. Mutants of the `sp.lk.entry != nil` and `ctx.Err() == nil` guards survive because `setUnlessResponse` and `timeoutOrOrigin` already enforce them; they stay as cheap early exits.
+- M7: the `Accept-Encoding` bucket is forwarded but not in `PrimaryKey`, so an origin that fails only for one coding writes a negative entry every coding sees (2 s, same bound as the marker note below). Keying the bucket in M7-01 closes it.
 
 - M5-04: `staleOK` (mode.go) is the single stale-on-error test for `onFetchError` and `staleOnTimeout`; The mode widens only entries still stored, so it helps entries with a validator (kept `Freshness.Keep`) or an SIE/SWR window.
 - M5-04: bypass uses `keys.Classified.AsBypass()`, which re-runs the `ClassPass` builder on the original request. M7-03 bypass rules (FR-BYP-1) can call the same method.

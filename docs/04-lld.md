@@ -766,7 +766,7 @@ func (e *Engine) setNegative(ctx, sp, res):
         Entry{Kind: KindNegative, Status: st, RetryAfter: parsed Retry-After (whole seconds), Expires: now + Negative.TTL})
 ```
 
-`setUnlessResponse` is the marker write's guard (§6.7): it re-reads the key and never replaces a response other than the hard-purged one this request found. `lookup` returns a live negative record as `lk.neg`; `cacheable` serves it before the only-if-cached and Range checks with `fromNegative`: the status, `Retry-After` when recorded, an empty body, `Cache-Status: Weir; hit; ttl=<remaining>; detail=negative`, and `EvNegativeServed`.
+`setUnlessResponse` is the marker write's guard (§6.7): it re-reads the key and never replaces a live response other than the hard-purged one this request found. `lookup` returns a live negative record as `lk.neg`; `cacheable` serves it before the only-if-cached and Range checks with `fromNegative`: the status, the recorded `Retry-After` less the entry's age (rounded up; omitted once it has passed), an empty body, `Cache-Status: Weir; hit; ttl=<remaining>; detail=negative`, and `EvNegativeServed`.
 
 ### 6.7 The fetch function (P3)
 

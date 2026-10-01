@@ -75,11 +75,12 @@ func retryAfter(v string, now time.Time) time.Duration {
 }
 
 // fromNegative synthesizes the response for a live negative entry: its
-// status, its Retry-After, nothing from the origin (FR-NEG-2, FR-NEG-3).
+// status, what is left of its Retry-After (rounded up, so a client never
+// retries early), nothing from the origin (FR-NEG-2, FR-NEG-3).
 func (e *Engine) fromNegative(c *keys.Classified, neg *store.Entry, now time.Time) *Response {
 	h := http.Header{}
-	if ra := neg.RetryAfter; ra > 0 {
-		h["Retry-After"] = []string{strconv.FormatInt(int64(ra/time.Second), 10)}
+	if ra := neg.RetryAfter - now.Sub(neg.StoredAt); ra > 0 {
+		h["Retry-After"] = []string{strconv.FormatInt(int64((ra+time.Second-1)/time.Second), 10)}
 	}
 	emit(e.cfg.Observer, Event{Kind: EvNegativeServed, Time: now, Partition: c.Partition})
 	return e.finish(&Response{StatusCode: neg.Status, Header: h, Body: http.NoBody},

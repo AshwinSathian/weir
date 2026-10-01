@@ -680,3 +680,11 @@ Entry template:
 - Deviations: 01 FR-NEG-4 lists the extra exclusions (request no-store, unkeyed forward, background and warm), 04 §6.6 moves the write from `onFetchError` to `fetchStored`, 06 T-31 drops "markers also". FR-NEG-4 needs Ashwin's approval (STATUS).
 - Follow-ups: reviewer should-fix (an expired record a lazy store returns blocked the negative write) fixed test-first. FR-NEG-4 approval and FR-NEG-3 `ttl` wording under Waiting on Ashwin.
 - Context: low; size S right. Touched four existing test files to disable negative caching where a test expects repeated origin calls.
+
+## 2026-10-01 · M6-01 · review-fixes
+- Branch / PR: card/M6-01-negative-caching / #43
+- Done: adversarial review of #43. Hard rule 8 gap: the origin `Retry-After` parser had no fuzz target; added `FuzzRetryAfter` with seeds. The served `Retry-After` now counts down from the origin's value (rounded up) instead of repeating it for the whole TTL. 01 §7.2's "negative entry" note and 04 §6.6 match FR-NEG-4.
+- Tests: TestParseRetryAfter, FuzzRetryAfter (30 s clean), TestNegativeRetryAfterAges. 10 hand mutants of `setNegative`/`retryAfter`: 7 killed, 3 equivalent survivors (guards duplicated downstream). Negative, coalesce and stale tests passed 30 times under race and shuffle. `make check` passes.
+- Deviations: none beyond the doc alignment above.
+- Follow-ups: Accept-Encoding bucket note for M7-01 in STATUS; FR-NEG-4 and FR-NEG-3 wording still under Waiting on Ashwin.
+- Context: low.

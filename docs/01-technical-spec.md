@@ -473,7 +473,7 @@ Evaluated in order after validation, bypass check, and store lookup.
 | follower wait expired | serve stale | fetch independently (FR-COA-4) |
 | any of the above on a `must-revalidate` or `proxy-revalidate` entry | not permitted | `ErrMustRevalidate` (504), except a 500/502/503/504 response is passed through |
 
-"Negative entry" in this table means: written only when no stored response exists for the key and the request carried no `Authorization` (FR-NEG-1, FR-NEG-4).
+"Negative entry" in this table means: written only by a foreground fetch, when no stored response exists for the key and none of the FR-NEG-4 exclusions apply (`Authorization`, request `no-store`, unkeyed forwarded input) (FR-NEG-1, FR-NEG-4).
 
 ## 8. RFC conformance summary
 
