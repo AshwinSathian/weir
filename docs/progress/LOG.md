@@ -543,3 +543,19 @@ Entry template:
 - Deviations: FR-LIM-3, T-11, 04 §8.2 and 07 T6.3 updated to the quarter cap (approved).
 - Follow-ups: `MaxQueueWait` above `LeaderMaxAge`/`FollowerMaxWait` defeats coalescing under load (STATUS note).
 - Context: low.
+
+## 2026-10-01 · M4-03 · done
+- Branch / PR: card/M4-03-upload-pool / #36
+- Done: upload pool (engine.go `upl`, picked in `fetch` by `c.HasBody`, FR-LIM-7, T-39). Origin deadline is now an `AfterFunc` timer, so streams drop it at headers and use `idleBody` with `StreamIdle` per Read (FR-TMO-2); buffered bodies stay under `Timeouts.Origin` (FR-TMO-1, T-41).
+- Tests: TestSlowUploadsDoNotStarveMisses, TestBodylessPassUsesMainPool, TestDripOriginReleasesSlot, TestStreamIdleTimeout; TestSlowReaderDoesNotPinSlots now expects streams to outlive `Timeouts.Origin`. `make check` passes.
+- Deviations: 04 §14 records the upload pool's queue rules (01 says only "its own queue rules"); 04 §6.7 pseudocode and §14 timeouts bullet updated to the timer and idle reader.
+- Follow-ups: PLAN M4.3b waits on M7-03 (`TestBodylessBypassUsesMainPool`).
+- Context: low; size M was right. card-reviewer: 0 must-fix, 2 should-fix (04 §6.7, §14 wording) fixed, 4 nits left (deadline/idle boundary races on the real clock, EvShed pool name, Content-Length: 0 trust).
+
+## 2026-10-01 · M4-03 · review-fixes
+- Branch / PR: card/M4-03-upload-pool / #36
+- Done: adversarial review of #36. Probed SSE idle and no total deadline, a consumer pausing 90 s between reads, caller cancel during a stream (499, not timeout), Close during a blocked Read, upload-pool shed, and Range pass (no body forwarded, main pool). All behaved. Mutants: the idle timer left armed after Read (counting consumer time) survived the card tests, because the test body ignored its context after a burst.
+- Tests: TestStreamIdleCountsOnlyReads added; TestStreamIdleTimeout gains an event-stream row; `dripBody` fails reads once its context ends, like an http.Client body. Both idleBody mutants (no Stop after Read, no cancel on Close) now fail a test. 3 shuffled race runs of the limiter and timeout tests clean. `make check` passes.
+- Deviations: none.
+- Follow-ups: `Timeouts.Background` unused (STATUS note); adapter docs to require a write timeout (STATUS note).
+- Context: low.

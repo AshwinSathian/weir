@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"net/http"
+	"strings"
 	"sync"
 	"testing"
 	"testing/synctest"
@@ -199,8 +201,8 @@ func TestPartitionFairness(t *testing.T) {
 }
 
 // FR-LIM-1, FR-TMO-2, T-18: 200 pass-through responses whose consumers never
-// read the body hold no limiter slot, so the next request never queues; the
-// streams still end at Timeouts.Origin.
+// read the body hold no limiter slot, so the next request never queues. The
+// streams have no total deadline, so they still read after Timeouts.Origin.
 func TestSlowReaderDoesNotPinSlots(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		o := testorigin.NewChecked(t, 64, 16)
@@ -223,10 +225,10 @@ func TestSlowReaderDoesNotPinSlots(t *testing.T) {
 			t.Fatalf("200 unread streams took %v; a request queued for a pinned slot", d)
 		}
 		time.Sleep(cfg.Timeouts.Origin)
-		synctest.Wait() // the deadlines fire at this same instant
+		synctest.Wait() // a total deadline would fire at this same instant
 		for i, b := range bodies {
-			if _, err := io.ReadAll(b); err == nil {
-				t.Fatalf("stream %d read after Timeouts.Origin succeeded", i)
+			if _, err := io.ReadAll(b); err != nil {
+				t.Fatalf("stream %d read after Timeouts.Origin: %v", i, err)
 			}
 			b.Close()
 		}
@@ -409,6 +411,312 @@ func TestFlightTableBoundedUnderFlood(t *testing.T) {
 		synctest.Wait()
 		if n := weir.Flights(e); n != 0 {
 			t.Fatalf("flights after the origin answered = %d, want 0", n)
+		}
+	})
+}
+
+// stallBody is a request or response body that never ends on its own: Read
+// blocks until stop closes (then EOF) or ctx ends.
+type stallBody struct {
+	ctx  context.Context
+	stop <-chan struct{}
+}
+
+func (b stallBody) Read([]byte) (int, error) {
+	select {
+	case <-b.stop:
+		return 0, io.EOF
+	case <-b.ctx.Done():
+		return 0, b.ctx.Err()
+	}
+}
+
+func (stallBody) Close() error { return nil }
+
+// dripBody sends burst at once, then one byte per tick until n bytes are
+// sent, then EOF. It never sends anything after stallAfter bytes (0 = no
+// stall). Reads fail once ctx ends, like an http.Client body.
+type dripBody struct {
+	ctx        context.Context
+	burst      []byte
+	tick       time.Duration
+	n, sent    int
+	stallAfter int
+}
+
+func (b *dripBody) Read(p []byte) (int, error) {
+	if err := b.ctx.Err(); err != nil {
+		return 0, err
+	}
+	if len(b.burst) > 0 {
+		n := copy(p, b.burst)
+		b.burst = b.burst[n:]
+		return n, nil
+	}
+	if b.sent >= b.n {
+		return 0, io.EOF
+	}
+	d := b.tick
+	if b.stallAfter > 0 && b.sent >= b.stallAfter {
+		d = math.MaxInt64
+	}
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-t.C:
+	case <-b.ctx.Done():
+		return 0, b.ctx.Err()
+	}
+	p[0] = 'x'
+	b.sent++
+	return 1, nil
+}
+
+func (*dripBody) Close() error { return nil }
+
+func uploadReq(ctx context.Context, path string, stop <-chan struct{}) *weir.Request {
+	r := postReq(path)
+	r.Body = stallBody{ctx, stop}
+	return r
+}
+
+// uploadOrigin reads each request body to the end, as a transport sends
+// it, then answers from o. It records how many bodies were read at once.
+type uploadOrigin struct {
+	o            *testorigin.Origin
+	mu           sync.Mutex
+	reading, max int
+}
+
+func (u *uploadOrigin) Fetch(ctx context.Context, req *weir.Request) (*weir.Response, error) {
+	if req.Body != nil {
+		u.mu.Lock()
+		u.reading++
+		u.max = max(u.max, u.reading)
+		u.mu.Unlock()
+		_, err := io.Copy(io.Discard, req.Body)
+		u.mu.Lock()
+		u.reading--
+		u.mu.Unlock()
+		if err != nil {
+			return nil, err
+		}
+	}
+	return u.o.Fetch(ctx, req)
+}
+
+// FR-LIM-7, T-39: 200 POSTs whose bodies never finish saturate the upload
+// pool alone; cacheable misses on the main pool are not delayed.
+func TestSlowUploadsDoNotStarveMisses(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		const slots, upload = 64, 16
+		o := testorigin.NewChecked(t, slots+upload, 16)
+		gate := make(chan struct{})
+		miss := cacheable("v")
+		miss.Gate = gate // every miss must hold a main slot at once
+		o.Default(miss)
+		origin := &uploadOrigin{o: o}
+		e := newEngine(t, cacheCfg)
+		defer closeEngine(t, e)
+
+		stop := make(chan struct{})
+		uploads := make([]<-chan timedServe, 200)
+		for i := range uploads {
+			uploads[i] = serveTimed(t, e, uploadReq(t.Context(), "/upload", stop), origin)
+		}
+		synctest.Wait()
+		misses := make([]<-chan timedServe, slots)
+		for i := range misses {
+			misses[i] = serveTimed(t, e, getReq(fmt.Sprintf("/k%d", i)), origin)
+		}
+		synctest.Wait()
+		if n := o.TotalCalls(); n != slots {
+			t.Fatalf("misses at the origin = %d, want all %d", n, slots)
+		}
+		close(gate)
+		for i, ch := range misses {
+			if r := <-ch; r.err != nil || r.elapsed != 0 {
+				t.Fatalf("miss %d: err %v after %v; want served at once", i, r.err, r.elapsed)
+			}
+		}
+		close(stop)
+		for i, ch := range uploads {
+			if r := <-ch; r.err != nil {
+				t.Fatalf("upload %d: %v", i, r.err)
+			}
+		}
+		if n := origin.max; n != upload {
+			t.Fatalf("uploads in flight at once = %d, want the upload pool's %d", n, upload)
+		}
+	})
+}
+
+// FR-LIM-7: requests without a body (nil, http.NoBody, or a declared
+// Content-Length: 0) take main-pool slots even when the upload pool is full.
+func TestBodylessPassUsesMainPool(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		o := testorigin.NewChecked(t, 5, 4)
+		origin := &uploadOrigin{o: o}
+		cfg := cacheCfg
+		cfg.Limiter = weir.LimiterConfig{MaxConcurrent: 4, MaxUpload: 1}
+		e := newEngine(t, cfg)
+		defer closeEngine(t, e)
+
+		stop := make(chan struct{})
+		held := serveTimed(t, e, uploadReq(t.Context(), "/upload", stop), origin)
+		queued := serveTimed(t, e, uploadReq(t.Context(), "/upload", stop), origin)
+		synctest.Wait()
+
+		for _, tc := range []struct {
+			name string
+			req  func() *weir.Request
+		}{
+			{"DELETE with nil body", func() *weir.Request { r := getReq("/a"); r.Method = http.MethodDelete; return r }},
+			{"OPTIONS with NoBody", func() *weir.Request {
+				r := getReq("/a")
+				r.Method, r.Body = http.MethodOptions, http.NoBody
+				return r
+			}},
+			{"POST declaring Content-Length 0", func() *weir.Request {
+				r := postReq("/a")
+				r.Header.Set("Content-Length", "0")
+				r.Body = io.NopCloser(strings.NewReader(""))
+				return r
+			}},
+		} {
+			if r := <-serveTimed(t, e, tc.req(), origin); r.err != nil || r.elapsed != 0 {
+				t.Fatalf("%s: err %v after %v; want served at once from the main pool", tc.name, r.err, r.elapsed)
+			}
+		}
+		close(stop)
+		for _, ch := range []<-chan timedServe{held, queued} {
+			if r := <-ch; r.err != nil {
+				t.Fatalf("upload: %v", r.err)
+			}
+		}
+	})
+}
+
+// FR-TMO-1, T-41: an origin sending a 10 KiB cacheable body at 1 byte per
+// second fails at Timeouts.Origin and releases its slot.
+func TestDripOriginReleasesSlot(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		o := testorigin.NewChecked(t, 1, 1)
+		o.Default(cacheable("v"))
+		origin := weir.OriginFunc(func(ctx context.Context, req *weir.Request) (*weir.Response, error) {
+			if req.Path != "/drip" {
+				return o.Fetch(ctx, req)
+			}
+			return &weir.Response{StatusCode: http.StatusOK,
+				Header: http.Header{"Cache-Control": {"max-age=60"}},
+				Body:   &dripBody{ctx: ctx, tick: time.Second, n: 10 << 10}}, nil
+		})
+		cfg := cacheCfg
+		cfg.Limiter = weir.LimiterConfig{MaxConcurrent: 1}
+		cfg.Timeouts.Origin = 5 * time.Second
+		e := newEngine(t, cfg)
+		defer closeEngine(t, e)
+
+		r := <-serveTimed(t, e, getReq("/drip"), origin)
+		if !errors.Is(r.err, weir.ErrOriginTimeout) || r.elapsed != cfg.Timeouts.Origin {
+			t.Fatalf("drip: err %v after %v; want ErrOriginTimeout after %v", r.err, r.elapsed, cfg.Timeouts.Origin)
+		}
+		if r := <-serveTimed(t, e, getReq("/next"), origin); r.err != nil || r.elapsed != 0 {
+			t.Fatalf("next: err %v after %v; want the released slot at once", r.err, r.elapsed)
+		}
+	})
+}
+
+// FR-TMO-2, FR-STR-1: streamed bodies (pass-through, oversized and event
+// streams) have no total deadline. A 2-minute stream that keeps sending survives Timeouts.Origin;
+// one that stalls ends StreamIdle after its last byte.
+func TestStreamIdleTimeout(t *testing.T) {
+	const limit = 1 << 10
+	for _, tc := range []struct {
+		name  string
+		req   func() *weir.Request
+		burst int
+		ctype string
+	}{
+		{"pass-through", func() *weir.Request { return postReq("/s") }, 0, ""},
+		{"oversized", func() *weir.Request { return getReq("/s") }, limit + 1, ""},
+		{"event stream", func() *weir.Request { return getReq("/s") }, 0, "text/event-stream"},
+	} {
+		for _, stall := range []bool{false, true} {
+			name := tc.name + " sending"
+			if stall {
+				name = tc.name + " stalled"
+			}
+			t.Run(name, func(t *testing.T) {
+				synctest.Test(t, func(t *testing.T) {
+					origin := weir.OriginFunc(func(ctx context.Context, _ *weir.Request) (*weir.Response, error) {
+						b := &dripBody{ctx: ctx, burst: make([]byte, tc.burst), tick: time.Second, n: 120}
+						if stall {
+							b.stallAfter = 1
+						}
+						h := http.Header{"Cache-Control": {"max-age=60"}}
+						if tc.ctype != "" {
+							h.Set("Content-Type", tc.ctype)
+						}
+						return &weir.Response{StatusCode: http.StatusOK, Header: h, Body: b}, nil
+					})
+					cfg := cacheCfg
+					cfg.Storable.MaxObjectBytes = limit
+					e := newEngine(t, cfg)
+					defer closeEngine(t, e)
+
+					start := time.Now()
+					resp, err := e.Serve(t.Context(), tc.req(), origin)
+					if err != nil {
+						t.Fatalf("Serve: %v", err)
+					}
+					defer resp.Body.Close()
+					n, err := io.Copy(io.Discard, resp.Body)
+					elapsed := time.Since(start)
+					if !stall {
+						if err != nil || n != int64(tc.burst+120) || elapsed != 120*time.Second {
+							t.Fatalf("read %d bytes in %v, err %v; want %d in 2m0s", n, elapsed, err, tc.burst+120)
+						}
+						return
+					}
+					if want := time.Second + 60*time.Second; !errors.Is(err, weir.ErrOriginTimeout) || elapsed != want {
+						t.Fatalf("stalled stream: err %v after %v; want ErrOriginTimeout after %v", err, elapsed, want)
+					}
+				})
+			})
+		}
+	}
+}
+
+// FR-TMO-2, T-18: only a Read in progress counts toward StreamIdle. A
+// consumer that waits 90 s between reads of a stream whose origin has the
+// bytes ready keeps it; a Close during a blocked Read ends that Read.
+func TestStreamIdleCountsOnlyReads(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		origin := weir.OriginFunc(func(ctx context.Context, _ *weir.Request) (*weir.Response, error) {
+			return &weir.Response{StatusCode: http.StatusOK, Header: http.Header{},
+				Body: &dripBody{ctx: ctx, burst: []byte("abcde"), n: 1, tick: math.MaxInt64}}, nil
+		})
+		e := newEngine(t, cacheCfg)
+		defer closeEngine(t, e)
+
+		resp, err := e.Serve(t.Context(), postReq("/s"), origin)
+		if err != nil {
+			t.Fatalf("Serve: %v", err)
+		}
+		buf := make([]byte, 1)
+		for i := range 5 {
+			time.Sleep(90 * time.Second)
+			if _, err := resp.Body.Read(buf); err != nil {
+				t.Fatalf("read %d after a 90 s pause: %v", i, err)
+			}
+		}
+		done := make(chan error, 1)
+		go func() { _, err := resp.Body.Read(buf); done <- err }() // the origin never sends the last byte
+		time.Sleep(time.Second)
+		resp.Body.Close()
+		if err := <-done; err == nil {
+			t.Fatal("Read blocked across Close returned no error")
 		}
 	})
 }
