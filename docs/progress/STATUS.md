@@ -5,7 +5,7 @@ Phase: 1
 Current card: none
 Card state: awaiting-merge
 Branch: card/M4-03-upload-pool
-PR: none
+PR: #36 https://github.com/AshwinSathian/weir/pull/36
 Next card: M4-04
 
 ## Blockers

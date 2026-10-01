@@ -545,7 +545,7 @@ Entry template:
 - Context: low.
 
 ## 2026-10-01 · M4-03 · done
-- Branch / PR: card/M4-03-upload-pool / see STATUS
+- Branch / PR: card/M4-03-upload-pool / #36
 - Done: upload pool (engine.go `upl`, picked in `fetch` by `c.HasBody`, FR-LIM-7, T-39). Origin deadline is now an `AfterFunc` timer, so streams drop it at headers and use `idleBody` with `StreamIdle` per Read (FR-TMO-2); buffered bodies stay under `Timeouts.Origin` (FR-TMO-1, T-41).
 - Tests: TestSlowUploadsDoNotStarveMisses, TestBodylessPassUsesMainPool, TestDripOriginReleasesSlot, TestStreamIdleTimeout; TestSlowReaderDoesNotPinSlots now expects streams to outlive `Timeouts.Origin`. `make check` passes.
 - Deviations: 04 §14 records the upload pool's queue rules (01 says only "its own queue rules"); 04 §6.7 pseudocode and §14 timeouts bullet updated to the timer and idle reader.
