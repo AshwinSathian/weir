@@ -361,8 +361,8 @@ A response is stored only if all of the following hold. Each failed check increm
 
 ### 5.16 Warm start (T6.4)
 
-- FR-WRM-1. `Warm` runs each request through the lookup and fetch path at background priority with `Warm.Concurrency` (default 4) concurrent fetches. Unlike background refresh, warm fetches wait for a slot (they do not drop), but they never use the foreground reserve.
-- FR-WRM-2. `Warm` skips requests that already have a fresh entry and returns counts of fetched, skipped, not-stored and failed requests.
+- FR-WRM-1. `Warm` runs each request through the lookup and fetch path at background priority with `Warm.Concurrency` concurrent fetches (default 4, lowered to `MaxConcurrent − ReserveForeground` when that is smaller). Unlike background refresh, warm fetches wait for a slot (they do not drop), but they never use the foreground reserve, and a warm fetch waiting for a slot holds no flight that foreground requests would join. Requests Weir never stores (unsafe methods, `Range`, `only-if-cached`) are not sent and count as not stored.
+- FR-WRM-2. `Warm` skips requests that already have a fresh entry, checked again once a slot is granted, and requests whose key another request's fetch stores; when such a fetch is abandoned by its own warm caller, `Warm` fetches the key itself. It returns counts of fetched, skipped, not-stored and failed requests.
 
 ### 5.17 Storage failure (T6.5)
 
@@ -380,7 +380,7 @@ A response is stored only if all of the following hold. Each failed check increm
 
 ### 5.19 Lifecycle
 
-- FR-LCY-1. `New` MUST reject invalid configuration: negative sizes, `Storable.MaxObjectBytes` larger than the store can admit (checked when the store implements `MaxObjectBytes() int64`, as the memory store does), `LeaderMaxAge` or `FollowerMaxWait` above `Timeouts.Origin`, `Jitter` outside [0, 0.5], `FailureRatio` outside (0, 1], or a `Storable.Statuses` list containing 206, 304, 500, 502, 503 or 504 (those statuses have dedicated handling and are never stored as entries).
+- FR-LCY-1. `New` MUST reject invalid configuration: negative sizes, `Storable.MaxObjectBytes` larger than the store can admit (checked when the store implements `MaxObjectBytes() int64`, as the memory store does), `LeaderMaxAge` or `FollowerMaxWait` above `Timeouts.Origin`, `Jitter` outside [0, 0.5], `FailureRatio` outside (0, 1], `Limiter.ReserveForeground` at or above `Limiter.MaxConcurrent` (no slot would be left for background refresh or `Warm`), `Warm.Concurrency` above `MaxConcurrent − ReserveForeground`, or a `Storable.Statuses` list containing 206, 304, 500, 502, 503 or 504 (those statuses have dedicated handling and are never stored as entries).
 - FR-LCY-2. After `Close` returns, no goroutine started by the engine is running.
 - FR-LCY-3. The engine is safe for concurrent use by any number of goroutines.
 
@@ -418,7 +418,7 @@ All fields are optional. The zero value of `Config` is valid and yields the defa
 | `Coalesce.HitForMissTTL` | 30 s | |
 | `Limiter.MaxConcurrent` / `MaxQueue` / `MaxQueueWait` | 64 / 1024 / 2 s | |
 | `Limiter.MaxPerPartition` | 16 | |
-| `Limiter.ReserveForeground` | 25% of `MaxConcurrent` | |
+| `Limiter.ReserveForeground` | 25% of `MaxConcurrent` | at least 1 from 2 slots; an explicit value at or above `MaxConcurrent` is rejected (FR-LCY-1) |
 | `Breaker.Window` / `MinRequests` / `FailureRatio` | 10 s / 20 / 0.5 | |
 | `Breaker.OpenFor` / `MaxOpenFor` / `HalfOpenProbes` | 5 s / 60 s / 1 | |
 | `Breaker.CountStatus500` | false | |
@@ -430,7 +430,7 @@ All fields are optional. The zero value of `Config` is valid and yields the defa
 | `CacheGroups.Ignore` | false | RFC 9875 honored by default |
 | `Client.HonorRevalidation` | false | decision D5 |
 | `Timeouts.Origin` / `Background` / `Store` | 30 s / 30 s / 50 ms | |
-| `Warm.Concurrency` | 4 | |
+| `Warm.Concurrency` | 4 | a default is lowered to `MaxConcurrent − ReserveForeground` when that is smaller; an explicit value above it is rejected (FR-LCY-1) |
 | `Limiter.MaxPerHost` | 0 (off) | M14; the Caddy adapter sets 25% for multi-host sites |
 | `Limiter.MaxUpload` | 25% of `MaxConcurrent` | D25, separate pool for requests with a body |
 | `Timeouts.StreamIdle` | 60 s | D26 |

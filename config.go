@@ -165,7 +165,7 @@ type CacheGroupsConfig struct{ Ignore bool }
 type ClientConfig struct{ HonorRevalidation bool }
 
 // WarmConfig tunes Engine.Warm.
-type WarmConfig struct{ Concurrency int } // 0: 4
+type WarmConfig struct{ Concurrency int } // 0: min(4, MaxConcurrent-ReserveForeground); at most that
 
 // TimeoutsConfig bounds origin and store calls (FR-TMO).
 type TimeoutsConfig struct {
@@ -282,7 +282,9 @@ func (c *Config) applyDefaults() {
 	orInt(&m.MinMisses, 500)
 	orFloat(&m.MinRatio, 0.9)
 
-	orInt(&c.Warm.Concurrency, 4)
+	// More warm workers than slots outside the reserve can never fetch at
+	// once; they would only hold queue places (FR-WRM-1).
+	orInt(&c.Warm.Concurrency, min(4, max(1, l.MaxConcurrent-l.ReserveForeground)))
 
 	lim := &c.Limits
 	orInt(&lim.MaxPathBytes, 8192)
@@ -406,6 +408,13 @@ func (c *Config) validate() error {
 	}
 	if c.Forward.Mode > ForwardAll {
 		return invalid("Forward.Mode", "unknown mode")
+	}
+	if l := &c.Limiter; l.ReserveForeground > 0 && l.ReserveForeground >= l.MaxConcurrent {
+		// No slot would be left for background refresh or Warm (FR-LIM-4).
+		return invalid("Limiter.ReserveForeground", "not below Limiter.MaxConcurrent")
+	}
+	if l := &c.Limiter; c.Warm.Concurrency > max(1, l.MaxConcurrent-l.ReserveForeground) {
+		return invalid("Warm.Concurrency", "above Limiter.MaxConcurrent - Limiter.ReserveForeground")
 	}
 	if c.Coalesce.LeaderMaxAge > c.Timeouts.Origin {
 		return invalid("Coalesce.LeaderMaxAge", "above Timeouts.Origin")

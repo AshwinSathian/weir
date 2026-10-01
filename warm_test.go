@@ -128,8 +128,50 @@ func TestWarmDoesNotUseReserve(t *testing.T) {
 				t.Fatalf("busy request: %v", r.err)
 			}
 		}
-		if r := <-warmed; r.err != nil || r.st != (weir.WarmStats{Fetched: 1}) {
-			t.Fatalf("Warm = %+v, %v; want 1 fetched", r.st, r.err)
+		// The foreground request stored /w while warm waited, so warm looks
+		// again after its slot arrives and sends nothing.
+		if r := <-warmed; r.err != nil || r.st != (weir.WarmStats{Skipped: 1}) || o.Calls("/w") != 1 {
+			t.Fatalf("Warm = %+v, %v with %d /w calls; want 1 skipped, 1 call", r.st, r.err, o.Calls("/w"))
+		}
+	})
+}
+
+// FR-WRM-2, 04 §6.8: a Warm call that joined another Warm call's flight,
+// whose caller then left, fetches the key itself instead of failing.
+func TestWarmRetriesDroppedFlight(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		o := testorigin.NewChecked(t, 64, 16)
+		gate := make(chan struct{})
+		b := cacheable("v")
+		b.Gate = gate
+		o.Default(b)
+		e := newEngine(t, cacheCfg)
+		defer closeEngine(t, e)
+
+		ctx, cancel := context.WithCancel(t.Context())
+		first := make(chan error, 1)
+		go func() {
+			_, err := e.Warm(ctx, warmReqs("/k"), o)
+			first <- err
+		}()
+		synctest.Wait()
+		type warmResult struct {
+			st  weir.WarmStats
+			err error
+		}
+		second := make(chan warmResult, 1)
+		go func() {
+			st, err := e.Warm(t.Context(), warmReqs("/k"), o)
+			second <- warmResult{st, err}
+		}()
+		synctest.Wait()
+		cancel()
+		if err := <-first; !errors.Is(err, context.Canceled) {
+			t.Fatalf("first Warm = %v, want context.Canceled", err)
+		}
+		close(gate)
+		if r := <-second; r.err != nil || r.st != (weir.WarmStats{Fetched: 1}) || o.Calls("/k") != 2 {
+			t.Fatalf("second Warm = %+v, %v with %d calls; want 1 fetched after its own call (2 calls)", r.st, r.err, o.Calls("/k"))
 		}
 	})
 }

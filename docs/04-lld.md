@@ -127,7 +127,7 @@ type MissRateConfig struct {
 
 type CacheGroupsConfig struct{ Ignore bool } // zero value honors RFC 9875
 type ClientConfig struct{ HonorRevalidation bool }
-type WarmConfig struct{ Concurrency int } // 0: 4
+type WarmConfig struct{ Concurrency int } // 0: min(4, MaxConcurrent-ReserveForeground); at most that
 
 type TimeoutsConfig struct {
 	Origin     time.Duration // 0: 30s
@@ -873,9 +873,11 @@ The limiter's `Background` class never queues: `Acquire(ctx, Background, part)` 
 
 - pass-class, `Range` and `only-if-cached` requests are not sent and count as `NotStored`; classification errors count as `Failed` (with `EvKeyRejected`);
 - a fresh entry counts as `Skipped`; `no-cache` and `max-age=0` do not force validation here;
-- otherwise the worker acquires a `Warm` slot first (§8.2: no reserve, waits on ctx only; `queue-full` sheds with `EvShed` and counts `Failed`). Only then does it join a flight, so a queued warm fetch never holds a flight that foreground requests would join and wait `FollowerMaxWait` on.
-- A flight already running: the worker releases the slot and waits for that flight; stored counts as `Skipped`, not stored as `NotStored`, an error as `Failed`.
+- otherwise the worker acquires a `Warm` slot first (§8.2: no reserve, waits on ctx only; `queue-full` sheds with `EvShed` and counts `Failed`). Only then does it join a flight, so a queued warm fetch never holds a flight that foreground requests would join and wait `FollowerMaxWait` on. With the slot held it looks up again (`warmSpec`): live traffic may have stored the key during the wait, which then counts as `Skipped` with nothing sent.
+- A flight already running: the worker releases the slot and waits for that flight; stored counts as `Skipped`, not stored as `NotStored`, an error as `Failed`. A flight published with `bgDropped` (another warm caller left) is retried once from the Acquire; two dropped in a row count `Failed`.
 - A created flight, or for the requests `cacheable` never lets lead one (`Authorization`, `no-store`, a marker) a `coalesce.NewFlight()` outside the table: marked creator-gone, `fetchSpec.permit` carries the slot into `fetch`, and `runFlight` runs on its own engine goroutine with the warm context as both cancellation and values. Its recovery turns an origin panic or `Goexit` into a published error (NFR-2); the worker waits on `Done`.
+
+Queue places: each `Warm` call has at most `Warm.Concurrency` waiters queued, and `New` keeps that at or below `MaxConcurrent − ReserveForeground` (FR-LCY-1). Warm waiters have no `MaxWait`, so concurrent `Warm` calls each take up to that many of the `MaxQueue` places foreground requests share; callers should run one at a time.
 
 A warm flight that ends because its context did publishes `bgDropped`, so foreground followers fetch for themselves as in §6.8. The outcome is `Fetched` when the response was stored, `NotStored` when not, `Failed` on error; a request the caller left mid-fetch is not counted.
 

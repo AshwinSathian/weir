@@ -123,14 +123,60 @@ func (e *Engine) warmOne(ctx context.Context, req *Request, origin Origin, st *W
 		st.NotStored++
 		return
 	}
+	if e.warmSpec(ctx, &c) == nil {
+		st.Skipped++
+		return
+	}
+	// Two attempts: a flight joined below may be dropped by its own caller
+	// leaving (bgDropped), and then this request is still cold.
+	for range 2 {
+		// Acquire before joining: a warm fetch queued for a slot must not
+		// hold a flight that foreground requests join and then wait on
+		// (FR-LIM-4).
+		permit, err := e.limFor(&c).Acquire(ctx, limiter.Warm, c.PartitionH)
+		if err != nil {
+			if ctx.Err() == nil {
+				e.shed(&c, limiter.Warm, err)
+				st.Failed++
+			}
+			return
+		}
+		// Look again: live traffic may have stored the key while this
+		// request waited (T6.4 cold starts overlap it).
+		sp := e.warmSpec(ctx, &c)
+		if sp == nil {
+			permit.Release()
+			st.Skipped++
+			return
+		}
+		sp.permit = permit
+		f := coalesce.NewFlight() // the requests cacheable never lets lead a flight
+		if !c.Authorized && !c.ReqCC.NoStore && !sp.lk.marker {
+			var created bool
+			if f, created = e.flights.Join(c.Primary, time.Now(), e.cfg.Coalesce.LeaderMaxAge); !created {
+				permit.Release()
+				if e.warmFollow(ctx, f, st) {
+					continue
+				}
+				return
+			}
+		}
+		e.warmLead(ctx, f, sp, origin, st)
+		return
+	}
+	st.Failed++ // two joined flights dropped in a row
+}
+
+// warmSpec looks c up and returns the fetch to run, or nil when the entry is
+// fresh. no-cache and max-age=0 do not force validation here.
+func (e *Engine) warmSpec(ctx context.Context, c *keys.Classified) *fetchSpec {
 	now := time.Now()
-	lk := e.lookup(ctx, &c, now)
-	sp := &fetchSpec{c: &c, lk: lk, found: lk.entry, class: limiter.Warm}
+	lk := e.lookup(ctx, c, now)
+	sp := &fetchSpec{c: c, lk: lk, found: lk.entry, class: limiter.Warm}
 	if lk.entry != nil {
 		switch state, _, _ := httpcc.Evaluate(lk.entry, lk.epoch, lk.epochOK, now); state {
 		case httpcc.Fresh:
-			st.Skipped++
-			return
+			return nil
 		case httpcc.Unusable: // FR-PRG-3: exactly a miss
 			sp.purged, sp.lk.entry, sp.lk.fwd = lk.entry, nil, FwdURIMiss
 		default:
@@ -139,35 +185,17 @@ func (e *Engine) warmOne(ctx context.Context, req *Request, origin Origin, st *W
 			}
 		}
 	}
-	// ponytail: the lookup above may be stale after a long wait for a slot,
-	// so a foreground fetch meanwhile costs one more origin call; look up
-	// again after Acquire if warm calls overlap live traffic heavily.
-	// Acquire before joining: a warm fetch queued for a slot must not hold
-	// a flight that foreground requests join and then wait on (FR-LIM-4).
-	permit, err := e.limFor(&c).Acquire(ctx, limiter.Warm, c.PartitionH)
-	if err != nil {
-		if ctx.Err() == nil {
-			e.shed(&c, limiter.Warm, err)
-			st.Failed++
-		}
-		return
-	}
-	defer permit.Release() // idempotent; fetch releases it first
-	sp.permit = permit
-	f := coalesce.NewFlight() // the requests cacheable never lets lead a flight
-	if !c.Authorized && !c.ReqCC.NoStore && !lk.marker {
-		var created bool
-		if f, created = e.flights.Join(c.Primary, time.Now(), e.cfg.Coalesce.LeaderMaxAge); !created {
-			permit.Release()
-			e.warmFollow(ctx, f, st)
-			return
-		}
-	}
+	return sp
+}
+
+// warmLead runs f's fetch and counts its outcome. runFlight runs on its own
+// goroutine: it turns an origin panic or Goexit into a published error,
+// which this worker cannot survive (NFR-2). ctx is both its cancellation
+// and its values (FR-COA-9).
+func (e *Engine) warmLead(ctx context.Context, f *coalesce.Flight, sp *fetchSpec, origin Origin, st *WarmStats) {
 	f.CreatorGone() // no one claims an over-size stream; runFlight closes it
-	// runFlight on its own goroutine: it turns an origin panic or Goexit
-	// into a published error, which this worker cannot survive (NFR-2).
-	// ctx is both its cancellation and its values (FR-COA-9).
 	if !e.goBackground(func(context.Context) { e.runFlight(ctx, ctx, f, sp, origin) }) {
+		sp.permit.Release()
 		f.Publish(&flightResult{fetchResult: fetchResult{err: ErrClosed}})
 		return // Close started after the worker checked; Warm reports ErrClosed
 	}
@@ -185,14 +213,18 @@ func (e *Engine) warmOne(ctx context.Context, req *Request, origin Origin, st *W
 }
 
 // warmFollow waits for a flight another request leads and counts its
-// outcome: a stored response is Skipped, since Warm sent nothing.
-func (e *Engine) warmFollow(ctx context.Context, f *coalesce.Flight, st *WarmStats) {
+// outcome: a stored response is Skipped, since Warm sent nothing. It
+// reports true, counting nothing, when the flight was dropped and the
+// request should be tried again.
+func (e *Engine) warmFollow(ctx context.Context, f *coalesce.Flight, st *WarmStats) (retry bool) {
 	select {
 	case <-f.Done():
 	case <-ctx.Done():
-		return
+		return false
 	}
 	switch fr := f.Result().(*flightResult); {
+	case fr.bgDropped:
+		return ctx.Err() == nil
 	case fr.err != nil:
 		st.Failed++
 	case fr.ci.Stored:
@@ -200,6 +232,7 @@ func (e *Engine) warmFollow(ctx context.Context, f *coalesce.Flight, st *WarmSta
 	default:
 		st.NotStored++
 	}
+	return false
 }
 
 func isClosed(ch <-chan struct{}) bool {

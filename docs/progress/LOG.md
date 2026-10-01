@@ -591,3 +591,11 @@ Entry template:
 - Deviations: 04 §6.8a states the Close behavior.
 - Follow-ups (not fixed): a warm call that joins another Warm's or a background refresh's flight that drops counts `Failed`, though it could fetch itself (background refresh only runs on fresh entries, which Warm skips, so the window is small). `Warm.Concurrency` above `MaxQueue` sheds the excess as `queue-full`; `New` does not cap it.
 - Context: low.
+
+## 2026-10-01 · M4-05 · review-fixes
+- Branch / PR: card/M4-05-warm / #38
+- Done: resolved the open questions (Ashwin delegated). 01 FR-WRM-1/2 state the not-sent and skip rules. `New` rejects `ReserveForeground >= MaxConcurrent` (it disabled background refresh and hung Warm) and `Warm.Concurrency` above `MaxConcurrent - ReserveForeground` (extra workers could only hold queue places); the default is lowered to fit, like the coalesce defaults. Warm looks up again after its slot arrives, and retries once when a flight it joined was dropped by another warm caller leaving.
+- Tests: TestWarmConcurrencyDefault, TestWarmRetriesDroppedFlight, three TestInvalidConfigRejected rows; TestWarmDoesNotUseReserve now expects Skipped with one origin call. Mutants (no recheck, no retry) fail. Race x30 on warm tests, x2 on the module. `make check` passes.
+- Deviations: 01 §5.16, FR-LCY-1 and the defaults table; 04 §1 WarmConfig comment and §6.8a.
+- Follow-ups: none.
+- Context: low.

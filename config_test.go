@@ -114,6 +114,34 @@ func TestLimiterDerivedDefaults(t *testing.T) {
 	}
 }
 
+// FR-WRM-1, FR-LCY-1: the Warm.Concurrency default is lowered to the slots
+// outside the reserve, so a small limiter stays valid; an explicit value
+// equal to them is kept.
+func TestWarmConcurrencyDefault(t *testing.T) {
+	tests := []struct {
+		name                    string
+		maxConcurrent, explicit int
+		want                    int
+	}{
+		{"default limiter", 0, 0, 4},
+		{"lowered to unreserved slots", 4, 0, 3},
+		{"two slots leave one", 2, 0, 1},
+		{"single slot", 1, 0, 1},
+		{"explicit at the bound", 8, 6, 6},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c, err := prepareConfig(Config{Limiter: LimiterConfig{MaxConcurrent: tt.maxConcurrent}, Warm: WarmConfig{Concurrency: tt.explicit}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if c.Warm.Concurrency != tt.want {
+				t.Errorf("Warm.Concurrency = %d, want %d", c.Warm.Concurrency, tt.want)
+			}
+		})
+	}
+}
+
 // FR-LCY-1: each rule that needs no store rejects with ErrInvalidConfig and
 // names the field.
 func TestInvalidConfigRejected(t *testing.T) {
@@ -132,6 +160,9 @@ func TestInvalidConfigRejected(t *testing.T) {
 		{"negative default ttl", Config{Freshness: FreshnessConfig{DefaultTTL: -time.Second}}, "Freshness.DefaultTTL"},
 		{"negative origin timeout", Config{Timeouts: TimeoutsConfig{Origin: -time.Second}}, "Timeouts.Origin"},
 		{"negative warm concurrency", Config{Warm: WarmConfig{Concurrency: -1}}, "Warm.Concurrency"},
+		{"reserve equal to max concurrent", Config{Limiter: LimiterConfig{MaxConcurrent: 4, ReserveForeground: 4}}, "Limiter.ReserveForeground"},
+		{"reserve on a single slot", Config{Limiter: LimiterConfig{MaxConcurrent: 1, ReserveForeground: 1}}, "Limiter.ReserveForeground"},
+		{"warm concurrency above unreserved slots", Config{Limiter: LimiterConfig{MaxConcurrent: 8, ReserveForeground: 2}, Warm: WarmConfig{Concurrency: 7}}, "Warm.Concurrency"},
 		{"negative path limit", Config{Limits: LimitsConfig{MaxPathBytes: -1}}, "Limits.MaxPathBytes"},
 		{"leader max age above origin timeout", Config{Coalesce: CoalesceConfig{LeaderMaxAge: 31 * time.Second}}, "Coalesce.LeaderMaxAge"},
 		{"follower wait above origin timeout", Config{Coalesce: CoalesceConfig{LeaderMaxAge: time.Second, FollowerMaxWait: 5 * time.Second}, Timeouts: TimeoutsConfig{Origin: 2 * time.Second}}, "Coalesce.FollowerMaxWait"},

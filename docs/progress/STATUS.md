@@ -14,8 +14,6 @@ none
 
 ## Waiting on Ashwin
 
-- M4-05: `Warm` does not send pass-class, `Range` or `only-if-cached` requests (counted `NotStored`), and a key another request's flight is fetching counts `Skipped` once that flight stores it. 04 §6.8a records both; FR-WRM-1/2 (01 §5.16) say neither. Should 01 say so?
-- M4-05 (carried from M4-02): `New` accepts `ReserveForeground >= MaxConcurrent`, under which `Warm` waits until its ctx ends and background refresh never runs. Reject it in `New`? (config rule)
 - M1-18 closes M1, which triggers PLAN P0.0: add `SECURITY.md`, flip the repo to public, enable private vulnerability reporting (D40), tag `v0.1.0` (D24). The card says to ask before flipping visibility. After merging #29, say whether to do P0.0 now (and in which session) or hold it.
 
 ## Decided 2026-10-01
@@ -35,8 +33,8 @@ The cards' Notes give the reasons and the options rejected. All three come befor
 ## Notes for the next session
 
 - M4-05: `Warm` acquires its `Warm` slot before joining a flight (`fetchSpec.permit`, the new last `fetch` argument `held`), so a queued warm fetch never holds a flight. Every warm fetch runs `runFlight` on its own engine goroutine; no-flight requests use `coalesce.NewFlight()` (outside the table).
-- M4-05: queued Warm waiters take `MaxQueue` places with no timeout (up to `Warm.Concurrency` per concurrent Warm call); 04 §8 does not state this effect on the foreground queue bound.
-- M4-05: the lookup runs before Acquire, so a foreground fetch during a long warm wait costs one more origin call (`ponytail:` in warm.go).
+- M4-05: decided 2026-10-01 (delegated by Ashwin): 01 FR-WRM-1/2 now state the not-sent and skip rules; `New` rejects `ReserveForeground >= MaxConcurrent` and `Warm.Concurrency > MaxConcurrent - ReserveForeground` (default lowered to fit). Concurrent Warm calls each take up to `Warm.Concurrency` queue places (04 §6.8a).
+- M4-05: a warm fetch looks up twice (before the wait, to skip fast; after the slot, to catch live traffic), so remote stores see one more Get and NewestEpoch per fetched URL.
 
 - M4-04: every store call goes through `e.sg` (storeguard.go). Use `e.sg.get/set/newestEpoch/setEpoch`, never `e.sg.s` directly, except `Close`. Delete and Scrub are not wrapped; whoever first calls them (M9 purges) adds a guard method.
 - M4-04: any store error except `ErrNotFound` counts toward the breaker (05 S-3), unless the caller's context ended first (05 S-2 makes stores return `ErrUnavailable` then; counting it would let disconnecting clients open the breaker). After an open period all calls go through, no single half-open probe.
