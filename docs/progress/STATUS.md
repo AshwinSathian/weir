@@ -4,9 +4,9 @@ Updated: 2026-10-01
 Phase: 1
 Current card: none
 Card state: awaiting-merge
-Branch: card/M4-05-warm
-PR: #38 https://github.com/AshwinSathian/weir/pull/38
-Next card: M5-01
+Branch: card/M5-01-breaker
+PR: #39 https://github.com/AshwinSathian/weir/pull/39
+Next card: M5-02
 
 ## Blockers
 
@@ -31,6 +31,12 @@ Already built, now confirmed: the weirhttp default transport (compression off, n
 The cards' Notes give the reasons and the options rejected. All three come before M1-18, because closing M1 makes the repo public.
 
 ## Notes for the next session
+
+- M5-01: `internal/breaker` exists but nothing calls it. M5-03 wires it into `fetch` (04 §6.7): `Allow` before the limiter, `Cancel` on shed or caller gone, `Record` with `classify`'s `Success`/`Failure`/`Status500`; the breaker applies `CountStatus500` itself. Translate `breaker.ErrCircuitOpen` to `weir.ErrCircuitOpen` like the limiter's `ErrShed`.
+- M5-03 needs the remaining open time for `RetryError.After` (04 §1.3), and the breaker has no accessor yet. Adding one (`Allow` returning a duration, or a `RetryIn()`) changes §8.3 signatures: ask Ashwin.
+- M5-02/M5-03: `Allow` cannot tell foreground from background, so a background refresh could take the only half-open probe (FR-CB-4 says probes are foreground; FR-CB-5 drops background while open). Background callers should check `State()` and drop unless Closed, or `Allow` takes a class; decide in the engine card and write it into 04 §8.3.
+- M5-01: `New` accepts `Breaker.MaxOpenFor < OpenFor` (a reopen is then shorter than the first open). Reject it in `New` when wiring (config rule: ask Ashwin).
+- `EngineStats.BreakerState` can read `breaker.State()`; the State constants share weir.BreakerState's order.
 
 - M4-05: `Warm` acquires its `Warm` slot before joining a flight (`fetchSpec.permit`, the new last `fetch` argument `held`), so a queued warm fetch never holds a flight. Every warm fetch runs `runFlight` on its own engine goroutine; no-flight requests use `coalesce.NewFlight()` (outside the table).
 - M4-05: decided 2026-10-01 (delegated by Ashwin): 01 FR-WRM-1/2 now state the not-sent and skip rules; `New` rejects `ReserveForeground >= MaxConcurrent` and `Warm.Concurrency > MaxConcurrent - ReserveForeground` (default lowered to fit). Concurrent Warm calls each take up to `Warm.Concurrency` queue places (04 §6.8a).

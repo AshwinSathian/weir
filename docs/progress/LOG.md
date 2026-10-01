@@ -599,3 +599,25 @@ Entry template:
 - Deviations: 01 §5.16, FR-LCY-1 and the defaults table; 04 §1 WarmConfig comment and §6.8a.
 - Follow-ups: none.
 - Context: low.
+
+## 2026-10-01 · M5-01 · done
+- Branch / PR: card/M5-01-breaker / #39
+- Done: `internal/breaker`: failure-ratio breaker over a 10-bucket rolling window with minimum volume, ±20% open jitter, doubling reopen capped at `MaxOpenFor`, half-open probes, nil-receiver safe. `Outcome` is Success, Failure or Status500 (counted only with `CountStatus500`).
+- Tests: TestBreakerOpensHalfOpenCloses, TestBreaker500DoesNotTrip, TestBreakerNeedsVolume, TestBreakerOddWindow, TestBreakerProbeLifecycle, TestBreakerNilReceiver; `make check` passes.
+- Deviations: 04 §8.3: `Probe{gen uint64}` replaces `{isProbe bool}` so a probe from an earlier half-open period cannot close or reopen a later one; adds `State()` and the Outcome rules.
+- Follow-ups: reviewer must-fixes fixed (bucket misalignment for windows not dividing the epoch gap; divide by zero for Window < 10 ns). Open for M5-03: remaining open time accessor, background callers taking the probe, MaxOpenFor < OpenFor validation (STATUS notes).
+- Context: low; size S was right.
+
+## 2026-10-01 · M5-01 · review-fixes
+- Branch / PR: card/M5-01-breaker / #39
+- Done: adversarial review of #39. Found and fixed:
+  - A probe that never ended in Record or Cancel held the breaker half-open forever (site-wide circuit-open). A half-open period now lasts at most `MaxOpenFor`, then a new one admits fresh probes.
+  - `Config.Rand` was drawn on every Record. It is now drawn once per open.
+  - Buckets used wall time, so a clock step could resurrect old outcomes or (before 1970) index out of range. They now use monotonic offsets from creation.
+  - The trip check ran only on failures. A success that completes the volume now trips too (FR-CB-2 states a condition, not an event).
+  - Doubling an enormous open period overflowed into the past. It now saturates.
+  - The `openFor` reset on close was dead code and is deleted.
+- Tests: TestBreakerLeakedProbeExpires, TestBreakerDrawsOnlyOnOpen, TestBreakerTripsWhenVolumeArrives, TestBreakerDoublingSaturates, TestBreakerConcurrentProbesBounded (64 goroutines, peak probes <= 3), TestBreakerCloseClearsWindow. 17 hand mutants, all killed. Race x5. `make check` passes.
+- Deviations: 04 §8.3 states the half-open bound, the monotonic buckets, the per-outcome check and when rnd is drawn.
+- Follow-ups: the wall-clock fix has no test (no injected clock, D9); it is structural. M5-03 items in STATUS stand.
+- Context: low.

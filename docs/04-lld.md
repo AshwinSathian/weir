@@ -1019,16 +1019,20 @@ type Breaker struct {
 	openUntil time.Time
 	openFor   time.Duration // current, doubles on reopen
 	probes    int           // in flight while HalfOpen
+	gen       uint64        // counts half-open periods
 	cfg       Config
 	rnd       func() float64
 	onChange  func(from, to State)
 }
 
-type Probe struct{ isProbe bool }
+type Probe struct{ gen uint64 } // 0: ordinary fetch; else the half-open period it probes
 func (b *Breaker) Allow() (Probe, error)
 func (b *Breaker) Record(p Probe, o Outcome)
 func (b *Breaker) Cancel(p Probe)
+func (b *Breaker) State() State
 ```
+
+`Outcome` is `Success` (4xx included), `Failure` (transport error, timeout, 502, 503, 504) or `Status500`, which counts as a failure only with `CountStatus500`, so the rule lives in the breaker and the engine's `classify` only names what it saw. A probe carries the half-open period it was granted in: a probe still in flight when that period ended (it reopened, then a new period began) counts as an ordinary fetch and its `Cancel` frees nothing, so it cannot close or reopen a later period. `onChange` runs after the lock is released, so concurrent transitions may reach it out of order; anything that needs the current state reads `State()`. `rnd` is drawn once per open period, under the lock (`Config.Rand` must be safe for concurrent use and must not call the engine). Bucket times are monotonic offsets from the breaker's creation with a width of at least 1 ns, so any `Window` works and a wall-clock step cannot misplace a bucket. The trip check runs on every outcome, so a success that brings the window to `MinRequests` at `FailureRatio` trips it. A half-open period that lasts `MaxOpenFor` with its probes still held is replaced by a new one (new `gen`, probe count zero), so a probe that never reaches `Record` or `Cancel` cannot hold the breaker half-open forever. A doubling that overflows saturates at `MaxOpenFor`.
 
 Buckets rotate lazily: on each call, buckets whose `start` is older than `Window` are zeroed. `Allow` in `Open` returns `ErrCircuitOpen` until `openUntil`, then moves to `HalfOpen`. In `HalfOpen` it grants at most `HalfOpenProbes` probes and rejects everything else. `Record` with a probe: success closes (reset buckets, reset `openFor`), failure reopens with `openFor = min(openFor*2, MaxOpenFor)` and `openUntil = now + openFor*(0.8 + 0.4*rnd())`. `Record` in `Closed` updates the bucket and trips when volume and ratio thresholds hold.
 
