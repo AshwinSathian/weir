@@ -138,7 +138,7 @@ Each seed taxonomy entry maps to the tests below. "Engine" tests run under synct
 ### T6.5 Storage outage
 
 - `TestStoreOutageStillCoalescedAndLimited` (engine): a store wrapper that returns `ErrUnavailable` for everything; 1 000 requests over 10 keys; origin calls ≤ 10 per flight wave; in-flight ≤ `MaxConcurrent`; the store breaker opens after 5 failures and `EvStoreBreaker` is emitted.
-- `TestStoreSlowRemote` (engine): a remote-flagged store that blocks on `Get`; each request spends at most `Timeouts.Store` in the store before continuing; after the breaker opens, zero time.
+- `TestStoreSlowRemote` (engine): a remote-flagged store that blocks on `Get`; each store call a request makes ends after at most `Timeouts.Store` (FR-STF-1; a miss makes up to four); after the breaker opens, zero time.
 
 ### T6.6 Origin outage
 

@@ -168,7 +168,7 @@ func (e *Engine) runFlight(bg, reqCtx context.Context, f *coalesce.Flight, sp *f
 // purgedSince reports whether an epoch newer than ent's request time
 // applies to it. A lookup error fails open, as in lookup (T-9).
 func (e *Engine) purgedSince(ctx context.Context, ent *store.Entry) bool {
-	_, ok, err := e.store.NewestEpoch(ctx, ent.Tags, ent.RequestTime)
+	_, ok, err := e.sg.newestEpoch(ctx, ent.Tags, ent.RequestTime)
 	return ok && err == nil
 }
 
