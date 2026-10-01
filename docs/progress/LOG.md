@@ -599,3 +599,11 @@ Entry template:
 - Deviations: 01 §5.16, FR-LCY-1 and the defaults table; 04 §1 WarmConfig comment and §6.8a.
 - Follow-ups: none.
 - Context: low.
+
+## 2026-10-01 · M5-01 · done
+- Branch / PR: card/M5-01-breaker / #<pr>
+- Done: `internal/breaker`: failure-ratio breaker over a 10-bucket rolling window with minimum volume, ±20% open jitter, doubling reopen capped at `MaxOpenFor`, half-open probes, nil-receiver safe. `Outcome` is Success, Failure or Status500 (counted only with `CountStatus500`).
+- Tests: TestBreakerOpensHalfOpenCloses, TestBreaker500DoesNotTrip, TestBreakerNeedsVolume, TestBreakerOddWindow, TestBreakerProbeLifecycle, TestBreakerNilReceiver; `make check` passes.
+- Deviations: 04 §8.3: `Probe{gen uint64}` replaces `{isProbe bool}` so a probe from an earlier half-open period cannot close or reopen a later one; adds `State()` and the Outcome rules.
+- Follow-ups: reviewer must-fixes fixed (bucket misalignment for windows not dividing the epoch gap; divide by zero for Window < 10 ns). Open for M5-03: remaining open time accessor, background callers taking the probe, MaxOpenFor < OpenFor validation (STATUS notes).
+- Context: low; size S was right.

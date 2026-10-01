@@ -1019,16 +1019,20 @@ type Breaker struct {
 	openUntil time.Time
 	openFor   time.Duration // current, doubles on reopen
 	probes    int           // in flight while HalfOpen
+	gen       uint64        // counts half-open periods
 	cfg       Config
 	rnd       func() float64
 	onChange  func(from, to State)
 }
 
-type Probe struct{ isProbe bool }
+type Probe struct{ gen uint64 } // 0: ordinary fetch; else the half-open period it probes
 func (b *Breaker) Allow() (Probe, error)
 func (b *Breaker) Record(p Probe, o Outcome)
 func (b *Breaker) Cancel(p Probe)
+func (b *Breaker) State() State
 ```
+
+`Outcome` is `Success` (4xx included), `Failure` (transport error, timeout, 502, 503, 504) or `Status500`, which counts as a failure only with `CountStatus500`, so the rule lives in the breaker and the engine's `classify` only names what it saw. A probe carries the half-open period it was granted in: a probe still in flight when that period ended (it reopened, then a new period began) counts as an ordinary fetch and its `Cancel` frees nothing, so it cannot close or reopen a later period. `onChange` runs after the lock is released, so concurrent transitions may reach it out of order; anything that needs the current state reads `State()`. `Config.Rand` is drawn before the lock. Bucket start and slot both derive from `UnixNano` with a width of at least 1 ns, so any `Window` works.
 
 Buckets rotate lazily: on each call, buckets whose `start` is older than `Window` are zeroed. `Allow` in `Open` returns `ErrCircuitOpen` until `openUntil`, then moves to `HalfOpen`. In `HalfOpen` it grants at most `HalfOpenProbes` probes and rejects everything else. `Record` with a probe: success closes (reset buckets, reset `openFor`), failure reopens with `openFor = min(openFor*2, MaxOpenFor)` and `openUntil = now + openFor*(0.8 + 0.4*rnd())`. `Record` in `Closed` updates the bucket and trips when volume and ratio thresholds hold.
 
