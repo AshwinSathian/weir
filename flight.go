@@ -2,6 +2,7 @@ package weir
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -10,6 +11,8 @@ import (
 	"github.com/AshwinSathian/weir/internal/keys"
 	"github.com/AshwinSathian/weir/store"
 )
+
+var errOriginGoexit = errors.New("weir: origin called runtime.Goexit")
 
 // fetchSpec is what a fetch-and-store needs from the request that starts it.
 type fetchSpec struct {
@@ -116,8 +119,12 @@ func (e *Engine) runFlight(bg, reqCtx context.Context, f *coalesce.Flight, sp *f
 	defer func() {
 		// NFR-2, FR-COA-6: a panic reading the origin body happens outside
 		// safeFetch's recover; on this goroutine it would end the process.
+		// runtime.Goexit in the origin leaves fr nil without a panic; the
+		// waiters must still get a result.
 		if r := recover(); r != nil {
 			fr = &flightResult{fetchResult: fetchResult{err: &OriginError{Err: fmt.Errorf("weir: origin panic: %v", r)}}}
+		} else if fr == nil {
+			fr = &flightResult{fetchResult: fetchResult{err: &OriginError{Err: errOriginGoexit}}}
 		}
 		if !fr.live() {
 			release()
@@ -131,9 +138,22 @@ func (e *Engine) runFlight(bg, reqCtx context.Context, f *coalesce.Flight, sp *f
 	if fr.err != nil && ctx.Err() != nil { // only Close cancels a flight
 		fr.err = ErrClosed
 	}
+	if fr.entry != nil && e.purgedSince(ctx, fr.entry) {
+		// FR-PRG-7, T-10: a follower may have arrived after the purge. Every
+		// follower arrived before Publish, so checking once here covers
+		// them all, up to this one store round trip.
+		fr.entry = nil
+	}
 	if fr.live() { // the body streams past this goroutine; Close still cancels it
 		fr.resp.Body = &cancelOnClose{ReadCloser: fr.resp.Body, cancel: release}
 	}
+}
+
+// purgedSince reports whether an epoch newer than ent's request time
+// applies to it. A lookup error fails open, as in lookup (T-9).
+func (e *Engine) purgedSince(ctx context.Context, ent *store.Entry) bool {
+	_, ok, err := e.store.NewestEpoch(ctx, ent.Tags, ent.RequestTime)
+	return ok && err == nil
 }
 
 // leaveFlight marks the creator gone. When the flight published first,

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -13,6 +14,8 @@ import (
 
 	"github.com/AshwinSathian/weir"
 	"github.com/AshwinSathian/weir/internal/testorigin"
+	"github.com/AshwinSathian/weir/store"
+	"github.com/AshwinSathian/weir/store/memory"
 )
 
 // serveAsync runs Serve on its own goroutine and delivers the response with
@@ -238,6 +241,10 @@ func TestCoalescePanic(t *testing.T) {
 		b    testorigin.Behavior
 	}{
 		{"panic in Fetch", testorigin.Behavior{Delay: 100 * time.Millisecond, Panic: true}},
+		{"Goexit in Fetch", testorigin.Behavior{Delay: 100 * time.Millisecond, Func: func(*weir.Request) (*weir.Response, error) {
+			runtime.Goexit()
+			return nil, nil
+		}}},
 		{"panic in body read", testorigin.Behavior{Delay: 100 * time.Millisecond, Func: func(*weir.Request) (*weir.Response, error) {
 			return &weir.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: panicBody{}}, nil
 		}}},
@@ -353,5 +360,84 @@ func TestCoalesceCanceledByClose(t *testing.T) {
 				t.Fatalf("err = %v, want *OriginError", err)
 			}
 		})
+	})
+}
+
+// FR-PRG-7, T-10: a request that arrives after a purge never gets the
+// response of a flight whose request was sent before it.
+func TestCoalescePurgeDuringFlight(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		m, err := memory.New(memory.Config{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer m.Close()
+		gate := make(chan struct{})
+		o := testorigin.New()
+		old := cacheable("old")
+		old.Gate = gate
+		o.Default(old)
+		cfg := cacheCfg
+		cfg.Store = m
+		e := newEngine(t, cfg)
+		defer closeEngine(t, e)
+
+		creator := serveAsync(t.Context(), e, getReq("/a"), o)
+		synctest.Wait()
+		time.Sleep(time.Second)
+		if err := m.SetEpoch(t.Context(), store.TagGlobal(), store.Epoch{At: time.Now(), Mode: store.EpochHard}); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(time.Second)
+		follower := serveAsync(t.Context(), e, getReq("/a"), o)
+		synctest.Wait()
+		o.Default(cacheable("new"))
+		close(gate)
+		if s := <-creator; s.err != nil || s.body != "old" {
+			t.Fatalf("creator: %v, %q; want its own old response", s.err, s.body)
+		}
+		if s := <-follower; s.err != nil || s.body != "new" {
+			t.Fatalf("follower: %v, %q; want a fetch after the purge", s.err, s.body)
+		}
+	})
+}
+
+// T-31, FR-COA-8: a request whose response can never be shared (request
+// no-store) does not lead a flight, so one client cannot make every
+// concurrent request wait for an unusable result and then fetch again.
+func TestCoalesceNoStoreRequestNotLeader(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		gate := make(chan struct{})
+		o := testorigin.New()
+		b := cacheable("x")
+		b.Gate = gate
+		o.Default(b)
+		e := newEngine(t, cacheCfg)
+		defer closeEngine(t, e)
+
+		ns := serveAsync(t.Context(), e, withHeader(getReq("/a"), "Cache-Control", "no-store"), o)
+		synctest.Wait()
+		chs := make([]<-chan served, 5)
+		for i := range chs {
+			chs[i] = serveAsync(t.Context(), e, getReq("/a"), o)
+		}
+		synctest.Wait()
+		close(gate)
+		if s := <-ns; s.err != nil {
+			t.Fatal(s.err)
+		}
+		collapsed := 0
+		for _, ch := range chs {
+			s := <-ch
+			if s.err != nil {
+				t.Fatal(s.err)
+			}
+			if s.resp.Cache.Collapsed {
+				collapsed++
+			}
+		}
+		if n := o.TotalCalls(); n != 2 || collapsed != 4 {
+			t.Fatalf("origin calls = %d, collapsed = %d; want 2 (no-store direct, one flight) and 4", n, collapsed)
+		}
 	})
 }

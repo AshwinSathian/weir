@@ -479,3 +479,11 @@ Entry template:
 - Deviations: 04 §6.4: on timeout without stale the creator keeps waiting on its own flight instead of refetching (default FollowerMaxWait equals Timeouts.Origin under 10 s; refetching doubled origin load). Followers unchanged (FR-COA-4).
 - Follow-ups: M2-03 re-entry; M7-01 VaryMatches for followers; M4 table bound. In STATUS.
 - Context: medium; size M was right. card-reviewer: 0 must-fix, 3 should-fix fixed, Vary nit commented, 2 nits noted in STATUS.
+
+## 2026-10-01 · M2-02 · review-fixes
+- Branch / PR: card/M2-02-coalesced-fetch / #31
+- Done: adversarial review of #31. Fixed: an origin calling `runtime.Goexit` crashed the process from the flight goroutine (nil result in the deferred publish); followers that arrived after a purge got the pre-purge flight result (FR-PRG-7), now checked once before `Publish`; a `no-store` request could lead a flight whose result is never shared, making every follower wait and refetch (T-31), now fetched directly.
+- Tests: TestCoalescePanic "Goexit in Fetch", TestCoalescePurgeDuringFlight, TestCoalesceNoStoreRequestNotLeader (each fails with its fix reverted); `make check` passes.
+- Deviations: 04 §6.4 and §6.5 updated for the three fixes.
+- Follow-ups: none new; follower sharing of `no-cache`/`max-age=0` responses left as is (common CDN practice; strict RFC 9111 §4 reading would stop it), noted in STATUS.
+- Context: low.

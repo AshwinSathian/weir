@@ -135,7 +135,10 @@ func (e *Engine) cacheable(ctx context.Context, c *keys.Classified, origin Origi
 		return e.pass(ctx, c.AsRangePass(), origin, lk.fwd)
 	}
 	sp := &fetchSpec{c: c, lk: lk, prior: prior, found: found, purged: purged}
-	if c.Authorized || lk.marker { // FR-COA-8, FR-STO-12
+	// FR-COA-8, FR-STO-12. A no-store request's response is never shared,
+	// so leading a flight would only make its followers wait and refetch
+	// (T-31: one client must not disable coalescing for everyone).
+	if c.Authorized || c.ReqCC.NoStore || lk.marker {
 		return e.fetchDirect(ctx, sp, origin)
 	}
 	return e.fetchCoalesced(ctx, sp, origin)
