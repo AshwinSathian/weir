@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/AshwinSathian/weir/internal/keys"
+	"github.com/AshwinSathian/weir/internal/limiter"
 	"github.com/AshwinSathian/weir/store"
 )
 
@@ -55,7 +56,7 @@ func (e *Engine) backgroundRefresh(ctx context.Context, c *keys.Classified, lk l
 	if hasValidators(lk.entry) {
 		prior = lk.entry
 	}
-	sp := &fetchSpec{c: c, lk: lk, prior: prior, found: lk.entry, bg: true}
+	sp := &fetchSpec{c: c, lk: lk, prior: prior, found: lk.entry, class: limiter.Background}
 	if !e.goBackground(func(bg context.Context) { e.runFlight(bg, ctx, f, sp, origin) }) {
 		f.Publish(&flightResult{fetchResult: fetchResult{err: ErrClosed}})
 	}

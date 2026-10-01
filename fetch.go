@@ -34,8 +34,9 @@ type fetchResult struct {
 	reqTime  time.Time
 	respTime time.Time // when the buffered body ended, or the headers arrived
 	err      error
-	// bgDropped: a background fetch found no limiter slot. Foreground
-	// requests that joined its flight fetch again rather than fail (04 §6.8).
+	// bgDropped: a background fetch found no limiter slot, or a warm
+	// fetch's caller left. Foreground requests that joined its flight fetch
+	// again rather than fail (04 §6.8).
 	bgDropped bool
 }
 
@@ -56,14 +57,16 @@ type fetchResult struct {
 // the request repeated without conditionals under the same timeout and
 // limiter slot. A 304 to that retry is an origin misbehaving; it passes
 // through unstored like any other 304.
-func (e *Engine) fetch(ctx context.Context, c *keys.Classified, origin Origin, class limiter.Class, buffered bool, prior *store.Entry) fetchResult {
-	lim := e.lim
-	if c.HasBody {
-		lim = e.upl
-	}
-	permit, err := lim.Acquire(ctx, class, c.PartitionH)
-	if err != nil {
-		return e.shed(c, class, err)
+//
+// A non-nil held is a slot the caller already acquired from limFor(c);
+// fetch releases it like its own.
+func (e *Engine) fetch(ctx context.Context, c *keys.Classified, origin Origin, class limiter.Class, buffered bool, prior *store.Entry, held *limiter.Permit) fetchResult {
+	permit := held
+	if permit == nil {
+		var err error
+		if permit, err = e.limFor(c).Acquire(ctx, class, c.PartitionH); err != nil {
+			return e.shed(c, class, err)
+		}
 	}
 	defer permit.Release()
 	if err := ctx.Err(); err != nil { // granted as the caller left (04 §8.2): send nothing
@@ -140,6 +143,15 @@ func (e *Engine) fetch(ctx context.Context, c *keys.Classified, origin Origin, c
 	resp.Body = http.NoBody
 	res.body = body
 	return res
+}
+
+// limFor returns the pool c's fetch takes its slot from: the upload pool
+// for requests with a body (FR-LIM-7, T-39).
+func (e *Engine) limFor(c *keys.Classified) *limiter.Limiter {
+	if c.HasBody {
+		return e.upl
+	}
+	return e.lim
 }
 
 // shed maps a limiter refusal to the fetch result (FR-LIM-5, 04 §8.2). A

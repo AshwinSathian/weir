@@ -9,6 +9,7 @@ import (
 	"github.com/AshwinSathian/weir/internal/coalesce"
 	"github.com/AshwinSathian/weir/internal/httpcc"
 	"github.com/AshwinSathian/weir/internal/keys"
+	"github.com/AshwinSathian/weir/internal/limiter"
 	"github.com/AshwinSathian/weir/store"
 )
 
@@ -18,10 +19,11 @@ var errOriginGoexit = errors.New("weir: origin called runtime.Goexit")
 type fetchSpec struct {
 	c      *keys.Classified
 	lk     lookupResult
-	prior  *store.Entry // the stale entry to validate (FR-SRV-3)
-	found  *store.Entry // the response the lookup returned; it may always be replaced
-	purged *store.Entry // an unusable response a marker may replace
-	bg     bool         // a background refresh: takes no reserved slot, never queues (FR-LIM-4)
+	prior  *store.Entry    // the stale entry to validate (FR-SRV-3)
+	found  *store.Entry    // the response the lookup returned; it may always be replaced
+	purged *store.Entry    // an unusable response a marker may replace
+	class  limiter.Class   // Background never queues, Warm waits on ctx only; neither takes the reserve (FR-LIM-4, FR-WRM-1)
+	permit *limiter.Permit // a slot already held (Warm); fetch releases it
 }
 
 // flightResult is what a fetch-and-store produced, and what a flight
@@ -151,8 +153,10 @@ func (e *Engine) runFlight(bg, reqCtx context.Context, f *coalesce.Flight, sp *f
 		}
 	}()
 	fr = e.fetchStored(ctx, sp, origin)
-	if fr.err != nil && ctx.Err() != nil { // only Close cancels a flight
+	if fr.err != nil && ctx.Err() != nil { // only Close, or a Warm caller leaving, cancels a flight
 		fr.err = ErrClosed
+		// Followers of a warm flight fetch for themselves (04 §6.8).
+		fr.bgDropped = sp.class == limiter.Warm
 	}
 	if fr.entry != nil && e.purgedSince(ctx, fr.entry) {
 		// FR-PRG-7, T-10: a follower may have arrived after the purge. Every
