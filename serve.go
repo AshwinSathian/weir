@@ -114,6 +114,7 @@ func (e *Engine) cacheable(ctx context.Context, c *keys.Classified, origin Origi
 		}
 		switch st {
 		case httpcc.Fresh:
+			e.maybeEarlyRefresh(ctx, c, lk, -staleness, origin)
 			return e.fromEntry(c, lk.entry, now, CacheInfo{Hit: true, TTL: -staleness}), nil
 		case httpcc.Unusable: // FR-PRG-3: exactly a miss
 			purged, lk.entry, lk.fwd = lk.entry, nil, FwdURIMiss
