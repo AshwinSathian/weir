@@ -218,3 +218,35 @@ func TestVaryNegativeStaysInVariant(t *testing.T) {
 		}
 	})
 }
+
+// INV-1, FR-KEY-7, T-15: a request header key in non-canonical case
+// (possible for direct library callers) reaches the origin under
+// ForwardAll, so the variant key must see it too; otherwise the origin's
+// answer to it is stored as the "absent" variant and served to everyone.
+func TestVaryNonCanonicalRequestKey(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		o := testorigin.NewChecked(t, 64, 16)
+		o.Default(testorigin.Behavior{Func: func(r *weir.Request) (*weir.Response, error) {
+			var v string
+			for k, vs := range r.Header { // an origin matching names case-insensitively
+				if strings.EqualFold(k, "X-Custom") {
+					v += strings.Join(vs, ",")
+				}
+			}
+			return &weir.Response{StatusCode: http.StatusOK,
+				Header: http.Header{"Cache-Control": {"max-age=60"}, "Vary": {"X-Custom"}},
+				Body:   io.NopCloser(strings.NewReader(v))}, nil
+		}})
+		cfg := cacheCfg
+		cfg.Forward.Mode = weir.ForwardAll
+		e := newEngine(t, cfg)
+		defer closeEngine(t, e)
+
+		evil := getReq("/c")
+		evil.Header["x-custom"] = []string{"evil"}
+		serve(t, e, evil, o)
+		if _, body := serve(t, e, getReq("/c"), o); body != "" {
+			t.Fatalf("a request without X-Custom got %q", body)
+		}
+	})
+}

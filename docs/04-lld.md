@@ -1,7 +1,7 @@
 # Weir low-level design
 
 Status: v1.0
-Date: 2026-10-01
+Date: 2026-10-02
 Depends on: [01-technical-spec.md](01-technical-spec.md), [02-architecture.md](02-architecture.md), [03-hld.md](03-hld.md)
 
 This document is written for the person (or agent) implementing a milestone. It gives exact type definitions, algorithms, locking rules and pseudo-code. Code may differ in naming of unexported identifiers; exported names, behavior, bounds and locking rules may not change without updating this document in the same commit.
@@ -351,7 +351,7 @@ type ClientConditionals struct {
 }
 ```
 
-A nil `Request.Header` is treated as empty. `internal/keys` cannot import `weir` (import cycle). It defines its own `Request` struct with the same fields, and the root package converts with a field copy. The copy is cheap (strings and a header map reference).
+A nil `Request.Header` is treated as empty. A header with any non-canonical key (`x-custom`, possible for library callers; net/http canonicalizes) is replaced, in a shallow copy of the request, by `keys.CanonicalHeader`, which merges duplicates canonical-first, the same function `Serve` applies to origin responses. Every keyed, Vary and hop-by-hop read uses canonical names, so without it a lowercase field would reach the origin under `ForwardAll` while the key read it as absent (INV-1, T-15). `internal/keys` cannot import `weir` (import cycle). It defines its own `Request` struct with the same fields, and the root package converts with a field copy. The copy is cheap (strings and a header map reference).
 
 Classification order:
 

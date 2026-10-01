@@ -696,3 +696,11 @@ Entry template:
 - Deviations: 04 §3.3 names kept in canonical case, not lowercase; 04 §6.4 follower check compares variant keys; 04 §6.7 marker and negative writes keep a live spec and go to `lk.ck`.
 - Follow-ups: reviewer should-fixes 1, 2, 4 fixed (sensitive/strict refusal pulled from M7-02, pool buffer cap, 10 KiB seed); finding 3 (normalized key vs raw forward) under Waiting on Ashwin.
 - Context: medium; size M right, slightly over by pulling M7-02's cap and policy checks.
+
+## 2026-10-02 · M7-01 · review-fixes
+- Branch / PR: card/M7-01-vary-variants / #44
+- Done: adversarial review of #44. Found a cache-poisoning path: a request key in non-canonical case (`x-custom`, library callers) reached the origin under `ForwardAll` while `VariantKey` read `X-Custom` as absent, so the origin's answer to it was served to every client without the field. Same root cause let a lowercase `accept-encoding` or `connection` slip past the bucket rewrite and hop-by-hop removal. `keys.Classify` now canonicalizes request keys first (`keys.CanonicalHeader`, moved from engine.go, also used for responses).
+- Tests: TestVaryNonCanonicalRequestKey, TestClassifyCanonicalizesRequestKeys (both fail without the fix). Vary/warm/coalesce/negative/RFC tests 15× under race and shuffle; FuzzForwardEqualsKey, FuzzValidateRequest, FuzzVaryNames, FuzzMalformedHeaderAbsent, FuzzKeyEncodingInjective 20 s each, clean. BenchmarkServeHitSmall ~910 to ~985 ns/op, 14 allocs unchanged. `make check` passes.
+- Deviations: 04 §3.1 documents the canonicalization.
+- Follow-ups: FR-KEY-11 normalized key vs raw forwarded lines (quoted strings with commas included) stays under Waiting on Ashwin.
+- Context: low.
