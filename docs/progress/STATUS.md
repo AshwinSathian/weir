@@ -5,7 +5,7 @@ Phase: 1
 Current card: none
 Card state: awaiting-merge
 Branch: card/M6-01-negative-caching
-PR: none
+PR: #43 https://github.com/AshwinSathian/weir/pull/43
 Next card: M7-01
 
 ## Blockers
