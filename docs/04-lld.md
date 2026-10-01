@@ -689,15 +689,22 @@ func (e *Engine) fetchCoalesced(ctx, c, lk, origin, attempt):
             return e.fromFetched(c, res, collapsed: true)
         return e.cacheable(ctx, c, origin, attempt+1)          // FR-COA-5
     case <-timer.C:
-        if created: e.leaveFlight(f)
-        if lk.entry != nil && staleIfErrorOK(lk): return e.fromEntry(c, lk.entry, staleInfo(StaleCoalesceTimeout))
-        return e.fetchDirect(ctx, c, lk, origin)
+        if f.Done() is closed: use the result as above   // the flight published as the timer fired
+        if lk.entry != nil && staleIfErrorOK(lk):
+            if created: e.leaveFlight(f)
+            return e.fromEntry(c, lk.entry, staleInfo(StaleCoalesceTimeout))
+        if !created: return e.fetchDirect(ctx, c, lk, origin)
+        wait for f.Done() or ctx.Done() as above        // the creator keeps waiting on its own fetch
     case <-ctx.Done():
         if created: e.leaveFlight(f)
         return nil, ctx.Err()
 ```
 
 `staleIfErrorOK(lk)` re-runs `Evaluate` at the current time and checks `sieOK`.
+
+The timer covers the creator too, so it can serve stale under stale-if-error like any follower. Without a stale entry the creator does not fetch again: its fetch is the flight, already bounded by `Timeouts.Origin`, and the default `FollowerMaxWait` equals `Timeouts.Origin` whenever that is under 10 s, so a second fetch would start just as the first one times out and double the origin load of every slow request.
+
+Before publishing, `runFlight` checks the built entry against epochs newer than its `RequestTime` (FR-PRG-7). If one applies, the entry is not shared: a follower may have arrived after the purge, and every follower arrived before `Publish`, so one check covers them all. The creator still gets its own response. If the origin calls `runtime.Goexit`, the flight publishes an `*OriginError` instead of leaving its waiters blocked.
 
 `runFlight`:
 
@@ -727,7 +734,7 @@ func (e *Engine) leaveFlight(f):
 
 ### 6.5 Direct fetch
 
-`fetchDirect` runs `e.fetch` on the request goroutine with `ctx` (plus the origin timeout). Used for markers, authorized-request misses, the second attempt after a non-reusable flight result, and follower timeouts. The result is stored if storable, exactly like a flight's. It never creates a flight, so it never blocks anyone else.
+`fetchDirect` runs `e.fetch` on the request goroutine with `ctx` (plus the origin timeout). Used for markers, authorized-request misses, requests with a `no-store` directive (their response is never shared, so leading a flight would make followers wait and then refetch; T-31), the second attempt after a non-reusable flight result, and follower timeouts. The result is stored if storable, exactly like a flight's. It never creates a flight, so it never blocks anyone else.
 
 ### 6.6 Fetch failure handling
 

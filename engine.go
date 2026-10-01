@@ -11,6 +11,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/AshwinSathian/weir/internal/coalesce"
 	"github.com/AshwinSathian/weir/internal/keys"
 	"github.com/AshwinSathian/weir/store"
 	"github.com/AshwinSathian/weir/store/memory"
@@ -37,6 +38,7 @@ type Engine struct {
 	kcfg     keys.Config // compiled from cfg
 	store    store.Store
 	ownStore bool
+	flights  coalesce.Table
 
 	mu        sync.Mutex  // orders setting closed against wg.Add in goBackground
 	closed    atomic.Bool // written under mu; read without it on the Serve path

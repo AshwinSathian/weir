@@ -471,3 +471,19 @@ Entry template:
 - Deviations: card-reviewer found that 04 §6.4 could leak a stream when the creator times out between runFlight's `Publish` and its `CreatorIsGone` check. `CreatorGone` now returns whether the flight had published, and 04 §6.4 gained `leaveFlight`, which closes the stream in that case. 04 §8.1 and the date line updated. Internal signature only.
 - Follow-ups: M2-02 implements `leaveFlight` as written in 04 §6.4. The table's size bound (MaxConcurrent + MaxQueue) comes from the limiter (M4) and needs a test there.
 - Context: low; size S was right. card-reviewer: 0 must-fix, 1 should-fix fixed, 2 nits handled.
+
+## 2026-10-01 · M2-02 · done
+- Branch / PR: card/M2-02-coalesced-fetch / #31
+- Done: flight.go (coalesced fetch, detached flight context with values from the creator and cancel only from `Close`, follower timeout to stale-if-error or direct fetch, stream hand-off via `leaveFlight`, panic recovery including body reads); serve.go split into `fetchStored` and `respond`; engine flight table. Authorized and marker requests fetch directly.
+- Tests: TestCoalesceColdKey1000, TestCoalesceCreatorCancel, TestCoalesceStuckLeader, TestCoalesceLeaderAging, TestCoalescePanic, TestCoalesceSkipsDirectRequests, TestCoalesceCanceledByClose; TestNewerResponseWins now uses LeaderMaxAge 1s; `make check` passes.
+- Deviations: 04 §6.4: on timeout without stale the creator keeps waiting on its own flight instead of refetching (default FollowerMaxWait equals Timeouts.Origin under 10 s; refetching doubled origin load). Followers unchanged (FR-COA-4).
+- Follow-ups: M2-03 re-entry; M7-01 VaryMatches for followers; M4 table bound. In STATUS.
+- Context: medium; size M was right. card-reviewer: 0 must-fix, 3 should-fix fixed, Vary nit commented, 2 nits noted in STATUS.
+
+## 2026-10-01 · M2-02 · review-fixes
+- Branch / PR: card/M2-02-coalesced-fetch / #31
+- Done: adversarial review of #31. Fixed: an origin calling `runtime.Goexit` crashed the process from the flight goroutine (nil result in the deferred publish); followers that arrived after a purge got the pre-purge flight result (FR-PRG-7), now checked once before `Publish`; a `no-store` request could lead a flight whose result is never shared, making every follower wait and refetch (T-31), now fetched directly.
+- Tests: TestCoalescePanic "Goexit in Fetch", TestCoalescePurgeDuringFlight, TestCoalesceNoStoreRequestNotLeader (each fails with its fix reverted); `make check` passes.
+- Deviations: 04 §6.4 and §6.5 updated for the three fixes.
+- Follow-ups: none new; follower sharing of `no-cache`/`max-age=0` responses left as is (common CDN practice; strict RFC 9111 §4 reading would stop it), noted in STATUS.
+- Context: low.
