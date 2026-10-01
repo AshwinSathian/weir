@@ -125,7 +125,7 @@ Refs: FR-STL-*, FR-CB-*, T6.6, T-16, T-20.
 - [x] M5.1 `internal/breaker`. AC: `TestBreakerOpensHalfOpenCloses` (component), `TestBreaker500DoesNotTrip`, `TestBreakerNeedsVolume` pass.
 - [x] M5.2 SWR serving with background refresh; SIE on every error condition; decision table 7.2 in full; operator default windows; `must-revalidate` 504. AC: `TestStaleIfErrorOnOriginDown`, `TestMustRevalidate504`, `TestDefaultStaleWindowsOff`, `TestLimiterShedsWithStale`, `TestRefreshNeverExceedsReserve` pass; RFC 5861 example rows pass.
 
-- [ ] M5.3 Incident modes via `SetMode` (D33). AC: `TestModeExpires`, `TestModeStaleOnErrorLimits`, `TestModeBypass` pass.
+- [x] M5.3 Incident modes via `SetMode` (D33). AC: `TestModeExpires`, `TestModeStaleOnErrorLimits`, `TestModeBypass` pass.
 
 #### M6 Negative caching (~0.5 week)
 

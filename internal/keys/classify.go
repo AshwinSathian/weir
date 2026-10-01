@@ -59,6 +59,7 @@ type Classified struct {
 	ClientCond ClientConditionals
 	rangeHdr   []string // the client's Range lines, for AsRangePass
 	ifRange    []string // the client's If-Range lines, for AsRangePass
+	req        *Request // the client request, for AsBypass; never modified
 }
 
 const maxPartitionBytes = 512
@@ -83,6 +84,7 @@ func Classify(r *Request, c *Config) (Classified, error) {
 
 	out := Classified{
 		Head:       r.Method == http.MethodHead,
+		req:        r,
 		Range:      len(h["Range"]) > 0,
 		rangeHdr:   h["Range"],
 		ifRange:    h["If-Range"],
@@ -143,6 +145,16 @@ func (c *Classified) AsRangePass() *Classified {
 	if len(c.ifRange) > 0 {
 		out.Forwarded.Header["If-Range"] = slices.Clone(c.ifRange)
 	}
+	return &out
+}
+
+// AsBypass turns a cacheable request into a pass-through forwarded as
+// received (FR-MODE-3, FR-FWD-3): method, path, query, headers and body as
+// the client sent them, hop-by-hop fields removed. Nothing is stored, so
+// INV-1 does not apply; tags and partition stay those of the cacheable form.
+func (c *Classified) AsBypass() *Classified {
+	out := pass(*c, c.req, c.Forwarded.Host)
+	out.FwdReason = FwdNone
 	return &out
 }
 

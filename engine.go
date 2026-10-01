@@ -43,8 +43,9 @@ type Engine struct {
 	ownStore bool
 	flights  coalesce.Table
 	lim      *limiter.Limiter
-	upl      *limiter.Limiter // requests with a body (FR-LIM-7)
-	cb       *breaker.Breaker // nil when Breaker.Disable
+	upl      *limiter.Limiter          // requests with a body (FR-LIM-7)
+	cb       *breaker.Breaker          // nil when Breaker.Disable
+	mode     atomic.Pointer[modeState] // nil: ModeNormal (FR-MODE-1)
 
 	mu        sync.Mutex  // orders setting closed against wg.Add in goBackground
 	closed    atomic.Bool // written under mu; read without it on the Serve path

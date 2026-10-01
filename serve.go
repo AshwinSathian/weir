@@ -32,6 +32,9 @@ func (e *Engine) Serve(ctx context.Context, req *Request, origin Origin) (*Respo
 	if c.Class == keys.ClassPass {
 		return e.pass(ctx, &c, origin, FwdMethod)
 	}
+	if e.currentMode() == ModeBypass { // FR-MODE-3
+		return e.pass(ctx, c.AsBypass(), origin, FwdBypass)
+	}
 	return e.cacheable(ctx, &c, origin, nil)
 }
 

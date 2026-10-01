@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/AshwinSathian/weir/internal/coalesce"
-	"github.com/AshwinSathian/weir/internal/httpcc"
 	"github.com/AshwinSathian/weir/internal/keys"
 	"github.com/AshwinSathian/weir/internal/limiter"
 	"github.com/AshwinSathian/weir/store"
@@ -204,7 +203,7 @@ func (e *Engine) staleOnTimeout(sp *fetchSpec) *Response {
 		return nil
 	}
 	now := time.Now()
-	if _, staleness, sieOK := httpcc.Evaluate(ent, sp.lk.epoch, sp.lk.epochOK, now); sieOK {
+	if staleness, ok := e.staleOK(sp, now); ok {
 		emit(e.cfg.Observer, Event{Kind: EvStaleServed, Time: now, Partition: sp.c.Partition, Reason: "coalesce-timeout"})
 		return e.fromEntry(sp.c, ent, now, CacheInfo{Hit: true, Stale: StaleCoalesceTimeout, TTL: -staleness})
 	}
@@ -227,7 +226,7 @@ func failed(ctx context.Context, fr *flightResult) bool {
 func (e *Engine) onFetchError(sp *fetchSpec, fr *flightResult, own bool) (*Response, error) {
 	if ent := sp.lk.entry; ent != nil {
 		now := time.Now()
-		if _, staleness, sieOK := httpcc.Evaluate(ent, sp.lk.epoch, sp.lk.epochOK, now); sieOK {
+		if staleness, ok := e.staleOK(sp, now); ok {
 			if own {
 				closeBody(fr.resp)
 			}

@@ -211,6 +211,39 @@ func TestCoalesceStuckLeader(t *testing.T) {
 			}
 		})
 	})
+	// FR-MODE-2: stale-on-error widens the coalesce timeout to an entry
+	// without a stale-if-error window.
+	t.Run("stale-on-error mode: followers serve stale", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			o := testorigin.NewChecked(t, wideSlots, wideSlots)
+			// The validator keeps the entry stored for Freshness.Keep past expiry.
+			o.Default(testorigin.Behavior{Header: http.Header{"Cache-Control": {"max-age=1"}, "Etag": {`"v1"`}}, Body: []byte("old")})
+			e := newEngine(t, cfg)
+			defer closeEngine(t, e)
+			serve(t, e, getReq("/a"), o)
+			time.Sleep(5 * time.Second)
+			if err := e.SetMode(weir.ModeStaleOnError, time.Hour); err != nil {
+				t.Fatal(err)
+			}
+
+			gate := make(chan struct{})
+			defer close(gate)
+			o.Default(testorigin.Behavior{Gate: gate})
+			chs := make([]<-chan served, 10)
+			for i := range chs {
+				chs[i] = serveAsync(t.Context(), e, getReq("/a"), o)
+			}
+			for _, ch := range chs {
+				s := <-ch
+				if s.err != nil {
+					t.Fatal(s.err)
+				}
+				if s.body != "old" || s.resp.Cache.Stale != weir.StaleCoalesceTimeout {
+					t.Fatalf("got %q, stale=%v; want old served as coalesce-timeout", s.body, s.resp.Cache.Stale)
+				}
+			}
+		})
+	})
 }
 
 // FR-COA-3, T6.2a: a request after LeaderMaxAge starts a second flight

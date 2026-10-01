@@ -656,3 +656,11 @@ Entry template:
 - Deviations: 01 FR-COA-5 amended.
 - Follow-ups: none.
 - Context: low.
+
+## 2026-10-01 · M5-04 · done
+- Branch / PR: card/M5-04-incident-modes / pending
+- Done: mode.go: `SetMode` (ttl in (0, 24 h], `EvMode` and a log line on change and on expiry), `currentMode` on an `atomic.Pointer[modeState]`, `staleOK` widening stale-if-error under `ModeStaleOnError` (staleness in [0, 24 h], no hard or invalidating epoch, none of must-revalidate, proxy-revalidate, no-cache, s-maxage) for `onFetchError` and `staleOnTimeout`. `ModeBypass` forwards through `pass()` with the new `keys.Classified.AsBypass()` (request as received, FR-FWD-3).
+- Tests: TestSetModeRejectsInvalid, TestModeExpires, TestModeStaleOnErrorLimits, TestModeBypass (asserts the forwarded request), TestModeBypassThroughBreaker, TestModeStaleOnErrorFreshForcedValidation, TestCoalesceStuckLeader "stale-on-error mode" subtest. `make check` passes.
+- Deviations: 04 §14 modes bullet now names `staleOK`, `staleOnTimeout`, `AsBypass` and the full flag list.
+- Follow-ups: FR-MODE-2 and s-maxage under Waiting on Ashwin. Reviewer must-fix (bypass sent the normalized cacheable forward) and should-fixes (fresh entry served on forced validation, missing tests, LLD drift) fixed.
+- Context: low; resumed an uncommitted start from an earlier session. Touched internal/keys and coalesce_test.go beyond the card's list.
