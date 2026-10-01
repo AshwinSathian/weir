@@ -5,7 +5,7 @@ Phase: 1
 Current card: none
 Card state: awaiting-merge
 Branch: card/M5-01-breaker
-PR: none
+PR: #39 https://github.com/AshwinSathian/weir/pull/39
 Next card: M5-02
 
 ## Blockers
