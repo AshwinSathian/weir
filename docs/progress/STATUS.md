@@ -5,7 +5,7 @@ Phase: 1
 Current card: none
 Card state: awaiting-merge
 Branch: card/M4-05-warm
-PR: pending
+PR: #38 https://github.com/AshwinSathian/weir/pull/38
 Next card: M5-01
 
 ## Blockers

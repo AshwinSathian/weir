@@ -577,7 +577,7 @@ Entry template:
 - Context: low.
 
 ## 2026-10-01 · M4-05 · done
-- Branch / PR: card/M4-05-warm / pending
+- Branch / PR: card/M4-05-warm / #38
 - Done: warm.go: `Engine.Warm` with `Warm.Concurrency` engine-owned workers, Warm-class slot acquired before the flight is joined, fetch via `runFlight` on its own goroutine (panic and Goexit safe). `fetchSpec.bg` became `class` plus `permit`; `fetch` takes a held permit; `limFor` picks the pool; `coalesce.NewFlight` for flights outside the table. A warm flight its caller leaves publishes `bgDropped`.
 - Tests: TestWarm, TestWarmDoesNotUseReserve, TestWarmCanceledFollowerFetches, TestWarmJoinsRunningFlight, TestCloseDuringBlockedWarm, TestWarmOriginBodyPanic. Mutants (Warm as Foreground class, no bgDropped on cancel) fail a test. `make check` passes.
 - Deviations: 04 §6.8a added (warm flow and counting rules); 04 §6.7 fetchSpec comment updated.
