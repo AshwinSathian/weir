@@ -449,7 +449,7 @@ Entry template:
 - Context: low.
 
 ## 2026-10-01 · M1-18 · done
-- Branch / PR: card/M1-18-rfc-bench / (pending)
+- Branch / PR: card/M1-18-rfc-bench / #29
 - Done: `rfc9111_test.go` RFC behavior table (62 rows; 57 run, 5 tagged M5/M7/M9 skip) over 07 §7's sections; `BenchmarkServeHitSmall`, `BenchmarkKeyBuild`, `BenchmarkAcceptEncoding`, `BenchmarkMemoryStoreGetParallel`; `docs/benchmarks.md` baseline (M4 Pro, Go 1.27.1).
 - Tests: TestRFC9111, TestCVE202435296 (missing M1.5 AC test, no owning card); `make check` passes.
 - Deviations: benchmarks live in three packages, not one `bench_test.go`, because two measure unexported code. PLAN M1.5 and M1.7 ticked: M1 is complete.

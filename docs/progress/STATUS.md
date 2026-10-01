@@ -5,7 +5,7 @@ Phase: 1
 Current card: none
 Card state: awaiting-merge
 Branch: card/M1-18-rfc-bench
-PR: (pending)
+PR: #29 https://github.com/AshwinSathian/weir/pull/29
 Next card: M2-01
 
 ## Blockers
@@ -14,7 +14,7 @@ none
 
 ## Waiting on Ashwin
 
-- M1-18 closes M1, which triggers PLAN P0.0: add `SECURITY.md`, flip the repo to public, enable private vulnerability reporting (D40), tag `v0.1.0` (D24). The card says to ask before flipping visibility. After merging #<this PR>, say whether to do P0.0 now (and in which session) or hold it.
+- M1-18 closes M1, which triggers PLAN P0.0: add `SECURITY.md`, flip the repo to public, enable private vulnerability reporting (D40), tag `v0.1.0` (D24). The card says to ask before flipping visibility. After merging #29, say whether to do P0.0 now (and in which session) or hold it.
 
 ## Decided 2026-09-28 (delegated by Ashwin after the #24 adversarial review)
 
