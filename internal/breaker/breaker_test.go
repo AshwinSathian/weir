@@ -2,6 +2,8 @@ package breaker
 
 import (
 	"errors"
+	"math"
+	"sync"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -89,7 +91,7 @@ func TestBreakerOpensHalfOpenCloses(t *testing.T) {
 		b.Record(p, Failure)
 		p = openAt(t, b, 9600*time.Millisecond)
 
-		// Success closes and resets OpenFor.
+		// Success closes, forgets the window and resets OpenFor.
 		b.Record(p, Success)
 		if b.State() != Closed {
 			t.Fatalf("state = %v after probe success, want Closed", b.State())
@@ -180,7 +182,7 @@ func TestBreakerNeedsVolume(t *testing.T) {
 		// Outcomes older than Window drop out of the count.
 		b = New(testConfig(), func() float64 { return 0 }, nil)
 		record(b, Failure, 19)
-		time.Sleep(10 * time.Second)
+		time.Sleep(15 * time.Second) // a slot no later outcome reuses
 		record(b, Failure, 1)
 		if b.State() != Closed {
 			t.Fatalf("state = %v with 19 failures outside the window, want Closed", b.State())
@@ -255,4 +257,147 @@ func TestBreakerNilReceiver(t *testing.T) {
 	if b.State() != Closed {
 		t.Fatalf("nil State = %v, want Closed", b.State())
 	}
+}
+
+// FR-CB-4: a probe that never ends in Record or Cancel (a bug, or a fetch
+// stuck past every timeout) does not hold the breaker half-open forever:
+// after MaxOpenFor a new half-open period admits fresh probes.
+func TestBreakerLeakedProbeExpires(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		b := New(testConfig(), func() float64 { return 0 }, nil)
+		record(b, Failure, 20)
+		leaked := openAt(t, b, 4*time.Second)
+		time.Sleep(12*time.Second - time.Millisecond)
+		if _, err := b.Allow(); !errors.Is(err, ErrCircuitOpen) {
+			t.Fatalf("Allow before MaxOpenFor with the probe held = %v, want ErrCircuitOpen", err)
+		}
+		time.Sleep(time.Millisecond)
+		p, err := b.Allow()
+		if err != nil {
+			t.Fatalf("Allow after MaxOpenFor with a leaked probe = %v, want probe", err)
+		}
+		b.Record(leaked, Failure) // late: names the superseded period
+		if b.State() != HalfOpen {
+			t.Fatalf("state = %v after a superseded probe failed, want HalfOpen", b.State())
+		}
+		b.Record(p, Success)
+		if b.State() != Closed {
+			t.Fatalf("state = %v, want Closed", b.State())
+		}
+	})
+}
+
+// FR-CB-3, NFR-1: Config.Rand is drawn only when the breaker opens, never on
+// an ordinary fetch.
+func TestBreakerDrawsOnlyOnOpen(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		draws := 0
+		b := New(testConfig(), func() float64 { draws++; return 0 }, nil)
+		record(b, Success, 100)
+		record(b, Status500, 100)
+		if draws != 0 {
+			t.Fatalf("Rand drawn %d times while closed, want 0", draws)
+		}
+		record(b, Failure, 300) // 200 successes above: trips at 200 of 400
+		if draws != 1 {
+			t.Fatalf("Rand drawn %d times for one open, want 1", draws)
+		}
+	})
+}
+
+// FR-CB-2: the check runs on every outcome, so a success that brings the
+// window to MinRequests at FailureRatio trips it.
+func TestBreakerTripsWhenVolumeArrives(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		b := New(testConfig(), func() float64 { return 0 }, nil)
+		record(b, Failure, 10)
+		record(b, Success, 10)
+		if b.State() != Open {
+			t.Fatalf("state = %v at 10 failures in 20, want Open", b.State())
+		}
+	})
+}
+
+// FR-CB-3: doubling an enormous open period does not overflow into the past.
+func TestBreakerDoublingSaturates(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		cfg := testConfig()
+		cfg.OpenFor = math.MaxInt64/2 + 1
+		cfg.MaxOpenFor = math.MaxInt64 / 2
+		b := New(cfg, func() float64 { return 0 }, nil)
+		b.mu.Lock()
+		b.state, b.gen, b.probes, b.openFor = HalfOpen, 1, 1, cfg.OpenFor
+		b.openUntil = time.Now().Add(time.Hour)
+		b.mu.Unlock()
+		b.Record(Probe{1}, Failure)
+		if _, err := b.Allow(); !errors.Is(err, ErrCircuitOpen) {
+			t.Fatalf("Allow right after reopen = %v, want ErrCircuitOpen", err)
+		}
+	})
+}
+
+// FR-CB-4: under concurrent Allow, Record and Cancel, no more than
+// HalfOpenProbes probes are in flight at once.
+func TestBreakerConcurrentProbesBounded(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		cfg := testConfig()
+		cfg.HalfOpenProbes = 3
+		b := New(cfg, func() float64 { return 0.5 }, nil)
+		var mu sync.Mutex
+		inflight, peak := 0, 0
+		var wg sync.WaitGroup
+		for i := range 64 {
+			wg.Go(func() {
+				for j := range 200 {
+					p, err := b.Allow()
+					if err != nil {
+						time.Sleep(time.Second)
+						continue
+					}
+					if p.gen != 0 {
+						mu.Lock()
+						inflight++
+						peak = max(peak, inflight)
+						mu.Unlock()
+					}
+					time.Sleep(time.Duration(i+j) % 7 * 100 * time.Millisecond)
+					if p.gen != 0 {
+						mu.Lock()
+						inflight--
+						mu.Unlock()
+					}
+					switch (i + j) % 3 {
+					case 0:
+						b.Record(p, Failure)
+					case 1:
+						b.Record(p, Success)
+					default:
+						b.Cancel(p)
+					}
+				}
+			})
+		}
+		wg.Wait()
+		if peak > 3 {
+			t.Fatalf("peak probes in flight = %d, want <= 3", peak)
+		}
+		if peak == 0 {
+			t.Fatal("no probe ever ran; the test did not reach half-open")
+		}
+	})
+}
+
+// FR-CB-4: closing forgets the window, so the failures that opened the
+// breaker do not reopen it on the next single failure.
+func TestBreakerCloseClearsWindow(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		b := New(testConfig(), func() float64 { return 0 }, nil)
+		record(b, Failure, 20)
+		p := openAt(t, b, 4*time.Second) // the 20 failures are still inside Window
+		b.Record(p, Success)
+		record(b, Failure, 1)
+		if b.State() != Closed {
+			t.Fatalf("state = %v: failures from before the close still counted", b.State())
+		}
+	})
 }

@@ -57,7 +57,7 @@ type Config struct {
 }
 
 type bucket struct {
-	start    time.Time
+	start    int64 // monotonic ns since the breaker was made
 	ok, fail uint32
 }
 
@@ -68,7 +68,8 @@ type Breaker struct {
 	mu        sync.Mutex
 	state     State
 	buckets   [10]bucket
-	openUntil time.Time
+	base      time.Time     // bucket times are offsets from it, on the monotonic clock
+	openUntil time.Time     // while Open: end of the period; while HalfOpen: when held probes are given up
 	openFor   time.Duration // current, doubles on reopen
 	probes    int           // in flight while HalfOpen
 	gen       uint64        // counts half-open periods; a Probe names its period
@@ -82,11 +83,11 @@ type Breaker struct {
 type Probe struct{ gen uint64 }
 
 // New returns a closed breaker. rnd returns values in [0, 1) for the open
-// jitter; onChange, when not nil, is called after every transition, outside
+// jitter and is called once per open period, under the lock; onChange, when not nil, is called after every transition, outside
 // the lock (FR-CB-6). Concurrent transitions may reach onChange out of
 // order, so a consumer that needs the current state reads State.
 func New(cfg Config, rnd func() float64, onChange func(from, to State)) *Breaker {
-	return &Breaker{cfg: cfg, rnd: rnd, onChange: onChange, openFor: cfg.OpenFor}
+	return &Breaker{cfg: cfg, rnd: rnd, onChange: onChange, openFor: cfg.OpenFor, base: time.Now()}
 }
 
 // State returns the current state, moving Open to HalfOpen when the open
@@ -137,7 +138,6 @@ func (b *Breaker) Record(p Probe, o Outcome) {
 		return
 	}
 	fail := o == Failure || o == Status500 && b.cfg.CountStatus500
-	r := b.rnd() // drawn before the lock: Config.Rand is caller code
 	now := time.Now()
 	b.mu.Lock()
 	from := b.state
@@ -145,14 +145,17 @@ func (b *Breaker) Record(p Probe, o Outcome) {
 	switch {
 	case b.state == HalfOpen && p.gen == b.gen && p.gen != 0:
 		if fail {
-			b.open(now, min(b.openFor*2, b.cfg.MaxOpenFor), r)
+			d := b.openFor * 2
+			if d <= 0 || d > b.cfg.MaxOpenFor { // <= 0: the doubling overflowed
+				d = b.cfg.MaxOpenFor
+			}
+			b.open(now, d)
 		} else {
-			b.state = Closed
+			b.state = Closed // the next trip starts again from OpenFor (count)
 			b.buckets = [10]bucket{}
-			b.openFor = b.cfg.OpenFor
 		}
 	case b.state == Closed:
-		b.count(now, fail, r)
+		b.count(now, fail)
 	}
 	to := b.state
 	b.mu.Unlock()
@@ -172,50 +175,56 @@ func (b *Breaker) Cancel(p Probe) {
 	b.mu.Unlock()
 }
 
-// expire moves Open to HalfOpen once openUntil has passed.
+// expire moves Open to HalfOpen once openUntil has passed. A half-open
+// period lasting MaxOpenFor is replaced by a new one, so probes that never
+// end in Record or Cancel cannot hold the breaker half-open forever; their
+// late outcomes name the old period and are ignored.
 func (b *Breaker) expire(now time.Time) {
-	if b.state == Open && !now.Before(b.openUntil) {
+	if b.state != Closed && !now.Before(b.openUntil) {
 		b.state = HalfOpen
 		b.probes = 0
 		b.gen++
+		b.openUntil = now.Add(b.cfg.MaxOpenFor)
 	}
 }
 
 // open starts an open period of d with ±20% jitter (FR-CB-3).
-func (b *Breaker) open(now time.Time, d time.Duration, r float64) {
+func (b *Breaker) open(now time.Time, d time.Duration) {
 	b.state = Open
 	b.openFor = d
-	b.openUntil = now.Add(time.Duration(float64(d) * (0.8 + 0.4*r)))
+	b.openUntil = now.Add(time.Duration(float64(d) * (0.8 + 0.4*b.rnd())))
 }
 
 // count adds one outcome to the current bucket and trips the breaker when
 // the window holds MinRequests outcomes at FailureRatio (FR-CB-2). Buckets
 // rotate lazily: a slot whose start is not the current bucket's is reused.
-func (b *Breaker) count(now time.Time, fail bool, r float64) {
-	// Start and slot come from the same number, so they agree for any
-	// Window; width is at least 1 ns so a tiny Window cannot divide by zero.
-	n, w := now.UnixNano(), max(int64(b.cfg.Window)/int64(len(b.buckets)), 1)
-	start := time.Unix(0, n-n%w)
+func (b *Breaker) count(now time.Time, fail bool) {
+	// Times are monotonic offsets from base, so a wall-clock step cannot
+	// misplace or resurrect a bucket, and n >= 0 keeps the slot index in
+	// range. Start and slot come from the same number, so they agree for
+	// any Window; width is at least 1 ns so a tiny Window cannot divide by
+	// zero.
+	n, w := int64(now.Sub(b.base)), max(int64(b.cfg.Window)/int64(len(b.buckets)), 1)
+	start := n - n%w
 	cur := &b.buckets[(n/w)%int64(len(b.buckets))]
-	if !cur.start.Equal(start) {
+	if cur.start != start {
 		*cur = bucket{start: start}
 	}
 	if fail {
 		cur.fail++
 	} else {
 		cur.ok++
-		return
 	}
 	var ok, failed uint32
 	for _, bk := range b.buckets {
-		if now.Sub(bk.start) < b.cfg.Window {
+		if n-bk.start < int64(b.cfg.Window) {
 			ok += bk.ok
 			failed += bk.fail
 		}
 	}
 	total := ok + failed
 	if int(total) >= b.cfg.MinRequests && float64(failed) >= b.cfg.FailureRatio*float64(total) {
-		b.open(now, b.cfg.OpenFor, r)
+		b.open(now, b.cfg.OpenFor)
 	}
 }
 
