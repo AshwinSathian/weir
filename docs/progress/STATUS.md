@@ -4,9 +4,9 @@ Updated: 2026-10-01
 Phase: 1
 Current card: none
 Card state: awaiting-merge
-Branch: card/M4-01-limiter
-PR: #34 https://github.com/AshwinSathian/weir/pull/34
-Next card: M4-02
+Branch: card/M4-02-limiter-fetch
+PR: none
+Next card: M4-03
 
 ## Blockers
 
@@ -14,8 +14,11 @@ none
 
 ## Waiting on Ashwin
 
-- Limiter queue exhaustion (adversarial review of #34, M4-01). FR-LIM-3 says a request over its partition cap "queues like any other", so a flood on one path (T-11: random query strings) fills all `MaxQueue` (1024) slots with waiters that cannot run. Origin load stays bounded at `MaxPerPartition`, but once legitimate load uses the other 48 slots, every other path sheds at once with `queue-full` instead of waiting up to 2 s. It costs about 512 requests per second to keep the queue full, and each release walks the 1 023 parked waiters (about 3 µs under the lock). An M8 throttle (cap 1) makes it worse. Proposed fix, with no new config field: cap the queued waiters per partition (for example at `MaxPerPartition`) and shed past that with `queue-full`. This changes FR-LIM-3 and T-11, so it needs your approval; the fix fits in M4-02.
 - M1-18 closes M1, which triggers PLAN P0.0: add `SECURITY.md`, flip the repo to public, enable private vulnerability reporting (D40), tag `v0.1.0` (D24). The card says to ask before flipping visibility. After merging #29, say whether to do P0.0 now (and in which session) or hold it.
+
+## Decided 2026-10-01
+
+- Limiter queue exhaustion (#34 review): Ashwin approved capping queued waiters per partition at `MaxPerPartition`, shedding past it with `queue-full`. FR-LIM-3 and T-11 change in M4-02.
 
 ## Decided 2026-09-28 (delegated by Ashwin after the #24 adversarial review)
 
@@ -29,9 +32,11 @@ The cards' Notes give the reasons and the options rejected. All three come befor
 
 ## Notes for the next session
 
-- M4-01: `internal/limiter` is standalone; nothing calls it yet. M4-02 wires it into `fetch` after `flights.Join` (replacing the `tryAcquireBackground` stub), maps `limiter.ErrShed`/`ErrQueueFull`/`ErrQueueTimeout` (all match `errors.Is(err, limiter.ErrShed)`) to `weir.ErrShed` with an explicit mapping test, and picks the `EvShed` detail from the sentinel.
-- M4-01: a waiter granted in the same instant its context ends keeps the permit with a nil error (04 §8.2 step 5); `fetch` should check `ctx.Err()` right after `Acquire`.
-- M4-01: `limiter.New` does not validate `Config`; M4-02 must confirm config validation rejects `Reserve >= Max` and `MaxWait <= 0`, or clamp. `EngineStats{Inflight, Queued}` will need a limiter stats accessor (only a test helper exists).
+- M4-02: `fetch` takes a limiter slot of the given class for `c.PartitionH` before the origin timeout starts and releases it on return (after the buffered body, or at stream headers). Shed is `*RetryError{ErrShed, MaxQueueWait}` plus `EvShed`; Background sets `bgDropped` and also emits `EvRefreshDropped` `no-slot`. A follower of a dropped background flight fetches directly, uncoalesced (bounded by the limiter).
+- M4-02: each partition now queues at most `MaxPerPartition` waiters (FR-LIM-3, T-11, approved 2026-10-01). Release walk with 1 023 waiters is about 5 us (one per partition).
+- M4-02: config allows `ReserveForeground >= MaxConcurrent`, which silently disables background refresh and (M4-05) warm; negatives are rejected. Decide in M4-05 whether `New` should reject it. `EngineStats{Inflight, Queued}` still needs a limiter accessor.
+- M4-02: coalescing tests that need more than 16 concurrent fetches on one path use `wideLimiter` (coalesce_test.go); new engine tests must use `testorigin.NewChecked` with the engine's caps.
+- M4-03: the upload pool is a second limiter with the same algorithm (04 §14); `fetch` picks the pool from `c.HasBody`.
 - M8: the `throttled` cap overrides go into `capFor` (04 §8.2 comment).
 
 - M3-01: early refresh lives in background.go. `tryAcquireBackground` is a stub that always returns true and runs before `flights.Join`. M4-02 must acquire inside `fetch`, after Join (04 §6.8); acquiring before Join would hold a slot for every hit that finds a flight already running. Until M4-02 nothing bounds refresh fetches below one per distinct key near expiry.

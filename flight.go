@@ -21,6 +21,7 @@ type fetchSpec struct {
 	prior  *store.Entry // the stale entry to validate (FR-SRV-3)
 	found  *store.Entry // the response the lookup returned; it may always be replaced
 	purged *store.Entry // an unusable response a marker may replace
+	bg     bool         // a background refresh: takes no reserved slot, never queues (FR-LIM-4)
 }
 
 // flightResult is what a fetch-and-store produced, and what a flight
@@ -81,6 +82,12 @@ func (e *Engine) fetchCoalesced(ctx context.Context, sp *fetchSpec, origin Origi
 	}
 
 	fr := f.Result().(*flightResult)
+	// 04 §6.8: a rule for background work never sheds a request. Each
+	// follower fetches directly, uncoalesced; the limiter bounds them.
+	if fr.bgDropped {
+		ck := c.Primary
+		return e.cacheable(ctx, c, origin, &ck)
+	}
 	if fr.err != nil { // FR-COA-6: every waiter gets the flight's error
 		return nil, fr.err
 	}

@@ -35,7 +35,7 @@ func lockedRand(seed uint64) func() float64 {
 // all expire in the same second.
 func TestBatchWriteExpirySpread(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		o := testorigin.New()
+		o := testorigin.NewChecked(t, 64, 16)
 		o.Default(testorigin.Behavior{Header: http.Header{"Cache-Control": {"max-age=300"}}, Body: []byte("x")})
 		e := newEngine(t, weir.Config{Rand: lockedRand(1)})
 		defer closeEngine(t, e)
@@ -66,7 +66,7 @@ func TestBatchWriteExpirySpread(t *testing.T) {
 // background refresh between them, and every one is served from the entry.
 func TestEarlyRefreshSingleFlight(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		o := testorigin.New()
+		o := testorigin.NewChecked(t, 64, 16)
 		b := cacheable("v")
 		b.Delay = time.Second // Δ = 1s; with u = 1e-9 the trigger horizon is about 20.7s
 		o.Default(b)
@@ -121,7 +121,7 @@ func TestEarlyRefreshGates(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
-				o := testorigin.New()
+				o := testorigin.NewChecked(t, 64, 16)
 				o.Default(testorigin.Behavior{Header: http.Header{"Cache-Control": {tc.cc}}, Body: []byte("v"), Delay: 2 * time.Second})
 				cfg := cacheCfg
 				cfg.Freshness.NoEarlyRefresh = tc.off
@@ -149,7 +149,7 @@ func TestEarlyRefreshGates(t *testing.T) {
 // which keeps the draw and math.Log off the hit path.
 func TestEarlyRefreshNoDrawFarFromExpiry(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		o := testorigin.New()
+		o := testorigin.NewChecked(t, 64, 16)
 		o.Default(cacheable("v"))
 		var draws atomic.Int64
 		cfg := cacheCfg
@@ -173,7 +173,7 @@ func TestEarlyRefreshNoDrawFarFromExpiry(t *testing.T) {
 // already served.
 func TestCloseCancelsEarlyRefresh(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		o := testorigin.New()
+		o := testorigin.NewChecked(t, 64, 16)
 		fill := cacheable("v")
 		fill.Delay = 2 * time.Second // Δ = 2s: the trigger horizon is about 73s
 		o.Default(fill)
@@ -214,7 +214,7 @@ func (b *trackedBody) Close() error { close(b.closed); return nil }
 // holding the origin connection open.
 func TestEarlyRefreshClosesUnclaimedStream(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		o := testorigin.New()
+		o := testorigin.NewChecked(t, 64, 16)
 		fill := cacheable("v")
 		fill.Delay = 2 * time.Second // Δ = 2s: the trigger horizon is about 73s
 		o.Default(fill)

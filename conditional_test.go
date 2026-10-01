@@ -67,7 +67,7 @@ const lastMod = "Mon, 01 Jan 2024 00:00:00 GMT"
 // restarts freshness and is stored as a new entry.
 func TestRevalidation304Freshens(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		o := testorigin.New()
+		o := testorigin.NewChecked(t, 64, 16)
 		o.Default(testorigin.Behavior{Header: http.Header{
 			"Cache-Control": {"max-age=60"}, "Etag": {`"1"`}, "Last-Modified": {lastMod},
 			"Content-Type": {"text/plain"},
@@ -126,7 +126,7 @@ func TestRevalidation304Freshens(t *testing.T) {
 // Content-Encoding and Content-Type are ignored; other fields still freshen.
 func TestFreshenKeepsRepresentationMetadata(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		o := testorigin.New()
+		o := testorigin.NewChecked(t, 64, 16)
 		o.Default(testorigin.Behavior{Header: http.Header{
 			"Cache-Control": {"max-age=60"}, "Etag": {`W/"1"`},
 			"Content-Type": {"text/plain"}, "Content-Encoding": {"gzip"},
@@ -158,7 +158,7 @@ func TestFreshenKeepsRepresentationMetadata(t *testing.T) {
 // Cache-Control it names still decides storage.
 func TestFreshenDropsHopByHop(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		o := testorigin.New()
+		o := testorigin.NewChecked(t, 64, 16)
 		o.Default(testorigin.Behavior{Header: http.Header{"Cache-Control": {"max-age=60"}, "Etag": {`"1"`}}, Body: []byte("v1")})
 		e, st := newRecordingEngine(t)
 		defer closeEngine(t, e)
@@ -200,7 +200,7 @@ func TestFreshenDropsHopByHop(t *testing.T) {
 // conditionals and stores the full response.
 func TestStrongETagMismatchRetries(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		o := testorigin.New()
+		o := testorigin.NewChecked(t, 64, 16)
 		o.Default(testorigin.Behavior{Header: http.Header{"Cache-Control": {"max-age=60"}, "Etag": {`"1"`}}, Body: []byte("v1")})
 		e, st := newRecordingEngine(t)
 		defer closeEngine(t, e)
@@ -236,7 +236,7 @@ func TestStrongETagMismatchRetries(t *testing.T) {
 // carries a body over MaxObjectBytes; the body is discarded, not streamed.
 func TestRevalidation304WithBody(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		o := testorigin.New()
+		o := testorigin.NewChecked(t, 64, 16)
 		o.Default(testorigin.Behavior{Header: http.Header{"Cache-Control": {"max-age=60"}, "Etag": {`"1"`}}, Body: []byte("v1")})
 		cfg := cacheCfg
 		cfg.Storable.MaxObjectBytes = 256
@@ -259,7 +259,7 @@ func TestRevalidation304WithBody(t *testing.T) {
 // freshens it: a 304 that drops public leaves the entry unstored.
 func TestFreshenKeepsAuthorizedRule(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		o := testorigin.New()
+		o := testorigin.NewChecked(t, 64, 16)
 		o.Default(testorigin.Behavior{Header: http.Header{"Cache-Control": {"public, max-age=60"}, "Etag": {`"1"`}}, Body: []byte("secret")})
 		e, st := newRecordingEngine(t)
 		defer closeEngine(t, e)
@@ -284,7 +284,7 @@ func TestFreshenKeepsAuthorizedRule(t *testing.T) {
 // FR-SRV-3: a stale entry without validators is refetched unconditionally.
 func TestStaleWithoutValidatorsRefetches(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		o := testorigin.New()
+		o := testorigin.NewChecked(t, 64, 16)
 		o.Default(cacheable("v1"))
 		e := newEngine(t, cacheCfg)
 		defer closeEngine(t, e)
@@ -309,7 +309,7 @@ func TestClientIfNoneMatch304(t *testing.T) {
 			"Content-Type": {"text/plain"}, "X-Other": {"z"},
 		}
 		noLM := http.Header{"Cache-Control": {"max-age=600"}}
-		o := testorigin.New()
+		o := testorigin.NewChecked(t, 64, 16)
 		o.Route("/a", testorigin.Behavior{Header: stored, Body: []byte("v1")})
 		o.Route("/nolm", testorigin.Behavior{Header: noLM, Body: []byte("v1")})
 		o.Route("/404", testorigin.Behavior{Status: http.StatusNotFound, Header: stored, Body: []byte("gone")})

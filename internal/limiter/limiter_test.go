@@ -3,6 +3,7 @@ package limiter
 import (
 	"context"
 	"errors"
+	"maps"
 	"math/rand/v2"
 	"runtime"
 	"slices"
@@ -89,6 +90,61 @@ func TestLimiterSkipsFullPartition(t *testing.T) {
 		rb.p.Release()
 		if in, q, parts := l.state(); in != 0 || q != 0 || parts != 0 {
 			t.Fatalf("state after release: inflight=%d queued=%d parts=%d", in, q, parts)
+		}
+	})
+}
+
+// FR-LIM-3, T-11, T6.8: one partition holds at most PerPartition queued
+// waiters; more shed with ErrQueueFull at once, so a flood on one path
+// cannot fill the shared queue and shed every other path.
+func TestLimiterPartitionQueueCap(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		l := newLimiter(2, 8, 2, 0)
+		held := []*Permit{mustAcquire(t, l, Foreground, 1), mustAcquire(t, l, Foreground, 1)}
+		queued := []<-chan result{acquireAsync(t.Context(), l, Foreground, 1), acquireAsync(t.Context(), l, Warm, 1)}
+		synctest.Wait()
+		if _, err := l.Acquire(t.Context(), Foreground, 1); !errors.Is(err, ErrQueueFull) {
+			t.Fatalf("third waiter of a partition: %v, want ErrQueueFull", err)
+		}
+		other := acquireAsync(t.Context(), l, Foreground, 2)
+		synctest.Wait()
+		if !pending(other) {
+			t.Fatal("another partition's waiter did not queue")
+		}
+		if _, q, _ := l.state(); q != 3 {
+			t.Fatalf("queued = %d, want 3", q)
+		}
+		// A waiter leaving by timeout frees its partition's queue place.
+		time.Sleep(wait)
+		synctest.Wait()
+		if r := <-queued[0]; !errors.Is(r.err, ErrQueueTimeout) {
+			t.Fatalf("first waiter: %v, want ErrQueueTimeout", r.err)
+		}
+		if r := <-other; !errors.Is(r.err, ErrQueueTimeout) {
+			t.Fatalf("other partition: %v, want ErrQueueTimeout", r.err)
+		}
+		again := acquireAsync(t.Context(), l, Foreground, 1)
+		synctest.Wait()
+		if !pending(again) {
+			t.Fatal("waiter after a timeout did not queue")
+		}
+		// A granted waiter frees its place too.
+		held[0].Release()
+		synctest.Wait()
+		rw := <-queued[1]
+		if rw.err != nil {
+			t.Fatalf("warm waiter: %v", rw.err)
+		}
+		held[1].Release()
+		rw.p.Release()
+		synctest.Wait()
+		ra := <-again
+		if ra.err != nil {
+			t.Fatalf("requeued waiter: %v", ra.err)
+		}
+		ra.p.Release()
+		if in, q, parts := l.state(); in != 0 || q != 0 || parts != 0 || len(l.queuedBy) != 0 {
+			t.Fatalf("state: inflight=%d queued=%d parts=%d queuedBy=%d", in, q, parts, len(l.queuedBy))
 		}
 	})
 }
@@ -328,9 +384,19 @@ func TestLimiterInvariants(t *testing.T) {
 					t.Fatalf("seed %d: inflight %d, max %d, partition sum %d, permits %d",
 						seed, l.inflight, slots, sum, len(held))
 				}
+				queued := map[uint64]int{}
 				for _, w := range l.queue {
 					if l.canRun(w.class, w.part) {
 						t.Fatalf("seed %d: runnable waiter left in the queue", seed)
+					}
+					queued[w.part]++
+				}
+				if !maps.Equal(queued, l.queuedBy) {
+					t.Fatalf("seed %d: queuedBy %v, queue holds %v", seed, l.queuedBy, queued)
+				}
+				for part, n := range queued {
+					if n > per {
+						t.Fatalf("seed %d: partition %d has %d queued, cap %d", seed, part, n, per)
 					}
 				}
 			}
@@ -375,7 +441,7 @@ func TestLimiterInvariants(t *testing.T) {
 }
 
 // BenchmarkLimiterAcquireRelease measures the fast path, and Release's
-// O(queue) walk with MaxQueue-1 waiters parked behind a full partition.
+// O(queue) walk with MaxQueue-1 waiters parked behind full partitions.
 func BenchmarkLimiterAcquireRelease(b *testing.B) {
 	b.Run("uncontended", func(b *testing.B) {
 		l := New(Config{Max: 64, MaxQueue: 1024, PerPartition: 16, Reserve: 16, MaxWait: wait})
@@ -394,13 +460,15 @@ func BenchmarkLimiterAcquireRelease(b *testing.B) {
 		})
 	})
 	b.Run("full queue", func(b *testing.B) {
-		l := New(Config{Max: 64, MaxQueue: 1024, PerPartition: 1, Reserve: 16, MaxWait: wait})
+		// One parked waiter per full partition, since each partition queues
+		// at most PerPartition (FR-LIM-3).
+		l := New(Config{Max: 1100, MaxQueue: 1024, PerPartition: 1, Reserve: 16, MaxWait: wait})
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		hold := mustAcquireB(b, l, 0)
-		defer hold.Release()
-		for range 1023 {
-			go func() { _, _ = l.Acquire(ctx, Warm, 0) }() // parked: partition 0 is full
+		for part := range uint64(1023) {
+			hold := mustAcquireB(b, l, part)
+			defer hold.Release()
+			go func() { _, _ = l.Acquire(ctx, Warm, part) }() // parked: its partition is full
 		}
 		for {
 			if _, q, _ := l.state(); q == 1023 {
@@ -410,7 +478,7 @@ func BenchmarkLimiterAcquireRelease(b *testing.B) {
 		}
 		b.ReportAllocs()
 		for b.Loop() {
-			mustAcquireB(b, l, 1).Release()
+			mustAcquireB(b, l, 2000).Release()
 		}
 	})
 }

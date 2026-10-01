@@ -13,7 +13,7 @@ import (
 // BenchmarkServeHitSmall measures the fresh-hit path (07 §10, NFR-5) for a
 // 1 KiB body: classify, store Get, freshness, response build.
 func BenchmarkServeHitSmall(b *testing.B) {
-	o := testorigin.New()
+	o := testorigin.NewChecked(b, 64, 16)
 	o.Default(testorigin.Behavior{Header: http.Header{"Cache-Control": {"max-age=3600"}}, Body: []byte(strings.Repeat("x", 1024))})
 	e, err := weir.New(cacheCfg)
 	if err != nil {

@@ -13,6 +13,7 @@ import (
 
 	"github.com/AshwinSathian/weir/internal/coalesce"
 	"github.com/AshwinSathian/weir/internal/keys"
+	"github.com/AshwinSathian/weir/internal/limiter"
 	"github.com/AshwinSathian/weir/store"
 	"github.com/AshwinSathian/weir/store/memory"
 )
@@ -39,6 +40,7 @@ type Engine struct {
 	store    store.Store
 	ownStore bool
 	flights  coalesce.Table
+	lim      *limiter.Limiter
 
 	mu        sync.Mutex  // orders setting closed against wg.Add in goBackground
 	closed    atomic.Bool // written under mu; read without it on the Serve path
@@ -75,6 +77,11 @@ func New(cfg Config) (*Engine, error) {
 	}
 	warnForwarding(c)
 	e := &Engine{cfg: c, kcfg: keysConfig(&c), store: c.Store, ownStore: own, closeDone: make(chan struct{})}
+	l := &c.Limiter
+	e.lim = limiter.New(limiter.Config{
+		Max: l.MaxConcurrent, MaxQueue: l.MaxQueue, PerPartition: l.MaxPerPartition,
+		Reserve: l.ReserveForeground, MaxWait: l.MaxQueueWait,
+	})
 	e.bgCtx, e.bgCancel = context.WithCancel(context.Background())
 	return e, nil
 }

@@ -47,7 +47,7 @@ type served struct {
 // cold key.
 func TestCoalesceColdKey1000(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		o := testorigin.New()
+		o := testorigin.NewChecked(t, 64, 16)
 		b := cacheable("shared")
 		b.Delay = 200 * time.Millisecond
 		o.Default(b)
@@ -82,7 +82,7 @@ func TestCoalesceColdKey1000(t *testing.T) {
 func TestCoalesceCreatorCancel(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		gate := make(chan struct{})
-		o := testorigin.New()
+		o := testorigin.NewChecked(t, 64, 16)
 		b := cacheable("shared")
 		b.Gate = gate
 		o.Default(b)
@@ -122,18 +122,28 @@ func TestCoalesceCreatorCancel(t *testing.T) {
 	})
 }
 
+// wideSlots lifts the limiter's caps above the concurrency of the tests
+// below, which check that requests are not serialized by coalescing.
+const wideSlots = 128
+
+func wideLimiter(cfg weir.Config) weir.Config {
+	cfg.Limiter.MaxConcurrent, cfg.Limiter.MaxPerPartition = wideSlots, wideSlots
+	return cfg
+}
+
 // FR-COA-4, T6.2a: a stuck flight holds no follower past FollowerMaxWait.
 // Followers serve stale when stale-if-error permits, else fetch themselves.
-// ponytail: MaxPerPartition is not asserted until the limiter lands (M4).
+// The limiter is widened so its partition cap does not bind; the cap itself
+// is TestPartitionFairness.
 func TestCoalesceStuckLeader(t *testing.T) {
 	const wait = 2 * time.Second
-	cfg := cacheCfg
+	cfg := wideLimiter(cacheCfg)
 	cfg.Coalesce.FollowerMaxWait = wait
 
 	t.Run("no stale entry: each follower fetches", func(t *testing.T) {
 		synctest.Test(t, func(t *testing.T) {
 			gate := make(chan struct{})
-			o := testorigin.New()
+			o := testorigin.NewChecked(t, wideSlots, wideSlots)
 			o.Default(testorigin.Behavior{Gate: gate, Header: http.Header{"Cache-Control": {"max-age=60"}}})
 			e := newEngine(t, cfg)
 			defer closeEngine(t, e)
@@ -163,7 +173,7 @@ func TestCoalesceStuckLeader(t *testing.T) {
 
 	t.Run("stale-if-error entry: followers serve stale", func(t *testing.T) {
 		synctest.Test(t, func(t *testing.T) {
-			o := testorigin.New()
+			o := testorigin.NewChecked(t, wideSlots, wideSlots)
 			o.Default(testorigin.Behavior{Header: http.Header{"Cache-Control": {"max-age=1, stale-if-error=600"}}, Body: []byte("old")})
 			e := newEngine(t, cfg)
 			defer closeEngine(t, e)
@@ -202,7 +212,7 @@ func TestCoalesceStuckLeader(t *testing.T) {
 func TestCoalesceLeaderAging(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		gate := make(chan struct{})
-		o := testorigin.New()
+		o := testorigin.NewChecked(t, 64, 16)
 		b := cacheable("x")
 		b.Gate = gate
 		o.Default(b)
@@ -253,7 +263,7 @@ func TestCoalescePanic(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
-				o := testorigin.New()
+				o := testorigin.NewChecked(t, 64, 16)
 				o.Default(tt.b)
 				e := newEngine(t, cacheCfg)
 				defer closeEngine(t, e)
@@ -294,7 +304,7 @@ func TestCoalesceSkipsDirectRequests(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
-				o := testorigin.New()
+				o := testorigin.NewChecked(t, 64, 16)
 				e := newEngine(t, cacheCfg)
 				defer closeEngine(t, e)
 				if tt.prime {
@@ -331,7 +341,7 @@ func TestCoalesceSkipsDirectRequests(t *testing.T) {
 // ErrClosed, even when the origin itself reports context.Canceled.
 func TestCoalesceCanceledByClose(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		o := testorigin.New()
+		o := testorigin.NewChecked(t, 64, 16)
 		o.Default(testorigin.Behavior{Gate: make(chan struct{})})
 		e := newEngine(t, cacheCfg)
 		chs := make([]<-chan served, 3)
@@ -353,7 +363,7 @@ func TestCoalesceCanceledByClose(t *testing.T) {
 
 	t.Run("origin's own context.Canceled stays an origin error", func(t *testing.T) {
 		synctest.Test(t, func(t *testing.T) {
-			o := testorigin.New()
+			o := testorigin.NewChecked(t, 64, 16)
 			o.Default(testorigin.Behavior{Err: context.Canceled})
 			e := newEngine(t, cacheCfg)
 			defer closeEngine(t, e)
@@ -375,7 +385,7 @@ func TestCoalescePurgeDuringFlight(t *testing.T) {
 		}
 		defer m.Close()
 		gate := make(chan struct{})
-		o := testorigin.New()
+		o := testorigin.NewChecked(t, 64, 16)
 		old := cacheable("old")
 		old.Gate = gate
 		o.Default(old)
@@ -410,7 +420,7 @@ func TestCoalescePurgeDuringFlight(t *testing.T) {
 func TestCoalesceNoStoreRequestNotLeader(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		gate := make(chan struct{})
-		o := testorigin.New()
+		o := testorigin.NewChecked(t, 64, 16)
 		b := cacheable("x")
 		b.Gate = gate
 		o.Default(b)
@@ -449,9 +459,9 @@ func TestCoalesceNoStoreRequestNotLeader(t *testing.T) {
 // left and fetch concurrently; later requests skip coalescing entirely.
 func TestUncacheableNotSerialized(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		o := testorigin.New()
+		o := testorigin.NewChecked(t, wideSlots, wideSlots)
 		o.Default(testorigin.Behavior{Header: http.Header{"Cache-Control": {"private"}}, Body: []byte("p"), Delay: 100 * time.Millisecond})
-		e := newEngine(t, cacheCfg)
+		e := newEngine(t, wideLimiter(cacheCfg))
 		defer closeEngine(t, e)
 
 		run := func(gate chan struct{}) (collapsed int) {
@@ -501,12 +511,12 @@ func TestUncacheableNotSerialized(t *testing.T) {
 func TestAuthorizedNotCoalesced(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		gate := make(chan struct{})
-		o := testorigin.New()
+		o := testorigin.NewChecked(t, wideSlots, wideSlots)
 		o.Default(testorigin.Behavior{Gate: gate, Func: func(r *weir.Request) (*weir.Response, error) {
 			return &weir.Response{StatusCode: http.StatusOK, Header: http.Header{"Cache-Control": {"max-age=60"}},
 				Body: io.NopCloser(strings.NewReader("for " + r.Header.Get("Authorization")))}, nil
 		}})
-		e := newEngine(t, cacheCfg)
+		e := newEngine(t, wideLimiter(cacheCfg))
 		defer closeEngine(t, e)
 
 		chs := make([]<-chan served, 50)
@@ -532,7 +542,7 @@ func TestAuthorizedNotCoalesced(t *testing.T) {
 // ones, and returns the origin calls the anonymous ones made.
 func markerProbe(t *testing.T, name, value string) int {
 	var calls atomic.Int32
-	o := testorigin.New()
+	o := testorigin.NewChecked(t, 64, 16)
 	o.Default(testorigin.Behavior{Delay: 100 * time.Millisecond, Func: func(*weir.Request) (*weir.Response, error) {
 		if calls.Add(1) == 1 {
 			return &weir.Response{StatusCode: http.StatusUnauthorized, Header: http.Header{}, Body: http.NoBody}, nil
@@ -608,7 +618,7 @@ func TestOversizedStreamedNotBuffered(t *testing.T) {
 		synctest.Test(t, func(t *testing.T) {
 			open := make(chan struct{})
 			close(open)
-			o := testorigin.New()
+			o := testorigin.NewChecked(t, 64, 16)
 			o.Default(big(open, open))
 			e := newEngine(t, cacheCfg) // MaxObjectBytes defaults to 1 MiB
 			defer closeEngine(t, e)
@@ -639,7 +649,7 @@ func TestOversizedStreamedNotBuffered(t *testing.T) {
 	t.Run("followers re-enter and fetch themselves", func(t *testing.T) {
 		synctest.Test(t, func(t *testing.T) {
 			first, rest := make(chan struct{}), make(chan struct{})
-			o := testorigin.New()
+			o := testorigin.NewChecked(t, 64, 16)
 			o.Default(big(first, rest))
 			e := newEngine(t, cacheCfg)
 			defer closeEngine(t, e)
@@ -690,7 +700,7 @@ func TestOversizedStreamedNotBuffered(t *testing.T) {
 // place.
 func TestMarkerNeverReplacesResponse(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		o := testorigin.New()
+		o := testorigin.NewChecked(t, 64, 16)
 		o.Default(testorigin.Behavior{Header: http.Header{"Cache-Control": {"max-age=1, stale-if-error=60"}}, Body: []byte("a")})
 		e := newEngine(t, cacheCfg)
 		defer closeEngine(t, e)
@@ -711,7 +721,7 @@ func TestMarkerNeverReplacesResponse(t *testing.T) {
 func TestCoalesceSharesNoCacheResponse(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		gate := make(chan struct{})
-		o := testorigin.New()
+		o := testorigin.NewChecked(t, 64, 16)
 		o.Default(testorigin.Behavior{Gate: gate, Header: http.Header{"Cache-Control": {"no-cache"}, "Etag": {`"1"`}}, Body: []byte("n")})
 		e := newEngine(t, cacheCfg)
 		defer closeEngine(t, e)

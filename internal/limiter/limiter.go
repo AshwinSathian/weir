@@ -15,7 +15,8 @@ import (
 var (
 	// ErrShed means a background fetch found no slot outside the reserve.
 	ErrShed = errors.New("weir: limiter shed")
-	// ErrQueueFull means the queue already held MaxQueue waiters.
+	// ErrQueueFull means the queue already held MaxQueue waiters, or
+	// PerPartition waiters for the same partition.
 	ErrQueueFull = fmt.Errorf("%w: queue full", ErrShed)
 	// ErrQueueTimeout means a foreground waiter waited MaxWait.
 	ErrQueueTimeout = fmt.Errorf("%w: queue timeout", ErrShed)
@@ -52,6 +53,7 @@ type Limiter struct {
 	inflight int
 	byPart   map[uint64]int // only partitions with inflight > 0; len <= Max
 	queue    []*waiter      // FIFO, len <= MaxQueue
+	queuedBy map[uint64]int // waiters per partition, each <= PerPartition; only partitions with queued > 0; len <= MaxQueue
 }
 
 type waiter struct {
@@ -70,7 +72,7 @@ type Permit struct {
 
 // New returns a limiter with the given bounds.
 func New(cfg Config) *Limiter {
-	return &Limiter{cfg: cfg, byPart: make(map[uint64]int)}
+	return &Limiter{cfg: cfg, byPart: make(map[uint64]int), queuedBy: make(map[uint64]int)}
 }
 
 // limit is the global cap. Every read goes through it so an adaptive policy
@@ -117,12 +119,15 @@ func (l *Limiter) Acquire(ctx context.Context, c Class, part uint64) (*Permit, e
 		l.mu.Unlock()
 		return nil, ErrShed
 	}
-	if len(l.queue) >= l.cfg.MaxQueue {
+	// T-11: a flood on one partition, whose waiters cannot run anyway,
+	// must not fill the queue every other partition shares (FR-LIM-3).
+	if len(l.queue) >= l.cfg.MaxQueue || l.queuedBy[part] >= l.cfg.PerPartition {
 		l.mu.Unlock()
 		return nil, ErrQueueFull
 	}
 	w := &waiter{part: part, class: c, ready: make(chan struct{})}
 	l.queue = append(l.queue, w)
+	l.queuedBy[part]++
 	l.mu.Unlock()
 
 	var expired <-chan time.Time
@@ -148,6 +153,7 @@ func (l *Limiter) Acquire(ctx context.Context, c Class, part uint64) (*Permit, e
 	}
 	if i := slices.Index(l.queue, w); i >= 0 {
 		l.queue = slices.Delete(l.queue, i, i+1)
+		l.unqueue(part)
 	}
 	return nil, err
 }
@@ -175,10 +181,18 @@ func (p *Permit) Release() {
 			l.byPart[w.part]++
 			w.granted = true
 			close(w.ready)
+			l.unqueue(w.part)
 			continue
 		}
 		kept = append(kept, w)
 	}
 	clear(l.queue[len(kept):])
 	l.queue = kept
+}
+
+// unqueue drops one waiter of part from queuedBy. Caller holds l.mu.
+func (l *Limiter) unqueue(part uint64) {
+	if l.queuedBy[part]--; l.queuedBy[part] <= 0 {
+		delete(l.queuedBy, part)
+	}
 }
