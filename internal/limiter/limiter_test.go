@@ -94,7 +94,8 @@ func TestLimiterSkipsFullPartition(t *testing.T) {
 	})
 }
 
-// FR-LIM-3, T-11, T6.8: one partition holds at most PerPartition queued
+// FR-LIM-3, T-11, T6.8: one partition holds at most queueCap (here
+// PerPartition = MaxQueue/4 = 2) queued
 // waiters; more shed with ErrQueueFull at once, so a flood on one path
 // cannot fill the shared queue and shed every other path.
 func TestLimiterPartitionQueueCap(t *testing.T) {
@@ -145,6 +146,28 @@ func TestLimiterPartitionQueueCap(t *testing.T) {
 		ra.p.Release()
 		if in, q, parts := l.state(); in != 0 || q != 0 || parts != 0 || len(l.queuedBy) != 0 {
 			t.Fatalf("state: inflight=%d queued=%d parts=%d queuedBy=%d", in, q, parts, len(l.queuedBy))
+		}
+	})
+}
+
+// FR-LIM-3, T-11: a partition may queue a quarter of MaxQueue when that is
+// more than PerPartition, so a legitimate cold start on one path keeps
+// queueing instead of shedding past PerPartition waiters.
+func TestLimiterPartitionQueueCapQuarter(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		l := newLimiter(1, 16, 1, 0)     // queue cap max(1, 16/4) = 4
+		mustAcquire(t, l, Foreground, 1) // held to the end; waiters time out
+		for range 4 {
+			acquireAsync(t.Context(), l, Foreground, 1)
+		}
+		synctest.Wait()
+		if _, err := l.Acquire(t.Context(), Foreground, 1); !errors.Is(err, ErrQueueFull) {
+			t.Fatalf("fifth waiter: %v, want ErrQueueFull", err)
+		}
+		acquireAsync(t.Context(), l, Foreground, 2) // another partition still queues
+		synctest.Wait()
+		if _, q, _ := l.state(); q != 5 {
+			t.Fatalf("queued = %d, want 5", q)
 		}
 	})
 }
@@ -395,8 +418,8 @@ func TestLimiterInvariants(t *testing.T) {
 					t.Fatalf("seed %d: queuedBy %v, queue holds %v", seed, l.queuedBy, queued)
 				}
 				for part, n := range queued {
-					if n > per {
-						t.Fatalf("seed %d: partition %d has %d queued, cap %d", seed, part, n, per)
+					if n > l.queueCap() {
+						t.Fatalf("seed %d: partition %d has %d queued, cap %d", seed, part, n, l.queueCap())
 					}
 				}
 			}

@@ -18,7 +18,7 @@ none
 
 ## Decided 2026-10-01
 
-- Limiter queue exhaustion (#34 review): Ashwin approved capping queued waiters per partition at `MaxPerPartition`, shedding past it with `queue-full`. FR-LIM-3 and T-11 change in M4-02.
+- Limiter queue exhaustion (#34 review): Ashwin approved capping queued waiters per partition, shedding past it with `queue-full`. The #35 adversarial review measured `MaxPerPartition` (16) as too low for a legitimate one-path cold start (32 of 2 000 served vs 656 uncapped); Ashwin chose max(`MaxPerPartition`, `MaxQueue`/4). FR-LIM-3 and T-11 say so.
 
 ## Decided 2026-09-28 (delegated by Ashwin after the #24 adversarial review)
 
@@ -33,7 +33,8 @@ The cards' Notes give the reasons and the options rejected. All three come befor
 ## Notes for the next session
 
 - M4-02: `fetch` takes a limiter slot of the given class for `c.PartitionH` before the origin timeout starts and releases it on return (after the buffered body, or at stream headers). Shed is `*RetryError{ErrShed, MaxQueueWait}` plus `EvShed`; Background sets `bgDropped` and also emits `EvRefreshDropped` `no-slot`. A follower of a dropped background flight fetches directly, uncoalesced (bounded by the limiter).
-- M4-02: each partition now queues at most `MaxPerPartition` waiters (FR-LIM-3, T-11, approved 2026-10-01). Release walk with 1 023 waiters is about 5 us (one per partition).
+- M4-02: each partition queues at most max(`MaxPerPartition`, `MaxQueue`/4) waiters (FR-LIM-3, T-11). Floods spread over many paths pass any per-path cap; M8's miss-rate throttle is the answer there. Release walk with 1 023 waiters is about 5 us.
+- M4-02: config allows `MaxQueueWait` above `Coalesce.LeaderMaxAge` or `FollowerMaxWait`. Then a queued flight ages out and a new request starts a second flight for the key, or followers give up and fetch directly, defeating coalescing under load. Consider rejecting or clamping it in `New` (ask Ashwin: it is a config rule).
 - M4-02: config allows `ReserveForeground >= MaxConcurrent`, which silently disables background refresh and (M4-05) warm; negatives are rejected. Decide in M4-05 whether `New` should reject it. `EngineStats{Inflight, Queued}` still needs a limiter accessor.
 - M4-02: coalescing tests that need more than 16 concurrent fetches on one path use `wideLimiter` (coalesce_test.go); new engine tests must use `testorigin.NewChecked` with the engine's caps.
 - M4-03: the upload pool is a second limiter with the same algorithm (04 §14); `fetch` picks the pool from `c.HasBody`.

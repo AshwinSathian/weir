@@ -60,6 +60,18 @@ func (t *Table) Join(k store.Key, now time.Time, maxAge time.Duration) (f *Fligh
 	return f, true
 }
 
+// Len returns the number of joinable flights in the table.
+func (t *Table) Len() int {
+	n := 0
+	for i := range t.shards {
+		sh := &t.shards[i]
+		sh.mu.Lock()
+		n += len(sh.m)
+		sh.mu.Unlock()
+	}
+	return n
+}
+
 // Done is closed when the flight publishes its result.
 func (f *Flight) Done() <-chan struct{} { return f.done }
 

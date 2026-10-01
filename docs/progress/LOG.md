@@ -535,3 +535,11 @@ Entry template:
 - Deviations: 01 FR-LIM-3, 06 T-11, 04 §8.2 and §6.7, 07 T6.3 updated for the per-partition queue cap and test wording. Full-queue benchmark reworked (one waiter per partition), ~5 us per release.
 - Follow-ups: `ReserveForeground >= MaxConcurrent` is accepted by config (STATUS note).
 - Context: medium; size M was right. card-reviewer: 0 must-fix, 2 should-fix fixed (ctx check after grant, bgDropped follower test), 4 nits fixed or noted.
+
+## 2026-10-01 · M4-02 · review-fixes
+- Branch / PR: card/M4-02-limiter-fetch / #35
+- Done: adversarial review of #35. The per-partition queue cap of `MaxPerPartition` shed most of a legitimate cold start on one path (2 000 cold `/product?id=N`: 32 served vs 656 uncapped); Ashwin chose max(`MaxPerPartition`, `MaxQueue`/4). Added the flight-table bound test that STATUS asked M4-02 for (`coalesce.Table.Len`, test export `Flights`).
+- Tests: TestLimiterPartitionQueueCapQuarter, TestFlightTableBoundedUnderFlood; TestPartitionFairness now expects 41. The PerPartition-only mutant fails a test. 10 shuffled race runs of the limiter and coalescing tests clean. `make check` passes.
+- Deviations: FR-LIM-3, T-11, 04 §8.2 and 07 T6.3 updated to the quarter cap (approved).
+- Follow-ups: `MaxQueueWait` above `LeaderMaxAge`/`FollowerMaxWait` defeats coalescing under load (STATUS note).
+- Context: low.

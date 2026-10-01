@@ -16,7 +16,7 @@ var (
 	// ErrShed means a background fetch found no slot outside the reserve.
 	ErrShed = errors.New("weir: limiter shed")
 	// ErrQueueFull means the queue already held MaxQueue waiters, or
-	// PerPartition waiters for the same partition.
+	// queueCap waiters for the same partition.
 	ErrQueueFull = fmt.Errorf("%w: queue full", ErrShed)
 	// ErrQueueTimeout means a foreground waiter waited MaxWait.
 	ErrQueueTimeout = fmt.Errorf("%w: queue timeout", ErrShed)
@@ -53,7 +53,7 @@ type Limiter struct {
 	inflight int
 	byPart   map[uint64]int // only partitions with inflight > 0; len <= Max
 	queue    []*waiter      // FIFO, len <= MaxQueue
-	queuedBy map[uint64]int // waiters per partition, each <= PerPartition; only partitions with queued > 0; len <= MaxQueue
+	queuedBy map[uint64]int // waiters per partition, each <= queueCap(); only partitions with queued > 0; len <= MaxQueue
 }
 
 type waiter struct {
@@ -85,6 +85,13 @@ func (l *Limiter) limit() int { return l.cfg.Max }
 // expiring) must run Release's grant walk when a cap rises, or queued
 // waiters stay parked while the fast path in Acquire admits newcomers.
 func (l *Limiter) capFor(uint64) int { return l.cfg.PerPartition }
+
+// queueCap is how many waiters one partition may queue (FR-LIM-3, T-11):
+// a quarter of the queue, so one flooded path leaves three quarters to the
+// rest, but never fewer than the partition's slots. A cap as low as
+// PerPartition sheds most of a legitimate cold start on one path with many
+// query strings.
+func (l *Limiter) queueCap() int { return max(l.cfg.PerPartition, l.cfg.MaxQueue/4) }
 
 // canRun reports whether a fetch of class c for part may take a slot now.
 // Caller holds l.mu.
@@ -121,7 +128,7 @@ func (l *Limiter) Acquire(ctx context.Context, c Class, part uint64) (*Permit, e
 	}
 	// T-11: a flood on one partition, whose waiters cannot run anyway,
 	// must not fill the queue every other partition shares (FR-LIM-3).
-	if len(l.queue) >= l.cfg.MaxQueue || l.queuedBy[part] >= l.cfg.PerPartition {
+	if len(l.queue) >= l.cfg.MaxQueue || l.queuedBy[part] >= l.queueCap() {
 		l.mu.Unlock()
 		return nil, ErrQueueFull
 	}

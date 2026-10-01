@@ -1,6 +1,7 @@
 package weir_test
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -145,8 +146,9 @@ func TestLimiterShedsWithStale(t *testing.T) {
 }
 
 // FR-LIM-3, T-11, T6.3, T6.8: a flood of unique query strings on /search
-// stays within MaxPerPartition in flight and queues at most MaxPerPartition
-// more, so it can fill neither the slots nor the queue. 50 requests to other
+// stays within MaxPerPartition in flight and queues at most
+// max(MaxPerPartition, MaxQueue/4) more, so it can fill neither the slots
+// nor the queue. 50 requests to other
 // paths, arriving after the flood, complete without shedding.
 func TestPartitionFairness(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
@@ -187,8 +189,8 @@ func TestPartitionFairness(t *testing.T) {
 				t.Fatalf("/search %d: %v, want success or a shed", i, r.err)
 			}
 		}
-		if ok != 32 {
-			t.Fatalf("/search served %d, want 32 (16 in flight, 16 queued)", ok)
+		if ok != 41 {
+			t.Fatalf("/search served %d, want 41 (16 in flight, 25 queued)", ok)
 		}
 		if n := o.MaxInflightPartition(); n > 16 {
 			t.Fatalf("/search max in-flight = %d, want <= 16", n)
@@ -365,6 +367,48 @@ func TestBackgroundDroppedFollowerFetches(t *testing.T) {
 			if r := <-ch; r.err != nil {
 				t.Fatalf("busy request: %v", r.err)
 			}
+		}
+	})
+}
+
+// P5, FR-LIM-6, FR-COA-2, T6.4: under a cold-start flood of distinct keys
+// whose clients all leave, the flight table holds at most MaxConcurrent +
+// MaxQueue flights: a flight the limiter sheds publishes at once, and
+// leaving clients do not end the flights they started.
+func TestFlightTableBoundedUnderFlood(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		const slots, queue = 64, 100
+		o := testorigin.NewChecked(t, slots, 16)
+		gate := make(chan struct{})
+		b := cacheable("v")
+		b.Gate = gate
+		o.Default(b)
+		cfg := cacheCfg
+		cfg.Limiter = weir.LimiterConfig{MaxConcurrent: slots, MaxQueue: queue}
+		e := newEngine(t, cfg)
+		defer closeEngine(t, e)
+
+		ctx, cancel := context.WithCancel(t.Context())
+		chs := make([]<-chan served, 5000)
+		for i := range chs {
+			chs[i] = serveAsync(ctx, e, getReq(fmt.Sprintf("/k%d", i)), o)
+		}
+		synctest.Wait()
+		if n := weir.Flights(e); n != slots+queue {
+			t.Fatalf("flights = %d, want %d (in flight plus queued)", n, slots+queue)
+		}
+		cancel()
+		for _, ch := range chs {
+			<-ch
+		}
+		synctest.Wait()
+		if n := weir.Flights(e); n > slots+queue {
+			t.Fatalf("flights after clients left = %d, want <= %d", n, slots+queue)
+		}
+		close(gate)
+		synctest.Wait()
+		if n := weir.Flights(e); n != 0 {
+			t.Fatalf("flights after the origin answered = %d, want 0", n)
 		}
 	})
 }
