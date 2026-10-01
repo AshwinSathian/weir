@@ -529,7 +529,7 @@ Entry template:
 - Context: low.
 
 ## 2026-10-01 · M4-02 · done
-- Branch / PR: card/M4-02-limiter-fetch / (see STATUS)
+- Branch / PR: card/M4-02-limiter-fetch / #35
 - Done: limiter wired into `fetch` (fetch.go, engine.go): slot from before the request until the buffered body or stream headers; shed maps to `*RetryError{ErrShed}` with `EvShed`; background refresh takes its slot inside the flight and drops with `bgDropped`/`EvRefreshDropped`; followers of a dropped background flight refetch as foreground. Limiter caps queued waiters per partition at `PerPartition` (approved change to FR-LIM-3, T-11). All engine tests use `testorigin.NewChecked`.
 - Tests: TestLimiterCap5000Keys, TestLimiterShedsWithStale (shed half), TestPartitionFairness, TestSlowReaderDoesNotPinSlots, TestColdStartBounded, TestBackgroundRefreshDroppedWithoutSlot, TestBackgroundDroppedFollowerFetches, TestLimiterPartitionQueueCap; invariant check extended to `queuedBy`. Mutants (no partition queue cap, background as foreground, no bgDropped re-entry) each fail a test. `make check` passes.
 - Deviations: 01 FR-LIM-3, 06 T-11, 04 §8.2 and §6.7, 07 T6.3 updated for the per-partition queue cap and test wording. Full-queue benchmark reworked (one waiter per partition), ~5 us per release.
