@@ -5,7 +5,7 @@ Phase: 1
 Current card: none
 Card state: awaiting-merge
 Branch: card/M3-01-jitter-early-refresh
-PR: none
+PR: #33 https://github.com/AshwinSathian/weir/pull/33
 Next card: M4-01
 
 ## Blockers

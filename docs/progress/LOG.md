@@ -497,7 +497,7 @@ Entry template:
 - Context: low; size M was generous, since M2-02 had built most of it. card-reviewer: 2 must-fix (test gaps) fixed, 3 should-fix fixed or moved to cards, 2 nits handled.
 
 ## 2026-10-01 · M3-01 · done
-- Branch / PR: card/M3-01-jitter-early-refresh / #(see STATUS)
+- Branch / PR: card/M3-01-jitter-early-refresh / #33
 - Done: background.go: `maybeEarlyRefresh` on every fresh hit (FR-FRS-6 XFetch with Δ clamped to [1 ms, 10 s]), `backgroundRefresh` on a flight no request waits on (04 §6.8), stub `tryAcquireBackground`. Jitter (FR-FRS-5) was already wired in `buildEntry`; this card adds its engine test.
 - Tests: TestEarlyRefreshProbability, TestEarlyRefreshDeltaClamp, TestBatchWriteExpirySpread, TestEarlyRefreshSingleFlight, TestEarlyRefreshGates; each checked by a mutant; `make check` passes.
 - Deviations: 04 §6.8 now states the gates (NoEarlyRefresh, JitterMinLifetime, Authorization, request no-store). The stub acquire runs before Join, unlike 04 §6.8; M4-02 moves it (STATUS note).
