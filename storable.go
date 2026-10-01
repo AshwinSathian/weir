@@ -21,6 +21,7 @@ type storeDecision struct {
 	cc             httpcc.ResponseDirectives
 	lifetime       time.Duration
 	heuristic      bool
+	varyNames      []string // keys.VaryNames of the response's Vary (FR-KEY-7)
 }
 
 // storability applies FR-STO-1 to FR-STO-9 to a fully read response received
@@ -36,6 +37,8 @@ func storability(cfg *Config, c *keys.Classified, resp *Response, body []byte, r
 		return d
 	}
 	h := resp.Header
+	var star bool
+	d.varyNames, star = keys.VaryNames(h["Vary"])
 	statusOK := slices.Contains(cfg.Storable.Statuses, resp.StatusCode)
 	switch {
 	case c.Forwarded.Method != http.MethodGet:
@@ -53,10 +56,14 @@ func storability(cfg *Config, c *keys.Classified, resp *Response, body []byte, r
 		return fail("authorization", false)
 	case len(h["Set-Cookie"]) > 0 && !cfg.Storable.StripSetCookie:
 		return fail("set-cookie", true) // T-8
-	case len(h["Vary"]) > 0:
-		// ponytail: every Vary response is refused until variant keying
-		// lands (M7-01), so nothing is keyed on inputs it ignores.
-		return fail("vary-unsupported", true)
+	case star: // FR-KEY-8
+		return fail("vary-star", true)
+	case len(d.varyNames) > cfg.Key.MaxVaryHeaders: // FR-KEY-10
+		return fail("vary-too-many", true)
+	case varyRefused(cfg, d.varyNames, false):
+		return fail("vary-sensitive", true)
+	case cfg.Key.Vary == VaryStrict && varyRefused(cfg, d.varyNames, true):
+		return fail("vary-strict", true)
 	case !hasFreshness(d, h, resp.StatusCode):
 		return fail("no-freshness", true) // T-6: never inferred from the path
 	case int64(len(body))+headerBytes(h) > cfg.Storable.MaxObjectBytes:
@@ -64,6 +71,19 @@ func storability(cfg *Config, c *keys.Classified, resp *Response, body []byte, r
 	}
 	d.ok = true
 	return d
+}
+
+// varyRefused reports a Vary name that Key.VaryAllow does not list and that
+// the policy refuses: a sensitive name in any mode, any name under
+// VaryStrict (FR-KEY-9, T-15).
+func varyRefused(cfg *Config, names []string, strict bool) bool {
+	for _, n := range names {
+		sensitive := n == "Cookie" || n == "Authorization" || n == "Proxy-Authorization"
+		if (strict || sensitive) && !slices.Contains(cfg.Key.VaryAllow, n) {
+			return true
+		}
+	}
+	return false
 }
 
 // validSMaxAge reports an s-maxage that can grant the RFC 9111 §3.5

@@ -47,7 +47,8 @@ type KeyInput struct {
 
 // bufPool holds encoding buffers, retained at their largest size. That
 // size is bounded by the request limits (MaxPathBytes, MaxQueryBytes,
-// MaxKeyedHeaderBytes) that every input passed before reaching the encoder.
+// MaxKeyedHeaderBytes) that every PrimaryKey input passed, and by
+// maxPooledBuf for VariantKey, whose Vary values those limits do not cover.
 var bufPool = sync.Pool{New: func() any {
 	b := make([]byte, 0, 512)
 	return &b

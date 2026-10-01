@@ -128,7 +128,8 @@ func (e *Engine) warmOne(ctx context.Context, req *Request, origin Origin, st *W
 		return
 	}
 	// Two attempts: a flight joined below may be dropped by its own caller
-	// leaving (bgDropped), and then this request is still cold.
+	// leaving (bgDropped), or store another variant (FR-KEY-7), and then
+	// this request is still cold.
 	for range 2 {
 		// Acquire before joining: a warm fetch queued for a slot must not
 		// hold a flight that foreground requests join and then wait on
@@ -153,9 +154,9 @@ func (e *Engine) warmOne(ctx context.Context, req *Request, origin Origin, st *W
 		f := coalesce.NewFlight() // the requests cacheable never lets lead a flight
 		if !c.Authorized && !c.ReqCC.NoStore && !sp.lk.marker {
 			var created bool
-			if f, created = e.flights.Join(c.Primary, time.Now(), e.cfg.Coalesce.LeaderMaxAge); !created {
+			if f, created = e.flights.Join(sp.lk.ck, time.Now(), e.cfg.Coalesce.LeaderMaxAge); !created {
 				permit.Release()
-				if e.warmFollow(ctx, f, st) {
+				if e.warmFollow(ctx, f, &c, st) {
 					continue
 				}
 				return
@@ -164,7 +165,7 @@ func (e *Engine) warmOne(ctx context.Context, req *Request, origin Origin, st *W
 		e.warmLead(ctx, f, sp, origin, st)
 		return
 	}
-	st.Failed++ // two joined flights dropped in a row
+	st.Failed++ // two joined flights in a row left this request cold
 }
 
 // warmSpec looks c up and returns the fetch to run, or nil when the entry is
@@ -214,16 +215,16 @@ func (e *Engine) warmLead(ctx context.Context, f *coalesce.Flight, sp *fetchSpec
 
 // warmFollow waits for a flight another request leads and counts its
 // outcome: a stored response is Skipped, since Warm sent nothing. It
-// reports true, counting nothing, when the flight was dropped and the
-// request should be tried again.
-func (e *Engine) warmFollow(ctx context.Context, f *coalesce.Flight, st *WarmStats) (retry bool) {
+// reports true, counting nothing, when the flight was dropped or stored
+// another variant (FR-KEY-7), and the request should be tried again.
+func (e *Engine) warmFollow(ctx context.Context, f *coalesce.Flight, c *keys.Classified, st *WarmStats) (retry bool) {
 	select {
 	case <-f.Done():
 	case <-ctx.Done():
 		return false
 	}
 	switch fr := f.Result().(*flightResult); {
-	case fr.bgDropped:
+	case fr.bgDropped, fr.entry != nil && keys.VariantKey(c.Primary, fr.entry.VaryNames, c.Forwarded.Header) != fr.vk:
 		return ctx.Err() == nil
 	case fr.err != nil:
 		st.Failed++

@@ -162,11 +162,17 @@ var rfcRows = []rfcRow{
 	}},
 
 	// §4.1 Vary and normalization: FR-KEY-7..11, §5.2.3; variant keying in M7.
-	{sec: "9111 §4.1", name: "Vary selects the stored variant", tag: "M7", steps: []rfcStep{
-		{origin: bh(200, "en", "Cache-Control", "max-age=60", "Vary", "Accept-Language"), hdr: []string{"Accept-Language", "en"}, calls: 1},
-		{hdr: []string{"Accept-Language", "en"}, calls: 1},
-		{hdr: []string{"Accept-Language", "fr"}, calls: 2},
-	}},
+	{sec: "9111 §4.1", name: "Vary selects the stored variant",
+		cfg: func(c *weir.Config) { c.Forward.Allow = []string{"Accept-Language"} }, steps: []rfcStep{
+			{origin: bh(200, "en", "Cache-Control", "max-age=60", "Vary", "Accept-Language"), hdr: []string{"Accept-Language", "en"}, calls: 1},
+			{hdr: []string{"Accept-Language", "en"}, calls: 1, cacheStatus: "Weir; hit; ttl=60"},
+			{hdr: []string{"Accept-Language", "fr"}, calls: 2, cacheStatus: "Weir; fwd=vary-miss; fwd-status=200; stored"},
+		}},
+	{sec: "9111 §4.1", name: "a field the cache does not forward matches as absent",
+		steps: []rfcStep{
+			{origin: bh(200, "en", "Cache-Control", "max-age=60", "Vary", "Accept-Language"), hdr: []string{"Accept-Language", "en"}, calls: 1},
+			{hdr: []string{"Accept-Language", "fr"}, calls: 1},
+		}},
 	{sec: "9111 §4.1", name: "Vary: * never matches", steps: []rfcStep{
 		{origin: bh(200, "a", "Cache-Control", "max-age=60", "Vary", "*"), calls: 1, cacheStatus: "Weir; fwd=uri-miss; fwd-status=200"},
 		{calls: 2},

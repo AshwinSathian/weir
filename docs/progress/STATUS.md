@@ -1,12 +1,12 @@
 # Status
 
-Updated: 2026-10-01
+Updated: 2026-10-02
 Phase: 1
 Current card: none
 Card state: awaiting-merge
-Branch: card/M6-01-negative-caching
-PR: #43 https://github.com/AshwinSathian/weir/pull/43
-Next card: M7-01
+Branch: card/M7-01-vary-variants
+PR: none
+Next card: M7-02
 
 ## Blockers
 
@@ -14,6 +14,7 @@ none
 
 ## Waiting on Ashwin
 
+- M7-01 review: FR-KEY-11 normalizes Vary values in the variant key only; the forwarded request keeps the client's raw lines (hard rule 4 says normalization rewrites the request). Example: `X-Custom: a` plus `X-Custom: b` keys as `a,b`, but an origin using `Header.Get` sees `a`. Affects only `Forward.Allow` fields (already unkeyed input, T-31). Options: forward Allow fields that a Vary names in normalized one-line form, or record the gap under 06 T-31.
 - M6-01: FR-NEG-4 was widened without prior sign-off. Negative entries are now also never created for requests with a `no-store` directive, after a forwarded `Forward.Allow` field or under `ForwardAll` (T-17, T-31, same rule as markers), or by background refresh and warm fetches. It only narrows when entries are written. Approve, or say which exclusion to drop.
 - M6-01: FR-NEG-3 says `Cache-Status: Weir; hit; detail=negative`; 04 §6.6 and the code add `ttl=<remaining>`. Proposed: FR-NEG-3 names `ttl` too.
 - #42 adversarial review: FR-MODE-3 ("every request is handled as pass-through") conflicts with FR-SRV-6 ("only-if-cached is always honored") for an `only-if-cached` request in bypass. The fix follows FR-SRV-6: `ErrOnlyIfCached`, origin not contacted (04 §14). Proposed fix: FR-MODE-3 adds "except `only-if-cached`, which gets `ErrOnlyIfCached`". FR-BYP-1 (M7-03) has the same question.
@@ -41,6 +42,11 @@ Already built, now confirmed: the weirhttp default transport (compression off, n
 The cards' Notes give the reasons and the options rejected. All three come before M1-18, because closing M1 makes the repo public.
 
 ## Notes for the next session
+
+- M7-01: `lookup` sets `lk.ck` (variant key under a spec, else Primary); flights, early refresh, warm, markers and negative entries all key on it. `storeResponse` writes the variant, then the spec (`setVariant`, serve.go); `setUnlessResponse` also keeps a live spec. Followers share only when `keys.VariantKey(...) == fr.vk`, else `reenter` (one more pass, then `fetchDirect`).
+- M7-02 scope left: `vary-sensitive` and `vary-strict` landed in M7-01 at storability level (`TestVaryPolicyStorability`, reviewer should-fix: strict mode must not be bypassable on main). M7-02 still adds the engine tests (strict part of TestVaryUnconfiguredHeader, TestVarySensitiveNotStored), `TestVaryOverflow`, and reclaim of refs whose record is gone (`ponytail:` in `setVariant`; expired refs are already dropped and the `MaxVariants` cap is enforced). `vary-overflow` in Cache-Status is not done.
+- M7-01: a request forwarding a `Forward.Allow` field stays `Unkeyed` even when the response's Vary keys that field, so it gets no marker or negative entry. M7-03 may refine `Unkeyed` against the spec's names. The Accept-Encoding bucket is still keyed only through Vary (04 §3.3); the marker note below holds for the first response of a URI, before a spec exists.
+- M7-01 review nits open: `VaryNames` allocates for every name before the `vary-too-many` check (origin-controlled, bounded by response header limits); the LLD's `lk.spec`/`fetchSpec.spec` are not in the code (`setVariant` rereads the primary key).
 
 - M6-01: negative writes happen in `setNegative` (negative.go), called by `fetchStored` before the flight publishes; `lookup` returns a live negative record as `lk.neg` and `cacheable` serves it before the only-if-cached and Range checks. Markers and negative entries share `setUnlessResponse` (serve.go), which replaces only a hard-purged or expired response.
 - M6-01: tests whose next request must reach the origin after a 502/503/504 or transport failure set `Negative.Disable` (coalesce, stale, serve, weirhttp handler-origin tests). New engine tests with failing origins need the same.

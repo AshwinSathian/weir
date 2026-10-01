@@ -205,7 +205,8 @@ func TestStorabilityReasons(t *testing.T) {
 		{name: "response no-store", kv: []string{"Cache-Control", "no-store, max-age=60"}, reason: "no-store", responseDriven: true},
 		{name: "must-understand overrides response no-store", kv: []string{"Cache-Control", "no-store, must-understand, max-age=60"}},
 		{name: "qualified private counts", kv: []string{"Cache-Control", `private="x", max-age=60`}, reason: "private", responseDriven: true},
-		{name: "Vary is unsupported until M7", kv: []string{"Cache-Control", "max-age=60", "Vary", "Accept-Language"}, reason: "vary-unsupported", responseDriven: true},
+		{name: "Vary is stored as a variant", kv: []string{"Cache-Control", "max-age=60", "Vary", "Accept-Language"}},
+		{name: "Vary: * is refused", kv: []string{"Cache-Control", "max-age=60", "Vary", "accept, *"}, reason: "vary-star", responseDriven: true},
 		{name: "public alone is stored", kv: []string{"Cache-Control", "public"}},
 		{name: "ETag with no-cache is stored", kv: []string{"Cache-Control", "no-cache", "ETag", etag}},
 		{name: "ETag with max-age=0 is stored", kv: []string{"Cache-Control", "max-age=0", "ETag", etag}},
@@ -448,5 +449,39 @@ func TestNormalizeResponseLeavesOriginHeaderAlone(t *testing.T) {
 		if !slices.Equal(v[:cap(v)], snapshot[k]) || len(shared) != 3 {
 			t.Fatalf("origin header changed: %s = %q", k, v[:cap(v)])
 		}
+	}
+}
+
+func TestVaryPolicyStorability(t *testing.T) {
+	// FR-KEY-9, T-15: sensitive names refuse storage unless allowed;
+	// VaryStrict refuses any name not in VaryAllow.
+	for _, tc := range []struct {
+		name   string
+		mode   VaryMode
+		allow  []string
+		vary   string
+		reason string // "" means stored
+	}{
+		{name: "auto folds an unconfigured name", vary: "X-Custom"},
+		{name: "auto refuses Cookie", vary: "accept, cookie", reason: "vary-sensitive"},
+		{name: "auto refuses Authorization", vary: "Authorization", reason: "vary-sensitive"},
+		{name: "auto refuses Proxy-Authorization", vary: "proxy-authorization", reason: "vary-sensitive"},
+		{name: "VaryAllow admits Cookie", allow: []string{"Cookie"}, vary: "Cookie"},
+		{name: "strict refuses an unlisted name", mode: VaryStrict, allow: []string{"Accept-Language"}, vary: "Accept-Language, X-Custom", reason: "vary-strict"},
+		{name: "strict stores listed names", mode: VaryStrict, allow: []string{"Accept-Language"}, vary: "accept-language"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := storableConfig(t, func(c *Config) { c.Key.Vary, c.Key.VaryAllow = tc.mode, tc.allow })
+			d := storability(cfg, classifiedGET("/", false), originResp(200, "Cache-Control", "max-age=60", "Vary", tc.vary), nil, testRespTime)
+			if tc.reason == "" {
+				if !d.ok {
+					t.Fatalf("not stored: %+v", d)
+				}
+				return
+			}
+			if d.ok || d.reason != tc.reason || !d.responseDriven {
+				t.Fatalf("got %+v, want reason %q, response-driven", d, tc.reason)
+			}
+		})
 	}
 }

@@ -27,6 +27,9 @@ type fetchSpec struct {
 	purged *store.Entry    // an unusable response a marker may replace
 	class  limiter.Class   // Background never queues, Warm waits on ctx only; neither takes the reserve (FR-LIM-4, FR-WRM-1)
 	permit *limiter.Permit // a slot already held (Warm); fetch releases it
+	// reentered marks a follower's second pass (FR-COA-5); a flight that
+	// again cannot serve it sends it to fetchDirect.
+	reentered bool
 }
 
 // flightResult is what a fetch-and-store produced, and what a flight
@@ -35,6 +38,7 @@ type flightResult struct {
 	fetchResult              // the creator's response; only the creator touches resp
 	ci          CacheInfo    // for the creator's response
 	entry       *store.Entry // the storable entry followers share; nil when not shareable
+	vk          store.Key    // the variant key entry answers (Primary without Vary)
 	errHeader   http.Header  // a buffered 5xx's header, which followers copy (04 §6.6)
 }
 
@@ -47,7 +51,7 @@ func (r *flightResult) live() bool { return r.err == nil && (r.over || r.stream)
 // FollowerMaxWait, bounded by its own ctx (FR-COA-4).
 func (e *Engine) fetchCoalesced(ctx context.Context, sp *fetchSpec, origin Origin) (*Response, error) {
 	c := sp.c
-	f, created := e.flights.Join(c.Primary, time.Now(), e.cfg.Coalesce.LeaderMaxAge)
+	f, created := e.flights.Join(sp.lk.ck, time.Now(), e.cfg.Coalesce.LeaderMaxAge)
 	if created {
 		if !e.goBackground(func(bg context.Context) { e.runFlight(bg, ctx, f, sp, origin) }) {
 			f.Publish(&flightResult{fetchResult: fetchResult{err: ErrClosed}})
@@ -91,8 +95,7 @@ func (e *Engine) fetchCoalesced(ctx context.Context, sp *fetchSpec, origin Origi
 	// 04 §6.8: a rule for background work never sheds a request. Each
 	// follower fetches directly, uncoalesced; the limiter bounds them.
 	if fr.bgDropped {
-		ck := c.Primary
-		return e.cacheable(ctx, c, origin, &ck)
+		return e.reenter(ctx, sp, origin)
 	}
 	owner := created && (!fr.live() || f.ClaimStream())
 	// FR-COA-6: every waiter gets the flight's error or buffered 5xx,
@@ -107,21 +110,27 @@ func (e *Engine) fetchCoalesced(ctx context.Context, sp *fetchSpec, origin Origi
 	if owner {
 		return e.respond(c, fr), nil
 	}
-	if fr.entry != nil {
+	// FR-KEY-7: a follower shares the entry only when its own forwarded
+	// request selects the same variant.
+	if fr.entry != nil && keys.VariantKey(c.Primary, fr.entry.VaryNames, c.Forwarded.Header) == fr.vk {
 		return e.fromEntry(c, fr.entry, time.Now(),
 			CacheInfo{Fwd: sp.lk.fwd, FwdStatus: fr.ci.FwdStatus, Stored: fr.ci.Stored, Collapsed: true}), nil
 	}
-	// FR-COA-5: not storable, over-size, an event stream, or purged during
-	// the flight. Re-enter lookup once: the flight may have left a marker
-	// or, under Vary, moved this request to another key. Until M7-01 the
-	// key never changes, so this equals fetchDirect and no test can tell
-	// them apart (TestVaryFollowersRecoalesce, M7-01).
-	// ponytail: M7-01 must compare the lookup's coalescing key, not
-	// c.Primary, cap re-entry at one attempt (a second unshareable flight
-	// under a new key would re-enter again), and add keys.VaryMatches above
-	// or a follower gets another variant (storability refuses Vary today).
-	ck := c.Primary
-	return e.cacheable(ctx, c, origin, &ck)
+	return e.reenter(ctx, sp, origin)
+}
+
+// reenter answers a follower the flight could not serve: not storable,
+// over-size, an event stream, purged during the flight, another variant, or
+// a dropped background flight (FR-COA-5, 04 §6.8). It looks up once more:
+// the flight may have left a marker, or a vary spec that moves the request
+// to its own variant key, where it coalesces again. A second pass fetches
+// directly, so followers never chain flights.
+func (e *Engine) reenter(ctx context.Context, sp *fetchSpec, origin Origin) (*Response, error) {
+	if sp.reentered {
+		return e.fetchDirect(ctx, sp, origin)
+	}
+	ck := sp.lk.ck
+	return e.cacheable(ctx, sp.c, origin, &ck)
 }
 
 // published reports whether f's result is ready without waiting.
