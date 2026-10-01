@@ -621,3 +621,11 @@ Entry template:
 - Deviations: 04 §8.3 states the half-open bound, the monotonic buckets, the per-outcome check and when rnd is drawn.
 - Follow-ups: the wall-clock fix has no test (no injected clock, D9); it is structural. M5-03 items in STATUS stand.
 - Context: low.
+
+## 2026-10-01 · M5-02 · done
+- Branch / PR: card/M5-02-swr / #<n>
+- Done: serve.go serves a `StaleSWR` entry at once (`detail=stale-while-revalidate`) and starts one background refresh through the existing `backgroundRefresh` (creator gone, Background class, dropped without a slot). SWR answers only-if-cached and Range requests; `Authorization`/`no-store` requests serve stale without a refresh; honored `no-cache` validates in the foreground.
+- Tests: TestSWRServesAndRefreshesOnce, TestSWRGates (5 rows), TestRefreshNeverExceedsReserve; TestBackgroundDroppedFollowerFetches renamed TestForegroundJoinsDroppedBackgroundFlight; RFC 5861 §3 row untagged with Cache-Status check. `make check` passes.
+- Deviations: 04 §6.8 states the Authorization/no-store refresh gate for SWR.
+- Follow-ups: `Timeouts.Background` unwired and the FR-STL-1 gate wording, both under Waiting on Ashwin. Reviewer should-fixes (Cache-Status, Range/only-if-cached rows, STATUS record) fixed.
+- Context: low; size M was generous (most plumbing existed from M3-01/M4-02).

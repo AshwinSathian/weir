@@ -865,7 +865,7 @@ func (e *Engine) backgroundRefresh(c, lk, origin):
 
 The limiter's `Background` class never queues: `Acquire(ctx, Background, part)` returns `ErrShed` at once when no slot is free outside the reserve. If it fails, `fetch` returns `ErrShed` with `bgDropped` set, the flight publishes that result, and nothing else happens (`EvRefreshDropped`). Foreground requests that joined this flight in the meantime see `bgDropped` and re-enter lookup as a direct foreground fetch (they may queue), rather than being shed by a rule meant only for background work.
 
-`maybeEarlyRefresh` draws `u := 1 - e.rnd()` (so `u` is in (0, 1]) and calls `backgroundRefresh` when `-float64(Δ) * beta * math.Log(u) >= float64(remaining)`. It returns first when `NoEarlyRefresh` is set, when the entry's (jittered) lifetime is below `JitterMinLifetime`, and for the requests that never lead a flight in `cacheable`: one carrying `Authorization` or `no-store`. Their forwarded request would put one client's credentials, or a request that refused storage, behind a refresh of a shared entry (T-8, T-31).
+`maybeEarlyRefresh` draws `u := 1 - e.rnd()` (so `u` is in (0, 1]) and calls `backgroundRefresh` when `-float64(Δ) * beta * math.Log(u) >= float64(remaining)`. It returns first when `NoEarlyRefresh` is set, when the entry's (jittered) lifetime is below `JitterMinLifetime`, and for the requests that never lead a flight in `cacheable`: one carrying `Authorization` or `no-store`. Their forwarded request would put one client's credentials, or a request that refused storage, behind a refresh of a shared entry (T-8, T-31). A `StaleSWR` hit from such a request is served the same way but starts no refresh either; the next request in the window does.
 
 ### 6.8a Warm
 

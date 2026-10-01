@@ -325,8 +325,8 @@ func (o *holdObserver) Observe(ev weir.Event) {
 
 // FR-LIM-4, FR-COA-1, 04 §6.8: a request that joined a background flight
 // which found no slot fetches as a foreground request instead of getting a
-// shed meant only for background work.
-func TestBackgroundDroppedFollowerFetches(t *testing.T) {
+// shed meant only for background work (04 §6.8, bgDropped).
+func TestForegroundJoinsDroppedBackgroundFlight(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		o := testorigin.NewChecked(t, 4, 4)
 		o.Default(cacheable("v"))

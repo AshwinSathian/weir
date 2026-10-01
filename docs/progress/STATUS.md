@@ -4,9 +4,9 @@ Updated: 2026-10-01
 Phase: 1
 Current card: none
 Card state: awaiting-merge
-Branch: card/M5-01-breaker
-PR: #39 https://github.com/AshwinSathian/weir/pull/39
-Next card: M5-02
+Branch: card/M5-02-swr
+PR: none
+Next card: M5-03
 
 ## Blockers
 
@@ -14,6 +14,8 @@ none
 
 ## Waiting on Ashwin
 
+- `Timeouts.Background` (public field, default 30s) is never read: every fetch uses `Timeouts.Origin`. The spec does not say which classes it bounds. Should it replace `Timeouts.Origin` for `limiter.Background` only, or for Warm too? M5-02 left it unwired.
+- FR-STL-1 says an SWR hit starts a refresh; M5-02 skips it for `Authorization` and `no-store` requests (same gate as early refresh, T-8, T-31, now in 04 §6.8). Should 01 FR-STL-1 and FR-FRS-6 say so?
 - M1-18 closes M1, which triggers PLAN P0.0: add `SECURITY.md`, flip the repo to public, enable private vulnerability reporting (D40), tag `v0.1.0` (D24). The card says to ask before flipping visibility. After merging #29, say whether to do P0.0 now (and in which session) or hold it.
 
 ## Decided 2026-10-01
@@ -32,6 +34,10 @@ The cards' Notes give the reasons and the options rejected. All three come befor
 
 ## Notes for the next session
 
+- M5-02: `cacheable` serves a `StaleSWR` entry before the only-if-cached and Range checks (it answers both, full 200 for Range) and calls `backgroundRefresh` unless the request is `Authorization` or `no-store`. A honored client `no-cache` turns `StaleSWR` into `NeedsValidation`.
+- M5-02: `runRFCRow` now calls `synctest.Wait()` before counting origin calls, so a row's `calls` includes the background refresh its step started.
+- M5-03: background refresh does not check the breaker yet (03 §2.3 "if the breaker is open the refresh is skipped"); see the probe note below.
+
 - M5-01: `internal/breaker` exists but nothing calls it. M5-03 wires it into `fetch` (04 §6.7): `Allow` before the limiter, `Cancel` on shed or caller gone, `Record` with `classify`'s `Success`/`Failure`/`Status500`; the breaker applies `CountStatus500` itself. Translate `breaker.ErrCircuitOpen` to `weir.ErrCircuitOpen` like the limiter's `ErrShed`.
 - M5-03 needs the remaining open time for `RetryError.After` (04 §1.3), and the breaker has no accessor yet. Adding one (`Allow` returning a duration, or a `RetryIn()`) changes §8.3 signatures: ask Ashwin.
 - M5-02/M5-03: `Allow` cannot tell foreground from background, so a background refresh could take the only half-open probe (FR-CB-4 says probes are foreground; FR-CB-5 drops background while open). Background callers should check `State()` and drop unless Closed, or `Allow` takes a class; decide in the engine card and write it into 04 §8.3.
@@ -49,7 +55,7 @@ The cards' Notes give the reasons and the options rejected. All three come befor
 
 - M4-03: `fetch` takes the slot from `e.upl` (upload pool, `MaxUpload` slots, partition cap min(`MaxPerPartition`, `MaxUpload`), own `MaxQueue` queue, no reserve) when `c.HasBody`. EvShed does not name the pool; add it when observability wants to tell an upload flood from main-pool saturation.
 - M4-03: the origin deadline is an `AfterFunc` timer on a `WithCancelCause` context. Streams (pass-through, oversized, event-stream) stop it at headers and wrap the body in `idleBody`: each `Read` arms `StreamIdle`, time between reads is not counted (04 §14). Total stream duration is unbounded by design (FR-TMO-2).
-- `Timeouts.Background` is defaulted and validated but never read: `fetch` uses `Timeouts.Origin` for every class, while 04 §6.7 says `timeoutFor(s.class)`. Defaults are equal (30 s), so nothing differs until an operator sets it. No card owns it; add it to M5-02 (SWR background refresh) or a small card. Found in the #36 adversarial review.
+- `Timeouts.Background` is defaulted and validated but never read (04 §6.7 says `timeoutFor(s.class)`); question under Waiting on Ashwin.
 - Streams have no total deadline and the idle timer counts only a Read in progress, so a client that keeps reading slowly holds an origin connection (not a slot) without limit. Adapter docs (M10) should tell operators to set `http.Server.WriteTimeout` or rely on Caddy's write timeout.
 - M4-03: PLAN M4.3b stays unticked: its AC lists `TestBodylessBypassUsesMainPool`, which M7-03 owns. `HasBody` trusts a declared `Content-Length: 0` even with a real body; only direct library callers can do that (net/http gives NoBody). Consider in M7-03.
 
