@@ -205,6 +205,7 @@ func (e *Engine) staleOnTimeout(sp *fetchSpec) *Response {
 	}
 	now := time.Now()
 	if _, staleness, sieOK := httpcc.Evaluate(ent, sp.lk.epoch, sp.lk.epochOK, now); sieOK {
+		emit(e.cfg.Observer, Event{Kind: EvStaleServed, Time: now, Partition: sp.c.Partition, Reason: "coalesce-timeout"})
 		return e.fromEntry(sp.c, ent, now, CacheInfo{Hit: true, Stale: StaleCoalesceTimeout, TTL: -staleness})
 	}
 	return nil
