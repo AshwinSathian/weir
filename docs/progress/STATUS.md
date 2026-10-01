@@ -14,6 +14,9 @@ none
 
 ## Waiting on Ashwin
 
+- #42 adversarial review: FR-MODE-3 ("every request is handled as pass-through") conflicts with FR-SRV-6 ("only-if-cached is always honored") for an `only-if-cached` request in bypass. The fix follows FR-SRV-6: `ErrOnlyIfCached`, origin not contacted (04 §14). Proposed fix: FR-MODE-3 adds "except `only-if-cached`, which gets `ErrOnlyIfCached`". FR-BYP-1 (M7-03) has the same question.
+- #42 adversarial review: by default `ModeStaleOnError` can only serve entries the store still holds. An entry without an SWR or SIE window is kept only `Freshness.Keep` (5 min) past expiry, and only with a validator. So "up to 24 h of staleness" is reachable only with longer windows or a larger `Keep`. Should FR-MODE-2 say so, or should the default retention change? (A retention change is a default, so it needs your approval.)
+
 - M5-04: `ModeStaleOnError` also refuses entries with `s-maxage` (FR-STL-3; RFC 9111 §5.2.2.10 makes s-maxage imply proxy-revalidate), even ones with an explicit `stale-if-error` (their own window still applies). FR-MODE-2 lists only must-revalidate, proxy-revalidate and no-cache. Should FR-MODE-2 name s-maxage too?
 
 - `Timeouts.Background` (public field, default 30s) is never read: every fetch uses `Timeouts.Origin`. The spec does not say which classes it bounds. Should it replace `Timeouts.Origin` for `limiter.Background` only, or for Warm too? M5-02 left it unwired.

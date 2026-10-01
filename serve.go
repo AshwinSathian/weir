@@ -33,6 +33,9 @@ func (e *Engine) Serve(ctx context.Context, req *Request, origin Origin) (*Respo
 		return e.pass(ctx, &c, origin, FwdMethod)
 	}
 	if e.currentMode() == ModeBypass { // FR-MODE-3
+		if c.ReqCC.OnlyIfCached { // FR-SRV-6: the client forbade the origin
+			return nil, ErrOnlyIfCached
+		}
 		return e.pass(ctx, c.AsBypass(), origin, FwdBypass)
 	}
 	return e.cacheable(ctx, &c, origin, nil)

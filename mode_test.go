@@ -28,6 +28,7 @@ func TestSetModeRejectsInvalid(t *testing.T) {
 		{"negative ttl rejected", weir.ModeStaleOnError, -time.Second, false},
 		{"ttl over 24 h rejected", weir.ModeBypass, 24*time.Hour + 1, false},
 		{"unknown mode rejected", weir.Mode(9), time.Minute, false},
+		{"first unknown mode rejected", weir.ModeBypass + 1, time.Minute, false},
 		{"24 h accepted", weir.ModeStaleOnError, 24 * time.Hour, true},
 		{"normal accepted", weir.ModeNormal, time.Second, true},
 	} {
@@ -60,7 +61,7 @@ func TestModeExpires(t *testing.T) {
 		if n := o.Calls("/a"); n != 2 {
 			t.Fatalf("calls in bypass = %d, want 2", n)
 		}
-		time.Sleep(time.Minute + time.Second)
+		time.Sleep(time.Minute) // the mode ends at exactly ttl
 		serve(t, e, getReq("/a"), o)
 		resp, _ := serve(t, e, getReq("/a"), o)
 		if n := o.Calls("/a"); n != 3 || !resp.Cache.Hit {
@@ -163,6 +164,17 @@ func TestModeBypass(t *testing.T) {
 			t.Fatalf("bypass: %q hit=%v fwd=%v; want origin's new body, fwd=bypass", body, resp.Cache.Hit, resp.Cache.Fwd)
 		}
 		serve(t, e, getReq("/b"), o)
+		// FR-SRV-6: only-if-cached is always honored; bypass never answers
+		// from the cache, so the request gets ErrOnlyIfCached and stays
+		// off the origin.
+		oic := getReq("/a")
+		oic.Header["Cache-Control"] = []string{"only-if-cached"}
+		if _, _, err := serveResult(t, e, oic, o); !errors.Is(err, weir.ErrOnlyIfCached) {
+			t.Fatalf("only-if-cached in bypass = %v, want ErrOnlyIfCached", err)
+		}
+		if n := o.Calls("/a"); n != 2 {
+			t.Fatalf("calls /a = %d, want 2 (only-if-cached never reaches the origin)", n)
+		}
 		head := getReq("/c")
 		head.Method, head.RawQuery = http.MethodHead, "z=1&a=2"
 		head.Header["If-None-Match"] = []string{`"v1"`}
