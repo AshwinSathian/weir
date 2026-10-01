@@ -4,9 +4,9 @@ Updated: 2026-10-01
 Phase: 1
 Current card: none
 Card state: awaiting-merge
-Branch: card/M1-18-rfc-bench
-PR: #29 https://github.com/AshwinSathian/weir/pull/29
-Next card: M2-01
+Branch: card/M2-01-flight-table
+PR: #30 https://github.com/AshwinSathian/weir/pull/30
+Next card: M2-02
 
 ## Blockers
 
@@ -27,6 +27,11 @@ Already built, now confirmed: the weirhttp default transport (compression off, n
 The cards' Notes give the reasons and the options rejected. All three come before M1-18, because closing M1 makes the repo public.
 
 ## Notes for the next session
+
+- M2-01: `internal/coalesce` is done. `Flight.CreatorGone()` returns `published bool`; M2-02's timeout and cancel branches call `leaveFlight` (04 §6.4), which closes an oversized stream when the flight published before the creator left. `Result()` returns `any`; M2-02 defines the engine's flight result type and asserts it.
+- M2-02 (from the #30 adversarial review): when the timer and `Done` are both ready, `select` may take the timer branch. The creator then discards a result that is already published and fetches again. Have the timer and cancel branches check `leaveFlight`'s published flag (or poll `Done` first) and use the result when it can be reused.
+- M2-01: the flight table's bound (MaxConcurrent + MaxQueue flights, P5) comes from the limiter. M4-02 should test the table size under a cold-start flood.
+- `Publish` must be called exactly once per flight (a second call panics on the double close). `runFlight` is the only caller.
 
 - M1-18: `rfc9111_test.go` is a step table (`rfcRow`/`rfcStep`); rows tagged M5, M7 or M9 skip. Cards that land those milestones untag their rows (M5: must-revalidate 504, RFC 5861 SWR/SIE; M7: Vary variant; M9: Cache-Group-Invalidation). M11/M12 cards add rows here too.
 - M1-18: benchmarks live in the package they measure (`bench_test.go`, `internal/keys/bench_test.go`, `store/memory/bench_test.go`); baseline in `docs/benchmarks.md` with raw output in `docs/benchmarks/m1.txt`. `BenchmarkServeHitVary` and `BenchmarkServeMissCoalesced` (07 §10) have no owning card; add them to the M7 and M2 cards when those start. The 1 MiB Cookie benchmark and the hard-epoch prune / S3-FIFO walk measurements carried below were not done here.

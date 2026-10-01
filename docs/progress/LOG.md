@@ -463,3 +463,11 @@ Entry template:
 - Deviations: none.
 - Follow-ups: the engine returns forwarded responses without `Date` (RFC 9110 §6.6.1 MUST; the wire is fine through net/http); CI lacks the D42 two-version matrix. Both are in STATUS.
 - Context: low.
+
+## 2026-10-01 · M2-01 · done
+- Branch / PR: card/M2-01-flight-table / #30
+- Done: `internal/coalesce` (doc.go, table.go): 64-shard flight table with aging (FR-COA-3), `Publish` that removes only the current flight, `Done` channel, stream claim/abandon CAS.
+- Tests: TestJoinAndShare, TestAgingReplacesEntry, TestPublishRemovesOnlyCurrent, TestStreamClaimedOrAbandonedOnce, TestCreatorGone, TestStreamClosedWhenCreatorLeavesDuringPublish (1 000 iterations each for the races); `make check` passes.
+- Deviations: card-reviewer found that 04 §6.4 could leak a stream when the creator times out between runFlight's `Publish` and its `CreatorIsGone` check. `CreatorGone` now returns whether the flight had published, and 04 §6.4 gained `leaveFlight`, which closes the stream in that case. 04 §8.1 and the date line updated. Internal signature only.
+- Follow-ups: M2-02 implements `leaveFlight` as written in 04 §6.4. The table's size bound (MaxConcurrent + MaxQueue) comes from the limiter (M4) and needs a test there.
+- Context: low; size S was right. card-reviewer: 0 must-fix, 1 should-fix fixed, 2 nits handled.

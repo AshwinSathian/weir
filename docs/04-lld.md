@@ -1,7 +1,7 @@
 # Weir low-level design
 
 Status: v1.0
-Date: 2026-09-28
+Date: 2026-10-01
 Depends on: [01-technical-spec.md](01-technical-spec.md), [02-architecture.md](02-architecture.md), [03-hld.md](03-hld.md)
 
 This document is written for the person (or agent) implementing a milestone. It gives exact type definitions, algorithms, locking rules and pseudo-code. Code may differ in naming of unexported identifiers; exported names, behavior, bounds and locking rules may not change without updating this document in the same commit.
@@ -689,11 +689,11 @@ func (e *Engine) fetchCoalesced(ctx, c, lk, origin, attempt):
             return e.fromFetched(c, res, collapsed: true)
         return e.cacheable(ctx, c, origin, attempt+1)          // FR-COA-5
     case <-timer.C:
-        if created: f.CreatorGone()
+        if created: e.leaveFlight(f)
         if lk.entry != nil && staleIfErrorOK(lk): return e.fromEntry(c, lk.entry, staleInfo(StaleCoalesceTimeout))
         return e.fetchDirect(ctx, c, lk, origin)
     case <-ctx.Done():
-        if created: f.CreatorGone()
+        if created: e.leaveFlight(f)
         return nil, ctx.Err()
 ```
 
@@ -714,6 +714,16 @@ func (e *Engine) runFlight(f, spec, origin):
 ```
 
 Stream hand-off uses one atomic state on the flight (`unclaimed`, `claimed`, `abandoned`). `ClaimStream` and `AbandonStream` both CAS from `unclaimed`; exactly one wins, so the stream is closed exactly once and never leaked, whichever of the creator and the flight goroutine finishes first.
+
+The creator can give up (timer or `ctx`) after `runFlight` published and checked `CreatorIsGone`, but before the creator marked itself gone. `CreatorGone` therefore reports whether the flight had already published, and the creator closes the stream in that case:
+
+```
+func (e *Engine) leaveFlight(f):
+    if f.CreatorGone():                      // published before we left; runFlight may have missed us
+        if res := f.Result(); res.stream != nil && f.AbandonStream(): res.stream.Close()
+```
+
+`Publish` stores `published`, and `runFlight` loads `creatorGone` (through `CreatorIsGone`) only after `Publish` returns. `CreatorGone` stores `creatorGone` before loading `published`. Go atomics are sequentially consistent, so at least one side sees both flags; the CAS keeps the close single.
 
 ### 6.5 Direct fetch
 
@@ -905,10 +915,12 @@ type Flight struct {
 	started time.Time  // monotonic
 	stream  atomic.Uint32
 	creatorGone atomic.Bool
+	published   atomic.Bool // set by Publish; read by CreatorGone (§6.4)
 }
 
 func (t *Table) Join(k store.Key, now time.Time, maxAge time.Duration) (f *Flight, created bool)
 func (f *Flight) Publish(res any)     // closes done exactly once and removes itself from the table if still current
+func (f *Flight) CreatorGone() (published bool) // marks the creator gone; reports whether Publish already ran (§6.4)
 ```
 
 `Join` under the shard lock: if an entry exists and `now.Sub(started) < maxAge`, return it; otherwise create a new flight, replace the map entry, return `created = true`. The aged flight keeps a back-pointer to its shard so `Publish` deletes the map entry only if `m[k] == f`.
