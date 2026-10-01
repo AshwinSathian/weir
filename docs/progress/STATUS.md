@@ -5,7 +5,7 @@ Phase: 1
 Current card: none
 Card state: awaiting-merge
 Branch: card/M2-01-flight-table
-PR: none
+PR: #30 https://github.com/AshwinSathian/weir/pull/30
 Next card: M2-02
 
 ## Blockers
