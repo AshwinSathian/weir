@@ -712,3 +712,11 @@ Entry template:
 - Deviations: 01 FR-KEY-11 rewritten, 04 §3.3, 06 T-15, 07 §7 wording; dates bumped.
 - Follow-ups: none from this PR. Older Waiting on Ashwin items untouched.
 - Context: low.
+
+## 2026-10-02 · M7-01 · review-fixes
+- Branch / PR: card/M7-01-vary-variants / #44
+- Done: decided every Waiting on Ashwin item (delegated). Code: `timeoutFor` (fetch.go) applies `Timeouts.Background` to background refresh and Warm. Docs: 01 FR-NEG-3, FR-MODE-2, FR-MODE-3, FR-BYP-1, FR-STL-1, FR-FRS-6, FR-TMO-1, FR-COA-2, D24, D40, error table; PLAN P0.0; M7-05 card; new SECURITY.md.
+- Tests: TestTimeoutByClass, TestModeStaleOnErrorReachIsRetention. `make check` passes.
+- Deviations: requirement and decision-table text changed under Ashwin's delegation (STATUS "Decided 2026-10-02").
+- Follow-ups: P0.0 after M7-05 merges.
+- Context: low.

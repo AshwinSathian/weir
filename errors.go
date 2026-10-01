@@ -22,7 +22,8 @@ var (
 	// ErrCircuitOpen means the breaker is open and nothing stale could be
 	// served. Serve returns it wrapped in *RetryError.
 	ErrCircuitOpen = errors.New("weir: origin circuit open")
-	// ErrOriginTimeout means the origin did not answer within Timeouts.Origin.
+	// ErrOriginTimeout means the origin did not answer within Timeouts.Origin
+	// (Timeouts.Background for background refresh and Warm).
 	ErrOriginTimeout = errors.New("weir: origin timeout")
 	// ErrMustRevalidate means a must-revalidate entry could not be validated.
 	ErrMustRevalidate = errors.New("weir: must-revalidate response could not be validated")

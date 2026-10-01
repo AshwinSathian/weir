@@ -248,3 +248,32 @@ func TestModeBypassThroughBreaker(t *testing.T) {
 		}
 	})
 }
+
+// FR-MODE-2: the mode widens what may be served, not what is kept. An
+// entry with a validator is kept Freshness.Keep past its lifetime; within
+// that the mode serves it, after it the store no longer has it.
+func TestModeStaleOnErrorReachIsRetention(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		o := testorigin.NewChecked(t, 64, 16)
+		o.Default(testorigin.Behavior{Header: http.Header{"Cache-Control": {"max-age=10"}, "Etag": {`"v1"`}}, Body: []byte("a")})
+		cfg := cacheCfg
+		cfg.Negative.Disable = true
+		e := newEngine(t, cfg)
+		defer closeEngine(t, e)
+
+		serve(t, e, getReq("/a"), o)
+		serve(t, e, getReq("/b"), o)
+		if err := e.SetMode(weir.ModeStaleOnError, time.Hour); err != nil {
+			t.Fatal(err)
+		}
+		o.SetDown(true)
+		time.Sleep(10*time.Second + 4*time.Minute) // inside Keep (5 min)
+		if resp, body, err := serveResult(t, e, getReq("/a"), o); err != nil || body != "a" || !resp.Cache.Hit {
+			t.Fatalf("inside Keep: %v %q, want the stale entry", err, body)
+		}
+		time.Sleep(2 * time.Minute) // past lifetime + Keep: the store dropped it
+		if _, _, err := serveResult(t, e, getReq("/b"), o); err == nil {
+			t.Fatal("past retention: served, want the origin error")
+		}
+	})
+}
