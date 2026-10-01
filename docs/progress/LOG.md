@@ -690,7 +690,7 @@ Entry template:
 - Context: low.
 
 ## 2026-10-02 · M7-01 · done
-- Branch / PR: card/M7-01-vary-variants / #PR
+- Branch / PR: card/M7-01-vary-variants / #44
 - Done: internal/keys/variant.go (`VaryNames`, `VariantKey`, FR-KEY-11 normalizer). Two-level lookup through the vary spec; variant then spec writes with a `MaxVariants` cap (expired refs dropped); flights, refresh, warm, markers and negatives key on `lk.ck`; followers of another variant re-enter once and coalesce on their own key. Storability: `vary-star`, `vary-too-many`, `vary-sensitive`, `vary-strict`; `vary-unsupported` removed.
 - Tests: TestVaryUnconfiguredHeader (auto), TestVaryStar, TestVaryFollowersRecoalesce, TestVaryNormalizesValues, TestVaryTooManyNames, TestVaryNegativeStaysInVariant, TestWarmFollowerOfOtherVariant, TestVaryPolicyStorability, TestVaryNames, TestVariantKey, FuzzVaryNames (8 seeds); RFC row "Vary selects the stored variant" untagged. `make check` passes.
 - Deviations: 04 §3.3 names kept in canonical case, not lowercase; 04 §6.4 follower check compares variant keys; 04 §6.7 marker and negative writes keep a live spec and go to `lk.ck`.
