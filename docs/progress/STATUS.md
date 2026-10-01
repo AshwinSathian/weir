@@ -5,7 +5,7 @@ Phase: 1
 Current card: none
 Card state: awaiting-merge
 Branch: card/M4-04-store-guard
-PR: none
+PR: #37 https://github.com/AshwinSathian/weir/pull/37
 Next card: M4-05
 
 ## Blockers
