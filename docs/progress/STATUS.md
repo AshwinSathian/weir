@@ -5,7 +5,7 @@ Phase: 1
 Current card: none
 Card state: awaiting-merge
 Branch: card/M2-03-markers-reentry
-PR: (pending)
+PR: #32 https://github.com/AshwinSathian/weir/pull/32
 Next card: M3-01
 
 ## Blockers

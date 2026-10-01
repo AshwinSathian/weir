@@ -489,7 +489,7 @@ Entry template:
 - Context: low.
 
 ## 2026-10-01 · M2-03 · done
-- Branch / PR: card/M2-03-markers-reentry / #(pending)
+- Branch / PR: card/M2-03-markers-reentry / #32
 - Done: FR-COA-5 re-entry: a follower of an unshareable flight result (not storable, over-size, stream, purged) re-enters lookup once with `prevCK`, and the same key fetches directly. Markers, Authorization and request no-store rules were already in place from M2-02; this card pins them.
 - Tests: TestUncacheableNotSerialized, TestAuthorizedNotCoalesced, TestMarkerNotFromAuthorizedRequest, TestMarkerNotFromRequestNoStore, TestOversizedStreamedNotBuffered, TestMarkerNeverReplacesResponse, TestCoalesceSharesNoCacheResponse; each guard checked by a mutant; `make check` passes.
 - Deviations: 01 FR-COA-5 records that storable responses needing validation are shared (Ashwin's decision). 04 §6.2 direct-fetch condition aligned with the code (Authorized always direct, request no-store).
