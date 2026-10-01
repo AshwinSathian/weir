@@ -700,7 +700,10 @@ func TestNewerResponseWins(t *testing.T) {
 				Header: http.Header{"Cache-Control": {"max-age=60"}, "Date": {date}},
 				Body:   io.NopCloser(strings.NewReader(body))}, nil
 		}})
-		e := newEngine(t, cacheCfg)
+		// The second GET must not join the first one's flight (FR-COA-3).
+		cfg := cacheCfg
+		cfg.Coalesce.LeaderMaxAge = time.Second
+		e := newEngine(t, cfg)
 		defer closeEngine(t, e)
 
 		done := make(chan struct{})
@@ -710,7 +713,9 @@ func TestNewerResponseWins(t *testing.T) {
 		}()
 		synctest.Wait() // the slow fetch is at the origin with its Date taken
 		time.Sleep(2 * time.Second)
-		serve(t, e, getReq("/a"), o)
+		if resp, _ := serve(t, e, getReq("/a"), o); resp.Cache.Collapsed {
+			t.Fatal("second GET joined the aged flight")
+		}
 		close(gate)
 		<-done
 

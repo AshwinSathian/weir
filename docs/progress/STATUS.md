@@ -4,9 +4,9 @@ Updated: 2026-10-01
 Phase: 1
 Current card: none
 Card state: awaiting-merge
-Branch: card/M2-01-flight-table
-PR: #30 https://github.com/AshwinSathian/weir/pull/30
-Next card: M2-02
+Branch: card/M2-02-coalesced-fetch
+PR: none
+Next card: M2-03
 
 ## Blockers
 
@@ -28,9 +28,12 @@ The cards' Notes give the reasons and the options rejected. All three come befor
 
 ## Notes for the next session
 
-- M2-01: `internal/coalesce` is done. `Flight.CreatorGone()` returns `published bool`; M2-02's timeout and cancel branches call `leaveFlight` (04 §6.4), which closes an oversized stream when the flight published before the creator left. `Result()` returns `any`; M2-02 defines the engine's flight result type and asserts it.
-- M2-02 (from the #30 adversarial review): when the timer and `Done` are both ready, `select` may take the timer branch. The creator then discards a result that is already published and fetches again. Have the timer and cancel branches check `leaveFlight`'s published flag (or poll `Done` first) and use the result when it can be reused.
-- M2-01: the flight table's bound (MaxConcurrent + MaxQueue flights, P5) comes from the limiter. M4-02 should test the table size under a cold-start flood.
+- M2-02: `flight.go` holds `fetchCoalesced`, `runFlight`, `leaveFlight`, `staleOnTimeout`, `fetchDirect`; `serve.go` splits `fetchStored` (fetch, freshen, store) from `respond`. Followers are served `fromEntry(fr.entry)`; a follower of an unshareable result calls `fetchDirect` (`ponytail:`). M2-03 replaces that with the FR-COA-5 re-entry rule.
+- M2-02: `cacheable` sends `c.Authorized` and marker requests to `fetchDirect` (FR-COA-8, FR-STO-12), pinned by `TestCoalesceSkipsDirectRequests`. M2-03 adds its named tests (`TestAuthorizedNotCoalesced` etc.) and the marker rules on top.
+- M2-02: on follower timeout without a stale-if-error entry, the creator keeps waiting on its own flight (04 §6.4 updated): the default `FollowerMaxWait` equals `Timeouts.Origin` below 10 s, so refetching doubled origin load.
+- M7-01: followers get `fr.entry` without `keys.VaryMatches`; safe only while storability refuses Vary. Add the check in `fetchCoalesced` (comment there).
+- M4: until the limiter lands, a client disconnect no longer cancels the origin fetch (FR-COA-2), so flights per second times `Timeouts.Origin` bounds the table, not MaxConcurrent + MaxQueue. M4-02 must test the table size under a cold-start flood.
+- A panic while reading a buffered origin body is recovered in `runFlight` but the body is not closed; a `defer` in `fetch` around `io.ReadAll` would be the root fix. `BenchmarkServeMissCoalesced` (07 §10) still has no card.
 - `Publish` must be called exactly once per flight (a second call panics on the double close). `runFlight` is the only caller.
 
 - M1-18: `rfc9111_test.go` is a step table (`rfcRow`/`rfcStep`); rows tagged M5, M7 or M9 skip. Cards that land those milestones untag their rows (M5: must-revalidate 504, RFC 5861 SWR/SIE; M7: Vary variant; M9: Cache-Group-Invalidation). M11/M12 cards add rows here too.

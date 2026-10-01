@@ -689,15 +689,20 @@ func (e *Engine) fetchCoalesced(ctx, c, lk, origin, attempt):
             return e.fromFetched(c, res, collapsed: true)
         return e.cacheable(ctx, c, origin, attempt+1)          // FR-COA-5
     case <-timer.C:
-        if created: e.leaveFlight(f)
-        if lk.entry != nil && staleIfErrorOK(lk): return e.fromEntry(c, lk.entry, staleInfo(StaleCoalesceTimeout))
-        return e.fetchDirect(ctx, c, lk, origin)
+        if f.Done() is closed: use the result as above   // the flight published as the timer fired
+        if lk.entry != nil && staleIfErrorOK(lk):
+            if created: e.leaveFlight(f)
+            return e.fromEntry(c, lk.entry, staleInfo(StaleCoalesceTimeout))
+        if !created: return e.fetchDirect(ctx, c, lk, origin)
+        wait for f.Done() or ctx.Done() as above        // the creator keeps waiting on its own fetch
     case <-ctx.Done():
         if created: e.leaveFlight(f)
         return nil, ctx.Err()
 ```
 
 `staleIfErrorOK(lk)` re-runs `Evaluate` at the current time and checks `sieOK`.
+
+The timer covers the creator too, so it can serve stale under stale-if-error like any follower. Without a stale entry the creator does not fetch again: its fetch is the flight, already bounded by `Timeouts.Origin`, and the default `FollowerMaxWait` equals `Timeouts.Origin` whenever that is under 10 s, so a second fetch would start just as the first one times out and double the origin load of every slow request.
 
 `runFlight`:
 

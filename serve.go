@@ -97,9 +97,9 @@ func (e *Engine) lookup(ctx context.Context, c *keys.Classified, now time.Time) 
 	return lk
 }
 
-// cacheable serves a GET or HEAD from the store or through an uncoalesced
+// cacheable serves a GET or HEAD from the store or through a coalesced
 // fetch (04 §6.2), validating a stale entry that has validators
-// (FR-SRV-3). Coalescing arrives in M2.
+// (FR-SRV-3).
 func (e *Engine) cacheable(ctx context.Context, c *keys.Classified, origin Origin) (*Response, error) {
 	now := time.Now()
 	lk := e.lookup(ctx, c, now)
@@ -134,11 +134,24 @@ func (e *Engine) cacheable(ctx context.Context, c *keys.Classified, origin Origi
 	if c.Range {
 		return e.pass(ctx, c.AsRangePass(), origin, lk.fwd)
 	}
-	res := e.fetch(ctx, (*Request)(&c.Forwarded), origin, true, prior)
-	if res.err != nil {
-		return nil, res.err
+	sp := &fetchSpec{c: c, lk: lk, prior: prior, found: found, purged: purged}
+	if c.Authorized || lk.marker { // FR-COA-8, FR-STO-12
+		return e.fetchDirect(ctx, sp, origin)
 	}
-	ci := CacheInfo{Fwd: lk.fwd, FwdStatus: res.resp.StatusCode}
+	return e.fetchCoalesced(ctx, sp, origin)
+}
+
+// fetchStored fetches sp's forwarded request, buffered, and stores the
+// response when storable (04 §6.7). A flight runs it, or the request itself
+// (fetchDirect).
+func (e *Engine) fetchStored(ctx context.Context, sp *fetchSpec, origin Origin) *flightResult {
+	c, prior := sp.c, sp.prior
+	fr := &flightResult{fetchResult: e.fetch(ctx, (*Request)(&c.Forwarded), origin, true, prior)}
+	res := &fr.fetchResult
+	if res.err != nil {
+		return fr
+	}
+	fr.ci = CacheInfo{Fwd: sp.lk.fwd, FwdStatus: res.resp.StatusCode}
 	if res.notMod { // FR-SRV-3: the freshened entry is stored and served like a full response
 		res.resp, res.body = freshened(prior, res.resp.Header), prior.Body
 		if res.recv != nil {
@@ -152,21 +165,26 @@ func (e *Engine) cacheable(ctx context.Context, c *keys.Classified, origin Origi
 			c = &ac
 		}
 	}
-	resp := res.resp
-	if lk.marker {
-		ci.Detail = "hit-for-miss"
+	if sp.lk.marker {
+		fr.ci.Detail = "hit-for-miss"
 	}
-	if !res.over && !res.stream && !serverError(resp.StatusCode) {
-		ci.Stored = e.storeResponse(ctx, c, &res, found, purged)
+	if !res.over && !res.stream && !serverError(res.resp.StatusCode) {
+		fr.entry, fr.ci.Stored = e.storeResponse(ctx, c, res, sp.found, sp.purged)
 	}
+	return fr
+}
+
+// respond builds the response for the request whose fetch produced fr.
+func (e *Engine) respond(c *keys.Classified, fr *flightResult) *Response {
+	resp := fr.resp
 	switch {
 	case c.Head:
 		closeBody(resp) // an over-size or event-stream body is canceled, not downloaded
 		resp.Body = http.NoBody
-	case !res.over && !res.stream && len(res.body) > 0:
-		resp.Body = io.NopCloser(bytes.NewReader(res.body))
+	case !fr.over && !fr.stream && len(fr.body) > 0:
+		resp.Body = io.NopCloser(bytes.NewReader(fr.body))
 	}
-	return e.finish(resp, ci), nil
+	return e.finish(resp, fr.ci)
 }
 
 // forcesValidation reports the request directives that turn a fresh entry
@@ -189,10 +207,11 @@ func serverError(status int) bool {
 
 // storeResponse stores a fully read response when storable, else writes a
 // hit-for-miss marker when the response itself is the reason (FR-STO-12,
-// T-31). It reports whether the entry was stored. The client's own
+// T-31). It returns the entry when storable, which followers may share, and
+// reports whether it was stored. The client's own
 // response keeps every origin field (FR-STO-6). found is the response the
 // lookup returned, which this request already judged not fresh.
-func (e *Engine) storeResponse(ctx context.Context, c *keys.Classified, res *fetchResult, found, purged *store.Entry) bool {
+func (e *Engine) storeResponse(ctx context.Context, c *keys.Classified, res *fetchResult, found, purged *store.Entry) (*store.Entry, bool) {
 	ctx = context.WithoutCancel(ctx) // a client leaving after the body arrived does not undo the store
 	recv := res.received()           // T-8: a field Connection names still refuses storage
 	d := storability(&e.cfg, c, recv, res.body, res.respTime)
@@ -201,7 +220,7 @@ func (e *Engine) storeResponse(ctx context.Context, c *keys.Classified, res *fet
 		if d.responseDriven {
 			e.setMarker(ctx, c.Primary, res.respTime, purged)
 		}
-		return false
+		return nil, false
 	}
 	ent := buildEntry(&e.cfg, c, recv, res.body, res.reqTime, res.respTime, d)
 	// RFC 9111 §4: a slow fetch never replaces a more recent response that
@@ -211,9 +230,9 @@ func (e *Engine) storeResponse(ctx context.Context, c *keys.Classified, res *fet
 	// record past its Expires that a lazy store still returns.
 	if cur, err := e.store.Get(ctx, c.Primary); err == nil && cur.Kind == store.KindResponse &&
 		cur.Expires.After(res.respTime) && !sameRecord(cur, found) && newer(cur, ent) {
-		return false
+		return ent, false
 	}
-	return e.store.Set(ctx, c.Primary, ent) == nil
+	return ent, e.store.Set(ctx, c.Primary, ent) == nil
 }
 
 // sameRecord reports whether a and b are the same stored response. Stores
