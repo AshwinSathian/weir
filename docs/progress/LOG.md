@@ -511,3 +511,11 @@ Entry template:
 - Deviations: none.
 - Follow-ups: none new.
 - Context: low.
+
+## 2026-10-01 · M4-01 · done
+- Branch / PR: card/M4-01-limiter / #<pending>
+- Done: `internal/limiter`: global cap read through `limit()` (D13), per-partition cap through `capFor`, foreground reserve, bounded FIFO queue that skips waiters of full partitions (ADR-8). Classes Foreground (waits MaxWait), Background (never queues), Warm (waits on ctx, respects reserve). Shed sentinels `ErrShed`, `ErrQueueFull`, `ErrQueueTimeout`.
+- Tests: TestLimiterSkipsFullPartition, TestLimiterFIFO, TestLimiterQueueTimeout, TestLimiterCancel, TestLimiterGrantRace (1 000 shuffled rounds, both race outcomes hit), TestLimiterStateBounded, BenchmarkLimiterAcquireRelease (uncontended 272 ns/op, full queue 2.9 µs/op); 100% statement coverage; `make check` passes.
+- Deviations: 04 §8.2 rewritten to the code (Config/New, slice queue, int counts, three sentinels, FIFO invariant, `throttled` deferred to M8); 04 §6.8 no longer mentions `TryAcquire`.
+- Follow-ups: none new; M4-02 notes in STATUS.
+- Context: low; size M was right. card-reviewer: 0 must-fix, 4 should-fix fixed (FIFO test, shed detail sentinels, LLD sync, queued benchmark), 4 nits noted for M4-02.
