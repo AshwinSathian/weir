@@ -355,7 +355,7 @@ A response is stored only if all of the following hold. Each failed check increm
 
 ### 5.15 Miss-rate signal (T6.8)
 
-- FR-MR-1. Weir tracks requests and misses per partition in a Space-Saving summary of `MissRate.TopK` (default 64) counters per `MissRate.Window` (default 10 s). Memory is O(TopK).
+- FR-MR-1. Weir tracks requests and misses per partition in a Space-Saving summary of `MissRate.TopK` (default 64) counters per `MissRate.Window` (default 10 s). Memory is O(TopK). The summary is exact enough for heavy hitters only: a partition with less than 1/`TopK` of a window's requests may go untracked (ADR-9).
 - FR-MR-2. At the end of each window, a partition with at least `MissRate.MinMisses` (default 500) misses and a miss ratio of at least `MissRate.MinRatio` (default 0.9) raises a `miss_rate_anomaly` event and a warning log with the partition string truncated to 256 bytes.
 - FR-MR-3. With `MissRate.Throttle` true (default false), an anomalous partition's limiter cap is set to 1 for the following window.
 

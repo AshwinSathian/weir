@@ -73,7 +73,7 @@ Deliverable: compiling public API with stub behavior, CI, test harness.
 - [x] P0.4 `New` with defaults and validation (FR-LCY-1); `Serve` that validates nothing and calls the origin through the single fetch function in `fetch.go` (no limiter yet); `Close`. AC: `TestZeroConfigValid`, `TestInvalidConfigRejected` (one row per FR-LCY-1 rule), `TestServePassThroughStub`.
 - [x] P0.5 `internal/testorigin` per [07 §3](docs/07-testing-strategy.md). AC: its own tests cover gate, delay under synctest, panic, truncate, `NewChecked` failing on over-concurrency.
 - [x] P0.6 `store/storetest.Run` with all cases from [05 §8](docs/05-storage-interface-spec.md) (they will fail until M1 provides a store; the suite itself compiles). AC: compiles; a trivial map-backed store in `storetest`'s own test passes the non-epoch cases.
-- [ ] P0.0 Private GitHub repo `AshwinSathian/weir` (created 2026-09-27); `SECURITY.md` added 2026-10-02; when M7-05 (key-boundary security review) merges: flip to public, enable private vulnerability reporting (D40), tag `v0.1.0` (D24, amended 2026-10-02). AC: repo visibility and reporting settings match the current phase.
+- [x] P0.0 Private GitHub repo `AshwinSathian/weir` (created 2026-09-27); `SECURITY.md` added 2026-10-02; when M7-05 (key-boundary security review) merges: flip to public, enable private vulnerability reporting (D40), tag `v0.1.0` (D24, amended 2026-10-02). AC: repo visibility and reporting settings match the current phase.
 - [x] P0.7 CI workflow: gofmt, vet, golangci-lint v2, `go test -race -shuffle=on`, dependency check (NFR-6) as a test (`TestNoThirdPartyImports` using `go list -deps -json`), govulncheck. AC: workflow green on the first push.
 - [x] P0.8 `scripts/trace.sh`: extracts IDs (`FR-*`, `NFR-*`, `INV-*`) from `docs/01` and `docs/06`, greps `_test.go` for citations, prints uncited IDs, exits 0 (report mode) until `TRACE_STRICT=1`. AC: runs locally and in CI.
 
@@ -146,7 +146,7 @@ Refs: FR-KEY-7, FR-KEY-9..11, FR-BYP-1, FR-STO-6, T6.7, T-8, T-15.
 
 Refs: FR-MR-*, T6.8, T-11.
 
-- [ ] M8.1 `internal/missrate` Space-Saving with windows. AC: `TestSpaceSavingBound` passes.
+- [x] M8.1 `internal/missrate` Space-Saving with windows. AC: `TestSpaceSavingBound` passes.
 - [ ] M8.2 Engine wiring and throttle callback into the limiter. AC: `TestRandomQueryFloodBounded`, `TestMissRateAnomaly`, `TestMissRateThrottle`, `TestOneHitWondersDoNotEvictHot` pass.
 
 #### M9 Purge and Cache Groups (~1 week)
