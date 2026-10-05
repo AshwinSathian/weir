@@ -801,3 +801,11 @@ Entry template:
 - Follow-ups: none open. The last round of fixes (trim-only `tokenIs`, `Malformed`, line cap) was not reviewed a third time. Next: PLAN P0.0 with Ashwin's confirmation.
 - Context: high; the review card grew to five small production fixes, each from a reproduced finding.
 
+
+## 2026-10-05 · M8-01 · done
+- Branch / PR: card/M8-01-space-saving-tracker / (recorded in the next commit)
+- Done: PLAN P0.0 first, after Ashwin confirmed it in chat: repository public, private vulnerability reporting enabled, annotated tag `v0.1.0` on 560d2af. Then internal/missrate (tracker.go, doc.go): Space-Saving summary of requests and misses per partition, `TopK` counters, lazy window rotation, nil-receiver safe, one `emit([]Anomaly)` call per closed window outside the lock.
+- Tests: TestSpaceSavingBound, TestAnomalyThresholds, TestLazyWindowRotation, TestSampleTruncated, TestNilTracker, TestObserveConcurrent, TestEmitOncePerWindow, TestDegenerateConfig. Tests and code were written together, not tests first; eight mutations of the code were then each caught by a test (two only after an added assertion). `make check` passes, trace 122/152.
+- Deviations: 04 §8.4 now lists `Config` and `Anomaly`, `emit func([]Anomaly)` once per window (was `func(Anomaly)`, which could not clear a throttle after a quiet window), the one-miss floor, nil `New`, lazy rotation. No requirement, default or public signature changed.
+- Follow-ups: review had no must-fix. Should-fix S1 (emit shape) and S3 (zero thresholds) fixed; S2 (windows can be reported out of order after a full-window stall) left for M8-02, noted in STATUS. The fixes after the review were not reviewed again.
+- Context: medium (P0.0 plus the card); size S was right.

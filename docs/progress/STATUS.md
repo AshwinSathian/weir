@@ -4,9 +4,9 @@ Updated: 2026-10-05
 Phase: 1
 Current card: none
 Card state: awaiting-merge
-Branch: card/M7-05-key-boundary-security-review
-PR: #48 https://github.com/AshwinSathian/weir/pull/48
-Next card: P0.0 (public flip, PLAN), then M8-01
+Branch: card/M8-01-space-saving-tracker
+PR: (recorded in the next commit)
+Next card: M8-02
 
 ## Blockers
 
@@ -119,7 +119,12 @@ The cards' Notes give the reasons and the options rejected. All three come befor
 
 ## Notes for the next session
 
-- Next session is PLAN P0.0, not a card: flip the repo to public, enable private vulnerability reporting, tag `v0.1.0`. Visibility cannot be taken back; confirm the flip with Ashwin in chat before running it. Then M8-01.
+- PLAN P0.0 ran on 2026-10-05 after Ashwin confirmed it in chat: the repository is public, private vulnerability reporting is enabled, and `v0.1.0` is an annotated tag on 560d2af (the #48 merge). Commit author emails are public with it.
+- M8-01: `missrate.New(cfg, emit)` calls `emit([]Anomaly)` once per closed window, an empty slice included, after its lock is released. M8-02's limiter callback can replace the whole `throttled` map from that one call, and a quiet window clears it (FR-MR-3).
+- M8-01: rotation is lazy (no timer), so with no traffic at all the last window is never reported and a throttle set by it stays until the next cacheable request. M8-02 should decide whether `capFor` also checks an expiry time.
+- M8-01: two `Observe` calls stalled a full window apart can deliver their windows out of order (review should-fix S2, left open). If M8-02 needs strict order, add the window start to the report and drop older ones in the receiver.
+- M8-01: `New` returns nil for a non-positive `TopK` or `Window`; `Config.validate` in config.go already range-checks the `MissRate` fields, so the engine never reaches that path with user values.
+- config.go's `MissRateConfig` comment cites `FR-MIS`; the spec's IDs are `FR-MR-*`. Fix it in M8-02, which touches that wiring.
 - M7-05: `Classified.Unkeyed` is now also true when the forward carries `Cache-Control` or `Pragma` unkeyed (keys/forward.go, after the `Allow` loop). A browser reload therefore plants no marker and no negative entry. A new always-forwarded unkeyed field needs the same line, or T-31 reopens.
 - M7-05: trace bytes are decided by `traceByte` (keys/forward.go). If a tracing vendor's `tracestate` goes missing at the origin, look there first; widening the set reopens T-31 unless the field is also flagged `Unkeyed`.
 - M7-05: `httpcc.ResponseDirectives.Malformed` is read in one place, the Authorization case of `storability`. A new directive that grants a permission must set it for its undefined forms.
