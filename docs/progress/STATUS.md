@@ -5,7 +5,7 @@ Phase: 1
 Current card: none
 Card state: awaiting-merge
 Branch: card/M8-01-space-saving-tracker
-PR: (recorded in the next commit)
+PR: #49 https://github.com/AshwinSathian/weir/pull/49
 Next card: M8-02
 
 ## Blockers
