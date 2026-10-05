@@ -1,0 +1,10 @@
+go test fuzz v1
+byte('@')
+string("GET")
+string("/a")
+string("")
+string("")
+string("")
+string("a\x00b")
+string("Range")
+string("")

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/AshwinSathian/weir/internal/keys"
 	"github.com/AshwinSathian/weir/store"
 )
 
@@ -461,6 +462,16 @@ func (c *Config) validate() error {
 			if !isToken(n) {
 				return invalid(f.name, fmt.Sprintf("%q is not a token", n))
 			}
+		}
+	}
+	for _, n := range c.Forward.Allow {
+		// T-1, FR-FWD-1: a keyed field goes in its normalized form and a
+		// hop-by-hop field never goes, so the entry could only mislead.
+		switch {
+		case slices.Contains(c.Key.Headers, n), n == "Cookie" && len(c.Key.Cookies) > 0:
+			return invalid("Forward.Allow", fmt.Sprintf("%q is keyed and already forwarded", n))
+		case keys.IsHopByHop(n):
+			return invalid("Forward.Allow", fmt.Sprintf("%q is hop-by-hop and never forwarded", n))
 		}
 	}
 	// A typed nil passes a nil interface check and panics on first use.

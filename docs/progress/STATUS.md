@@ -4,9 +4,9 @@ Updated: 2026-10-05
 Phase: 1
 Current card: none
 Card state: awaiting-merge
-Branch: card/M7-02-vary-policies
-PR: #45 https://github.com/AshwinSathian/weir/pull/45
-Next card: M7-03
+Branch: card/M7-03-keyed-headers-bypass
+PR: (recorded in the next commit)
+Next card: M7-04
 
 ## Blockers
 
@@ -14,7 +14,11 @@ none
 
 ## Waiting on Ashwin
 
-none
+Not blocking; M7-03 built each of these and 01 §5.2.3 states them. Confirm or change in the PR review:
+
+- A keyed header that is present with an empty value is keyed and forwarded as empty, apart from an absent one (the origin can tell them apart). The other choice is to treat empty as absent.
+- `MaxKeyedHeaderBytes` applies to a keyed header's combined lines (FR-VAL-3) and also to its normalized form, which can be longer (`a,b` becomes `a, b`). FR-VAL-3 itself is unchanged.
+- A `Bypass.Cookies` name matches a pair without `=` and a name followed by whitespace before `=`. Bypass is the safe direction for a malformed session cookie.
 
 ## Decided 2026-10-05
 
@@ -73,6 +77,12 @@ Already built, now confirmed: the weirhttp default transport (compression off, n
 The cards' Notes give the reasons and the options rejected. All three come before M1-18, because closing M1 makes the repo public.
 
 ## Notes for the next session
+
+- M7-03: `Key.Headers` values are normalized in `forwardHeader` (keys/forward.go) and the key reads them back from the finished forward (`keyedHeaders`, keys/headers.go), so the key is what the origin sees by construction. Any new step that edits the forwarded header must run before `keyedHeaders` in `Classify`.
+- M7-03: bypass rules are decided in `Classify` (`keys.FwdBypass`), so `Warm` counts a URL matching a rule as not stored through its `ClassPass` check. FR-WRM-1's list of not-sent requests does not name bypass matches and no Warm test covers one.
+- M7-03: `New` accepts `Forward.Allow` entries that can never take effect beyond the ones it now rejects: `Cookie` without `Key.Cookies`, `Host`, `Accept-Encoding`, and the conditional, Range and body fields. `Key.Headers` naming a hop-by-hop or dropped field is an always-absent key slot. With `ForwardAll`, `Key.Headers: ["Cookie"]` joins several `Cookie` lines with `, `, which origins read as one cookie (keyed, so no INV-1 breach). M7-05 should decide whether `New` rejects these.
+- M7-03: `FuzzForwardEqualsKey` picks `fuzzKeyedCfg` with selector bit 0x40 and `fuzzAllCfg` (ForwardAll) with 0x20; the low bits still pick `fuzzCfgs`, so old corpus entries keep their config. Add configs behind a new bit, not by growing `fuzzCfgs`.
+- M7-03: no `-benchmem` run was made. On a config without `Key.Headers` and `Bypass` rules the added hit-path work is two length checks and an empty loop.
 
 - M7-01: `lookup` sets `lk.ck` (variant key under a spec, else Primary); flights, early refresh, warm, markers and negative entries all key on it. `storeResponse` writes the variant, then the spec (`setVariant`, serve.go); `setUnlessResponse` also keeps a live spec. Followers share only when `keys.VariantKey(...) == fr.vk`, else `reenter` (one more pass, then `fetchDirect`).
 - M7-02: `setVariant` (serve.go) at the cap reads each kept ref and drops those the store answers `ErrNotFound` for (04 §14); any other store error keeps the ref, so a failing store cannot lift the cap. `recordingStore` (conditional_test.go) now has `down` (one key whose Get fails, counted in `downGets`) and `firstVariant`; the expired-ref subtest runs on `lazyStore` so the ref's `Expires` check is pinned apart from the read. The card listed storable.go and fetch.go, but M7-01 put the policy checks in storable.go and the cap in serve.go, so only serve.go changed.

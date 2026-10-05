@@ -30,13 +30,16 @@ type Config struct {
 	QueryKeep      []string // empty keeps all
 	QuerySort      bool
 	NormalizePath  bool
+	Headers        []string // Key.Headers, canonical names, keyed in this order
 	Cookies        []string // forwarded in this order
 	AcceptEncoding []string // lowercase tokens, most preferred first
 
 	ForwardAll        bool     // Forward.Mode == ForwardAll
 	Allow             []string // Forward.Allow, canonical header names
 	NoTraceHeaders    bool
-	HonorRevalidation bool // Client.HonorRevalidation
+	BypassHeaders     []string // Bypass.Headers, canonical names
+	BypassCookies     []string // Bypass.Cookies
+	HonorRevalidation bool     // Client.HonorRevalidation
 }
 
 // ErrUpgrade reports a CONNECT or protocol upgrade request (FR-UPG-1). The

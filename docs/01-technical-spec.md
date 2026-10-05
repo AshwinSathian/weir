@@ -234,7 +234,7 @@ Package `store` (import path `github.com/AshwinSathian/weir/store`) defines `Sto
 #### 5.2.3 Header normalizers
 
 - `Accept-Encoding`: parsed per RFC 9110 §12.5.3. The value becomes the single most preferred coding from `Key.AcceptEncoding` (default `["gzip"]`) that has a non-zero qvalue, explicitly or via `*`; ties break by list order. If none qualifies the value is `identity`. A request without `Accept-Encoding` also gets `identity`: RFC 9110 permits any coding in that case, but clients that omit the header often cannot decode one. Malformed list members are skipped; a wholly malformed value becomes `identity`. The forwarded request carries `Accept-Encoding: <chosen>`. `Accept-Encoding` is always processed this way, keyed or not, because it is the CVE-2024-35296 input.
-- Other keyed headers: trimmed, list lines combined with `, `, internal runs of optional whitespace around commas collapsed. Case preserved (header values are case-sensitive unless their spec says otherwise).
+- Other keyed headers: trimmed, list lines combined with `, `, internal runs of optional whitespace around commas collapsed to one space after each comma. Case preserved (header values are case-sensitive unless their spec says otherwise). A byte outside visible ASCII, space and tab makes the value malformed. The size limit of FR-VAL-3 applies to the combined lines and also to the normalized form, which can be longer (`a,b` becomes `a, b`). A present header with an empty value is keyed and forwarded as empty, apart from an absent one, because the origin can tell them apart.
 - Operators cannot register custom normalizers in Phase 1. (Phase 3 key dimensions will use the same hook.)
 
 ### 5.3 Forwarded request (T6.7)
@@ -400,7 +400,7 @@ All fields are optional. The zero value of `Config` is valid and yields the defa
 | `Key.MaxVaryHeaders` / `Key.MaxVariants` | 8 / 8 | |
 | `Key.AcceptEncoding` | `["gzip"]` | set to what the origin produces, e.g. `["br","gzip"]` |
 | `Forward.Mode` | `ForwardStrict` | `ForwardAll` logs a warning |
-| `Forward.Allow` | empty | operator additions, on top of the trace defaults |
+| `Forward.Allow` | empty | operator additions, on top of the trace defaults. `New` rejects an entry that names a `Key.Headers` field, `Cookie` while `Key.Cookies` is set, or a hop-by-hop field (`ErrInvalidConfig`): the first two already go in their keyed form and the last never goes |
 | `Forward.NoTraceHeaders` | false | D29: true stops forwarding `traceparent`, `tracestate`, `X-Request-Id` (a boolean, because nil-versus-empty slices do not survive JSON or Caddyfile round trips) |
 | `Bypass.Cookies`, `Bypass.Headers` | empty | |
 | `Storable.Statuses` | 200, 203, 204, 300, 301, 302, 307, 308, 404, 405, 410, 414, 501 | 302/307 need explicit freshness (D39) |

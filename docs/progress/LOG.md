@@ -744,3 +744,11 @@ Entry template:
 - Deviations: 05 §6 (Encode errors, decoding rules, the reason, the uvarint decision); date bumped.
 - Follow-ups: none. Nothing is waiting on Ashwin.
 - Context: medium.
+
+## 2026-10-05 · M7-03 · done
+- Branch / PR: card/M7-03-keyed-headers-bypass / (recorded in the next commit)
+- Done: `Key.Headers` enter the key and the forward in normalized form, strict and ForwardAll (keys/headers.go, forward.go); the key reads its header values from the finished forward. Bypass rules (`Bypass.Headers`, `Bypass.Cookies`) classify a GET/HEAD as `FwdBypass`: forwarded as received, never stored or coalesced, `only-if-cached` gets `ErrOnlyIfCached`. `New` rejects `Forward.Allow` entries naming a keyed or hop-by-hop field. `StripSetCookie` already existed (M1), storable.go unchanged.
+- Tests: TestForwardEqualsKey, TestKeyedInputsSplitEntries, TestUnkeyedHeaderNotForwarded, TestQueryDropRemovesFromForward, TestBypassNeverStored, TestBypassNotCoalesced, TestBodylessBypassUsesMainPool, TestNewRejectsAllowOfKeyedOrHopByHop; keys: TestNormalizeHeader, TestClassifyKeyedHeaders, TestClassifyBypass, TestIsHopByHop, FuzzBypassed, two new FuzzForwardEqualsKey configs and seven seeds. Fuzz 30 s and 10 s clean. `make check` passes.
+- Deviations: 01 §5.2.3 (generic normalizer details) and the `Forward.Allow` config row; 04 §3.1 step 3 and §3.5; 06 T-1 and T-13 test lists; 07 fuzz table. Review: no must-fix; should-fix 1-4 fixed (allocation bound, fuzz and test coverage), 5 answered by making the code follow FR-VAL-3 and listing three choices under Waiting on Ashwin.
+- Follow-ups: the three confirmations in STATUS (not blocking); dead `Forward.Allow` and `Key.Headers` names and FR-WRM-1 wording for M7-05 (STATUS notes).
+- Context: medium; size M right.

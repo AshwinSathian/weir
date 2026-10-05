@@ -24,6 +24,23 @@ var fuzzCfgs = []Config{
 	},
 }
 
+// fuzzKeyedCfg has Key.Headers, including names the forward rewrites (the
+// bucket, keyed cookies), filters (trace) or drops (Range, hop-by-hop). Bit
+// 0x40 of the selector picks it, so older corpus entries keep their config.
+var fuzzKeyedCfg = Config{
+	MaxPathBytes: 256, MaxQueryBytes: 256, MaxQueryParams: 8, MaxKeyedHeaderBytes: 128,
+	Headers: []string{"X-Tenant", "Tracestate", "Accept-Encoding", "Cookie", "Range", "Connection", "X-Forwarded-Host"},
+	Cookies: []string{"sid"}, AcceptEncoding: []string{"gzip"},
+}
+
+// fuzzAllCfg is ForwardAll with Key.Headers, picked by selector bit 0x20.
+// Unkeyed fields reach the origin by design (G4), so only the keyed part of
+// the property holds: the forward carries the normal form the key holds.
+var fuzzAllCfg = Config{
+	MaxPathBytes: 256, MaxQueryBytes: 256, MaxQueryParams: 8, MaxKeyedHeaderBytes: 128,
+	ForwardAll: true, Headers: []string{"X-Tenant", "X-Forwarded-Host"}, AcceptEncoding: []string{"gzip"},
+}
+
 func FuzzForwardEqualsKey(f *testing.F) {
 	// INV-1, FR-FWD-1, FR-FWD-5, FR-FWD-6, FR-UPG-1; T-1, T-2, T-5, T-44
 	f.Add(byte(0), "GET", "/a", "a=1&utm_x=2", "lang=en; sid=1; x=2", "gzip;q=0.5, br", "evil", "X-Original-Url", "")
@@ -34,8 +51,23 @@ func FuzzForwardEqualsKey(f *testing.F) {
 	// FR-UPG-1: a lone h2c upgrade is served; Allow names Upgrade and
 	// HTTP2-Settings in config 1, and neither may reach the origin.
 	f.Add(byte(0x82), "GET", "/a", "", "", "", "AAMAAABkAAQAAP__", "Http2-Settings", "")
+	// FR-VAL-3: keyed header values that the generic normalizer rewrites
+	// (two lines, whitespace around commas) or maps to absent.
+	f.Add(byte(0x40), "GET", "/a", "", "sid=1; x=2", "gzip", " a ,b", "X-Tenant", " c ")
+	f.Add(byte(0x40), "GET", "/a", "", "", "", "a\x00b", "Range", "")
+	f.Add(byte(0x40), "GET", "/a", "", "", "", "", "X-Tenant", "")
+	f.Add(byte(0x40), "GET", "/a", "", "", "", strings.Repeat("x", 127), "X-Tenant", "y")
+	f.Add(byte(0x40), "GET", "/a", "", "", "", "\xff", "X-Tenant", "a")
+	f.Add(byte(0x40), "GET", "/a", "", "", "", " , ,, ", "X-Tenant", ",")
+	f.Add(byte(0x20), "GET", "/a", "", "sid=1", "br", " a ,b", "X-Tenant", "c\x00")
 	f.Fuzz(func(t *testing.T, sel byte, method, path, query, cookie, ae, extra, name, tracestate2 string) {
 		cfg := &fuzzCfgs[int(sel)%len(fuzzCfgs)]
+		switch {
+		case sel&0x40 != 0:
+			cfg = &fuzzKeyedCfg
+		case sel&0x20 != 0:
+			cfg = &fuzzAllCfg
+		}
 		r := &Request{Method: method, Scheme: "https", Host: "example.com", Path: path, RawQuery: query,
 			Header: http.Header{
 				"Cookie": {cookie}, "Accept-Encoding": {ae},
@@ -43,6 +75,10 @@ func FuzzForwardEqualsKey(f *testing.F) {
 				"Tracestate":   {extra, tracestate2},
 				"X-Request-Id": {extra}, "If-None-Match": {extra}, "Range": {extra}, "Connection": {extra},
 			}}
+		if sel&0x60 != 0 {
+			// A keyed header in several lines (FR-VAL-3).
+			r.Header["X-Tenant"] = []string{extra, tracestate2}
+		}
 		if sel&0x80 != 0 {
 			// The h2c upgrade shape: the high bit of sel adds it to any config.
 			r.Header["Connection"] = []string{extra, "Upgrade"} // HTTP2-Settings not named
@@ -74,6 +110,12 @@ func FuzzForwardEqualsKey(f *testing.F) {
 			t.Fatalf("forwarded method %q, body %v", f.Method, f.Body)
 		}
 		allowed := append([]string{"Accept-Encoding", "Cookie", "Authorization", "Cache-Control", "Pragma"}, cfg.Allow...)
+		allowed = append(allowed, cfg.Headers...)
+		for _, name := range cfg.Headers {
+			if len(f.Header[name]) > 1 {
+				t.Fatalf("keyed header %s forwarded as %d lines; the key holds one value", name, len(f.Header[name]))
+			}
+		}
 		if !cfg.NoTraceHeaders {
 			allowed = append(allowed, "Traceparent", "Tracestate", "X-Request-Id")
 		}
@@ -81,7 +123,7 @@ func FuzzForwardEqualsKey(f *testing.F) {
 			if name == "Connection" || name == "Upgrade" || name == "Http2-Settings" {
 				t.Fatalf("forwarded hop-by-hop header %q", name)
 			}
-			if indexOf(allowed, name) < 0 {
+			if indexOf(allowed, name) < 0 && !cfg.ForwardAll {
 				t.Fatalf("forwarded unkeyed header %q", name)
 			}
 		}
