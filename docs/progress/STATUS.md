@@ -14,10 +14,21 @@ none
 
 ## Waiting on Ashwin
 
-Not blocking M7-05. Both are confirmations of choices built in the M7-04 PR; merging it approves them, and the follow-up doc edit to 01 is one line each.
+none
 
-- `TrackingParams` is a function (`weir.TrackingParams()`, a fresh slice per call), because an exported slice variable is mutable package state. D30 in 01 §2 still writes `weir.TrackingParams`. Confirm the form, then D30 gets the parentheses.
-- The stripped-cookie report has three bounds that FR-OBS-5 does not state (they are in 04 §14): names over 64 bytes are not counted, at most 32 pairs are read per request, and a request is skipped when another holds the report's lock. Confirm, then FR-OBS-5 gets one sentence.
+## Decided 2026-10-05 (M7-04)
+
+Both items that were waiting on Ashwin and the open M7-04 review nits, decided under his delegation after trying to break each choice (PR #47).
+
+- `TrackingParams` form: a function, confirmed. An exported slice variable is package-level mutable state, which CLAUDE.md forbids, and one caller writing `weir.TrackingParams[0] = ...` would change the key of every engine in the process. D30 now writes `weir.TrackingParams()` and says why.
+- Report bound, name length: changed. Dropping names over 64 bytes lost the cookies the report exists to find: session cookies of some identity providers (`CognitoIdentityServiceProvider.<client>.<user>.idToken`) run past 100 bytes. A long name is now cut to 64 bytes and marked `...`. Rejected: a higher cap (the cliff moves, and the suffix that would then be logged is the per-user part).
+- Report bound, pairs per request: raised from 32 to 256. Browsers send the oldest cookies first, so on a site with more than 32 cookies the session cookie set at login was past the cap in every request and never counted. 256 is five times RFC 6265 §6.1's floor of 50 per domain; worst case under the lock is 256 × 32 comparisons, in the window only.
+- Report counting (review nit): a request moves each counter at most once. Before, `a=1; a=2; ...` in one request added one count per pair, which the higher pair cap would have made a cheap way to push a name to the top.
+- Report bound, skip when the lock is held: confirmed. The report is a sample (D31) and the hit path must not queue behind it. A flood can skew the sample, but it could do that by volume anyway, and the output is one advisory log line of token names.
+- Log call under the lock (review nit): no change. It runs once, `done` is set before it, and every other request then returns at the atomic load.
+- No timer: confirmed. The first cacheable request with a `Cookie` field after the window logs the report; a timer would be a goroutine to own and stop for one log line.
+- Preset members (review nits): `mc_cid` and `mc_eid` stay. Whether a shop integration reads them server-side is unverified, but a cached hit never runs that code under any cache, and the doc comment says to leave out names the origin reads. `TestTrackingParamsPreset` now sends every member through the engine and pins the count at 21.
+- FR-OBS-5 states all of the above bounds.
 
 ## Decided 2026-10-05 (M7-03)
 
@@ -96,7 +107,7 @@ The cards' Notes give the reasons and the options rejected. All three come befor
 
 - M7-04: the stripped-cookie report lives in cookiereport.go; `Serve` calls `e.cr.observe(req.Header)` just before `e.cacheable`, so bypass, method-pass and `ModeBypass` requests are never counted. `e.cr` is nil under `ForwardAll` or a negative window. There is no timer: the first cacheable request with a `Cookie` line past the deadline logs the report.
 - M7-04: `observe` parses pairs the same way as `keyedCookies` (keys/cookies.go: split on `;`, trim, cut at `=`). If that parser changes, change both, or a keyed name could be reported as stripped.
-- M7-04 review nits open: repeated names in one request count once per occurrence; the slog handler runs under the report's lock (once); `TestTrackingParamsPreset` exercises 5 of the 21 preset members; `mc_cid` and `mc_eid` may be read server-side by some Mailchimp shop integrations (unverified), which the doc comment's "leave out any name the origin reads" covers.
+- M7-04: the report cuts names over 64 bytes (`...` mark), reads 256 pairs per request and moves each counter once per request (`moved` bit mask in `observe`, so `cookieReportNames` must stay at or below 32). During the report window the hit path pays a header-key scan (about 50 ns in `BenchmarkServeHitSmall`); after it, one atomic load.
 
 - M7-03: `Key.Headers` values are normalized in `forwardHeader` (keys/forward.go) and the key reads them back from the finished forward (`keyedHeaders`, keys/headers.go), so the key is what the origin sees by construction. Any new step that edits the forwarded header must run before `keyedHeaders` in `Classify`.
 - M7-03: bypass rules are decided in `Classify` (`keys.FwdBypass`, `bypassed` in keys/headers.go). The cookie match is deliberately wide (whole token, any case, percent-decoded, `tokenIs`); do not narrow it to RFC 6265 pairs.

@@ -60,9 +60,8 @@ func TestStrippedCookieReport(t *testing.T) {
 				serve(t, e, cookieReq(http.MethodGet, "sid=SECRETVALUE; lang=en; cart=SECRETVALUE"), o)
 			}
 			serve(t, e, cookieReq(http.MethodGet, "sid=SECRETVALUE; theme=SECRETVALUE"), o)
-			// Never logged: a name outside the
-			// token grammar, a pair without "=", a name over 64 bytes.
-			serve(t, e, cookieReq(http.MethodGet, `ba d=SECRETVALUE; "q"=1; novalue; `+strings.Repeat("n", 65)+"=1"), o)
+			// Never logged: a name outside the token grammar, a pair without "=".
+			serve(t, e, cookieReq(http.MethodGet, `ba d=SECRETVALUE; "q"=1; novalue; user@example.com=1`), o)
 			// A request forwarded as received strips nothing.
 			serve(t, e, cookieReq(http.MethodPost, "posted=SECRETVALUE"), o)
 			if got := reportLines(log.String()); len(got) != 0 {
@@ -107,18 +106,47 @@ func TestStrippedCookieReport(t *testing.T) {
 		})
 	})
 
-	t.Run("one request counts at most 32 pairs", func(t *testing.T) { // P5: bounded work under the lock
+	t.Run("one request reads at most 256 pairs", func(t *testing.T) { // P5: bounded work under the lock
 		run(t, nil, func(t *testing.T, e *weir.Engine, o *testorigin.Origin, log *bytes.Buffer) {
-			var b strings.Builder
-			for i := range 40 {
-				fmt.Fprintf(&b, "c%02d=1; ", i)
-			}
-			serve(t, e, cookieReq(http.MethodGet, b.String()), o)
+			// Browsers send the oldest cookies first, so a session cookie
+			// set at login comes late in the header: pair 256 still counts.
+			serve(t, e, cookieReq(http.MethodGet, strings.Repeat("lang=en; ", 255)+"session=1; over=1"), o)
 			time.Sleep(time.Minute)
 			serve(t, e, cookieReq(http.MethodGet, "x=1"), o)
 			got := reportLines(log.String())
-			if len(got) != 1 || !strings.Contains(got[0], "c31") || strings.Contains(got[0], "c32") {
-				t.Errorf("report %q, want c00 to c31 only", got)
+			if len(got) != 1 || !strings.Contains(got[0], `names=[session]`) {
+				t.Errorf("report %q, want session (pair 256) and not over (pair 257)", got)
+			}
+		})
+	})
+
+	t.Run("one request moves a counter once", func(t *testing.T) { // a name counts requests, not occurrences
+		run(t, nil, func(t *testing.T, e *weir.Engine, o *testorigin.Origin, log *bytes.Buffer) {
+			serve(t, e, cookieReq(http.MethodGet, "loud=1; loud=2; loud=3; loud=4; loud=5"), o)
+			for range 2 {
+				serve(t, e, cookieReq(http.MethodGet, "quiet=1"), o)
+			}
+			time.Sleep(time.Minute)
+			serve(t, e, cookieReq(http.MethodGet, "x=1"), o)
+			got := reportLines(log.String())
+			if len(got) != 1 || !strings.Contains(got[0], `names="[quiet loud]"`) {
+				t.Errorf("report %q, want quiet (2 requests) before loud (1 request, 5 pairs)", got)
+			}
+		})
+	})
+
+	t.Run("a long name is cut to 64 bytes", func(t *testing.T) { // P5; per-user suffixes fold into one counter
+		run(t, nil, func(t *testing.T, e *weir.Engine, o *testorigin.Origin, log *bytes.Buffer) {
+			prefix := "CognitoIdentityServiceProvider.3n4b5urk1ft4fl3mg5e62d9ado." + strings.Repeat("u", 6) // 64 bytes
+			serve(t, e, cookieReq(http.MethodGet, prefix+"aaaa-1111.idToken=SECRETVALUE"), o)
+			serve(t, e, cookieReq(http.MethodGet, prefix+"bbbb-2222.idToken=SECRETVALUE; short=1"), o)
+			// Not a token past the cut: still not logged.
+			serve(t, e, cookieReq(http.MethodGet, strings.Repeat("e", 64)+"@example.com=1"), o)
+			time.Sleep(time.Minute)
+			serve(t, e, cookieReq(http.MethodGet, "x=1"), o)
+			got := reportLines(log.String())
+			if len(got) != 1 || !strings.Contains(got[0], `names="[`+prefix+`... short]"`) {
+				t.Errorf("report %q, want the 64-byte prefix with ... first, then short", got)
 			}
 		})
 	})

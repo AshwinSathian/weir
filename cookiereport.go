@@ -14,15 +14,20 @@ import (
 )
 
 const (
-	cookieReportNames    = 32 // counters in the summary (FR-OBS-5)
-	cookieReportPairs    = 32 // pairs read from one request
-	cookieReportNameSize = 64 // longer names are not counted
+	cookieReportNames = 32 // counters in the summary (FR-OBS-5)
+	// Pairs read from one request. Browsers send the oldest cookies first,
+	// so a session cookie set at login comes late in the header; 256 is
+	// five times RFC 6265 §6.1's floor of 50 cookies per domain.
+	cookieReportPairs    = 256
+	cookieReportNameSize = 64 // longer names are cut to this and marked
+	cookieReportCut      = "..."
 )
 
 // cookieReport counts the cookie names strict forwarding strips during the
 // first Bypass.ReportStrippedCookies after New, then logs them once
 // (FR-OBS-5, D31). It never reads a value. Memory is at most
-// cookieReportNames names of cookieReportNameSize bytes (P5).
+// cookieReportNames names of cookieReportNameSize bytes plus the cut mark
+// (P5).
 type cookieReport struct {
 	done  atomic.Bool // set once the report is logged; the only cost after that
 	keyed []string    // Key.Cookies: forwarded, so not stripped
@@ -73,6 +78,7 @@ func (r *cookieReport) observe(h http.Header) {
 		return
 	}
 	pairs := 0
+	var moved uint32 // one bit per counter this request has moved
 	for _, line := range lines {
 		for pair := range strings.SplitSeq(line, ";") {
 			if pairs++; pairs > cookieReportPairs {
@@ -81,8 +87,8 @@ func (r *cookieReport) observe(h http.Header) {
 			name, _, ok := strings.Cut(strings.Trim(pair, " \t"), "=")
 			// Only token names are logged: a name is attacker-chosen
 			// bytes, and a token holds no space, quote or control byte.
-			if ok && len(name) <= cookieReportNameSize && isToken(name) && !slices.Contains(r.keyed, name) {
-				r.count(name)
+			if ok && isToken(name) && !slices.Contains(r.keyed, name) {
+				r.count(name, &moved)
 			}
 		}
 	}
@@ -90,25 +96,49 @@ func (r *cookieReport) observe(h http.Header) {
 
 // count is the Space-Saving update: a new name takes over the smallest
 // counter and inherits its count, so a frequent name cannot be pushed out
-// by a stream of distinct rare ones.
-func (r *cookieReport) count(name string) {
-	least := 0
+// by a stream of distinct rare ones. A request moves each counter at most
+// once (moved), so a name counts requests: repeating a pair, or sending
+// many per-user names with one long prefix, adds one.
+func (r *cookieReport) count(name string, moved *uint32) {
+	// A long name is cut, not skipped: session cookies of some identity
+	// providers run past 100 bytes, and the suffix that is cut is the part
+	// that names a user.
+	long := len(name) > cookieReportNameSize
+	if long {
+		name = name[:cookieReportNameSize]
+	}
+	least := -1
 	for i := range r.counts {
-		if r.counts[i].name == name {
-			r.counts[i].n++
+		c, free := &r.counts[i], *moved&(1<<i) == 0
+		if len(c.name) >= len(name) && c.name[:len(name)] == name && c.name[len(name):] == cutMark(long) {
+			if free {
+				c.n++
+				*moved |= 1 << i
+			}
 			return
 		}
-		if r.counts[i].n < r.counts[least].n {
+		if free && (least < 0 || c.n < r.counts[least].n) {
 			least = i
 		}
 	}
-	// Cloned so the summary does not pin the request's whole Cookie line.
-	name = strings.Clone(name)
+	// Built fresh so the summary does not pin the request's Cookie line.
+	name = strings.Clone(name) + cutMark(long)
 	if len(r.counts) < cookieReportNames {
+		*moved |= 1 << len(r.counts)
 		r.counts = append(r.counts, cookieCount{name, 1})
 		return
 	}
-	r.counts[least] = cookieCount{name, r.counts[least].n + 1}
+	if least >= 0 {
+		*moved |= 1 << least
+		r.counts[least] = cookieCount{name, r.counts[least].n + 1}
+	}
+}
+
+func cutMark(long bool) string {
+	if long {
+		return cookieReportCut
+	}
+	return ""
 }
 
 // report logs the names, most frequent first, and frees the summary.

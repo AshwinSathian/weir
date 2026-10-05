@@ -79,7 +79,7 @@ These were settled with the project owner on 2026-09-27 and are not reopened by 
 | D27 | Upgrade and `CONNECT` requests are rejected by `Serve`; adapters route them around Weir (§14.3). |
 | D28 | `text/event-stream` responses are never buffered, coalesced or stored (§14.4). |
 | D29 | `traceparent`, `tracestate` and `X-Request-Id` are forwarded by default in addition to `Forward.Allow`; `Forward.NoTraceHeaders` turns them off; malformed `traceparent` is dropped (§14.5). |
-| D30 | `Key.QueryDrop` stays empty by default; `weir.TrackingParams` preset provided. |
+| D30 | `Key.QueryDrop` stays empty by default; the `weir.TrackingParams()` preset is provided. It is a function returning a new slice of 21 patterns per call, because an exported slice variable would be mutable package state that one caller could change for every engine in the process. |
 | D31 | No default cookie bypass; a sampled report of stripped cookie names helps operators configure `Bypass` (§14.6). |
 | D32 | No prefix purge; sections are purged through `Cache-Groups`. |
 | D33 | Runtime incident modes via `Engine.SetMode` with a mandatory expiry (§14.7). |
@@ -621,7 +621,7 @@ Open: none that block any milestone before Phase 3.
 
 ### 14.6 Stripped-cookie report (D31)
 
-- FR-OBS-5. For `Bypass.ReportStrippedCookies` after `New` (default 5 minutes), Weir counts cookie names (never values) stripped by strict forwarding in a Space-Saving summary of 32 names, then logs the top names once and stops. Names are logged only if they match the RFC 6265 token grammar.
+- FR-OBS-5. For `Bypass.ReportStrippedCookies` after `New` (default 5 minutes), Weir counts cookie names (never values) stripped by strict forwarding in a Space-Saving summary of 32 names, then logs the top names once and stops. Names are logged only if they match the RFC 6265 token grammar. The report is a sample with fixed bounds, so no request can make it cost more: a name longer than 64 bytes is cut to 64 and marked `...` (session cookies of some identity providers are longer, and the part cut off is the part that names a user); at most 256 pairs are read per request (browsers send the oldest cookies first, so a session cookie comes late; 256 is five times RFC 6265 §6.1's floor of 50 per domain); a name counts once per request however often it repeats; and a request that arrives while another is being counted is not counted. There is no timer: the first cacheable request carrying a `Cookie` field after the window writes the log line, and nothing is logged when no name was counted. Bypassed and pass-through requests strip nothing and are not counted.
 
 ### 14.7 Incident modes (D33)
 

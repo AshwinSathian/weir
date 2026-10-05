@@ -2,6 +2,7 @@ package weir_test
 
 import (
 	"slices"
+	"strings"
 	"testing"
 	"testing/synctest"
 
@@ -46,6 +47,39 @@ func TestTrackingParamsPreset(t *testing.T) {
 			})
 		})
 	}
+
+	// Every member, so a typo in one pattern fails here: a URL carrying all
+	// of them is forwarded as the clean URL.
+	t.Run("every preset member is dropped", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			o := testorigin.NewChecked(t, 64, 16)
+			o.Default(cacheable("v"))
+			cfg := cacheCfg
+			cfg.Key.QueryDrop = weir.TrackingParams()
+			e := newEngine(t, cfg)
+			defer closeEngine(t, e)
+
+			query := "a=1"
+			for _, p := range weir.TrackingParams() {
+				query += "&" + strings.ReplaceAll(p, "*", "anything") + "=v"
+			}
+			r := getReq("/a")
+			r.RawQuery = query + "&b=2"
+			serve(t, e, r, o)
+			if got := o.Requests()[0].RawQuery; got != "a=1&b=2" {
+				t.Fatalf("forwarded query %q, want a=1&b=2", got)
+			}
+		})
+		// The names operators expect; a rename or removal is deliberate.
+		for _, want := range []string{"utm_*", "gclid", "fbclid", "msclkid", "mc_cid", "mc_eid", "_ga", "_gl"} {
+			if !slices.Contains(weir.TrackingParams(), want) {
+				t.Errorf("preset lost %q", want)
+			}
+		}
+		if n := len(weir.TrackingParams()); n != 21 {
+			t.Errorf("preset has %d patterns, want 21 (update 01 D30's note with any change)", n)
+		}
+	})
 
 	t.Run("each call returns its own slice", func(t *testing.T) {
 		a := weir.TrackingParams()
