@@ -130,9 +130,22 @@ func TestVaryOverflow(t *testing.T) {
 		e := newEngine(t, cfg)
 		defer closeEngine(t, e)
 
-		for _, v := range []string{"a", "b", "c", "c"} {
-			if resp, body := serve(t, e, varyReq("/o", "X-Custom", v), o); resp.Cache.Hit || body != v {
+		for i, v := range []string{"a", "b", "c", "c"} {
+			resp, body := serve(t, e, varyReq("/o", "X-Custom", v), o)
+			if resp.Cache.Hit || body != v {
 				t.Fatalf("%s: hit=%v body %q, want its own forwarded answer", v, resp.Cache.Hit, body)
+			}
+			// The overflow is an event, not a Cache-Status detail: the
+			// member only loses "stored".
+			want := "Weir; fwd=vary-miss; fwd-status=200"
+			if i < 2 {
+				want += "; stored"
+			}
+			if i == 0 {
+				want = "Weir; fwd=uri-miss; fwd-status=200; stored"
+			}
+			if got := resp.Header.Get("Cache-Status"); got != want {
+				t.Fatalf("%s: Cache-Status %q, want %q", v, got, want)
 			}
 		}
 		if n := ev.count(weir.EvVaryOverflow.String() + "/"); n != 2 || o.Calls("/o") != 4 {
@@ -228,6 +241,33 @@ func TestVaryReclaimsDeadSlots(t *testing.T) {
 			}
 			if stored(t, e, o, "a") {
 				t.Fatal("a stored past the cap: b and c hold both slots")
+			}
+		})
+	})
+
+	// 04 §14: below the cap no slot is needed, so a spec write reads no
+	// other variant.
+	t.Run("no reads below the cap", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			o := origin(t)
+			e, st := newRecordingEngineCfg(t, func(c *weir.Config) {
+				c.Forward.Allow = []string{"X-Custom"}
+				c.Key.MaxVariants = 3
+			})
+			defer closeEngine(t, e)
+
+			serve(t, e, varyReq("/r", "X-Custom", "a"), o)
+			a := st.firstVariant(t)
+			st.mu.Lock()
+			st.down = &a
+			st.mu.Unlock()
+			serve(t, e, varyReq("/r", "X-Custom", "b"), o)
+			serve(t, e, varyReq("/r", "X-Custom", "c"), o)
+			st.mu.Lock()
+			n := st.downGets
+			st.mu.Unlock()
+			if n != 0 {
+				t.Fatalf("%d reads of a's variant while the spec was below the cap", n)
 			}
 		})
 	})

@@ -135,7 +135,7 @@ type BreakerConfig struct {
 	MinRequests    int           // 0: 20
 	FailureRatio   float64       // 0: 0.5; (0, 1]
 	OpenFor        time.Duration // 0: 5s
-	MaxOpenFor     time.Duration // 0: 60s
+	MaxOpenFor     time.Duration // 0: max(60s, OpenFor); at least OpenFor
 	HalfOpenProbes int           // 0: 1
 	CountStatus500 bool
 	Disable        bool
@@ -271,7 +271,7 @@ func (c *Config) applyDefaults() {
 	orInt(&b.MinRequests, 20)
 	orFloat(&b.FailureRatio, 0.5)
 	orDur(&b.OpenFor, 5*time.Second)
-	orDur(&b.MaxOpenFor, 60*time.Second)
+	orDur(&b.MaxOpenFor, max(60*time.Second, b.OpenFor)) // FR-CB-3: never below the first open
 	orInt(&b.HalfOpenProbes, 1)
 
 	orDur(&c.Negative.TTL, 2*time.Second)
@@ -421,6 +421,10 @@ func (c *Config) validate() error {
 	}
 	if c.Coalesce.FollowerMaxWait > c.Timeouts.Origin {
 		return invalid("Coalesce.FollowerMaxWait", "above Timeouts.Origin")
+	}
+	if c.Breaker.MaxOpenFor < c.Breaker.OpenFor {
+		// A reopen would be shorter than the first open (FR-CB-3).
+		return invalid("Breaker.MaxOpenFor", "below Breaker.OpenFor")
 	}
 	for _, s := range c.Storable.Statuses {
 		switch {

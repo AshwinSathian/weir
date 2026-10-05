@@ -1,7 +1,7 @@
 # Weir low-level design
 
 Status: v1.0
-Date: 2026-10-02
+Date: 2026-10-05
 Depends on: [01-technical-spec.md](01-technical-spec.md), [02-architecture.md](02-architecture.md), [03-hld.md](03-hld.md)
 
 This document is written for the person (or agent) implementing a milestone. It gives exact type definitions, algorithms, locking rules and pseudo-code. Code may differ in naming of unexported identifiers; exported names, behavior, bounds and locking rules may not change without updating this document in the same commit.
@@ -105,7 +105,7 @@ type BreakerConfig struct {
 	MinRequests    int           // 0: 20
 	FailureRatio   float64       // 0: 0.5
 	OpenFor        time.Duration // 0: 5s
-	MaxOpenFor     time.Duration // 0: 60s
+	MaxOpenFor     time.Duration // 0: max(60s, OpenFor); at least OpenFor
 	HalfOpenProbes int           // 0: 1
 	CountStatus500 bool
 	Disable        bool
@@ -1229,5 +1229,5 @@ Limiter: `byHost map[uint64]int32` alongside `byPart`; `canRun` adds `byHost[hos
 - Stripped-cookie report (FR-OBS-5): a `missrate`-style Space-Saving summary of 32 string counters with a deadline; `Observe` becomes a no-op after the report is logged, so the steady-state hot path pays one atomic load.
 - Modes (FR-MODE-*): `atomic.Pointer[modeState]{mode, until}` read once per `Serve`; expiry checked against `time.Now()`. `ModeBypass` routes to `pass()` with `Classified.AsBypass()`, which forwards the client request as received (FR-FWD-3); a request with `only-if-cached` gets `ErrOnlyIfCached` instead, because FR-SRV-6 always honors it and bypass never answers from the cache. `ModeStaleOnError` widens `sieOK` in `staleOK`, used by `onFetchError` and `staleOnTimeout` (a follower timeout is an FR-STL-2 error condition): staleness in [0, 24 h], no hard or invalidating epoch, and none of the flags that forbid stale serving under FR-STL-3 (`must-revalidate`, `proxy-revalidate`, `no-cache`, `s-maxage`). A fresh entry the client forced to validate is never served on error.
 - Memory sizing (FR-MEM-1): computed in `New` when it builds the default store.
-- Vary reclaim (D37): when updating a vary spec, refs with past `Expires` are dropped; refs whose `Get` returns `ErrNotFound` during the same update are dropped too (one extra read per ref, at most `MaxVariants`, only on spec writes).
+- Vary reclaim (D37): when updating a vary spec, refs with past `Expires` are dropped. When the kept refs would still refuse the new variant at `MaxVariants`, each is read once and those whose `Get` returns `ErrNotFound` are dropped too. Any other store error keeps the ref, so a failing store cannot lift the cap (T-15). Below the cap no ref is read: a remote store pays nothing on ordinary variant writes, and the reads do not count as accesses that keep cold variants in the memory store.
 

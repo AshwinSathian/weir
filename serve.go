@@ -285,26 +285,28 @@ func (e *Engine) storeResponse(ctx context.Context, c *keys.Classified, res *fet
 // setVariant stores ent under its variant key vk, then the vary spec under
 // the primary key that lists it (04 §6.7). Variant first, so a reader that
 // finds the spec usually finds the variant. A spec with other names is
-// replaced and its variants age out. Refs past their Expires or without a
-// record are dropped, freeing their slots (D37); a new variant past
+// replaced and its variants age out. Refs past their Expires are dropped,
+// and at the cap those without a record too, freeing their slots (D37); a new variant past
 // MaxVariants live ones is not stored (FR-KEY-10, NFR-3).
 func (e *Engine) setVariant(ctx context.Context, c *keys.Classified, vk store.Key, ent *store.Entry) bool {
 	now := ent.StoredAt
 	var refs []store.VariantRef // a new slice: the stored spec is immutable (P4)
 	if cur, err := e.sg.get(ctx, c.Primary); err == nil && cur.Kind == store.KindVarySpec && slices.Equal(cur.VaryNames, ent.VaryNames) {
 		for _, r := range cur.Variants {
-			if r.Key == vk || !r.Expires.After(now) {
-				continue
+			if r.Key != vk && r.Expires.After(now) {
+				refs = append(refs, r)
 			}
-			// 04 §14 reclaim: a ref whose record the store evicted or
-			// dropped holds no slot. One read per listed ref, only on
-			// spec writes. Any other store error
-			// keeps the ref, so a failing store cannot lift the cap (T-15).
-			if _, err := e.sg.get(ctx, r.Key); errors.Is(err, store.ErrNotFound) {
-				continue
-			}
-			refs = append(refs, r)
 		}
+	}
+	if len(refs) >= e.cfg.Key.MaxVariants {
+		// 04 §14 reclaim: a ref whose record the store evicted or dropped
+		// holds no slot. One read per listed ref, only when the write
+		// would otherwise be refused. Any other store error keeps the
+		// ref, so a failing store cannot lift the cap (T-15).
+		refs = slices.DeleteFunc(refs, func(r store.VariantRef) bool {
+			_, err := e.sg.get(ctx, r.Key)
+			return errors.Is(err, store.ErrNotFound)
+		})
 	}
 	if len(refs) >= e.cfg.Key.MaxVariants {
 		emit(e.cfg.Observer, Event{Kind: EvVaryOverflow, Time: now, Partition: c.Partition})

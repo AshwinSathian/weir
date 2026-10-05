@@ -19,14 +19,18 @@ import (
 // recordingStore keeps every entry written, in order.
 type recordingStore struct {
 	store.Store
-	mu   sync.Mutex
-	sets []*store.Entry
-	down *store.Key // Get of this key fails with ErrUnavailable
+	mu       sync.Mutex
+	sets     []*store.Entry
+	down     *store.Key // Get of this key fails with ErrUnavailable
+	downGets int        // how often it was read
 }
 
 func (s *recordingStore) Get(ctx context.Context, k store.Key) (*store.Entry, error) {
 	s.mu.Lock()
 	down := s.down != nil && *s.down == k
+	if down {
+		s.downGets++
+	}
 	s.mu.Unlock()
 	if down {
 		return nil, store.ErrUnavailable

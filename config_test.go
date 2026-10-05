@@ -164,6 +164,7 @@ func TestInvalidConfigRejected(t *testing.T) {
 		{"reserve on a single slot", Config{Limiter: LimiterConfig{MaxConcurrent: 1, ReserveForeground: 1}}, "Limiter.ReserveForeground"},
 		{"warm concurrency above unreserved slots", Config{Limiter: LimiterConfig{MaxConcurrent: 8, ReserveForeground: 2}, Warm: WarmConfig{Concurrency: 7}}, "Warm.Concurrency"},
 		{"negative path limit", Config{Limits: LimitsConfig{MaxPathBytes: -1}}, "Limits.MaxPathBytes"},
+		{"breaker max open below open", Config{Breaker: BreakerConfig{OpenFor: 10 * time.Second, MaxOpenFor: 5 * time.Second}}, "Breaker.MaxOpenFor"},
 		{"leader max age above origin timeout", Config{Coalesce: CoalesceConfig{LeaderMaxAge: 31 * time.Second}}, "Coalesce.LeaderMaxAge"},
 		{"follower wait above origin timeout", Config{Coalesce: CoalesceConfig{LeaderMaxAge: time.Second, FollowerMaxWait: 5 * time.Second}, Timeouts: TimeoutsConfig{Origin: 2 * time.Second}}, "Coalesce.FollowerMaxWait"},
 		{"jitter above 0.5", Config{Freshness: FreshnessConfig{Jitter: 0.51}}, "Freshness.Jitter"},
@@ -336,5 +337,14 @@ func TestConfigDuplicateNamesRemoved(t *testing.T) {
 		if !slices.Equal(ck.got, ck.want) {
 			t.Errorf("got %q, want %q", ck.got, ck.want)
 		}
+	}
+}
+
+// FR-CB-3: a default that depends on another field follows that field
+// instead of failing validation against it.
+func TestDependentDefaultsFollow(t *testing.T) {
+	c, err := prepareConfig(Config{Breaker: BreakerConfig{OpenFor: 2 * time.Minute}})
+	if err != nil || c.Breaker.MaxOpenFor != 2*time.Minute {
+		t.Errorf("open for 2m: MaxOpenFor = %v, err %v; want 2m", c.Breaker.MaxOpenFor, err)
 	}
 }

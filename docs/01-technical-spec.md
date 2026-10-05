@@ -1,7 +1,7 @@
 # Weir technical specification
 
 Status: v1.0, approved for Phase 0 and Phase 1 implementation
-Date: 2026-10-02
+Date: 2026-10-05
 Owner: Ashwin Sathian
 Module: `github.com/AshwinSathian/weir`
 Supersedes: the interface sketch in [00-design-doc.md §7.2](00-design-doc.md)
@@ -227,7 +227,7 @@ Package `store` (import path `github.com/AshwinSathian/weir/store`) defines `Sto
 - FR-KEY-7. Vary handling uses a two-level lookup: a vary spec stored under the primary key and variants stored under variant keys. Secondary values are read from the forwarded request (after rewriting), never from the raw client request.
 - FR-KEY-8. `Vary: *` MUST prevent storage (RFC 9111 §4.1).
 - FR-KEY-9. In `VaryAuto` mode (default), any header named in `Vary` is folded into the variant key, except the sensitive set `Cookie`, `Authorization` and `Proxy-Authorization`, which prevent storage unless listed in `Key.VaryAllow`. In `VaryStrict` mode, a response whose `Vary` names any header not in `Key.VaryAllow` MUST NOT be stored. No configuration can make Weir store a response under a key that omits a header its `Vary` names.
-- FR-KEY-10. A response whose `Vary` lists more than `Key.MaxVaryHeaders` (default 8) names MUST NOT be stored. When a primary key already has `Key.MaxVariants` (default 8) live variants, a response for a new variant MUST NOT be stored; the request is answered and counted as `vary-overflow`. A variant is live while its ref has not passed `Expires` and its record still exists in the store; dead refs are dropped at the next spec update, freeing their slots (D37).
+- FR-KEY-10. A response whose `Vary` lists more than `Key.MaxVaryHeaders` (default 8) names MUST NOT be stored. When a primary key already has `Key.MaxVariants` (default 8) live variants, a response for a new variant MUST NOT be stored; the request is answered and counted by the `vary-overflow` event. Its `Cache-Status` member carries no detail for it, only the missing `stored` parameter: no other not-stored reason is shown to clients either, and the cap is an operator's concern (T-27). A variant is live while its ref has not passed `Expires` and its record still exists in the store. Refs past `Expires` are dropped at every spec update; when the update would otherwise be refused at the cap, refs whose record the store no longer has are dropped too, freeing their slots (D37).
 - FR-KEY-11. Secondary header values for Vary are matched exactly as forwarded: the same lines, in the same order, byte for byte. Weir does not apply RFC 9111 §4.1's optional normalizations (combining lines, removing whitespace) itself, because a generic normalizer cannot know where a field's syntax allows whitespace (a comma inside a quoted string), and an origin that reads one line answers two lines and their combination differently; a key that treats them as equal would serve one client's answer to the other (T-15). Not matching is always permitted (§4.1), so the cost is a split variant, never wrong content. Headers with a registered normalizer (§5.2.3) are already normalized in the forwarded request (the `Accept-Encoding` bucket, keyed cookies), so their keyed value is that normal form. An absent header only matches absent.
 - FR-KEY-12. The key builder MUST be deterministic across processes (no per-process seed in key bytes) so a shared store in Phase 2.5 sees the same keys from every node.
 
@@ -315,7 +315,7 @@ A response is stored only if all of the following hold. Each failed check increm
 ### 5.10 Origin concurrency limiter (T6.3, T6.4, T6.5, T6.8)
 
 - FR-LIM-1. Every origin fetch, including unsafe methods, bypass, background refresh and `Warm`, holds a limiter slot from before the request is sent until the response body is fully buffered. Streamed responses (pass-through and bodies over `MaxObjectBytes`) release the slot when response headers arrive, so a slow-reading client cannot pin origin slots; the stream itself stays bounded by `Timeouts.Origin`. At most `Limiter.MaxConcurrent` (default 64) fetches hold slots at once.
-- FR-LIM-2. Foreground fetches that cannot start immediately queue FIFO. The queue holds at most `Limiter.MaxQueue` (default 1024) waiters; each waits at most `Limiter.MaxQueueWait` (default 2 s) or its context. A full queue or an expired wait is a shed.
+- FR-LIM-2. Foreground fetches that cannot start immediately queue FIFO. The queue holds at most `Limiter.MaxQueue` (default 1024) waiters; each waits at most `Limiter.MaxQueueWait` (default 2 s) or its context. A full queue or an expired wait is a shed. `MaxQueueWait` may exceed `Coalesce.LeaderMaxAge` and `FollowerMaxWait`: a patient queue is the right setting for a cold start over many distinct keys, which never coalesce. The cost is on one hot key under saturation, which then gets one more queued flight per `LeaderMaxAge` it waits, each counted against the queue and the partition cap.
 - FR-LIM-3. At most `Limiter.MaxPerPartition` (default 16) fetches for one partition are in flight at once. A request over its partition cap queues like any other, and is skipped (not reordered past) until its partition has room. At most max(`MaxPerPartition`, `MaxQueue`/4) waiters of one partition (256 by default) are queued at once; a request past that is shed as a full queue, so a flood on one path cannot take more than a quarter of the queue places every other path shares (T-11). The quarter, not `MaxPerPartition`, keeps a legitimate cold start on one path with many query strings queueing: with 16 it served 32 of 2 000 such requests in the 2 s queue wait, against 656 with no cap.
 - FR-LIM-4. Background fetches never queue. They start only if in-flight fetches are below `MaxConcurrent − ReserveForeground`, where `ReserveForeground` defaults to 25% of `MaxConcurrent`; otherwise the refresh is dropped and counted.
 - FR-LIM-5. On shed, Weir serves stale per FR-STL-2 (reason `shed`) or returns `ErrShed` with a `RetryAfter` hint of `MaxQueueWait`.
@@ -325,7 +325,7 @@ A response is stored only if all of the following hold. Each failed check increm
 
 - FR-CB-1. One breaker per `Engine`. It counts outcomes of all origin fetches over a rolling window of `Breaker.Window` (default 10 s, 10 buckets).
 - FR-CB-2. The breaker opens when the window holds at least `Breaker.MinRequests` (default 20) outcomes and the fraction of origin-health failures is at least `Breaker.FailureRatio` (default 0.5). Status 500 and 4xx never count as failures. `Breaker.CountStatus500` makes 500 count.
-- FR-CB-3. Open lasts `Breaker.OpenFor` (default 5 s) with ±20% jitter. Each consecutive reopen doubles the duration up to `Breaker.MaxOpenFor` (default 60 s); closing resets it.
+- FR-CB-3. Open lasts `Breaker.OpenFor` (default 5 s) with ±20% jitter. Each consecutive reopen doubles the duration up to `Breaker.MaxOpenFor` (default 60 s, or `OpenFor` when that is longer); closing resets it. `New` rejects a `MaxOpenFor` below `OpenFor`, which would make a reopen shorter than the first open.
 - FR-CB-4. After the open period, up to `Breaker.HalfOpenProbes` (default 1) concurrent foreground fetches are admitted as probes. One success closes the breaker. One failure reopens it.
 - FR-CB-5. While open, no fetch reaches the origin. Foreground requests get stale per FR-STL-2 (reason `circuit-open`) or `ErrCircuitOpen`. Background refreshes are dropped. Unsafe methods get `ErrCircuitOpen`.
 - FR-CB-6. Every state transition emits an event and a log line.
@@ -381,7 +381,7 @@ A response is stored only if all of the following hold. Each failed check increm
 ### 5.19 Lifecycle
 
 - FR-LCY-1. `New` MUST reject invalid configuration: negative sizes, `Storable.MaxObjectBytes` larger than the store can admit (checked when the store implements `MaxObjectBytes() int64`, as the memory store does), `LeaderMaxAge` or `FollowerMaxWait` above `Timeouts.Origin`, `Jitter` outside [0, 0.5], `FailureRatio` outside (0, 1], `Limiter.ReserveForeground` at or above `Limiter.MaxConcurrent` (no slot would be left for background refresh or `Warm`), `Warm.Concurrency` above `MaxConcurrent − ReserveForeground`, or a `Storable.Statuses` list containing 206, 304, 500, 502, 503 or 504 (those statuses have dedicated handling and are never stored as entries).
-- FR-LCY-2. After `Close` returns, no goroutine started by the engine is running.
+- FR-LCY-2. After `Close` returns, no goroutine started by the engine is running. `Close` does not wait for `Serve` calls in progress: they run on their callers' goroutines, and the adapter drains them first (`http.Server.Shutdown`). A call still waiting on a flight when `Close` cancels it gets its stale entry or `ErrClosed`; a new call gets `ErrClosed`.
 - FR-LCY-3. The engine is safe for concurrent use by any number of goroutines.
 
 ## 6. Configuration
@@ -420,7 +420,7 @@ All fields are optional. The zero value of `Config` is valid and yields the defa
 | `Limiter.MaxPerPartition` | 16 | |
 | `Limiter.ReserveForeground` | 25% of `MaxConcurrent` | at least 1 from 2 slots; an explicit value at or above `MaxConcurrent` is rejected (FR-LCY-1) |
 | `Breaker.Window` / `MinRequests` / `FailureRatio` | 10 s / 20 / 0.5 | |
-| `Breaker.OpenFor` / `MaxOpenFor` / `HalfOpenProbes` | 5 s / 60 s / 1 | |
+| `Breaker.OpenFor` / `MaxOpenFor` / `HalfOpenProbes` | 5 s / 60 s / 1 | `MaxOpenFor` defaults to `OpenFor` when that is longer |
 | `Breaker.CountStatus500` | false | |
 | `Breaker.Disable` | false | |
 | `Negative.TTL` | 2 s | `Negative.Disable` turns it off |

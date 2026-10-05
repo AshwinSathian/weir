@@ -11,6 +11,7 @@ These phases start from draft specs. Each begins with one planning card that ver
 - AC: every Caddy API named in 08 checked at the pinned release with file and line; 08 marked v1.0; Phase 2 split into S/M cards (expected: module skeleton and Caddyfile, store pool and key-generation hash, nextOrigin and upgrades, errors and memory split, admin API purge/mode/stats, metrics, deployment guide)
 
 ## Phase 2.5: Valkey store
+- Notes: 06 T-45 and R-6: the adapter spec must say where `weir` sits relative to authentication and variable-setting handlers, and the deployment guide repeats it.
 
 ### [ ] P25-00 Plan the Valkey store and write its cards
 - Plan: 2.5.x · Size: S · Depends on: Phase 2 cards done
