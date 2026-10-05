@@ -73,6 +73,7 @@ It asserts INV-7 on every call when constructed with `NewChecked(tb testing.TB, 
 | `FuzzForwardEqualsKey` | INV-1: rebuild the key from the forwarded request alone (with the same config) and get the same primary key; every forwarded header is in the allowed set | request fields from fuzz bytes; config variants from a small fixed set selected by one fuzz byte |
 | `FuzzKeyEncodingInjective` | INV-2: two tuples decoded from fuzz bytes that differ in any field produce different encodings | two tuples per input |
 | `FuzzMalformedHeaderAbsent` | INV-3 | header values from fuzz bytes |
+| `FuzzBypassed` | FR-BYP-1: the bypass cookie scan never panics, finds a named cookie in any line and matches nothing without the name | two `Cookie` lines from fuzz bytes |
 | `FuzzCodecRoundTrip` | decode(encode(e)) equals e | entries from fuzz bytes |
 | `TestJitterNeverLengthens` | FR-FRS-5 | exhaustive over a grid of lifetimes and `u` values |
 

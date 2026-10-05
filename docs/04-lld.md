@@ -357,7 +357,7 @@ Classification order:
 
 1. Detect `CONNECT` (any form) and `Connection: upgrade` with an `Upgrade` field (other than one whose only token is `h2c`, which is served as a plain request) first and return `keys.ErrUpgrade`, which the root maps to `ErrUpgradeNotSupported` (FR-UPG-1, T-44); a CONNECT path is authority-form and would otherwise fail as `path`. Then validate per FR-VAL-1. Any failure returns `RequestError{Reason}` with reasons from a fixed list (`scheme`, `host`, `path`, `path-escape`, `query`, `query-params`, `method`).
 2. Method: `GET`, `HEAD` are cacheable. `OPTIONS`, `TRACE` are safe but not cacheable: `ClassPass`, `FwdMethod`, no invalidation. Everything else (including lowercase `get`) is unsafe or unknown: `ClassPass`, `FwdMethod`, invalidation on 2xx/3xx.
-3. Bypass: any `Bypass.Headers` present, or any `Bypass.Cookies` present in any `Cookie` line: `ClassPass`, `FwdBypass`.
+3. Bypass: any `Bypass.Headers` present, or any `Bypass.Cookies` present in any `Cookie` line: `ClassPass`, `FwdBypass`. A cookie name matches any maximal run of token characters in a `Cookie` line that equals it ignoring ASCII case, with each valid `%XX` in the run read as the byte it encodes (FR-BYP-1, T-8), so no pair parsing is involved: one pass over the line bytes, times `len(Bypass.Cookies)` for the comparison. Unsafe methods keep `FwdMethod` from step 2.
 4. Otherwise build the forwarded request and keys (§3.2 to §3.5).
 
 For `ClassPass`, the forwarded request is the client request with hop-by-hop fields and any `Host` field removed (the host is `Forwarded.Host`), path and query untouched, body attached. No key is built except the URI tag (needed for invalidation). The URI tag is computed from the path and query after applying the same rewrite rules as cacheable requests (§3.4, and path normalization when enabled), even though the forwarded query stays untouched; otherwise `POST /p?utm_source=x` would invalidate a URI that no cached `GET` is stored under.
@@ -421,14 +421,18 @@ Matching compares raw bytes. `utm_source` and `utm%5Fsource` are different names
 
 ```
 out := http.Header{}
-for name in Key.Headers: if v, ok := normalized(name); ok { out[name] = []string{v} }
 copy if present: Authorization, Cache-Control, Pragma, traceparent, tracestate, X-Request-Id
 for name in Forward.Allow: copy all lines if present
+for name in Key.Headers: if v, ok := normalized(name); ok { out[name] = []string{v} } else { delete(out, name) }
 delete hop-by-hop fields, fields named in Connection, Host, conditionals, Range, Content-Length, Expect and Trailer (an Allow entry cannot bring them back)
 if v := cookieHeader(keyedCookies()); v != "": out["Cookie"] = []string{v}
 filter trace fields (FR-FWD-6)
 out["Accept-Encoding"] = []string{aeBucket}  // always, set last, e.g. "gzip" or "identity"
 ```
+
+The `Key.Headers` values of the key (§3.2) are read back from `out` after it is complete, not from the client's lines. The key then holds what the origin sees by construction (INV-1), also for a keyed name that a later step rewrites (`Accept-Encoding` becomes the bucket, `Cookie` the keyed cookies), filters (trace fields) or deletes (hop-by-hop fields, `Range`); such a name costs at most a cache split, never an unkeyed value. Keyed names are written after the `Forward.Allow` copy so a name in both lists goes in its normalized form; `New` rejects that configuration, and any `Allow` or `Key.Headers` entry for which `keys.Unforwardable` is true (hop-by-hop fields, `Host`, the dropped fields, `Cookie`), so the operator learns the entry does nothing (FR-LCY-1). The deletions below stay as they are: `keys.Config` can be built without `New`, and a `Connection` option can name any field. `ForwardAll` applies the same `Key.Headers` step to its copy: normalization rewrites the request, never just the key (P2).
+
+The generic normalizer (`normalizeHeader`, 01 §5.2.3) refuses lines over `MaxKeyedHeaderBytes` combined before it copies anything, so its buffer is at most twice that limit (P5), and its output normalizes to itself, which `FuzzForwardEqualsKey` checks by classifying the forwarded request again.
 
 The hop-by-hop fields are RFC 9110 §7.6.1's list plus `HTTP2-Settings` (FR-UPG-1: a lone `h2c` upgrade is served as a plain request). `DropHopByHop` also serves stored and served responses, where dropping `HTTP2-Settings` is intended: it never belongs in a response.
 

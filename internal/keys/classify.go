@@ -20,13 +20,14 @@ const (
 )
 
 // FwdReason is why a ClassPass request goes forward. The root package maps
-// it to weir.FwdReason. Bypass rules add FwdBypass (M7-03).
+// it to weir.FwdReason.
 type FwdReason uint8
 
 // FwdReason values.
 const (
 	FwdNone   FwdReason = iota
 	FwdMethod           // the method is not cacheable
+	FwdBypass           // a Bypass rule matched a GET or HEAD (FR-BYP-1)
 )
 
 // ClientConditionals are the client's preconditions, kept so the engine can
@@ -41,7 +42,7 @@ type ClientConditionals struct {
 // look it up and forward it (04 §3.1).
 type Classified struct {
 	Class      Class
-	FwdReason  FwdReason // FwdMethod for ClassPass
+	FwdReason  FwdReason // for ClassPass: FwdMethod or FwdBypass
 	Head       bool      // client method was HEAD
 	Range      bool      // request carried Range
 	Authorized bool      // request carried Authorization
@@ -119,6 +120,11 @@ func Classify(r *Request, c *Config) (Classified, error) {
 		out.Unsafe = true
 		return pass(out, r, host), nil
 	}
+	if bypassed(h, c) { // FR-BYP-1
+		out = pass(out, r, host)
+		out.FwdReason = FwdBypass
+		return out, nil
+	}
 
 	cookies := keyedCookies(h["Cookie"], c)
 	// FR-FWD-4: a HEAD miss is fetched as GET so the response can be stored.
@@ -127,7 +133,7 @@ func Classify(r *Request, c *Config) (Classified, error) {
 	out.Forwarded = Request{Method: http.MethodGet, Scheme: r.Scheme, Host: host, Path: path, RawQuery: query, Header: fh}
 	out.Unkeyed = unkeyed
 	out.Primary = PrimaryKey(&KeyInput{Method: http.MethodGet, Scheme: r.Scheme, Host: host, Path: path, Query: query,
-		CookieNames: c.Cookies, Cookies: cookies})
+		Headers: keyedHeaders(fh, c), CookieNames: c.Cookies, Cookies: cookies})
 	out.ClientCond = ClientConditionals{IfNoneMatch: parseIfNoneMatch(h["If-None-Match"], c)}
 	// RFC 9110 §13.1.3: If-Modified-Since is ignored whenever If-None-Match
 	// is present, even when that field is malformed or over the limit.

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/AshwinSathian/weir/internal/keys"
 	"github.com/AshwinSathian/weir/store"
 )
 
@@ -463,6 +464,21 @@ func (c *Config) validate() error {
 			}
 		}
 	}
+	// T-1, FR-FWD-1: an entry that can never take effect is refused, so the
+	// operator learns the list is wrong instead of trusting it.
+	for _, n := range c.Key.Headers {
+		if keys.Unforwardable(n) {
+			return invalid("Key.Headers", fmt.Sprintf("%q is never forwarded, so it cannot be keyed%s", n, cookieHint(n, "Key.Cookies")))
+		}
+	}
+	for _, n := range c.Forward.Allow {
+		switch {
+		case slices.Contains(c.Key.Headers, n):
+			return invalid("Forward.Allow", fmt.Sprintf("%q is keyed and already forwarded", n))
+		case keys.Unforwardable(n):
+			return invalid("Forward.Allow", fmt.Sprintf("%q is never forwarded%s", n, cookieHint(n, "Key.Cookies")))
+		}
+	}
 	// A typed nil passes a nil interface check and panics on first use.
 	if isTypedNil(c.Observer) {
 		return invalid("Observer", "typed nil")
@@ -483,6 +499,15 @@ func isTypedNil(v any) bool {
 		return rv.IsNil()
 	}
 	return false
+}
+
+// cookieHint points a rejected Cookie entry at the setting that forwards
+// cookies: only keyed ones go (FR-KEY-6).
+func cookieHint(name, field string) string {
+	if name == "Cookie" {
+		return "; list cookie names in " + field
+	}
+	return ""
 }
 
 func invalid(field, reason string) error {

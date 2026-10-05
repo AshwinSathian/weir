@@ -31,7 +31,13 @@ func (e *Engine) Serve(ctx context.Context, req *Request, origin Origin) (*Respo
 		return nil, e.rejected(err)
 	}
 	if c.Class == keys.ClassPass {
-		return e.pass(ctx, &c, origin, FwdMethod)
+		if c.FwdReason != keys.FwdBypass {
+			return e.pass(ctx, &c, origin, FwdMethod)
+		}
+		if c.ReqCC.OnlyIfCached { // FR-BYP-1, FR-SRV-6: the client forbids the origin and the rule forbids the cache
+			return nil, ErrOnlyIfCached
+		}
+		return e.pass(ctx, &c, origin, FwdBypass)
 	}
 	if e.currentMode() == ModeBypass { // FR-MODE-3
 		if c.ReqCC.OnlyIfCached { // FR-SRV-6: the client forbade the origin
@@ -371,11 +377,14 @@ func keysConfig(c *Config) keys.Config {
 		QueryKeep:           c.Key.QueryKeep,
 		QuerySort:           c.Key.QuerySort,
 		NormalizePath:       c.Key.NormalizePath,
+		Headers:             c.Key.Headers,
 		Cookies:             c.Key.Cookies,
 		AcceptEncoding:      c.Key.AcceptEncoding,
 		ForwardAll:          c.Forward.Mode == ForwardAll,
 		Allow:               c.Forward.Allow,
 		NoTraceHeaders:      c.Forward.NoTraceHeaders,
+		BypassHeaders:       c.Bypass.Headers,
+		BypassCookies:       c.Bypass.Cookies,
 		HonorRevalidation:   c.Client.HonorRevalidation,
 	}
 }

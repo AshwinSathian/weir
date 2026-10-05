@@ -32,7 +32,6 @@ func forwardHeader(h http.Header, c *Config, cookies []Cookie) (out http.Header,
 		if out == nil {
 			out = http.Header{}
 		}
-		DropHopByHop(out, h["Connection"])
 	} else {
 		out = http.Header{}
 		for _, name := range defaultForward {
@@ -41,10 +40,23 @@ func forwardHeader(h http.Header, c *Config, cookies []Cookie) (out http.Header,
 		for _, name := range c.Allow {
 			copyField(out, h, name)
 		}
-		// An Allow entry or a Connection option can name any copied field;
-		// hop-by-hop fields still never go.
-		DropHopByHop(out, h["Connection"])
-		delete(out, "Cookie") // only keyed cookies, even if Allow names Cookie
+	}
+	// After the Allow copy, so a name in both lists (New rejects that) goes
+	// in its keyed form; unkeyed below still counts it, which only costs
+	// markers. FR-VAL-3, T-13: a value with no normal form is
+	// absent in the forward, and so in the key (keyedHeaders).
+	for _, name := range c.Headers {
+		if v, ok := normalizeHeader(h[name], c.MaxKeyedHeaderBytes); ok {
+			out[name] = []string{v}
+		} else {
+			delete(out, name)
+		}
+	}
+	// An Allow entry, a keyed name or a Connection option can name any
+	// field; hop-by-hop fields still never go.
+	DropHopByHop(out, h["Connection"])
+	if !c.ForwardAll {
+		delete(out, "Cookie") // only keyed cookies, even if Allow or Key.Headers names Cookie
 		if v := cookieHeader(cookies); v != "" {
 			out["Cookie"] = []string{v}
 		}
