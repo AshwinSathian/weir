@@ -5,7 +5,7 @@ Phase: 1
 Current card: none
 Card state: awaiting-merge
 Branch: card/M7-05-key-boundary-security-review
-PR: (recorded in the next commit)
+PR: #48 https://github.com/AshwinSathian/weir/pull/48
 Next card: P0.0 (public flip, PLAN), then M8-01
 
 ## Blockers
