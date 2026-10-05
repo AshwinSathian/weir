@@ -21,6 +21,31 @@ type recordingStore struct {
 	store.Store
 	mu   sync.Mutex
 	sets []*store.Entry
+	down *store.Key // Get of this key fails with ErrUnavailable
+}
+
+func (s *recordingStore) Get(ctx context.Context, k store.Key) (*store.Entry, error) {
+	s.mu.Lock()
+	down := s.down != nil && *s.down == k
+	s.mu.Unlock()
+	if down {
+		return nil, store.ErrUnavailable
+	}
+	return s.Store.Get(ctx, k)
+}
+
+// firstVariant returns the variant key in the first vary spec written.
+func (s *recordingStore) firstVariant(t *testing.T) store.Key {
+	t.Helper()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, e := range s.sets {
+		if e.Kind == store.KindVarySpec {
+			return e.Variants[0].Key
+		}
+	}
+	t.Fatal("no vary spec written")
+	return store.Key{}
 }
 
 func (s *recordingStore) Set(ctx context.Context, k store.Key, e *store.Entry) error {
@@ -44,6 +69,12 @@ func (s *recordingStore) responses() []*store.Entry {
 
 func newRecordingEngine(t *testing.T) (*weir.Engine, *recordingStore) {
 	t.Helper()
+	return newRecordingEngineCfg(t, func(*weir.Config) {})
+}
+
+// newRecordingEngineCfg is newRecordingEngine with cacheCfg adjusted by set.
+func newRecordingEngineCfg(t *testing.T, set func(*weir.Config)) (*weir.Engine, *recordingStore) {
+	t.Helper()
 	m, err := memory.New(memory.Config{})
 	if err != nil {
 		t.Fatal(err)
@@ -52,6 +83,7 @@ func newRecordingEngine(t *testing.T) (*weir.Engine, *recordingStore) {
 	st := &recordingStore{Store: m}
 	cfg := cacheCfg
 	cfg.Store = st
+	set(&cfg)
 	return newEngine(t, cfg), st
 }
 

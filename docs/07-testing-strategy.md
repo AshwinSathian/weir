@@ -1,7 +1,7 @@
 # Weir testing strategy
 
 Status: v1.0
-Date: 2026-10-02
+Date: 2026-10-05
 Depends on: [01-technical-spec.md](01-technical-spec.md), [06-threat-model.md](06-threat-model.md)
 Seed name: `03-testing-strategy.md` (renumbered, see [docs/README.md](README.md))
 
@@ -274,7 +274,7 @@ Named in [06-threat-model.md](06-threat-model.md), [01-technical-spec.md](01-tec
 | `TestModeExpires`, `TestModeStaleOnErrorLimits`, `TestModeBypass` (engine) | mode reverts after ttl; stale-on-error never serves hard-purged, invalidated or must-revalidate entries, nor beyond 24 h; bypass stores nothing |
 | `TestDefaultStoreSizeFromMemLimit` (unit) | 1 GiB limit gives 409.6 MiB rounded to shards; unset gives 256 MiB and a warning |
 | `TestMemorySizingSplit` (Caddy, Phase 2) | three unnamed-size stores share 40% of the limit |
-| `TestVaryReclaimsDeadSlots` (engine) | after a variant expires, a new variant can take its slot |
+| `TestVaryReclaimsDeadSlots` (engine) | after a variant expires or its record leaves the store, a new variant can take its slot; a failed read frees none |
 | `TestRedirect302NeedsExplicitFreshness` (engine) | 302 with `max-age=60` stored; 302 with only `Last-Modified` not stored |
 | `TestRetryAfterSurvivesHandleErrors` (Caddy, Phase 2) | `Retry-After` present with and without `handle_errors` |
 

@@ -720,3 +720,11 @@ Entry template:
 - Deviations: requirement and decision-table text changed under Ashwin's delegation (STATUS "Decided 2026-10-02").
 - Follow-ups: P0.0 after M7-05 merges.
 - Context: low.
+
+## 2026-10-05 · M7-02 · done
+- Branch / PR: card/M7-02-vary-policies / (recorded in the next commit)
+- Done: `setVariant` (serve.go) reads each kept ref on a spec write and drops those the store answers `ErrNotFound` for, so an evicted or deleted variant frees its slot (FR-KEY-10, D37, 04 §14). Any other store error keeps the ref (T-15). Strict, sensitive, overflow and expired-ref reclaim were already in the code from M7-01; this card pins them at engine level.
+- Tests: TestVaryUnconfiguredHeader (strict subtest), TestVarySensitiveNotStored, TestVaryOverflow, TestVaryReclaimsDeadSlots (expired on a lazy store, record gone, store error keeps the slot). Only "record gone" failed before the change. Mutants of the `ErrNotFound` and `Expires` conditions fail the tests. `make check` passes.
+- Deviations: 07 line for TestVaryReclaimsDeadSlots now names the record-gone and failed-read cases. The card's Touch list names storable.go and fetch.go; neither changed, because M7-01 put the policy checks in storable.go and the cap in serve.go. PLAN M7.1 ticked.
+- Follow-ups: Cache-Status detail for overflow (Waiting on Ashwin, not blocking). Reclaim reads on every spec write vs only at the cap (STATUS note, Phase 2.5).
+- Context: low; size S right.

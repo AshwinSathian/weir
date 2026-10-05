@@ -1,12 +1,12 @@
 # Status
 
-Updated: 2026-10-02
+Updated: 2026-10-05
 Phase: 1
 Current card: none
 Card state: awaiting-merge
-Branch: card/M7-01-vary-variants
-PR: #44 https://github.com/AshwinSathian/weir/pull/44
-Next card: M7-02
+Branch: card/M7-02-vary-policies
+PR: none
+Next card: M7-03
 
 ## Blockers
 
@@ -14,7 +14,7 @@ none
 
 ## Waiting on Ashwin
 
-none
+- M7-02 (not blocking): should the overflowing request carry a Cache-Status detail? FR-KEY-10 says "counted as `vary-overflow`"; today only `EvVaryOverflow` counts it and the response shows `fwd=vary-miss` without `stored`. A detail is public surface, so it was not added.
 
 ## Decided 2026-10-02
 
@@ -49,7 +49,10 @@ The cards' Notes give the reasons and the options rejected. All three come befor
 ## Notes for the next session
 
 - M7-01: `lookup` sets `lk.ck` (variant key under a spec, else Primary); flights, early refresh, warm, markers and negative entries all key on it. `storeResponse` writes the variant, then the spec (`setVariant`, serve.go); `setUnlessResponse` also keeps a live spec. Followers share only when `keys.VariantKey(...) == fr.vk`, else `reenter` (one more pass, then `fetchDirect`).
-- M7-02 scope left: `vary-sensitive` and `vary-strict` landed in M7-01 at storability level (`TestVaryPolicyStorability`, reviewer should-fix: strict mode must not be bypassable on main). M7-02 still adds the engine tests (strict part of TestVaryUnconfiguredHeader, TestVarySensitiveNotStored), `TestVaryOverflow`, and reclaim of refs whose record is gone (`ponytail:` in `setVariant`; expired refs are already dropped and the `MaxVariants` cap is enforced). `vary-overflow` in Cache-Status is not done.
+- M7-02: `setVariant` (serve.go) reads each kept ref on a spec write and drops those the store answers `ErrNotFound` for (04 §14); any other store error keeps the ref, so a failing store cannot lift the cap. `recordingStore` (conditional_test.go) now has `down` (one key whose Get fails) and `firstVariant`; the expired-ref subtest runs on `lazyStore` so the ref's `Expires` check is pinned apart from the read. The card listed storable.go and fetch.go, but M7-01 put the policy checks in storable.go and the cap in serve.go, so only serve.go changed. The reclaim reads count as accesses in the memory store's S3-FIFO, so variants of a busy URI look a little hotter than they are.
+- M7-02: the memory store keeps nothing past `MaxRetention` (24 h), while a ref's `Expires` follows the entry; a variant with a longer lifetime is a "record gone" ref after 24 h and is reclaimed by the read. Tests that sleep past 24 h hit this.
+- M7-02 review nit left open: the reclaim reads run on every spec write, up to `MaxVariants` - 1 store round trips per variant store on a remote store. Reading only when the spec is at the cap gives the same cap behavior with fewer reads but departs from 04 §14's wording; decide when the Valkey store lands (Phase 2.5).
+- M7-02: overflow is counted by `EvVaryOverflow` only. FR-KEY-10 says "counted as `vary-overflow`" and names no Cache-Status detail, so none was added; the overflowing request shows `fwd=vary-miss` without `stored`. Ask Ashwin if a detail is wanted (public surface).
 - M7-01: a request forwarding a `Forward.Allow` field stays `Unkeyed` even when the response's Vary keys that field, so it gets no marker or negative entry. M7-03 may refine `Unkeyed` against the spec's names. The Accept-Encoding bucket is still keyed only through Vary (04 §3.3); the marker note below holds for the first response of a URI, before a spec exists.
 - M7-01 review nits open: `VaryNames` allocates for every name before the `vary-too-many` check (origin-controlled, bounded by response header limits); the LLD's `lk.spec`/`fetchSpec.spec` are not in the code (`setVariant` rereads the primary key).
 

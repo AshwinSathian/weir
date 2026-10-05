@@ -137,7 +137,7 @@ Refs: FR-NEG-*, T6.10, T-17.
 
 Refs: FR-KEY-7, FR-KEY-9..11, FR-BYP-1, FR-STO-6, T6.7, T-8, T-15.
 
-- [ ] M7.1 Vary spec and variant records, `VaryAuto`/`VaryStrict`, sensitive names, variant cap, coalescing on variant keys. AC: `TestVaryUnconfiguredHeader`, `TestVarySensitiveNotStored`, `TestVaryStar`, `TestVaryOverflow`, `TestVaryFollowersRecoalesce` pass; the M1 `vary-unsupported` reason is removed.
+- [x] M7.1 Vary spec and variant records, `VaryAuto`/`VaryStrict`, sensitive names, variant cap, coalescing on variant keys. AC: `TestVaryUnconfiguredHeader`, `TestVarySensitiveNotStored`, `TestVaryStar`, `TestVaryOverflow`, `TestVaryFollowersRecoalesce` pass; the M1 `vary-unsupported` reason is removed.
 - [ ] M7.2 `Key.Headers`, `Key.Cookies`, `Forward.Allow`, `Bypass`, `StripSetCookie`. AC: `TestForwardEqualsKey` covers each; `TestSetCookieNotStored`, `TestAuthorizationRules` pass.
 - [ ] M7.2b `weir.TrackingParams` preset, stripped-cookie report, vary slot reclaim (D30, D31, D37). AC: `TestStrippedCookieReport`, `TestVaryReclaimsDeadSlots` pass.
 - [ ] M7.3 Security review of `internal/keys` against [06 §6](docs/06-threat-model.md) checklist, written up in the PR. AC: checklist answered in the PR description; every T-1..T-8 test present.
