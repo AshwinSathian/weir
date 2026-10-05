@@ -415,3 +415,32 @@ func TestClientIfNoneMatch304(t *testing.T) {
 		}
 	})
 }
+
+// T-8, 05 §6: the codec refuses header names that are not canonical, so
+// every entry the engine stores must already be canonical, whatever
+// spelling a custom Origin used. Otherwise a remote store would fail Set.
+func TestStoredEntriesEncode(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		o := testorigin.NewChecked(t, 64, 16)
+		o.Default(testorigin.Behavior{Func: func(*weir.Request) (*weir.Response, error) {
+			return respond(200, http.Header{"cache-control": {"max-age=60"}, "eTag": {`"a"`}, "x-odd": {"1"}, "vary": {"accept"}}, "v"), nil
+		}})
+		e, st := newRecordingEngine(t)
+		defer closeEngine(t, e)
+
+		serve(t, e, getReq("/e"), o)
+		if resp, _ := serve(t, e, getReq("/e"), o); !resp.Cache.Hit {
+			t.Fatalf("second request: %+v, want a hit", resp.Cache)
+		}
+		st.mu.Lock()
+		defer st.mu.Unlock()
+		if len(st.sets) < 2 {
+			t.Fatalf("%d records written, want the variant and its spec", len(st.sets))
+		}
+		for _, ent := range st.sets {
+			if _, err := store.Encode(ent); err != nil {
+				t.Errorf("kind %v: %v", ent.Kind, err)
+			}
+		}
+	})
+}

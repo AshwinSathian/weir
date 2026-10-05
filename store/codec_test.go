@@ -90,7 +90,7 @@ func genEntry(data []byte) *Entry {
 		if e.Header == nil {
 			e.Header = http.Header{}
 		}
-		name := "h" + g.str()
+		name := http.CanonicalHeaderKey("h" + g.str()) // the codec refuses other spellings
 		for range g.u8()%3 + 1 {
 			e.Header[name] = append(e.Header[name], g.str())
 		}
@@ -219,6 +219,8 @@ func TestDecodeRejects(t *testing.T) {
 		{"duplicate header name", with(header("A", "1"), header("A", "2")), 100},
 		{"empty header name", with(header("", "1")), 100},
 		{"header with no values", with(header("A")), 100},
+		{"header name not canonical", with(header("set-cookie", "1")), 100}, // T-8
+		{"header name in mixed case", with(header("Cache-control", "1")), 100},
 		{"empty vary name", with(field(nil, 0x0D)), 100},
 	}
 	for _, tt := range tests {
@@ -305,6 +307,7 @@ func TestEncodeRejectsUnrepresentable(t *testing.T) {
 		{"empty vary name", &Entry{Kind: KindVarySpec, VaryNames: []string{""}}},
 		{"empty header name", &Entry{Kind: KindResponse, Header: http.Header{"": {"v"}}}},
 		{"header name with no values", &Entry{Kind: KindResponse, Header: http.Header{"A": nil}}},
+		{"header name not canonical", &Entry{Kind: KindResponse, Header: http.Header{"etag": {"v"}}}},
 		{"variant expiry before 1678", &Entry{Kind: KindVarySpec, Variants: []VariantRef{{Expires: time.Date(1600, 1, 1, 0, 0, 0, 0, time.UTC)}}}},
 	}
 	for _, tt := range tests {

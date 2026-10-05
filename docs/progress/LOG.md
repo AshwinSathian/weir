@@ -736,3 +736,11 @@ Entry template:
 - Deviations: 01 FR-KEY-10, FR-LIM-2, FR-CB-3, FR-LCY-2 and the defaults table; 04 §1 config comment and §14 reclaim; 06 T-45 and R-6; 07 reclaim row. Dates bumped. New card M10-07 (PLAN M10.8); notes on M7-03, M10-01, M10-04, P2-00.
 - Follow-ups: "codec header-name case" in the carried list has no recorded question; drop or describe it by M7-05.
 - Context: medium.
+
+## 2026-10-05 · M7-02 · review-fixes
+- Branch / PR: card/M7-02-vary-policies / #45
+- Done: "Waiting on Ashwin" was empty; the one undecided item was "codec header-name case". Traced it to the M1-08 review and decided it (delegated): `store.Encode` and `store.Decode` reject header names that are not canonical. Non-minimal uvarints stay accepted.
+- Tests: TestDecodeRejects (two rows), TestEncodeRejectsUnrepresentable (one row), TestStoredEntriesEncode (an origin sending lowercase names still yields encodable entries), fuzz seed `non-canonical-header`. The codec rows failed first. FuzzDecodeEntry 15 s and FuzzCodecRoundTrip 10 s clean. `make check` passes.
+- Deviations: 05 §6 (Encode errors, decoding rules, the reason, the uvarint decision); date bumped.
+- Follow-ups: none. Nothing is waiting on Ashwin.
+- Context: medium.

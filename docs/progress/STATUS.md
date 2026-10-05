@@ -26,6 +26,7 @@ Every open question in this file and in LOG follow-ups, decided under Ashwin's d
 - `MaxQueueWait` above `LeaderMaxAge` or `FollowerMaxWait` (M4-02): allowed, no clamp. The reject rule was built and it broke `TestLimiterCap5000Keys` and `TestWarmDoesNotUseReserve`, which is the counterexample: a patient queue is right for a cold start over distinct keys (T6.3), and those never coalesce. Forcing `LeaderMaxAge` up to match would make followers share minute-old flights. The cost on one hot key is bounded by the queue and the partition cap. FR-LIM-2 states the interaction.
 - `Close` and foreground `Serve` calls (carried): `Close` does not wait for them. They run on caller goroutines the engine does not own; the adapter drains first. FR-LCY-2 says what such a call gets.
 - In-process origin and context values (Caddy note): new threat row T-45 and residual risk R-6 in 06. Weir cannot key what it cannot see, and stripping the values would break the handlers FR-COA-9 exists for. P2-00 carries the placement rule into the adapter spec.
+- Codec header-name case (carried since M1-08, where the review found `Decode` accepting case-distinct header names and non-minimal uvarints "from the trusted store"): `Encode` and `Decode` both reject a header name that is not canonical. Every engine check reads stored headers by canonical name, so a record with `set-cookie`, or `etag` beside `ETag`, would be served with fields no check saw (T-8); M7-01 showed the same gap on the request side was a poisoning path. Rejected: canonicalizing on decode (merging `vary` into `Vary` invents a line order, and it breaks the strictly ascending name rule); rejecting only on decode (a `Set` would succeed on a record every `Get` reports unavailable, the M1-08 defect). Non-minimal uvarints stay accepted: same decoded value, and nothing compares encoded bytes. 05 §6 says so; pinned by `TestDecodeRejects`, `TestEncodeRejectsUnrepresentable`, `TestStoredEntriesEncode` and a `FuzzDecodeEntry` seed.
 
 Decided, no change:
 
@@ -40,7 +41,6 @@ Decided, owned by a card:
 - Unowned events (`EvRequest`, `EvFetchStart`, `EvFetchEnd`, `EvNotStored` for over-size and 5xx): M10-01 (card note).
 - Go version matrix in CI (D42): M10-04 (card note).
 
-Not decided: "codec header-name case" in the carried list has no description in STATUS, LOG or the docs, so there is nothing to judge. It stays in the notes; whoever wrote it down should say what the question was, or it gets dropped at M7-05.
 
 ## Decided 2026-10-02
 
@@ -153,7 +153,7 @@ The cards' Notes give the reasons and the options rejected. All three come befor
 - With `HonorRevalidation`, `no-cache`/`max-age=0` turn Fresh into NeedsValidation (`forcesValidation`), except under `only-if-cached`.
 - `fetch` retries a strong-ETag-mismatch 304 under the same timeout; M4 must keep the retry under the same limiter slot. After a validation whose response is unstorable and response-driven, `setMarker` relies on the read-before-write to skip the marker.
 - Unowned events: no card emits `EvRequest`, `EvFetchStart` or `EvFetchEnd` (`EvStoreError{epoch}` landed in M4-04); over-size and 5xx responses emit no `EvNotStored`. M1-16 decided not to fold `EvRequest` in (its "every hit/stale/miss/.../error" scope is bigger than a Size S card and depends on M6/M7 reason values); M10-01 owns them (decided 2026-10-05). CONNECT/upgrade rejection stays event-less too: `EvKeyRejected`'s reason vocabulary is `RequestError.Reason` values only, and FR-UPG-1 has adapters intercept these before `Serve`.
-- Carried: `New` must reject `Forward.Allow` entries naming keyed or hop-by-hop fields (M7-03) and compile query patterns; codec header-name case (question undescribed, see Decided 2026-10-05); hard-epoch prune and S3-FIFO walk to measure in M1-18.
+- Carried: `New` must reject `Forward.Allow` entries naming keyed or hop-by-hop fields (M7-03) and compile query patterns; hard-epoch prune and S3-FIFO walk to measure in M1-18.
 - `invalidate` (purge.go) handles FR-INV-1 URI, `Location` and `Content-Location`; FR-INV-2 groups are M9-03. Failed `SetEpoch` writes are ignored with no event.
 - Newest-wins lives in `storeResponse` (serve.go), not `fetch`; M2 moving the store into the flight must keep the found-record exemption (`sameRecord`). `TestNewerResponseWins` sends a second GET while the first is gated, so under M2 coalescing it must use a key that cannot join the flight.
 - Event streams (FR-STR-1, M1-16): `fetch` checks `Content-Type` against `text/event-stream` or `Storable.StreamTypes` right after headers arrive, before the buffered `io.ReadAll`, and sets `fetchResult.stream`; `cacheable` (serve.go) treats it like `res.over` (skip `storeResponse`, leave `resp.Body` as fetch wired it) but never marks it `over`. M2 coalescing and M5 background refresh must keep a `stream` response out of the flight/refresh path (FR-COA-5: followers re-enter, not share it).
