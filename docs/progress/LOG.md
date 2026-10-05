@@ -768,3 +768,19 @@ Entry template:
 - Deviations: 01 FR-BYP-1, 04 §3.1 step 3, 06 R-3 name percent-decoding.
 - Follow-ups: none. Nothing is waiting on Ashwin.
 - Context: medium.
+
+## 2026-10-05 · M7-04 · done
+- Branch / PR: card/M7-04-tracking-preset-cookie-report / (recorded in the next commit)
+- Done: presets.go (`weir.TrackingParams()`, 21 `Key.QueryDrop` patterns, opt-in per D30); cookiereport.go (Space-Saving summary of 32 stripped cookie names, logged once at Info after `Bypass.ReportStrippedCookies`, names only); one field in engine.go and one call in serve.go. After the report the hit path pays one atomic load.
+- Tests: TestStrippedCookieReport (9 subtests: order, no values, once, 32-name bound, pair cap, any header key case, concurrent, default window, disabled), TestTrackingParamsPreset. The report test failed 4 subtests with the `observe` call removed. `make check` passes, trace 119/152.
+- Deviations: 04 §14 stripped-cookie bullet rewritten (where it is called, bounds, no timer). Review: no must-fix; should-fix 1 (cookies under a non-canonical header key were missed) and 4 (no concurrent test) fixed test-first; 2 and 3 need Ashwin's approval because they touch a requirement and a public signature.
+- Follow-ups: two confirmations under Waiting on Ashwin in STATUS (not blocking); 01 D30 and FR-OBS-5 wording after them.
+- Context: low; size S right.
+
+## 2026-10-05 · M7-04 · review-fixes
+- Branch / PR: card/M7-04-tracking-preset-cookie-report / #47
+- Done: decided both Waiting on Ashwin items and the open review nits (delegated), each after trying to break it. `TrackingParams()` stays a function. Report bounds changed in cookiereport.go: names over 64 bytes are cut and marked instead of dropped, 256 pairs per request instead of 32, one count per name per request. TryLock skip, no timer and the log call under the lock stand.
+- Tests: TestStrippedCookieReport subtests "one request reads at most 256 pairs", "one request moves a counter once", "a long name is cut to 64 bytes"; TestTrackingParamsPreset "every preset member is dropped". The three report subtests failed first. `make check` passes.
+- Deviations: 01 D30 and FR-OBS-5 (bounds, no timer, what is counted); 04 §14 report bullet.
+- Follow-ups: none. Nothing is waiting on Ashwin.
+- Context: low.
