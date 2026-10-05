@@ -49,7 +49,7 @@ var testRespTime = time.Date(2026, 9, 28, 12, 0, 0, 0, time.UTC)
 func TestErrorStatusesNotStored(t *testing.T) {
 	// FR-STO-2, T-7: error pages are outside the default set even with explicit freshness.
 	cfg := storableConfig(t, nil)
-	for _, status := range []int{400, 401, 403, 500, 502, 503} {
+	for _, status := range []int{400, 401, 403, 500, 502, 503, 504} {
 		d := storability(cfg, classifiedGET("/", false), originResp(status, "Cache-Control", "max-age=60"), nil, testRespTime)
 		if d.ok || d.reason != "status" || !d.responseDriven {
 			t.Errorf("status %d: got %+v, want not stored for status", status, d)

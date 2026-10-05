@@ -176,7 +176,7 @@ Each seed taxonomy entry maps to the tests below. "Engine" tests run under synct
 - `TestNegativeCacheBurst` (engine): origin returns 503 for one key; 200 requests in the same 100 ms; 1 origin call; 199 synthesized 503s with `detail=negative`; after `Negative.TTL`, 1 more call.
 - `TestNegativeNotFor500`, `TestNegativePrefersStale`, `TestNegativeScopedToKey`, `TestNegativeNeverReplacesResponse` (engine).
 - `TestMarkerNotFromAuthorizedRequest`, `TestMarkerNotFromRequestNoStore` (engine, T-31): after such a request, the next 100 anonymous requests for the URL collapse into 1 origin call.
-- `TestNoMarkerAfterUnkeyedInput` (engine, FR-STO-12, T-31): a request that forwarded a `Forward.Allow` field or ran under `ForwardAll` plants no marker; trace headers alone still do.
+- `TestNoMarkerAfterUnkeyedInput` (engine, FR-STO-12, T-31): a request that forwarded a `Forward.Allow` field, `Cache-Control` or `Pragma` (a 9000-byte value included), or ran under `ForwardAll`, plants no marker; trace headers alone still do.
 
 ### T6.11 Eviction storms
 
@@ -225,6 +225,7 @@ Named in [06-threat-model.md](06-threat-model.md), [01-technical-spec.md](01-tec
 | `TestConnectionNamedFieldsStillDecideStorage` (engine) | a response whose `Connection` names its `Cache-Control: private`, `Vary` or `Set-Cookie` is refused, as without `Connection` |
 | `TestConnectionNamedFieldsStillInform` (engine) | with `Connection` naming them, `Age` still ages the entry, `Content-Type: text/event-stream` still streams, and `Location` on a POST 201 still invalidates |
 | `TestFreshenDropsHopByHop` (engine) | a 304's hop-by-hop and `Connection`-named fields reach neither the served nor the freshened entry; a 304 naming its `private` `Cache-Control` is not stored |
+| `TestFreshenRefusesUnstorable304` (engine) | a 304 carrying `Set-Cookie`, `private`, `no-store`, `Vary: *` or `Vary: Cookie` is served to its client with every field, is not stored, and leaves the stored entry unchanged for the next client (INV-4) |
 | `TestFreshenKeepsRepresentationMetadata` (engine) | a 304 with a different `Content-Encoding` or `Content-Type` freshens the entry but keeps the stored values |
 | `TestEpochLookupErrorEmitsEvent` (engine) | a remote-flagged store failing `NewestEpoch` still serves the entry and emits `EvStoreError{epoch}` |
 | `TestCacheStatusNoKey` (engine) | no emitted `Cache-Status` contains `key=` |

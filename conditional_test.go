@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -315,6 +316,57 @@ func TestFreshenKeepsAuthorizedRule(t *testing.T) {
 			t.Fatalf("stored %d response entries, want 1", n)
 		}
 	})
+}
+
+// INV-4, FR-SRV-3, FR-STO-3, FR-STO-6, FR-KEY-8; T-8: a 304 is merged into
+// the stored response and judged like a full one, so a field that forbids
+// storage is served to the client that got it and never to the next one.
+func TestFreshenRefusesUnstorable304(t *testing.T) {
+	tests := []struct {
+		name string
+		h    http.Header
+	}{
+		{"a 304 with Set-Cookie is not stored", http.Header{"Cache-Control": {"max-age=60"}, "Set-Cookie": {"sid=victim"}}},
+		{"a private 304 is not stored", http.Header{"Cache-Control": {"private, max-age=60"}}},
+		{"a no-store 304 is not stored", http.Header{"Cache-Control": {"no-store"}}},
+		{"a 304 with Vary star is not stored", http.Header{"Cache-Control": {"max-age=60"}, "Vary": {"*"}}},
+		{"a 304 with Vary Cookie is not stored", http.Header{"Cache-Control": {"max-age=60"}, "Vary": {"Cookie"}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				o := testorigin.NewChecked(t, 64, 16)
+				o.Default(testorigin.Behavior{Header: http.Header{"Cache-Control": {"max-age=60"}, "Etag": {`"1"`}}, Body: []byte("v1")})
+				e, st := newRecordingEngine(t)
+				defer closeEngine(t, e)
+
+				serve(t, e, getReq("/a"), o)
+				time.Sleep(61 * time.Second)
+				o.Default(testorigin.Behavior{Status: http.StatusNotModified, Header: tt.h})
+				resp, body := serve(t, e, getReq("/a"), o)
+				if body != "v1" || resp.Cache.Stored {
+					t.Fatalf("body %q stored=%v, want served but not stored", body, resp.Cache.Stored)
+				}
+				for name, want := range tt.h { // FR-STO-6: its own client still gets every field
+					if !slices.Equal(resp.Header[name], want) {
+						t.Fatalf("%s served as %q, want %q", name, resp.Header[name], want)
+					}
+				}
+				if n := len(st.responses()); n != 1 {
+					t.Fatalf("stored %d response entries, want only the first", n)
+				}
+
+				// No Cache-Control on this 304, so the served one can only
+				// come from the first entry, unchanged (P4).
+				o.Default(testorigin.Behavior{Status: http.StatusNotModified})
+				next, body := serve(t, e, getReq("/a"), o)
+				if body != "v1" || len(next.Header["Set-Cookie"]) > 0 || len(next.Header["Vary"]) > 0 ||
+					next.Header.Get("Cache-Control") != "max-age=60" {
+					t.Fatalf("next client got body %q, header %v; want none of the refused 304's fields", body, next.Header)
+				}
+			})
+		})
+	}
 }
 
 // FR-SRV-3: a stale entry without validators is refetched unconditionally.

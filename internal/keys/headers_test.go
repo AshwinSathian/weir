@@ -85,6 +85,29 @@ func TestClassifyKeyedHeaders(t *testing.T) {
 			t.Fatal("keyed header marked the request Unkeyed")
 		}
 	})
+	t.Run("unkeyed cache directives mark the request Unkeyed", func(t *testing.T) {
+		// FR-STO-12, FR-NEG-4, T-31: forwarded with any bytes, never keyed.
+		for _, name := range []string{"Cache-Control", "Pragma"} {
+			h := http.Header{name: {"no-cache"}}
+			c, err := Classify(classifyReq("GET", h), cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !c.Unkeyed || len(c.Forwarded.Header[name]) != 1 {
+				t.Errorf("%s: Unkeyed = %v, forwarded %q; want Unkeyed and forwarded", name, c.Unkeyed, c.Forwarded.Header[name])
+			}
+			keyed := classifyCfg()
+			keyed.Headers = []string{name}
+			if c, err = Classify(classifyReq("GET", h), keyed); err != nil || c.Unkeyed {
+				t.Errorf("%s in Key.Headers: Unkeyed = %v, err %v; want keyed", name, c.Unkeyed, err)
+			}
+			// Named in Connection, the field never reaches the origin.
+			h = http.Header{name: {"no-cache"}, "Connection": {name}}
+			if c, err = Classify(classifyReq("GET", h), cfg); err != nil || c.Unkeyed {
+				t.Errorf("%s dropped by Connection: Unkeyed = %v, err %v; want false", name, c.Unkeyed, err)
+			}
+		}
+	})
 	t.Run("equal after normalization share key and forward", func(t *testing.T) {
 		one, two := classify(t, cfg, " a ,b"), classify(t, cfg, "a", "b")
 		if one.Primary != two.Primary {

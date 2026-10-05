@@ -784,3 +784,11 @@ Entry template:
 - Deviations: 01 D30 and FR-OBS-5 (bounds, no timer, what is counted); 04 §14 report bullet.
 - Follow-ups: none. Nothing is waiting on Ashwin.
 - Context: low.
+
+## 2026-10-05 · M7-05 · done
+- Branch / PR: card/M7-05-key-boundary-security-review / (recorded in the next commit)
+- Done: security review of internal/keys, storable.go and store/codec.go against 06. All 36 tests named on rows T-1..T-8, T-13, T-31, T-40, T-44 exist and pass. 36 fuzz seeds added across 11 targets for shapes 06 §6 item 3 asks for (empty, 10 KiB, non-ASCII, duplicate lines, separators only). One real break found by the attack review and fixed in keys/forward.go: an unkeyed `Cache-Control` or `Pragma` now sets `Unkeyed`, so no marker or negative entry follows it (T-31).
+- Tests: TestFreshenRefusesUnstorable304 (new, passed first: coverage gap, not a bug); new cases in TestNoMarkerAfterUnkeyedInput, TestNegativeNotFor500, TestClassifyKeyedHeaders (all failed before the fix); 504 in TestErrorStatusesNotStored. `make check` passes, trace 119/152; `make fuzz-short` clean on 18 targets before the fix, FuzzForwardEqualsKey 15 s clean after.
+- Deviations: 01 FR-STO-12 and FR-NEG-4 (the fix, approved by Ashwin in the session); 06 T-7 row reworded (its test proves Range passes through unstored), T-8 and T-31 rows, INV-1 now names the Accept-Encoding bucket; 04 §3.1 comment; 07 two rows.
+- Follow-ups: four open attack-review findings in STATUS notes (two hardening, one hypothesis, one nit). The normal review ran before the fix; the fix itself had no independent review. Next: PLAN P0.0 with Ashwin's confirmation.
+- Context: medium; size S was right for the review, the fix added about 10 lines.

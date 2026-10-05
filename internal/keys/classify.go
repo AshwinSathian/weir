@@ -48,7 +48,7 @@ type Classified struct {
 	Authorized bool      // request carried Authorization
 	Unsafe     bool      // unsafe or unknown method: invalidate on 2xx/3xx
 	HasBody    bool      // the forwarded request carries a body (upload pool, FR-LIM-7)
-	Unkeyed    bool      // the forward carries a Forward.Allow field, or ForwardAll (FR-STO-12, T-31)
+	Unkeyed    bool      // the forward carries an unkeyed Forward.Allow field, Cache-Control or Pragma, or ForwardAll (FR-STO-12, T-31)
 	Forwarded  Request   // the request the origin sees on a miss
 	Primary    store.Key // zero for ClassPass
 	URITag     store.Tag

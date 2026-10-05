@@ -23,8 +23,10 @@ var dropped = []string{
 // In strict mode (T-1, INV-1) it holds only keyed fields, the cache
 // directives and Authorization (FR-FWD-1), and operator-allowed and trace
 // fields. cookies is the keyedCookies result the key was built from.
-// unkeyed reports that the origin sees a field the key ignores beyond the
-// default set: always under ForwardAll, else when an Allow field is sent.
+// unkeyed reports that the origin sees client-chosen bytes the key ignores:
+// always under ForwardAll, else when an Allow field, Cache-Control or Pragma
+// is sent unkeyed. Authorization has its own flag, and trace fields have a
+// validated shape (FR-FWD-6).
 func forwardHeader(h http.Header, c *Config, cookies []Cookie) (out http.Header, unkeyed bool) {
 	if c.ForwardAll {
 		unkeyed = true
@@ -71,6 +73,12 @@ func forwardHeader(h http.Header, c *Config, cookies []Cookie) (out http.Header,
 		// carries whether or not Allow names it.
 		keyed := name == "Cookie" || name == "Accept-Encoding" || slices.Contains(defaultForward, name)
 		unkeyed = unkeyed || !keyed && len(out[name]) > 0
+	}
+	// T-31: the cache directives go as the client sent them, any length and
+	// any bytes, so an origin or WAF that rejects one must not fail the key
+	// for everyone. Keyed, they went in normal form and split the key.
+	for _, name := range [...]string{"Cache-Control", "Pragma"} {
+		unkeyed = unkeyed || len(out[name]) > 0 && !slices.Contains(c.Headers, name)
 	}
 	// Set last so no Connection option or Allow entry can remove or replace it.
 	out["Accept-Encoding"] = []string{aeBucket(h["Accept-Encoding"], c)}

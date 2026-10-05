@@ -4,9 +4,9 @@ Updated: 2026-10-05
 Phase: 1
 Current card: none
 Card state: awaiting-merge
-Branch: card/M7-04-tracking-preset-cookie-report
-PR: #47 https://github.com/AshwinSathian/weir/pull/47
-Next card: M7-05
+Branch: card/M7-05-key-boundary-security-review
+PR: (recorded in the next commit)
+Next card: P0.0 (public flip, PLAN), then M8-01
 
 ## Blockers
 
@@ -15,6 +15,10 @@ none
 ## Waiting on Ashwin
 
 none
+
+## Decided 2026-10-05 (M7-05)
+
+- T-31 fix, chosen by Ashwin in the session: a request whose forward carries `Cache-Control` or `Pragma` that `Key.Headers` does not name writes no hit-for-miss marker and no negative entry. Both fields go forward as the client sent them, any length and bytes, so an origin answering a 9000-byte `Pragma` with 431 or 503 used to plant a marker or a 2 s cached 503 on the shared key. Rejected: bounding the two fields only (a short value a WAF rejects still plants a marker). FR-STO-12, FR-NEG-4 and T-31 say so now.
 
 ## Decided 2026-10-05 (M7-04)
 
@@ -104,6 +108,12 @@ Already built, now confirmed: the weirhttp default transport (compression off, n
 The cards' Notes give the reasons and the options rejected. All three come before M1-18, because closing M1 makes the repo public.
 
 ## Notes for the next session
+
+- Next session is PLAN P0.0, not a card: flip the repo to public, enable private vulnerability reporting, tag `v0.1.0`. Visibility cannot be taken back; confirm the flip with Ashwin in chat before running it. Then M8-01.
+- M7-05: `Classified.Unkeyed` is now also true when the forward carries `Cache-Control` or `Pragma` unkeyed (keys/forward.go, after the `Allow` loop). A browser reload therefore plants no marker and no negative entry. A new always-forwarded unkeyed field needs the same line, or T-31 reopens.
+- M7-05 open findings from the attack review, none fixed here (candidates for one small card before or after M8): (a) `Bypass.Cookies` name that itself holds a valid `%XX` never matches (`tokenIs` decodes the token, not the name), `New` could reject such names; (b) `Cache-Control: public=no` on a response still grants the FR-STO-5 Authorization permission (httpcc reads `public` with an argument as `public`); (c) hypothesis, not run against PHP: `%20sessionid=1` and `+sessionid=1` are missed by `bypassed` under `ForwardAll` (R-3 territory); (d) `ForwardAll` + `Key.Cookies` + `Connection: cookie` splits the cache (safe direction).
+- M7-05: 501 is in the default storable set on purpose (FR-STO-2, RFC 9110); T-7's answer to the `Transfer-Encoding` 501 is hop-by-hop stripping. The T-7 row says so now.
+- M7-05: `FuzzVaryNames` and `FuzzCodecRoundTrip` cite no requirement ID in a comment (pre-existing nit).
 
 - M7-04: the stripped-cookie report lives in cookiereport.go; `Serve` calls `e.cr.observe(req.Header)` just before `e.cacheable`, so bypass, method-pass and `ModeBypass` requests are never counted. `e.cr` is nil under `ForwardAll` or a negative window. There is no timer: the first cacheable request with a `Cookie` line past the deadline logs the report.
 - M7-04: `observe` parses pairs the same way as `keyedCookies` (keys/cookies.go: split on `;`, trim, cut at `=`). If that parser changes, change both, or a keyed name could be reported as stripped.
