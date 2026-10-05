@@ -1,7 +1,7 @@
 # Weir threat model
 
 Status: v1.0
-Date: 2026-10-02
+Date: 2026-10-05
 Depends on: [01-technical-spec.md](01-technical-spec.md), [02-architecture.md](02-architecture.md)
 
 The seed's §7.3 makes the cache key a security boundary. This document says what that boundary protects, from whom, how each known attack class is answered, and what remains the operator's problem. Every threat has an ID so tests and code comments can cite it (`// T-3: ...`).
@@ -47,6 +47,7 @@ Each row: the attack, where it comes from, Weir's answer, the requirement or ADR
 | T-8 | Private data leakage: `Set-Cookie`, `Authorization`-bearing, or `private` responses stored and shared | RFC 9111 §3.5 enforced, and only a valid `s-maxage` grants its permission; `Set-Cookie` responses not stored unless stripped by explicit config; `private` never stored; `Vary: Cookie` and `Vary: Authorization` not stored without explicit allow; requests with `Authorization` do not coalesce | FR-STO-4..6, FR-KEY-9, FR-COA-8 | `TestSetCookieNotStored`, `TestAuthorizationRules`, `TestAuthorizationNeedsValidSMaxage`, `TestAuthorizedNotCoalesced` |
 | T-9 | Stale purge: an entry that should be purged is served because the epoch lookup failed | memory store epoch lookups cannot fail; remote stores fail open with an event. Chosen because failing closed would turn a store blip into a full miss storm. Operators who need fail-closed purges should also hard-purge by `All` after an incident | [04-lld.md §6.3](04-lld.md) | `TestEpochLookupErrorEmitsEvent` |
 | T-10 | Purge race: a fetch in flight during a purge stores pre-purge content afterwards | epochs compare against `RequestTime`, not store time | FR-PRG-7 | `TestPurgeDuringInflightFetch` |
+| T-45 | In-process origin reads unkeyed context: `HandlerOrigin` (and the Caddy `nextOrigin`) hands the handler the flight creator's context values (FR-COA-9), so an identity or variable that upstream middleware put there can shape a response that is then stored and shared | Weir cannot see context values, so it cannot key them. A handler behind Weir must derive per-user output only from the forwarded request, or the route must bypass the cache; the same rule as R-1. `TransportOrigin` sends only the forwarded request and is not affected | FR-COA-9, INV-1 | none (operator rule; the weirhttp and Caddy guides state it, R-6) |
 
 ### Availability
 
@@ -111,6 +112,7 @@ These hold for every build. Each has at least one test that fails if it breaks.
 - R-3. Operators who set `ForwardAll`, `StripSetCookie`, `VaryAllow: [Cookie]`, or large `Forward.Allow` lists take back risks the defaults remove. `New` logs a warning for `ForwardAll`; the README lists the others.
 - R-4. Epoch fail-open with remote stores (T-9).
 - R-5. Web cache deception still works if the origin itself marks a per-user page as publicly cacheable. No cache can fix that.
+- R-6. An in-process origin that varies its response on context values set by middleware in front of Weir (T-45). Put that middleware behind Weir, or bypass the route.
 
 ## 6. Review checklist for security-sensitive code
 

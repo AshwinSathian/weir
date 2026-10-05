@@ -137,7 +137,7 @@ Refs: FR-NEG-*, T6.10, T-17.
 
 Refs: FR-KEY-7, FR-KEY-9..11, FR-BYP-1, FR-STO-6, T6.7, T-8, T-15.
 
-- [ ] M7.1 Vary spec and variant records, `VaryAuto`/`VaryStrict`, sensitive names, variant cap, coalescing on variant keys. AC: `TestVaryUnconfiguredHeader`, `TestVarySensitiveNotStored`, `TestVaryStar`, `TestVaryOverflow`, `TestVaryFollowersRecoalesce` pass; the M1 `vary-unsupported` reason is removed.
+- [x] M7.1 Vary spec and variant records, `VaryAuto`/`VaryStrict`, sensitive names, variant cap, coalescing on variant keys. AC: `TestVaryUnconfiguredHeader`, `TestVarySensitiveNotStored`, `TestVaryStar`, `TestVaryOverflow`, `TestVaryFollowersRecoalesce` pass; the M1 `vary-unsupported` reason is removed.
 - [ ] M7.2 `Key.Headers`, `Key.Cookies`, `Forward.Allow`, `Bypass`, `StripSetCookie`. AC: `TestForwardEqualsKey` covers each; `TestSetCookieNotStored`, `TestAuthorizationRules` pass.
 - [ ] M7.2b `weir.TrackingParams` preset, stripped-cookie report, vary slot reclaim (D30, D31, D37). AC: `TestStrippedCookieReport`, `TestVaryReclaimsDeadSlots` pass.
 - [ ] M7.3 Security review of `internal/keys` against [06 §6](docs/06-threat-model.md) checklist, written up in the PR. AC: checklist answered in the PR description; every T-1..T-8 test present.
@@ -168,6 +168,7 @@ Refs: FR-OBS-*, NFR-*, seed §7.5.
 - [ ] M10.5b GC cost at 1M entries measured (D36). AC: `docs/benchmarks.md` reports GC CPU share and p99; if GC CPU exceeds 10% at 1M entries, a pointer-light layout task is added to Phase 1.x.
 - [ ] M10.6 `TRACE_STRICT=1` in CI. AC: trace report empty.
 - [ ] M10.7 README usage guide: quick start with `weirhttp`, the strict-forwarding explanation, every opt-out that weakens a default (R-3). AC: README reviewed against [06 §5](docs/06-threat-model.md).
+- [ ] M10.8 RFC 9110 gaps found in review: `Date` on forwarded responses (§6.6.1), empty absolute-form path as `/` (§4.2.3). AC: `TestForwardedResponseGetsDate`, `TestAbsoluteFormEmptyPath` pass.
 
 Exit criteria for Phase 1: [07 §12](docs/07-testing-strategy.md).
 

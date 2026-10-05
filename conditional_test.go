@@ -19,8 +19,37 @@ import (
 // recordingStore keeps every entry written, in order.
 type recordingStore struct {
 	store.Store
-	mu   sync.Mutex
-	sets []*store.Entry
+	mu       sync.Mutex
+	sets     []*store.Entry
+	down     *store.Key // Get of this key fails with ErrUnavailable
+	downGets int        // how often it was read
+}
+
+func (s *recordingStore) Get(ctx context.Context, k store.Key) (*store.Entry, error) {
+	s.mu.Lock()
+	down := s.down != nil && *s.down == k
+	if down {
+		s.downGets++
+	}
+	s.mu.Unlock()
+	if down {
+		return nil, store.ErrUnavailable
+	}
+	return s.Store.Get(ctx, k)
+}
+
+// firstVariant returns the variant key in the first vary spec written.
+func (s *recordingStore) firstVariant(t *testing.T) store.Key {
+	t.Helper()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, e := range s.sets {
+		if e.Kind == store.KindVarySpec {
+			return e.Variants[0].Key
+		}
+	}
+	t.Fatal("no vary spec written")
+	return store.Key{}
 }
 
 func (s *recordingStore) Set(ctx context.Context, k store.Key, e *store.Entry) error {
@@ -44,6 +73,12 @@ func (s *recordingStore) responses() []*store.Entry {
 
 func newRecordingEngine(t *testing.T) (*weir.Engine, *recordingStore) {
 	t.Helper()
+	return newRecordingEngineCfg(t, func(*weir.Config) {})
+}
+
+// newRecordingEngineCfg is newRecordingEngine with cacheCfg adjusted by set.
+func newRecordingEngineCfg(t *testing.T, set func(*weir.Config)) (*weir.Engine, *recordingStore) {
+	t.Helper()
 	m, err := memory.New(memory.Config{})
 	if err != nil {
 		t.Fatal(err)
@@ -52,6 +87,7 @@ func newRecordingEngine(t *testing.T) (*weir.Engine, *recordingStore) {
 	st := &recordingStore{Store: m}
 	cfg := cacheCfg
 	cfg.Store = st
+	set(&cfg)
 	return newEngine(t, cfg), st
 }
 
@@ -376,6 +412,35 @@ func TestClientIfNoneMatch304(t *testing.T) {
 		}
 		if n := o.TotalCalls(); n != 3 {
 			t.Fatalf("origin calls = %d, want 3", n)
+		}
+	})
+}
+
+// T-8, 05 §6: the codec refuses header names that are not canonical, so
+// every entry the engine stores must already be canonical, whatever
+// spelling a custom Origin used. Otherwise a remote store would fail Set.
+func TestStoredEntriesEncode(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		o := testorigin.NewChecked(t, 64, 16)
+		o.Default(testorigin.Behavior{Func: func(*weir.Request) (*weir.Response, error) {
+			return respond(200, http.Header{"cache-control": {"max-age=60"}, "eTag": {`"a"`}, "x-odd": {"1"}, "vary": {"accept"}}, "v"), nil
+		}})
+		e, st := newRecordingEngine(t)
+		defer closeEngine(t, e)
+
+		serve(t, e, getReq("/e"), o)
+		if resp, _ := serve(t, e, getReq("/e"), o); !resp.Cache.Hit {
+			t.Fatalf("second request: %+v, want a hit", resp.Cache)
+		}
+		st.mu.Lock()
+		defer st.mu.Unlock()
+		if len(st.sets) < 2 {
+			t.Fatalf("%d records written, want the variant and its spec", len(st.sets))
+		}
+		for _, ent := range st.sets {
+			if _, err := store.Encode(ent); err != nil {
+				t.Errorf("kind %v: %v", ent.Kind, err)
+			}
 		}
 	})
 }

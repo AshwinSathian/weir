@@ -720,3 +720,27 @@ Entry template:
 - Deviations: requirement and decision-table text changed under Ashwin's delegation (STATUS "Decided 2026-10-02").
 - Follow-ups: P0.0 after M7-05 merges.
 - Context: low.
+
+## 2026-10-05 · M7-02 · done
+- Branch / PR: card/M7-02-vary-policies / (recorded in the next commit)
+- Done: `setVariant` (serve.go) reads each kept ref on a spec write and drops those the store answers `ErrNotFound` for, so an evicted or deleted variant frees its slot (FR-KEY-10, D37, 04 §14). Any other store error keeps the ref (T-15). Strict, sensitive, overflow and expired-ref reclaim were already in the code from M7-01; this card pins them at engine level.
+- Tests: TestVaryUnconfiguredHeader (strict subtest), TestVarySensitiveNotStored, TestVaryOverflow, TestVaryReclaimsDeadSlots (expired on a lazy store, record gone, store error keeps the slot). Only "record gone" failed before the change. Mutants of the `ErrNotFound` and `Expires` conditions fail the tests. `make check` passes.
+- Deviations: 07 line for TestVaryReclaimsDeadSlots now names the record-gone and failed-read cases. The card's Touch list names storable.go and fetch.go; neither changed, because M7-01 put the policy checks in storable.go and the cap in serve.go. PLAN M7.1 ticked.
+- Follow-ups: Cache-Status detail for overflow (Waiting on Ashwin, not blocking). Reclaim reads on every spec write vs only at the cap (STATUS note, Phase 2.5).
+- Context: low; size S right.
+
+## 2026-10-05 · M7-02 · review-fixes
+- Branch / PR: card/M7-02-vary-policies / #45
+- Done: decided every open question in STATUS and LOG follow-ups (delegated by Ashwin), each after trying to break the obvious answer. Code: `setVariant` reads refs only when the write would be refused at the cap; `Breaker.MaxOpenFor` defaults to max(60 s, `OpenFor`) and `New` rejects it below `OpenFor`. No Cache-Status detail for overflow. A reject rule for `MaxQueueWait` above the coalesce waits was built and withdrawn: two existing limiter tests are legitimate configs it refused.
+- Tests: TestVaryReclaimsDeadSlots "no reads below the cap", TestVaryOverflow (Cache-Status member), TestInvalidConfigRejected "breaker max open below open", TestDependentDefaultsFollow. Each failed before its change. `make check` passes.
+- Deviations: 01 FR-KEY-10, FR-LIM-2, FR-CB-3, FR-LCY-2 and the defaults table; 04 §1 config comment and §14 reclaim; 06 T-45 and R-6; 07 reclaim row. Dates bumped. New card M10-07 (PLAN M10.8); notes on M7-03, M10-01, M10-04, P2-00.
+- Follow-ups: "codec header-name case" in the carried list has no recorded question; drop or describe it by M7-05.
+- Context: medium.
+
+## 2026-10-05 · M7-02 · review-fixes
+- Branch / PR: card/M7-02-vary-policies / #45
+- Done: "Waiting on Ashwin" was empty; the one undecided item was "codec header-name case". Traced it to the M1-08 review and decided it (delegated): `store.Encode` and `store.Decode` reject header names that are not canonical. Non-minimal uvarints stay accepted.
+- Tests: TestDecodeRejects (two rows), TestEncodeRejectsUnrepresentable (one row), TestStoredEntriesEncode (an origin sending lowercase names still yields encodable entries), fuzz seed `non-canonical-header`. The codec rows failed first. FuzzDecodeEntry 15 s and FuzzCodecRoundTrip 10 s clean. `make check` passes.
+- Deviations: 05 §6 (Encode errors, decoding rules, the reason, the uvarint decision); date bumped.
+- Follow-ups: none. Nothing is waiting on Ashwin.
+- Context: medium.

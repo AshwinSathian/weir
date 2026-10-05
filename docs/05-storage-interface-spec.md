@@ -1,7 +1,7 @@
 # Weir storage interface specification
 
 Status: v1.0
-Date: 2026-09-28
+Date: 2026-10-05
 Depends on: [01-technical-spec.md](01-technical-spec.md), [04-lld.md §2](04-lld.md)
 Seed name: `02-storage-interface-spec.md` (renumbered, see [docs/README.md](README.md))
 
@@ -239,9 +239,11 @@ func Encode(e *Entry) ([]byte, error)
 func Decode(b []byte, maxBytes int64) (*Entry, error) // errors wrap ErrUnavailable
 ```
 
-Times are Unix nanoseconds and 0 stands for the zero time (so the instant 1970-01-01T00:00:00Z decodes as zero); `Encode` returns an error for an unknown kind, a non-zero time outside the int64 nanosecond range (years 1678 to 2262) a status outside [0, 999], an empty vary name, an empty header name or a header name with no values. Zero-valued singular fields and empty collections are omitted, and decode as zero values and nil.
+Times are Unix nanoseconds and 0 stands for the zero time (so the instant 1970-01-01T00:00:00Z decodes as zero); `Encode` returns an error for an unknown kind, a non-zero time outside the int64 nanosecond range (years 1678 to 2262) a status outside [0, 999], an empty vary name, an empty header name, a header name not in canonical form (`http.CanonicalHeaderKey`) or a header name with no values. Zero-valued singular fields and empty collections are omitted, and decode as zero values and nil.
 
-Decoding rules: unknown field tags are skipped (forward compatibility); a length beyond the remaining buffer, a duplicate singular field, a fixed-size field of the wrong size, a status over 999, header names not strictly ascending, an empty vary name, an empty header name or a header value count of 0, an unknown kind, or a wrong magic or version is a decode error, which the store reports as `ErrUnavailable` and the engine treats as a miss. Total encoded size is bounded by the store's object limit (`maxBytes`) before decoding allocates anything, and every length and header value count is checked against the remaining bytes before use. The decoded entry does not alias `b`. `FuzzDecodeEntry` covers the decoder.
+Decoding rules: unknown field tags are skipped (forward compatibility); a length beyond the remaining buffer, a duplicate singular field, a fixed-size field of the wrong size, a status over 999, header names not strictly ascending, an empty vary name, an empty header name, a header name not in canonical form or a header value count of 0, an unknown kind, or a wrong magic or version is a decode error, which the store reports as `ErrUnavailable` and the engine treats as a miss. Total encoded size is bounded by the store's object limit (`maxBytes`) before decoding allocates anything, and every length and header value count is checked against the remaining bytes before use. The decoded entry does not alias `b`. `FuzzDecodeEntry` covers the decoder.
+
+Header names are canonical on both sides because every engine check reads stored headers by canonical name: a record carrying `set-cookie`, or `etag` beside `ETag`, would be served with fields no check saw (T-8). `Encode` refuses what `Decode` refuses, so a `Set` never succeeds on a record every `Get` then reports unavailable; the engine canonicalizes origin headers before it builds an entry (`TestStoredEntriesEncode`). Non-minimal uvarints are accepted: they decode to the same value, and nothing compares or hashes encoded records, so rejecting them would add a check per integer and protect nothing.
 
 ## 7. Valkey store on paper (Phase 2.5)
 

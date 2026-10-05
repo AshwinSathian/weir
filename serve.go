@@ -286,8 +286,8 @@ func (e *Engine) storeResponse(ctx context.Context, c *keys.Classified, res *fet
 // the primary key that lists it (04 §6.7). Variant first, so a reader that
 // finds the spec usually finds the variant. A spec with other names is
 // replaced and its variants age out. Refs past their Expires are dropped,
-// freeing their slots (D37); a new variant past MaxVariants live ones is
-// not stored (FR-KEY-10, NFR-3).
+// and at the cap those without a record too, freeing their slots (D37); a new variant past
+// MaxVariants live ones is not stored (FR-KEY-10, NFR-3).
 func (e *Engine) setVariant(ctx context.Context, c *keys.Classified, vk store.Key, ent *store.Entry) bool {
 	now := ent.StoredAt
 	var refs []store.VariantRef // a new slice: the stored spec is immutable (P4)
@@ -298,8 +298,16 @@ func (e *Engine) setVariant(ctx context.Context, c *keys.Classified, vk store.Ke
 			}
 		}
 	}
-	// ponytail: refs whose record is gone still hold a slot until they
-	// expire; M7-02 adds the per-ref read (04 §14 reclaim) and its test.
+	if len(refs) >= e.cfg.Key.MaxVariants {
+		// 04 §14 reclaim: a ref whose record the store evicted or dropped
+		// holds no slot. One read per listed ref, only when the write
+		// would otherwise be refused. Any other store error keeps the
+		// ref, so a failing store cannot lift the cap (T-15).
+		refs = slices.DeleteFunc(refs, func(r store.VariantRef) bool {
+			_, err := e.sg.get(ctx, r.Key)
+			return errors.Is(err, store.ErrNotFound)
+		})
+	}
 	if len(refs) >= e.cfg.Key.MaxVariants {
 		emit(e.cfg.Observer, Event{Kind: EvVaryOverflow, Time: now, Partition: c.Partition})
 		return false
