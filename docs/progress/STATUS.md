@@ -5,7 +5,7 @@ Phase: 1
 Current card: none
 Card state: awaiting-merge
 Branch: card/M7-03-keyed-headers-bypass
-PR: (recorded in the next commit)
+PR: #46 https://github.com/AshwinSathian/weir/pull/46
 Next card: M7-04
 
 ## Blockers
