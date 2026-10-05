@@ -4,9 +4,9 @@ Updated: 2026-10-05
 Phase: 1
 Current card: none
 Card state: awaiting-merge
-Branch: card/M7-03-keyed-headers-bypass
-PR: #46 https://github.com/AshwinSathian/weir/pull/46
-Next card: M7-04
+Branch: card/M7-04-tracking-preset-cookie-report
+PR: (recorded in the next commit)
+Next card: M7-05
 
 ## Blockers
 
@@ -14,7 +14,10 @@ none
 
 ## Waiting on Ashwin
 
-none
+Not blocking M7-05. Both are confirmations of choices built in the M7-04 PR; merging it approves them, and the follow-up doc edit to 01 is one line each.
+
+- `TrackingParams` is a function (`weir.TrackingParams()`, a fresh slice per call), because an exported slice variable is mutable package state. D30 in 01 §2 still writes `weir.TrackingParams`. Confirm the form, then D30 gets the parentheses.
+- The stripped-cookie report has three bounds that FR-OBS-5 does not state (they are in 04 §14): names over 64 bytes are not counted, at most 32 pairs are read per request, and a request is skipped when another holds the report's lock. Confirm, then FR-OBS-5 gets one sentence.
 
 ## Decided 2026-10-05 (M7-03)
 
@@ -90,6 +93,10 @@ Already built, now confirmed: the weirhttp default transport (compression off, n
 The cards' Notes give the reasons and the options rejected. All three come before M1-18, because closing M1 makes the repo public.
 
 ## Notes for the next session
+
+- M7-04: the stripped-cookie report lives in cookiereport.go; `Serve` calls `e.cr.observe(req.Header)` just before `e.cacheable`, so bypass, method-pass and `ModeBypass` requests are never counted. `e.cr` is nil under `ForwardAll` or a negative window. There is no timer: the first cacheable request with a `Cookie` line past the deadline logs the report.
+- M7-04: `observe` parses pairs the same way as `keyedCookies` (keys/cookies.go: split on `;`, trim, cut at `=`). If that parser changes, change both, or a keyed name could be reported as stripped.
+- M7-04 review nits open: repeated names in one request count once per occurrence; the slog handler runs under the report's lock (once); `TestTrackingParamsPreset` exercises 5 of the 21 preset members; `mc_cid` and `mc_eid` may be read server-side by some Mailchimp shop integrations (unverified), which the doc comment's "leave out any name the origin reads" covers.
 
 - M7-03: `Key.Headers` values are normalized in `forwardHeader` (keys/forward.go) and the key reads them back from the finished forward (`keyedHeaders`, keys/headers.go), so the key is what the origin sees by construction. Any new step that edits the forwarded header must run before `keyedHeaders` in `Classify`.
 - M7-03: bypass rules are decided in `Classify` (`keys.FwdBypass`, `bypassed` in keys/headers.go). The cookie match is deliberately wide (whole token, any case, percent-decoded, `tokenIs`); do not narrow it to RFC 6265 pairs.

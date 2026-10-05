@@ -45,6 +45,7 @@ type Engine struct {
 	upl      *limiter.Limiter          // requests with a body (FR-LIM-7)
 	cb       *breaker.Breaker          // nil when Breaker.Disable
 	mode     atomic.Pointer[modeState] // nil: ModeNormal (FR-MODE-1)
+	cr       *cookieReport             // nil when disabled (FR-OBS-5)
 
 	mu        sync.Mutex  // orders setting closed against wg.Add in goBackground
 	closed    atomic.Bool // written under mu; read without it on the Serve path
@@ -80,7 +81,7 @@ func New(cfg Config) (*Engine, error) {
 		return nil, invalid("Storable.MaxObjectBytes", fmt.Sprintf("above the store's limit of %d", sz.MaxObjectBytes()))
 	}
 	warnForwarding(c)
-	e := &Engine{cfg: c, kcfg: keysConfig(&c), sg: newStoreGuard(c.Store, c.Timeouts.Store, c.Observer), ownStore: own, closeDone: make(chan struct{})}
+	e := &Engine{cfg: c, kcfg: keysConfig(&c), sg: newStoreGuard(c.Store, c.Timeouts.Store, c.Observer), ownStore: own, cr: newCookieReport(&c), closeDone: make(chan struct{})}
 	l := &c.Limiter
 	e.lim = limiter.New(limiter.Config{
 		Max: l.MaxConcurrent, MaxQueue: l.MaxQueue, PerPartition: l.MaxPerPartition,

@@ -45,6 +45,7 @@ func (e *Engine) Serve(ctx context.Context, req *Request, origin Origin) (*Respo
 		}
 		return e.pass(ctx, c.AsBypass(), origin, FwdBypass)
 	}
+	e.cr.observe(req.Header)
 	return e.cacheable(ctx, &c, origin, nil)
 }
 
