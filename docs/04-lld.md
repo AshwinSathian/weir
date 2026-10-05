@@ -1076,7 +1076,7 @@ type Tracker struct {
 	start    time.Time
 	counters []counter          // len <= TopK
 	index    map[uint64]int     // partition hash -> counters index
-	emit     func([]Anomaly)
+	emit     func(end time.Time, found []Anomaly)
 }
 type counter struct {
 	h           uint64
@@ -1088,7 +1088,9 @@ type counter struct {
 
 `Observe(h, sample, miss)`: rotate if the window ended (evaluate anomalies, emit, reset); if `h` is tracked, increment; else if not full, add; else replace the counter with the minimum `reqs`, setting `reqs = min+1`, `err = min`, `misses = 1 if miss`. `misses` counts only since the counter was (re)assigned, so it is exact for that span and a lower bound overall. Anomaly check at rotation: `misses >= max(1, MinMisses)` and `misses / (reqs - err) >= MinRatio`, so replaced counters do not produce false alarms (`reqs - err` is at least 1 and at least `misses` for every live counter). Threshold ranges are validated by the engine's config, not here. Throttle updates go to the limiter through a callback that replaces the limiter's whole `throttled` map once per window (at most `TopK` entries), so throttles expire by themselves. Partition strings are safe to log: validation already rejected control bytes (FR-VAL-1).
 
-`New(cfg, emit)` returns nil when `TopK` or `Window` is not positive, and every method accepts a nil `*Tracker`, so a disabled tracker costs one nil check. Rotation is lazy: there is no timer, the first `Observe` at or past `start + Window` closes the window and is itself counted in the new one, so an idle engine reports its last window on the next request. `emit` runs after the mutex is released (P8), once per closed window with that window's anomalies, an empty slice included; that one call is what replaces the limiter's `throttled` map. Two observations stalled a full window apart can deliver their windows out of order, so the receiver must not assume order beyond that.
+`New(cfg, emit)` returns nil when `TopK` or `Window` is not positive, and every method accepts a nil `*Tracker`, so a disabled tracker costs one nil check. Rotation is lazy: there is no timer, the first `Observe` at or past `start + Window` closes the window and is itself counted in the new one, so an idle engine reports its last window on the next request. `emit(end, found)` runs after the mutex is released (P8), once per closed window with that window's anomalies, an empty slice included; that one call is what replaces the limiter's `throttled` map. `end` is `start + Window` of the closed window, and it grows with every window. The receiver needs it for two reasons. A report can arrive long after its window when traffic stopped (rotation waits for a request), so a throttle is applied only while `end + Window` is still ahead, and the limiter drops it at that time without waiting for the next report. And two callers stalled a full window apart can deliver their windows out of order, so the receiver keeps the report with the latest `end`.
+
+Detection limit (ADR-9): a partition is sure to hold its counter only while it has more than `N / TopK` of the window's `N` requests. Below that, one-off partitions can keep taking its counter, each time resetting `misses`, so a flood of 2 000 misses hidden in 200 000 one-off requests is not reported at `TopK = 64`. The one-off requests are themselves misses that the limiter bounds (FR-LIM-3, `TestPathFloodOriginBounded`). A counter's sample is a slice of the partition string, not a copy; partitions are at most 512 bytes (§3.1), so the summary pins at most `TopK * 512` bytes.
 
 The engine calls `Observe` once per cacheable request after the outcome is known (hit or miss), not in `lookup`; the pseudo-code in §6.2 shows the call site simplified.
 

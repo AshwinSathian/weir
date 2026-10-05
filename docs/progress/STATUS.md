@@ -16,6 +16,17 @@ none
 
 none
 
+## Decided 2026-10-05 (M8-01)
+
+Open items of the M8-01 handoff, decided under Ashwin's delegation after trying to break each choice (PR #49). Nothing was listed under Waiting on Ashwin; these were the findings left open.
+
+- Windows reported out of order (review S2): fixed in the report shape. `emit(end, found)` carries the window's end time, which grows with every window; the receiver keeps the latest. Rejected: a second mutex to serialize `emit` (the rotating caller would hold the tracker's lock while it waits, which blocks every request and breaks P8); dropping a late report in the tracker (its anomaly event would be lost).
+- Throttle left standing when traffic stops, and the worse case found while attacking it: a flood, an idle hour, then one request reported the hour-old window, and a receiver would throttle on it. Same fix: `end` lets the limiter apply a throttle only while `end + Window` is ahead and drop it then. The limiter side is M8-02; its card now says so. Rejected: a timer in the tracker (lazy rotation is the card's AC, and it would add a goroutine to own).
+- Floods under 1/`TopK` of traffic go unreported: reproduced (1 997 misses in 200 000 one-off requests, none reported at `TopK` 64). Kept: it is Space-Saving's stated bound (ADR-9), the attacker pays 64 one-off misses per hidden miss, and the limiter bounds those. 01 FR-MR-1 and 04 §8.4 now state the limit; `TestHeavyHitterAboveBoundReported` pins the side that must hold.
+- Sample copy (`strings.Clone`, added after the first review): removed. It was one allocation under the mutex per request of a flood; without it the summary pins at most `TopK` * 512 bytes. `BenchmarkObserveFlood` shows 0 allocs.
+- Truncation splitting a UTF-8 character: cannot happen, partitions are visible ASCII (FR-VAL-1). No change.
+- Tie-break of the minimum scan: left unpinned. Any minimum is a correct Space-Saving step, and a test would freeze an accident.
+
 ## Decided 2026-10-05 (M7-05)
 
 Open findings of the two attack reviews, decided under Ashwin's delegation after trying to break each choice (PR #48). Nothing was listed under Waiting on Ashwin; these were the findings left open at handoff.
@@ -120,9 +131,8 @@ The cards' Notes give the reasons and the options rejected. All three come befor
 ## Notes for the next session
 
 - PLAN P0.0 ran on 2026-10-05 after Ashwin confirmed it in chat: the repository is public, private vulnerability reporting is enabled, and `v0.1.0` is an annotated tag on 560d2af (the #48 merge). Commit author emails are public with it.
-- M8-01: `missrate.New(cfg, emit)` calls `emit([]Anomaly)` once per closed window, an empty slice included, after its lock is released. M8-02's limiter callback can replace the whole `throttled` map from that one call, and a quiet window clears it (FR-MR-3).
-- M8-01: rotation is lazy (no timer), so with no traffic at all the last window is never reported and a throttle set by it stays until the next cacheable request. M8-02 should decide whether `capFor` also checks an expiry time.
-- M8-01: two `Observe` calls stalled a full window apart can deliver their windows out of order (review should-fix S2, left open). If M8-02 needs strict order, add the window start to the report and drop older ones in the receiver.
+- M8-01: `missrate.New(cfg, emit)` calls `emit(end, found)` once per closed window, an empty slice included, after its lock is released. `end` is the closed window's end time. M8-02's limiter callback keeps the report with the latest `end`, throttles only while `end + Window` is ahead and drops the map at that time (card notes, 04 §8.4).
+- M8-01: `TestPathFloodOriginBounded` (M8-02) is bounded by the limiter, not by the tracker: a flood over distinct paths has no heavy partition, so nothing is reported. The M4-02 note below that calls the miss-rate throttle "the answer there" is wrong on that point.
 - M8-01: `New` returns nil for a non-positive `TopK` or `Window`; `Config.validate` in config.go already range-checks the `MissRate` fields, so the engine never reaches that path with user values.
 - config.go's `MissRateConfig` comment cites `FR-MIS`; the spec's IDs are `FR-MR-*`. Fix it in M8-02, which touches that wiring.
 - M7-05: `Classified.Unkeyed` is now also true when the forward carries `Cache-Control` or `Pragma` unkeyed (keys/forward.go, after the `Allow` loop). A browser reload therefore plants no marker and no negative entry. A new always-forwarded unkeyed field needs the same line, or T-31 reopens.

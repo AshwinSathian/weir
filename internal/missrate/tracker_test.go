@@ -1,6 +1,7 @@
 package missrate
 
 import (
+	"math/rand/v2"
 	"strings"
 	"sync"
 	"testing"
@@ -15,7 +16,7 @@ func testConfig() Config {
 // collect returns a tracker and the anomalies it has emitted so far.
 func collect(cfg Config) (*Tracker, *[]Anomaly) {
 	var got []Anomaly
-	return New(cfg, func(a []Anomaly) { got = append(got, a...) }), &got
+	return New(cfg, func(_ time.Time, a []Anomaly) { got = append(got, a...) }), &got
 }
 
 // rotate ends the current window and makes the observation that notices it.
@@ -179,7 +180,7 @@ func TestNilTracker(t *testing.T) {
 		{Window: 0, TopK: 64},
 		{Window: time.Second, TopK: -1},
 	} {
-		if tr := New(cfg, func([]Anomaly) {}); tr != nil {
+		if tr := New(cfg, func(time.Time, []Anomaly) {}); tr != nil {
 			t.Errorf("New(%+v) = %v, want nil", cfg, tr)
 		} else {
 			tr.Observe(1, "/p", true)
@@ -195,7 +196,7 @@ func TestObserveConcurrent(t *testing.T) {
 		var tr *Tracker
 		var mu sync.Mutex
 		var misses uint64
-		tr = New(cfg, func(as []Anomaly) {
+		tr = New(cfg, func(_ time.Time, as []Anomaly) {
 			tr.Observe(99, "/from-emit", false)
 			mu.Lock()
 			for _, a := range as {
@@ -225,14 +226,22 @@ func TestEmitOncePerWindow(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		cfg := testConfig()
 		var calls [][]Anomaly
-		tr := New(cfg, func(a []Anomaly) { calls = append(calls, a) })
+		var ends []time.Time
+		begin := time.Now()
+		tr := New(cfg, func(end time.Time, a []Anomaly) {
+			calls = append(calls, a)
+			ends = append(ends, end)
+		})
 		for range 600 {
 			tr.Observe(1, "/p", true)
 		}
 		rotate(tr, cfg) // closes the flood window
 		rotate(tr, cfg) // closes a quiet one
 		if len(calls) != 2 || len(calls[0]) != 1 || len(calls[1]) != 0 {
-			t.Errorf("calls = %+v, want one anomaly, then an empty report", calls)
+			t.Fatalf("calls = %+v, want one anomaly, then an empty report", calls)
+		}
+		if !ends[0].Equal(begin.Add(cfg.Window)) || !ends[1].Equal(begin.Add(2*cfg.Window)) {
+			t.Errorf("window ends = %v, want %v and %v", ends, begin.Add(cfg.Window), begin.Add(2*cfg.Window))
 		}
 	})
 }
@@ -253,5 +262,77 @@ func TestDegenerateConfig(t *testing.T) {
 		quiet := New(cfg, nil)
 		quiet.Observe(1, "/p", true)
 		rotate(quiet, cfg)
+	})
+}
+
+// FR-MR-3, T-11: a report says when its window ended, not when it was
+// noticed, so a receiver can order reports and can tell that a flood seen
+// before an idle hour is too old to throttle on.
+func TestLateReportCarriesWindowEnd(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		cfg := testConfig()
+		var ends []time.Time
+		var found int
+		begin := time.Now()
+		tr := New(cfg, func(end time.Time, a []Anomaly) {
+			ends = append(ends, end)
+			found += len(a)
+		})
+		for range 600 {
+			tr.Observe(1, "/p", true)
+		}
+		time.Sleep(time.Hour)
+		tr.Observe(1, "/p", false)
+		if len(ends) != 1 || found != 1 || !ends[0].Equal(begin.Add(cfg.Window)) {
+			t.Fatalf("ends = %v, anomalies = %d, want one report ending at %v", ends, found, begin.Add(cfg.Window))
+		}
+		// The next window starts at the late observation, so ends only grow.
+		rotate(tr, cfg)
+		if len(ends) != 2 || !ends[1].Equal(begin.Add(time.Hour+cfg.Window)) {
+			t.Errorf("ends = %v, want the second at %v", ends, begin.Add(time.Hour+cfg.Window))
+		}
+	})
+}
+
+// P5: a counter keeps the partition string it was given when that fits, with
+// no copy on the replacement path a flood drives.
+func BenchmarkObserveFlood(b *testing.B) {
+	cfg := testConfig()
+	cfg.Window = time.Hour
+	tr := New(cfg, nil)
+	sample := strings.Repeat("a", 300)
+	var h uint64
+	b.ReportAllocs()
+	for b.Loop() {
+		h++
+		tr.Observe(h, sample, true)
+	}
+}
+
+// FR-MR-1, T-11, ADR-9: a partition above 1/TopK of the window's requests
+// (here 2% against 1.56%) is reported however the one-off partitions around
+// it are ordered, and its counts are short by at most N/TopK.
+func TestHeavyHitterAboveBoundReported(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		cfg := testConfig()
+		tr, got := collect(cfg)
+		r := rand.New(rand.NewPCG(1, 2))
+		const total = 200_000
+		var sent uint64
+		for i := range total {
+			if r.Float64() < 0.02 {
+				sent++
+				tr.Observe(7, "/heavy", true)
+			} else {
+				tr.Observe(1000+uint64(i), "/one-off", true)
+			}
+		}
+		rotate(tr, cfg)
+		if len(*got) != 1 || (*got)[0].Partition != 7 {
+			t.Fatalf("anomalies = %+v, want only partition 7", *got)
+		}
+		if m := (*got)[0].Misses; m > sent || sent-m > total/uint64(cfg.TopK) {
+			t.Errorf("misses = %d of %d sent, want short by at most %d", m, sent, total/cfg.TopK)
+		}
 	})
 }

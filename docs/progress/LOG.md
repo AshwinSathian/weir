@@ -809,3 +809,11 @@ Entry template:
 - Deviations: 04 §8.4 now lists `Config` and `Anomaly`, `emit func([]Anomaly)` once per window (was `func(Anomaly)`, which could not clear a throttle after a quiet window), the one-miss floor, nil `New`, lazy rotation. No requirement, default or public signature changed.
 - Follow-ups: review had no must-fix. Should-fix S1 (emit shape) and S3 (zero thresholds) fixed; S2 (windows can be reported out of order after a full-window stall) left for M8-02, noted in STATUS. The fixes after the review were not reviewed again.
 - Context: medium (P0.0 plus the card); size S was right.
+
+## 2026-10-05 · M8-01 · review-fixes
+- Branch / PR: card/M8-01-space-saving-tracker / #49
+- Done: decided every item the handoff left open (delegated), each after trying to break it. `emit` is now `func(end time.Time, found []Anomaly)`: the window's end time orders reports and shows their age. Sample copy removed (0 allocs per flood request). Attack runs found two things: a report delivered an hour late would be throttled on, and a flood under 1/`TopK` of traffic is not reported.
+- Tests: TestLateReportCarriesWindowEnd, TestHeavyHitterAboveBoundReported, BenchmarkObserveFlood (new); window ends asserted in TestEmitOncePerWindow. The new tests failed to compile before the change. `make check` passes.
+- Deviations: 01 FR-MR-1 (states the 1/`TopK` limit); 04 §8.4 (`emit` shape, receiver rules, detection limit, sample bound); M8-02 card notes (limiter expiry and ordering).
+- Follow-ups: the limiter half of the late-report and ordering rules is M8-02's. This round was attacked by the session that wrote it, not by an independent reviewer.
+- Context: medium.

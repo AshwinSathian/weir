@@ -1,7 +1,6 @@
 package missrate
 
 import (
-	"strings"
 	"sync"
 	"time"
 )
@@ -34,7 +33,7 @@ type Tracker struct {
 	start    time.Time
 	counters []counter      // len <= TopK (P5)
 	index    map[uint64]int // partition hash -> counters index, len <= TopK
-	emit     func([]Anomaly)
+	emit     func(end time.Time, found []Anomaly)
 }
 
 type counter struct {
@@ -46,13 +45,17 @@ type counter struct {
 
 // New returns a tracker whose first window starts now. emit is called once
 // per closed window with that window's anomalies, an empty slice included,
-// outside the tracker's lock; a receiver that keeps only the last call
+// outside the tracker's lock; a receiver that keeps only the newest report
 // (the limiter's throttle map, FR-MR-3) therefore forgets a partition one
-// window after it stops being anomalous. Two Observe calls a full window
-// apart can deliver their windows out of order.
+// window after it stops being anomalous.
+//
+// end is when the window ended, which can be long before the call: rotation
+// waits for a request, and emit runs unlocked, so a stalled caller can
+// deliver its window after a later one. end grows with every window, so the
+// receiver keeps the report with the latest end and judges its age from it.
 // New returns nil, a tracker that records nothing, when cfg cannot hold a
 // summary (no counters or no window).
-func New(cfg Config, emit func([]Anomaly)) *Tracker {
+func New(cfg Config, emit func(end time.Time, found []Anomaly)) *Tracker {
 	if cfg.TopK <= 0 || cfg.Window <= 0 {
 		return nil
 	}
@@ -76,7 +79,8 @@ func (t *Tracker) Observe(h uint64, sample string, miss bool) {
 	t.mu.Lock()
 	var found []Anomaly
 	now := time.Now()
-	closed := now.Sub(t.start) >= t.cfg.Window
+	end := t.start.Add(t.cfg.Window)
+	closed := !now.Before(end)
 	if closed {
 		found = t.rotate(now)
 	}
@@ -84,7 +88,7 @@ func (t *Tracker) Observe(h uint64, sample string, miss bool) {
 	t.mu.Unlock()
 	// P8: emit may log, or call back into Observe, so it runs unlocked.
 	if closed && t.emit != nil {
-		t.emit(found)
+		t.emit(end, found)
 	}
 }
 
@@ -138,11 +142,14 @@ func (t *Tracker) rotate(now time.Time) []Anomaly {
 	return found
 }
 
-// truncate copies the kept bytes, so a counter never pins a longer
-// partition string for the window (P5).
+// truncate does not copy: a counter pins the string it was cut from for at
+// most one window, and keys.Classify caps a partition at 512 bytes, so the
+// summary holds at most TopK * 512 bytes of them (P5). A copy would be one
+// allocation under the mutex for every request of a flood. Partitions are
+// visible ASCII (FR-VAL-1), so the cut cannot split a character.
 func truncate(s string) string {
 	if len(s) > maxSample {
-		return strings.Clone(s[:maxSample])
+		return s[:maxSample]
 	}
 	return s
 }
