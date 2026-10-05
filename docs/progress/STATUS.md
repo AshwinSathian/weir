@@ -5,7 +5,7 @@ Phase: 1
 Current card: none
 Card state: awaiting-merge
 Branch: card/M7-04-tracking-preset-cookie-report
-PR: (recorded in the next commit)
+PR: #47 https://github.com/AshwinSathian/weir/pull/47
 Next card: M7-05
 
 ## Blockers
