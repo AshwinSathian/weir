@@ -49,7 +49,7 @@ var testRespTime = time.Date(2026, 9, 28, 12, 0, 0, 0, time.UTC)
 func TestErrorStatusesNotStored(t *testing.T) {
 	// FR-STO-2, T-7: error pages are outside the default set even with explicit freshness.
 	cfg := storableConfig(t, nil)
-	for _, status := range []int{400, 401, 403, 500, 502, 503} {
+	for _, status := range []int{400, 401, 403, 500, 502, 503, 504} {
 		d := storability(cfg, classifiedGET("/", false), originResp(status, "Cache-Control", "max-age=60"), nil, testRespTime)
 		if d.ok || d.reason != "status" || !d.responseDriven {
 			t.Errorf("status %d: got %+v, want not stored for status", status, d)
@@ -116,6 +116,32 @@ func TestAuthorizationRules(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestAuthorizationNeedsBarePublic(t *testing.T) {
+	// FR-STO-5, T-8: the permission needs a well-formed field. "public=no"
+	// is not the public directive, and a directive read out of an unclosed
+	// quote is a guess that may restrict but never widen.
+	cfg := storableConfig(t, nil)
+	for _, cc := range []string{
+		"public=no, max-age=60",
+		"public, public=no, max-age=60",
+		`foo="bar, public, max-age=60`,
+		`max-age="60, public, s-maxage=60`,
+		`foo="bar, must-revalidate, max-age=60`,
+		"must-revalidate=no, max-age=60",
+		`s-maxage=60, foo="bar`,
+	} {
+		d := storability(cfg, classifiedGET("/", true), originResp(200, "Cache-Control", cc), nil, testRespTime)
+		if d.ok || d.reason != "authorization" {
+			t.Errorf("%s on an Authorization request: %+v, want refused for authorization", cc, d)
+		}
+	}
+	for _, cc := range []string{"public, max-age=60", `public, foo="a,b", max-age=60`, "must-revalidate, max-age=60"} {
+		if d := storability(cfg, classifiedGET("/", true), originResp(200, "Cache-Control", cc), nil, testRespTime); !d.ok {
+			t.Errorf("%s on an Authorization request refused: %+v", cc, d)
+		}
 	}
 }
 

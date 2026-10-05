@@ -85,6 +85,29 @@ func TestClassifyKeyedHeaders(t *testing.T) {
 			t.Fatal("keyed header marked the request Unkeyed")
 		}
 	})
+	t.Run("unkeyed cache directives mark the request Unkeyed", func(t *testing.T) {
+		// FR-STO-12, FR-NEG-4, T-31: forwarded with any bytes, never keyed.
+		for _, name := range []string{"Cache-Control", "Pragma"} {
+			h := http.Header{name: {"no-cache"}}
+			c, err := Classify(classifyReq("GET", h), cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !c.Unkeyed || len(c.Forwarded.Header[name]) != 1 {
+				t.Errorf("%s: Unkeyed = %v, forwarded %q; want Unkeyed and forwarded", name, c.Unkeyed, c.Forwarded.Header[name])
+			}
+			keyed := classifyCfg()
+			keyed.Headers = []string{name}
+			if c, err = Classify(classifyReq("GET", h), keyed); err != nil || c.Unkeyed {
+				t.Errorf("%s in Key.Headers: Unkeyed = %v, err %v; want keyed", name, c.Unkeyed, err)
+			}
+			// Named in Connection, the field never reaches the origin.
+			h = http.Header{name: {"no-cache"}, "Connection": {name}}
+			if c, err = Classify(classifyReq("GET", h), cfg); err != nil || c.Unkeyed {
+				t.Errorf("%s dropped by Connection: Unkeyed = %v, err %v; want false", name, c.Unkeyed, err)
+			}
+		}
+	})
 	t.Run("equal after normalization share key and forward", func(t *testing.T) {
 		one, two := classify(t, cfg, " a ,b"), classify(t, cfg, "a", "b")
 		if one.Primary != two.Primary {
@@ -239,6 +262,70 @@ func TestUnforwardable(t *testing.T) {
 		if Unforwardable(n) {
 			t.Errorf("%s reported unforwardable", n)
 		}
+	}
+}
+
+func TestBypassedCookieShapes(t *testing.T) {
+	// FR-BYP-1, T-8: an origin that decodes a cookie name also trims it, so
+	// decoded separators and '+' (a space to a form decoder) around the
+	// name are ignored. Inside a token they are not: an encoded JSON or URL
+	// value that mentions the name is no session cookie. A configured name
+	// holding '%' or '+' still matches itself.
+	cfg := &Config{BypassCookies: []string{"session", "a%41b", "c+d"}}
+	for _, tc := range []struct {
+		line string
+		want bool
+	}{
+		{"%20session=1", true},
+		{"+session=1", true},
+		{"lang=en;%09session%20=1", true},
+		{"+%20SESSION%09+=1", true},
+		{"sess%69on%3D1", false},
+		{"x+SESSION", false},
+		{"prefs=%7B%22theme%22%3A%22dark%22%2C%22session%22%3Anull%7D", false},
+		{"q=cheap+session+tickets", false},
+		{"redirect=%2Flogin%3Fsession%3D1", false},
+		{"session+x=1", false},
+		{"+%20+", false},
+		{"a%41b=1", true},
+		{"A%41B=1", true},
+		{"c+d=1", true},
+		{"xsession=1", false},
+		{"session2=1", false},
+		{"my-session=1", false},
+		{"sess+ion=1", false},
+		{"%2Bxsession=1", false},
+		{"aAb=1", false},
+		{"sessio%6", false},
+		{"", false},
+	} {
+		if got := bypassed(http.Header{"Cookie": {tc.line}}, cfg); got != tc.want {
+			t.Errorf("bypassed(%q) = %v, want %v", tc.line, got, tc.want)
+		}
+	}
+}
+
+func TestForwardAllConnectionNamedCookieNotKeyed(t *testing.T) {
+	// INV-1, FR-KEY-6, FR-FWD-2: Connection can name Cookie, and ForwardAll
+	// then forwards none, so the key holds none either.
+	cfg := classifyCfg()
+	cfg.ForwardAll, cfg.Cookies = true, []string{"sid"}
+	key := func(h http.Header) Classified {
+		c, err := Classify(classifyReq("GET", h), cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return c
+	}
+	one := key(http.Header{"Cookie": {"sid=1"}, "Connection": {"cookie"}})
+	if _, ok := one.Forwarded.Header["Cookie"]; ok {
+		t.Fatal("Cookie named in Connection was forwarded")
+	}
+	if two := key(http.Header{"Cookie": {"sid=2"}, "Connection": {"cookie"}}); one.Primary != two.Primary || one.Primary != key(nil).Primary {
+		t.Fatal("a cookie the origin never saw entered the key")
+	}
+	if one.Primary == key(http.Header{"Cookie": {"sid=1"}}).Primary {
+		t.Fatal("a forwarded keyed cookie did not enter the key")
 	}
 }
 

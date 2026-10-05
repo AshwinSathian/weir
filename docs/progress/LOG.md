@@ -784,3 +784,20 @@ Entry template:
 - Deviations: 01 D30 and FR-OBS-5 (bounds, no timer, what is counted); 04 §14 report bullet.
 - Follow-ups: none. Nothing is waiting on Ashwin.
 - Context: low.
+
+## 2026-10-05 · M7-05 · done
+- Branch / PR: card/M7-05-key-boundary-security-review / (recorded in the next commit)
+- Done: security review of internal/keys, storable.go and store/codec.go against 06. All 36 tests named on rows T-1..T-8, T-13, T-31, T-40, T-44 exist and pass. 36 fuzz seeds added across 11 targets for shapes 06 §6 item 3 asks for (empty, 10 KiB, non-ASCII, duplicate lines, separators only). One real break found by the attack review and fixed in keys/forward.go: an unkeyed `Cache-Control` or `Pragma` now sets `Unkeyed`, so no marker or negative entry follows it (T-31).
+- Tests: TestFreshenRefusesUnstorable304 (new, passed first: coverage gap, not a bug); new cases in TestNoMarkerAfterUnkeyedInput, TestNegativeNotFor500, TestClassifyKeyedHeaders (all failed before the fix); 504 in TestErrorStatusesNotStored. `make check` passes, trace 119/152; `make fuzz-short` clean on 18 targets before the fix, FuzzForwardEqualsKey 15 s clean after.
+- Deviations: 01 FR-STO-12 and FR-NEG-4 (the fix, approved by Ashwin in the session); 06 T-7 row reworded (its test proves Range passes through unstored), T-8 and T-31 rows, INV-1 now names the Accept-Encoding bucket; 04 §3.1 comment; 07 two rows.
+- Follow-ups: four open attack-review findings in STATUS notes (two hardening, one hypothesis, one nit). The normal review ran before the fix; the fix itself had no independent review. Next: PLAN P0.0 with Ashwin's confirmation.
+- Context: medium; size S was right for the review, the fix added about 10 lines.
+
+## 2026-10-05 · M7-05 · review-fixes
+- Branch / PR: card/M7-05-key-boundary-security-review / #48
+- Done: decided and implemented every finding the attack reviews left open (delegated), then had the new code attacked again and fixed what that found. keys/headers.go `tokenIs` (literal match first; decoded separators and `+` trimmed around the name only); keys/forward.go trace byte set, 32-line cap, no empty line, no `..`; keys/classify.go drops keyed cookies the forward lacks; httpcc `ResponseDirectives.Malformed` and bare-only `public`, read by the Authorization case in storable.go.
+- Tests: TestBypassedCookieShapes, TestForwardAllConnectionNamedCookieNotKeyed, TestAuthorizationNeedsBarePublic (new); cases in TestTraceparentValidated, TestParseResponseDirectives, TestBypassCookieEvasion; `fuzzAllCfg` gains a keyed cookie and a seed. All failed first. `make check` passes; FuzzBypassed, FuzzForwardEqualsKey, FuzzCacheControl, FuzzEvaluate clean for 10 to 12 s each.
+- Deviations: 01 FR-STO-5, FR-FWD-6, FR-BYP-1, FR-STO-12; 04 §3.5 trace filter and the `ResponseDirectives` listing; 06 T-8, T-40, R-3, new R-7; 07 rows. Second-review must-fix (257 empty `tracestate` lines) and three should-fix all fixed.
+- Follow-ups: none open. The last round of fixes (trim-only `tokenIs`, `Malformed`, line cap) was not reviewed a third time. Next: PLAN P0.0 with Ashwin's confirmation.
+- Context: high; the review card grew to five small production fixes, each from a reproduced finding.
+

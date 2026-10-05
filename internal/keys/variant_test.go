@@ -81,6 +81,8 @@ func TestVariantKey(t *testing.T) {
 // FuzzVaryNames: NFR-2, T-15. Vary comes from the origin: no panic, and the
 // names are sorted, unique, non-empty and never "*".
 func FuzzVaryNames(f *testing.F) {
+	// FR-KEY-7, FR-KEY-8, NFR-2; T-15: no panic; names come back sorted,
+	// unique and never "*" or empty.
 	f.Add("Accept-Encoding, accept-language", "*")
 	f.Fuzz(func(t *testing.T, a, b string) {
 		names, star := VaryNames([]string{a, b})

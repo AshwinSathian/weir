@@ -176,7 +176,7 @@ Each seed taxonomy entry maps to the tests below. "Engine" tests run under synct
 - `TestNegativeCacheBurst` (engine): origin returns 503 for one key; 200 requests in the same 100 ms; 1 origin call; 199 synthesized 503s with `detail=negative`; after `Negative.TTL`, 1 more call.
 - `TestNegativeNotFor500`, `TestNegativePrefersStale`, `TestNegativeScopedToKey`, `TestNegativeNeverReplacesResponse` (engine).
 - `TestMarkerNotFromAuthorizedRequest`, `TestMarkerNotFromRequestNoStore` (engine, T-31): after such a request, the next 100 anonymous requests for the URL collapse into 1 origin call.
-- `TestNoMarkerAfterUnkeyedInput` (engine, FR-STO-12, T-31): a request that forwarded a `Forward.Allow` field or ran under `ForwardAll` plants no marker; trace headers alone still do.
+- `TestNoMarkerAfterUnkeyedInput` (engine, FR-STO-12, T-31): a request that forwarded a `Forward.Allow` field, `Cache-Control` or `Pragma` (a 9000-byte value included), or ran under `ForwardAll`, plants no marker; trace headers alone still do.
 
 ### T6.11 Eviction storms
 
@@ -217,6 +217,9 @@ Named in [06-threat-model.md](06-threat-model.md), [01-technical-spec.md](01-tec
 | `TestErrorStatusesNotStored` (engine) | 400, 401, 403, 500, 502, 503 with `max-age=60` are not stored under default config |
 | `TestSetCookieNotStored` (engine) | `Set-Cookie` blocks storage; with `StripSetCookie` the stored entry has no `Set-Cookie` and the triggering client still receives it |
 | `TestAuthorizationRules` (engine) | RFC 9111 §3.5: stored only with `public`, `s-maxage` or `must-revalidate` |
+| `TestAuthorizationNeedsBarePublic` (unit) | `public=no`, `public, public=no`, `must-revalidate=no`, and `public`, `must-revalidate` or `s-maxage` in a field with an unclosed quote do not permit storing an `Authorization` response; bare `public` and `must-revalidate` do |
+| `TestBypassedCookieShapes` (unit) | a bypass cookie name matches with encoded spaces, tabs or `+` around it, and when the configured name holds `%` or `+`; `xsession`, `session2`, `sess+ion`, and an encoded value that mentions the name (`q=cheap+session+tickets`, URL-encoded JSON) do not match |
+| `TestForwardAllConnectionNamedCookieNotKeyed` (unit) | under `ForwardAll`, a `Cookie` that `Connection` names is not forwarded and not keyed |
 | `TestAuthorizationNeedsValidSMaxage` (unit) | `s-maxage=abc`, two differing `s-maxage` values, or a valid `s-maxage` beside an invalid or conflicting delta-seconds directive do not permit storing an `Authorization` response; `public` and `must-revalidate` still do |
 | `TestAuthorizedNotCoalesced` (engine) | 50 concurrent `Authorization` requests on a cold key make 50 origin calls; none receives another's response |
 | `TestClientNoCacheIgnored` (engine) | `Cache-Control: no-cache` and `Pragma: no-cache` requests are hits under default config |
@@ -225,6 +228,7 @@ Named in [06-threat-model.md](06-threat-model.md), [01-technical-spec.md](01-tec
 | `TestConnectionNamedFieldsStillDecideStorage` (engine) | a response whose `Connection` names its `Cache-Control: private`, `Vary` or `Set-Cookie` is refused, as without `Connection` |
 | `TestConnectionNamedFieldsStillInform` (engine) | with `Connection` naming them, `Age` still ages the entry, `Content-Type: text/event-stream` still streams, and `Location` on a POST 201 still invalidates |
 | `TestFreshenDropsHopByHop` (engine) | a 304's hop-by-hop and `Connection`-named fields reach neither the served nor the freshened entry; a 304 naming its `private` `Cache-Control` is not stored |
+| `TestFreshenRefusesUnstorable304` (engine) | a 304 carrying `Set-Cookie`, `private`, `no-store`, `Vary: *` or `Vary: Cookie` is served to its client with every field, is not stored, and leaves the stored entry unchanged for the next client (INV-4) |
 | `TestFreshenKeepsRepresentationMetadata` (engine) | a 304 with a different `Content-Encoding` or `Content-Type` freshens the entry but keeps the stored values |
 | `TestEpochLookupErrorEmitsEvent` (engine) | a remote-flagged store failing `NewestEpoch` still serves the entry and emits `EvStoreError{epoch}` |
 | `TestCacheStatusNoKey` (engine) | no emitted `Cache-Status` contains `key=` |
@@ -270,7 +274,7 @@ Named in [06-threat-model.md](06-threat-model.md), [01-technical-spec.md](01-tec
 | `TestStreamIdleTimeout` (engine) | a 2-minute pass-through stream that keeps sending survives; one that stalls for `StreamIdle` ends |
 | `TestConnectRejected`, `TestUpgradeRejected` (engine), `TestAdaptersRouteUpgradesAround` (integration), `TestH2CUpgradeServedNormally` (keys and weirhttp), `TestH2CKeyedLikePlainRequest` | `Serve` returns `ErrUpgradeNotSupported`; weirhttp hands WebSocket and CONNECT to the next handler; a lone `h2c` upgrade is served and keyed like a plain request, and the origin never sees `Upgrade` or `HTTP2-Settings` |
 | `TestEventStreamNeverBuffered` (engine) | first SSE event reaches the client before the origin sends a second; nothing stored |
-| `TestTraceparentValidated` (engine) | valid headers forwarded on a miss; malformed `traceparent` drops both trace headers; `NoTraceHeaders` forwards none |
+| `TestTraceparentValidated` (engine) | valid headers forwarded on a miss; malformed `traceparent` drops both trace headers; `tracestate` or `X-Request-Id` with a byte outside the FR-FWD-6 set, `..`, an empty line, or more than 32 `tracestate` lines is dropped; `NoTraceHeaders` forwards none |
 | `TestStrippedCookieReport` (engine) | after the report window one log line lists the most frequent stripped names, no values |
 | `TestModeExpires`, `TestModeStaleOnErrorLimits`, `TestModeBypass` (engine) | mode reverts after ttl; stale-on-error never serves hard-purged, invalidated or must-revalidate entries, nor beyond 24 h; bypass stores nothing |
 | `TestDefaultStoreSizeFromMemLimit` (unit) | 1 GiB limit gives 409.6 MiB rounded to shards; unset gives 256 MiB and a warning |

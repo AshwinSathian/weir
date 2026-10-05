@@ -4,9 +4,9 @@ Updated: 2026-10-05
 Phase: 1
 Current card: none
 Card state: awaiting-merge
-Branch: card/M7-04-tracking-preset-cookie-report
-PR: #47 https://github.com/AshwinSathian/weir/pull/47
-Next card: M7-05
+Branch: card/M7-05-key-boundary-security-review
+PR: #48 https://github.com/AshwinSathian/weir/pull/48
+Next card: P0.0 (public flip, PLAN), then M8-01
 
 ## Blockers
 
@@ -15,6 +15,20 @@ none
 ## Waiting on Ashwin
 
 none
+
+## Decided 2026-10-05 (M7-05)
+
+Open findings of the two attack reviews, decided under Ashwin's delegation after trying to break each choice (PR #48). Nothing was listed under Waiting on Ashwin; these were the findings left open at handoff.
+
+- `Bypass.Cookies` name holding `%XX`: fixed by matching the literal spelling first. Rejected: refusing such names in `New` (a valid cookie name, and a config that used to load would stop loading).
+- `%20session`, `+session` under `ForwardAll`: now match. Decoded separators and `+` are skipped around the name only. A first version also split inside the token; the second attack review showed it bypassed on `q=cheap+session+tickets` and URL-encoded JSON values, so one persistent cookie would switch the cache off for a visitor.
+- `public=no` granting the Authorization permission: fixed, and widened after the second review. `ResponseDirectives.Malformed` (unclosed quote, or an argument on `public` or `must-revalidate`) refuses the FR-STO-5 permission; `public` with an argument is not `public` anywhere. Restricting directives keep their effect in any form.
+- `ForwardAll` + `Key.Cookies` + `Connection: cookie`: the key now drops cookies the forward does not carry (INV-1).
+- Trace fields, found while attacking the T-31 fix: `tracestate` and `X-Request-Id` go forward unkeyed and still allow markers, so their bytes are now letters, digits and `-_.:/=+@,;*~!|`, no `..`, no empty line, at most 32 `tracestate` lines. Rejected: flagging them `Unkeyed` (behind a tracing proxy every request carries them, so no marker would ever be written).
+- Followers of a flight led by an unkeyed request share its 5xx: left as is, written up as R-7. Not coalescing such requests would switch coalescing off under `ForwardAll` and for every browser reload.
+- Not changed: `tracestate: a=1, b=2` (W3C-legal space) is dropped, as before this card; FR-FWD-6 now says so.
+
+- T-31 fix, chosen by Ashwin in the session: a request whose forward carries `Cache-Control` or `Pragma` that `Key.Headers` does not name writes no hit-for-miss marker and no negative entry. Both fields go forward as the client sent them, any length and bytes, so an origin answering a 9000-byte `Pragma` with 431 or 503 used to plant a marker or a 2 s cached 503 on the shared key. Rejected: bounding the two fields only (a short value a WAF rejects still plants a marker). FR-STO-12, FR-NEG-4 and T-31 say so now.
 
 ## Decided 2026-10-05 (M7-04)
 
@@ -104,6 +118,13 @@ Already built, now confirmed: the weirhttp default transport (compression off, n
 The cards' Notes give the reasons and the options rejected. All three come before M1-18, because closing M1 makes the repo public.
 
 ## Notes for the next session
+
+- Next session is PLAN P0.0, not a card: flip the repo to public, enable private vulnerability reporting, tag `v0.1.0`. Visibility cannot be taken back; confirm the flip with Ashwin in chat before running it. Then M8-01.
+- M7-05: `Classified.Unkeyed` is now also true when the forward carries `Cache-Control` or `Pragma` unkeyed (keys/forward.go, after the `Allow` loop). A browser reload therefore plants no marker and no negative entry. A new always-forwarded unkeyed field needs the same line, or T-31 reopens.
+- M7-05: trace bytes are decided by `traceByte` (keys/forward.go). If a tracing vendor's `tracestate` goes missing at the origin, look there first; widening the set reopens T-31 unless the field is also flagged `Unkeyed`.
+- M7-05: `httpcc.ResponseDirectives.Malformed` is read in one place, the Authorization case of `storability`. A new directive that grants a permission must set it for its undefined forms.
+- M7-05: `tokenIs` (keys/headers.go) trims decoded separators and `+` around a bypass cookie name but never splits inside a token. Do not widen it to interior pieces; `TestBypassedCookieShapes` holds the cases that broke.
+- M7-05: 501 is in the default storable set on purpose (FR-STO-2, RFC 9110); T-7's answer to the `Transfer-Encoding` 501 is hop-by-hop stripping. The T-7 row says so now.
 
 - M7-04: the stripped-cookie report lives in cookiereport.go; `Serve` calls `e.cr.observe(req.Header)` just before `e.cacheable`, so bypass, method-pass and `ModeBypass` requests are never counted. `e.cr` is nil under `ForwardAll` or a negative window. There is no timer: the first cacheable request with a `Cookie` line past the deadline logs the report.
 - M7-04: `observe` parses pairs the same way as `keyedCookies` (keys/cookies.go: split on `;`, trim, cut at `=`). If that parser changes, change both, or a keyed name could be reported as stripped.

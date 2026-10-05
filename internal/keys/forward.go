@@ -23,8 +23,10 @@ var dropped = []string{
 // In strict mode (T-1, INV-1) it holds only keyed fields, the cache
 // directives and Authorization (FR-FWD-1), and operator-allowed and trace
 // fields. cookies is the keyedCookies result the key was built from.
-// unkeyed reports that the origin sees a field the key ignores beyond the
-// default set: always under ForwardAll, else when an Allow field is sent.
+// unkeyed reports that the origin sees client-chosen bytes the key ignores:
+// always under ForwardAll, else when an Allow field, Cache-Control or Pragma
+// is sent unkeyed. Authorization has its own flag, and trace fields have a
+// validated shape (FR-FWD-6).
 func forwardHeader(h http.Header, c *Config, cookies []Cookie) (out http.Header, unkeyed bool) {
 	if c.ForwardAll {
 		unkeyed = true
@@ -72,6 +74,12 @@ func forwardHeader(h http.Header, c *Config, cookies []Cookie) (out http.Header,
 		keyed := name == "Cookie" || name == "Accept-Encoding" || slices.Contains(defaultForward, name)
 		unkeyed = unkeyed || !keyed && len(out[name]) > 0
 	}
+	// T-31: the cache directives go as the client sent them, any length and
+	// any bytes, so an origin or WAF that rejects one must not fail the key
+	// for everyone. Keyed, they went in normal form and split the key.
+	for _, name := range [...]string{"Cache-Control", "Pragma"} {
+		unkeyed = unkeyed || len(out[name]) > 0 && !slices.Contains(c.Headers, name)
+	}
 	// Set last so no Connection option or Allow entry can remove or replace it.
 	out["Accept-Encoding"] = []string{aeBucket(h["Accept-Encoding"], c)}
 	return out, unkeyed
@@ -111,6 +119,12 @@ func DropHopByHop(h http.Header, conn []string) {
 // across its lines (FR-FWD-6).
 const maxTracestateBytes = 512
 
+// maxTracestateLines is the W3C limit on list members; a line holds at
+// least one. T-31: without it 257 empty lines fit in 512 combined bytes and
+// could trip an origin's field-count limit on a request that still plants
+// markers.
+const maxTracestateLines = 32
+
 // filterTrace applies FR-FWD-6 (T-40): trace fields that reach the origin
 // have a validated shape, and none do with NoTraceHeaders.
 func filterTrace(h http.Header, none bool) {
@@ -118,22 +132,38 @@ func filterTrace(h http.Header, none bool) {
 		delete(h, "Traceparent")
 		delete(h, "Tracestate")
 	}
-	if ts := h["Tracestate"]; len(ts) > 0 && (combinedLen(ts) > maxTracestateBytes || !allVisibleASCII(ts)) {
+	if ts := h["Tracestate"]; len(ts) > maxTracestateLines || len(ts) > 0 && (combinedLen(ts) > maxTracestateBytes || !allTraceBytes(ts)) {
 		delete(h, "Tracestate")
 	}
-	if id := h["X-Request-Id"]; none || len(id) > 0 && (len(id) != 1 || len(id[0]) > 128 || !visibleASCII(id[0])) {
+	if id := h["X-Request-Id"]; none || len(id) > 0 && (len(id) != 1 || len(id[0]) > 128 || !allTraceBytes(id)) {
 		delete(h, "X-Request-Id")
 	}
 }
 
-// allVisibleASCII reports whether every line is visibleASCII.
-func allVisibleASCII(lines []string) bool {
+// allTraceBytes reports whether every line is non-empty, holds only
+// traceByte bytes and has no ".." (a path-traversal pattern to a WAF).
+func allTraceBytes(lines []string) bool {
 	for _, l := range lines {
-		if !visibleASCII(l) {
+		if l == "" || strings.Contains(l, "..") {
 			return false
+		}
+		for i := 0; i < len(l); i++ {
+			if !traceByte(l[i]) {
+				return false
+			}
 		}
 	}
 	return true
+}
+
+// traceByte reports a byte tracestate and X-Request-Id may carry (FR-FWD-6).
+// T-31: both go forward unkeyed and do not suppress markers, so the set
+// leaves out what a WAF rule matches on (quotes, angle brackets, brackets,
+// backslash, "%", "&", "#", "$", "?"). It covers W3C tracestate keys, the
+// vendor values in use, UUIDs, base64 and hierarchical ids.
+func traceByte(c byte) bool {
+	return 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z' || '0' <= c && c <= '9' ||
+		strings.IndexByte("-_.:/=+@,;*~!|", c) >= 0
 }
 
 // validTraceparent accepts W3C Trace Context version 00 only:

@@ -570,7 +570,9 @@ func TestRequestNoStore(t *testing.T) {
 
 // FR-STO-12, T-31: a field the origin sees unkeyed (a Forward.Allow field
 // or anything under ForwardAll) could let one client plant a marker for a
-// hot URL, so such requests plant none. Trace headers alone still do.
+// hot URL, so such requests plant none. Cache-Control and Pragma go forward
+// unkeyed with any bytes the client chose, so they count too. Trace headers
+// alone still do.
 func TestNoMarkerAfterUnkeyedInput(t *testing.T) {
 	allow := weir.Config{Freshness: weir.FreshnessConfig{NoJitter: true}, Forward: weir.ForwardConfig{Allow: []string{"X-Tenant"}}}
 	all := weir.Config{Freshness: weir.FreshnessConfig{NoJitter: true}, Forward: weir.ForwardConfig{Mode: weir.ForwardAll}}
@@ -583,6 +585,8 @@ func TestNoMarkerAfterUnkeyedInput(t *testing.T) {
 		{"Forward.Allow field present plants no marker", allow, [2]string{"X-Tenant", "a"}, false},
 		{"Forward.Allow naming keyed fields plants a marker", weir.Config{Freshness: weir.FreshnessConfig{NoJitter: true}, Forward: weir.ForwardConfig{Allow: []string{"Accept-Encoding", "Authorization"}}}, [2]string{"Accept-Encoding", "gzip"}, true},
 		{"Forward.Allow configured but absent plants a marker", allow, [2]string{"Traceparent", "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01"}, true},
+		{"Cache-Control present plants no marker", cacheCfg, [2]string{"Cache-Control", "max-age=0"}, false},
+		{"oversized Pragma plants no marker", cacheCfg, [2]string{"Pragma", strings.Repeat("A", 9000)}, false},
 		{"ForwardAll plants no marker", all, [2]string{"Traceparent", "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01"}, false},
 		{"trace header alone plants a marker", cacheCfg, [2]string{"Traceparent", "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01"}, true},
 	} {

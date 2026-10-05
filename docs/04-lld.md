@@ -330,7 +330,7 @@ type Classified struct {
 	Authorized bool      // request carried Authorization
 	Unsafe     bool      // unsafe or unknown method: invalidate on 2xx/3xx
 	HasBody    bool      // the forwarded request carries a body (upload pool)
-	Unkeyed    bool      // the forward carries a Forward.Allow field, or ForwardAll (FR-STO-12, T-31)
+	Unkeyed    bool      // the forward carries an unkeyed Forward.Allow field, Cache-Control or Pragma, or ForwardAll (FR-STO-12, T-31)
 	Forwarded  Request   // keys.Request, see note
 	Primary    store.Key // zero for ClassPass
 	URITag     store.Tag
@@ -440,7 +440,7 @@ The hop-by-hop fields are RFC 9110 §7.6.1's list plus `HTTP2-Settings` (FR-UPG-
 
 `ForwardAll` copies all fields, then deletes hop-by-hop fields, the fields named in `Connection`, `Host`, `If-None-Match`, `If-Modified-Since`, `If-Match`, `If-Unmodified-Since`, `If-Range`, `Range`, and the body fields `Content-Length`, `Expect` and `Trailer` (the fetch has no body), filters trace fields, and sets `Accept-Encoding` to the bucket. The `Cookie` field stays as received.
 
-Trace filtering drops `traceparent` and `tracestate` together unless there is exactly one `traceparent` line in version-00 form with lowercase hex and non-zero ids, and drops `X-Request-Id` unless it is one line of at most 128 visible ASCII bytes. With `NoTraceHeaders` all three go.
+Trace filtering drops `traceparent` and `tracestate` together unless there is exactly one `traceparent` line in version-00 form with lowercase hex and non-zero ids, drops `tracestate` when it has more than 32 lines, an empty line, `..`, lines over 512 bytes combined or a byte outside the FR-FWD-6 set (letters, digits and `-_.:/=+@,;*~!|`, `traceByte`), and drops `X-Request-Id` unless it is one non-empty line of at most 128 bytes from that set without `..`. With `NoTraceHeaders` all three go.
 
 The client conditionals (`If-None-Match`, `If-Modified-Since`) are parsed into `ClientConditionals` before being dropped, so the engine can answer 304 itself.
 
@@ -485,6 +485,7 @@ type ResponseDirectives struct {
 	Public, MustRevalidate      bool
 	ProxyRevalidate, MustUnderstand bool
 	Duplicates                  bool // a delta-seconds directive (max-age, s-maxage, SWR, SIE) repeated with different values (FR-FRS-2)
+	Malformed                   bool // an unclosed quoted string, or an argument on public or must-revalidate; no Authorization permission (FR-STO-5)
 }
 
 func ParseResponse(h http.Header) ResponseDirectives

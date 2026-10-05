@@ -1,0 +1,8 @@
+go test fuzz v1
+string("GET")
+string("https")
+string("ex\xc3\xa4mple.com")
+string("/caf\xc3\xa9/\xff")
+string("q=\xe2\x80\xa8")
+string("\xff")
+string("h2c\x80")
