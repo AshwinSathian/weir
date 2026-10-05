@@ -180,6 +180,10 @@ func TestClassifyBypass(t *testing.T) {
 		{"comma-separated pairs", "GET", http.Header{"Cookie": {"lang=en, session=abc"}}, FwdBypass, ClassPass},
 		{"quoted name", "GET", http.Header{"Cookie": {`"session"=abc`}}, FwdBypass, ClassPass},
 		{"name as a whole value", "GET", http.Header{"Cookie": {"lang=session"}}, FwdBypass, ClassPass},
+		{"percent-encoded name", "GET", http.Header{"Cookie": {"sess%69on=abc"}}, FwdBypass, ClassPass},
+		{"percent-encoded name in another case", "GET", http.Header{"Cookie": {"%53ESS%49ON=abc"}}, FwdBypass, ClassPass},
+		{"percent-encoded longer name", "GET", http.Header{"Cookie": {"session%32=abc; %78session=1"}}, FwdNone, ClassCacheable},
+		{"broken percent escapes", "GET", http.Header{"Cookie": {"sessio%6=1; sessio%zz=2; sessio%"}}, FwdNone, ClassCacheable},
 		{"unsafe method keeps its reason", "POST", http.Header{"X-Preview": {"1"}}, FwdMethod, ClassPass},
 	}
 	for _, tt := range tests {
@@ -245,10 +249,11 @@ func FuzzBypassed(f *testing.F) {
 	f.Add("session", "x=1")
 	f.Add(" ;; =; session =", "\xff=session")
 	f.Add("xsession=1; session2=2", "lang=session")
+	f.Add("sess%69on=1", "sessio%6; %; %zz; %53ession%3D")
 	f.Fuzz(func(t *testing.T, line1, line2 string) {
 		cfg := &Config{BypassCookies: []string{"session"}}
 		got := bypassed(http.Header{"Cookie": {line1, line2}}, cfg)
-		if got && !strings.Contains(strings.ToLower(line1+";"+line2), "session") {
+		if got && !strings.ContainsRune(line1+line2, '%') && !strings.Contains(strings.ToLower(line1+";"+line2), "session") {
 			t.Fatalf("bypass without the cookie name: %q %q", line1, line2)
 		}
 		if !bypassed(http.Header{"Cookie": {line1, line2, "session=1"}}, cfg) {

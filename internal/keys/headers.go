@@ -3,7 +3,6 @@ package keys
 import (
 	"net/http"
 	"slices"
-	"strings"
 )
 
 // normalizeHeader is the normalizer of a keyed header without one of its own
@@ -86,9 +85,10 @@ func keyedHeaders(fh http.Header, c *Config) []Header {
 // sender's personalized response for everyone, while a false match costs
 // one uncached response. So a name matches in any letter case wherever it
 // stands as a whole token: before "=" with or without whitespace, without
-// "=", after a comma, in quotes, or as a value. The scan costs line bytes
-// times len(Bypass.Cookies), and the server's header limit bounds the
-// lines (P5).
+// "=", after a comma, in quotes, or as a value, and also when some of its
+// bytes are percent-encoded, which some origins decode in cookie names.
+// The scan costs line bytes times len(Bypass.Cookies), and the server's
+// header limit bounds the lines (P5).
 func bypassed(h http.Header, c *Config) bool {
 	for _, name := range c.BypassHeaders {
 		if len(h[name]) > 0 {
@@ -109,13 +109,41 @@ func bypassed(h http.Header, c *Config) bool {
 				i++
 			}
 			for _, name := range c.BypassCookies {
-				if len(name) == i-start && strings.EqualFold(name, line[start:i]) {
+				if tokenIs(line[start:i], name) {
 					return true
 				}
 			}
 		}
 	}
 	return false
+}
+
+// tokenIs reports whether tok spells name, ignoring ASCII case and reading
+// each valid %XX in tok as the byte it encodes ("%" is a token character,
+// so an encoded name is still one token). It allocates nothing.
+func tokenIs(tok, name string) bool {
+	if len(tok) < len(name) {
+		return false
+	}
+	n := 0
+	for i := 0; i < len(tok); i, n = i+1, n+1 {
+		c := tok[i]
+		if c == '%' && i+2 < len(tok) && isHex(tok[i+1]) && isHex(tok[i+2]) {
+			c = unhex(tok[i+1])<<4 | unhex(tok[i+2])
+			i += 2
+		}
+		if n >= len(name) || lower(c) != lower(name[n]) {
+			return false
+		}
+	}
+	return n == len(name)
+}
+
+func lower(c byte) byte {
+	if 'A' <= c && c <= 'Z' {
+		return c + 'a' - 'A'
+	}
+	return c
 }
 
 // Unforwardable reports a canonical header name that no Forward.Allow or

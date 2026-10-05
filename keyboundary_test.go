@@ -4,6 +4,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/url"
 	"slices"
 	"strings"
 	"testing"
@@ -333,13 +334,13 @@ func TestBodylessBypassUsesMainPool(t *testing.T) {
 // so a session cookie in a shape only a lenient parser reads must still
 // bypass, or the sender's personalized response is stored for everyone.
 func TestBypassCookieEvasion(t *testing.T) {
-	for _, cookie := range []string{"session =alice", "SESSION=alice", "lang=en, session=alice", `"session"=alice`, "session"} {
+	for _, cookie := range []string{"session =alice", "SESSION=alice", "lang=en, session=alice", `"session"=alice`, "session", "sess%69on=alice"} {
 		t.Run(cookie, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				o := testorigin.NewChecked(t, 64, 16)
 				o.Default(testorigin.Behavior{Func: func(r *weir.Request) (*weir.Response, error) {
 					body := "anonymous"
-					if strings.Contains(strings.ToLower(r.Header.Get("Cookie")), "session") { // a lenient origin
+					if c, _ := url.QueryUnescape(r.Header.Get("Cookie")); strings.Contains(strings.ToLower(c), "session") { // a lenient origin
 						body = "alice's page"
 					}
 					return &weir.Response{StatusCode: 200, Header: http.Header{"Cache-Control": {"max-age=60"}}, Body: bodyOf(body)}, nil

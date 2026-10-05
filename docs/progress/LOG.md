@@ -760,3 +760,11 @@ Entry template:
 - Deviations: 01 FR-BYP-1, FR-LCY-1, FR-WRM-1, §5.2.3 and the config table; 04 §3.1 and §3.5; 06 T-8 and R-3. Two existing tests changed because `Cookie` in `Forward.Allow` is now rejected (TestNewWarnsOnCredentialForwarding, TestNoMarkerAfterUnkeyedInput).
 - Follow-ups: none. Nothing is waiting on Ashwin.
 - Context: medium.
+
+## 2026-10-05 · M7-03 · review-fixes
+- Branch / PR: card/M7-03-keyed-headers-bypass / #46
+- Done: "Waiting on Ashwin" was already empty (decided in the entry above). Second adversarial pass over the three decisions it had held: empty-versus-absent and the size limit stand; the bypass cookie match had one more evasion, a percent-encoded name (`sess%69on`), which `tokenIs` (keys/headers.go) now decodes before comparing.
+- Tests: TestClassifyBypass (four rows), TestBypassCookieEvasion (one shape), FuzzBypassed seed; the new rows failed first. FuzzBypassed 20 s clean. `make check` passes.
+- Deviations: 01 FR-BYP-1, 04 §3.1 step 3, 06 R-3 name percent-decoding.
+- Follow-ups: none. Nothing is waiting on Ashwin.
+- Context: medium.
