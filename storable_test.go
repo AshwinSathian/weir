@@ -119,6 +119,32 @@ func TestAuthorizationRules(t *testing.T) {
 	}
 }
 
+func TestAuthorizationNeedsBarePublic(t *testing.T) {
+	// FR-STO-5, T-8: the permission needs a well-formed field. "public=no"
+	// is not the public directive, and a directive read out of an unclosed
+	// quote is a guess that may restrict but never widen.
+	cfg := storableConfig(t, nil)
+	for _, cc := range []string{
+		"public=no, max-age=60",
+		"public, public=no, max-age=60",
+		`foo="bar, public, max-age=60`,
+		`max-age="60, public, s-maxage=60`,
+		`foo="bar, must-revalidate, max-age=60`,
+		"must-revalidate=no, max-age=60",
+		`s-maxage=60, foo="bar`,
+	} {
+		d := storability(cfg, classifiedGET("/", true), originResp(200, "Cache-Control", cc), nil, testRespTime)
+		if d.ok || d.reason != "authorization" {
+			t.Errorf("%s on an Authorization request: %+v, want refused for authorization", cc, d)
+		}
+	}
+	for _, cc := range []string{"public, max-age=60", `public, foo="a,b", max-age=60`, "must-revalidate, max-age=60"} {
+		if d := storability(cfg, classifiedGET("/", true), originResp(200, "Cache-Control", cc), nil, testRespTime); !d.ok {
+			t.Errorf("%s on an Authorization request refused: %+v", cc, d)
+		}
+	}
+}
+
 func TestAuthorizationNeedsValidSMaxage(t *testing.T) {
 	// FR-STO-5, T-8: RFC 9111 §4.2.1 makes an invalid or conflicting
 	// s-maxage unusable, so it cannot grant the §3.5 permission.

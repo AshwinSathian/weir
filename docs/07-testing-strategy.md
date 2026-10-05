@@ -217,6 +217,9 @@ Named in [06-threat-model.md](06-threat-model.md), [01-technical-spec.md](01-tec
 | `TestErrorStatusesNotStored` (engine) | 400, 401, 403, 500, 502, 503 with `max-age=60` are not stored under default config |
 | `TestSetCookieNotStored` (engine) | `Set-Cookie` blocks storage; with `StripSetCookie` the stored entry has no `Set-Cookie` and the triggering client still receives it |
 | `TestAuthorizationRules` (engine) | RFC 9111 §3.5: stored only with `public`, `s-maxage` or `must-revalidate` |
+| `TestAuthorizationNeedsBarePublic` (unit) | `public=no`, `public, public=no`, `must-revalidate=no`, and `public`, `must-revalidate` or `s-maxage` in a field with an unclosed quote do not permit storing an `Authorization` response; bare `public` and `must-revalidate` do |
+| `TestBypassedCookieShapes` (unit) | a bypass cookie name matches with encoded spaces, tabs or `+` around it, and when the configured name holds `%` or `+`; `xsession`, `session2`, `sess+ion`, and an encoded value that mentions the name (`q=cheap+session+tickets`, URL-encoded JSON) do not match |
+| `TestForwardAllConnectionNamedCookieNotKeyed` (unit) | under `ForwardAll`, a `Cookie` that `Connection` names is not forwarded and not keyed |
 | `TestAuthorizationNeedsValidSMaxage` (unit) | `s-maxage=abc`, two differing `s-maxage` values, or a valid `s-maxage` beside an invalid or conflicting delta-seconds directive do not permit storing an `Authorization` response; `public` and `must-revalidate` still do |
 | `TestAuthorizedNotCoalesced` (engine) | 50 concurrent `Authorization` requests on a cold key make 50 origin calls; none receives another's response |
 | `TestClientNoCacheIgnored` (engine) | `Cache-Control: no-cache` and `Pragma: no-cache` requests are hits under default config |
@@ -271,7 +274,7 @@ Named in [06-threat-model.md](06-threat-model.md), [01-technical-spec.md](01-tec
 | `TestStreamIdleTimeout` (engine) | a 2-minute pass-through stream that keeps sending survives; one that stalls for `StreamIdle` ends |
 | `TestConnectRejected`, `TestUpgradeRejected` (engine), `TestAdaptersRouteUpgradesAround` (integration), `TestH2CUpgradeServedNormally` (keys and weirhttp), `TestH2CKeyedLikePlainRequest` | `Serve` returns `ErrUpgradeNotSupported`; weirhttp hands WebSocket and CONNECT to the next handler; a lone `h2c` upgrade is served and keyed like a plain request, and the origin never sees `Upgrade` or `HTTP2-Settings` |
 | `TestEventStreamNeverBuffered` (engine) | first SSE event reaches the client before the origin sends a second; nothing stored |
-| `TestTraceparentValidated` (engine) | valid headers forwarded on a miss; malformed `traceparent` drops both trace headers; `NoTraceHeaders` forwards none |
+| `TestTraceparentValidated` (engine) | valid headers forwarded on a miss; malformed `traceparent` drops both trace headers; `tracestate` or `X-Request-Id` with a byte outside the FR-FWD-6 set, `..`, an empty line, or more than 32 `tracestate` lines is dropped; `NoTraceHeaders` forwards none |
 | `TestStrippedCookieReport` (engine) | after the report window one log line lists the most frequent stripped names, no values |
 | `TestModeExpires`, `TestModeStaleOnErrorLimits`, `TestModeBypass` (engine) | mode reverts after ttl; stale-on-error never serves hard-purged, invalidated or must-revalidate entries, nor beyond 24 h; bypass stores nothing |
 | `TestDefaultStoreSizeFromMemLimit` (unit) | 1 GiB limit gives 409.6 MiB rounded to shards; unset gives 256 MiB and a warning |

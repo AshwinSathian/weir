@@ -334,7 +334,7 @@ func TestBodylessBypassUsesMainPool(t *testing.T) {
 // so a session cookie in a shape only a lenient parser reads must still
 // bypass, or the sender's personalized response is stored for everyone.
 func TestBypassCookieEvasion(t *testing.T) {
-	for _, cookie := range []string{"session =alice", "SESSION=alice", "lang=en, session=alice", `"session"=alice`, "session", "sess%69on=alice"} {
+	for _, cookie := range []string{"session =alice", "SESSION=alice", "lang=en, session=alice", `"session"=alice`, "session", "sess%69on=alice", "%20session=alice", "+session=alice"} {
 		t.Run(cookie, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				o := testorigin.NewChecked(t, 64, 16)

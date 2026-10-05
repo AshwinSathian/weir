@@ -119,6 +119,12 @@ func DropHopByHop(h http.Header, conn []string) {
 // across its lines (FR-FWD-6).
 const maxTracestateBytes = 512
 
+// maxTracestateLines is the W3C limit on list members; a line holds at
+// least one. T-31: without it 257 empty lines fit in 512 combined bytes and
+// could trip an origin's field-count limit on a request that still plants
+// markers.
+const maxTracestateLines = 32
+
 // filterTrace applies FR-FWD-6 (T-40): trace fields that reach the origin
 // have a validated shape, and none do with NoTraceHeaders.
 func filterTrace(h http.Header, none bool) {
@@ -126,22 +132,38 @@ func filterTrace(h http.Header, none bool) {
 		delete(h, "Traceparent")
 		delete(h, "Tracestate")
 	}
-	if ts := h["Tracestate"]; len(ts) > 0 && (combinedLen(ts) > maxTracestateBytes || !allVisibleASCII(ts)) {
+	if ts := h["Tracestate"]; len(ts) > maxTracestateLines || len(ts) > 0 && (combinedLen(ts) > maxTracestateBytes || !allTraceBytes(ts)) {
 		delete(h, "Tracestate")
 	}
-	if id := h["X-Request-Id"]; none || len(id) > 0 && (len(id) != 1 || len(id[0]) > 128 || !visibleASCII(id[0])) {
+	if id := h["X-Request-Id"]; none || len(id) > 0 && (len(id) != 1 || len(id[0]) > 128 || !allTraceBytes(id)) {
 		delete(h, "X-Request-Id")
 	}
 }
 
-// allVisibleASCII reports whether every line is visibleASCII.
-func allVisibleASCII(lines []string) bool {
+// allTraceBytes reports whether every line is non-empty, holds only
+// traceByte bytes and has no ".." (a path-traversal pattern to a WAF).
+func allTraceBytes(lines []string) bool {
 	for _, l := range lines {
-		if !visibleASCII(l) {
+		if l == "" || strings.Contains(l, "..") {
 			return false
+		}
+		for i := 0; i < len(l); i++ {
+			if !traceByte(l[i]) {
+				return false
+			}
 		}
 	}
 	return true
+}
+
+// traceByte reports a byte tracestate and X-Request-Id may carry (FR-FWD-6).
+// T-31: both go forward unkeyed and do not suppress markers, so the set
+// leaves out what a WAF rule matches on (quotes, angle brackets, brackets,
+// backslash, "%", "&", "#", "$", "?"). It covers W3C tracestate keys, the
+// vendor values in use, UUIDs, base64 and hierarchical ids.
+func traceByte(c byte) bool {
+	return 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z' || '0' <= c && c <= '9' ||
+		strings.IndexByte("-_.:/=+@,;*~!|", c) >= 0
 }
 
 // validTraceparent accepts W3C Trace Context version 00 only:

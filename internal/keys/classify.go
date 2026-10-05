@@ -130,6 +130,11 @@ func Classify(r *Request, c *Config) (Classified, error) {
 	// FR-FWD-4: a HEAD miss is fetched as GET so the response can be stored.
 	// T-5: the body of a fat GET never reaches the origin.
 	fh, unkeyed := forwardHeader(h, c, cookies)
+	if len(fh["Cookie"]) == 0 {
+		// INV-1: under ForwardAll a Connection option can name Cookie, and
+		// a cookie the origin never sees must not split the key.
+		cookies = nil
+	}
 	out.Forwarded = Request{Method: http.MethodGet, Scheme: r.Scheme, Host: host, Path: path, RawQuery: query, Header: fh}
 	out.Unkeyed = unkeyed
 	out.Primary = PrimaryKey(&KeyInput{Method: http.MethodGet, Scheme: r.Scheme, Host: host, Path: path, Query: query,

@@ -51,7 +51,7 @@ func storability(cfg *Config, c *keys.Classified, resp *Response, body []byte, r
 		return fail("no-store", true)
 	case d.cc.Private:
 		return fail("private", true)
-	case c.Authorized && !d.cc.Public && !validSMaxAge(&d.cc) && !d.cc.MustRevalidate:
+	case c.Authorized && (d.cc.Malformed || !d.cc.Public && !validSMaxAge(&d.cc) && !d.cc.MustRevalidate):
 		// RFC 9111 §3.5, T-8. Request-driven: the credentials are unkeyed.
 		return fail("authorization", false)
 	case len(h["Set-Cookie"]) > 0 && !cfg.Storable.StripSetCookie:

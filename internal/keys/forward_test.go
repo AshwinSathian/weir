@@ -38,7 +38,7 @@ var fuzzKeyedCfg = Config{
 // the property holds: the forward carries the normal form the key holds.
 var fuzzAllCfg = Config{
 	MaxPathBytes: 256, MaxQueryBytes: 256, MaxQueryParams: 8, MaxKeyedHeaderBytes: 128,
-	ForwardAll: true, Headers: []string{"X-Tenant", "X-Forwarded-Host"}, AcceptEncoding: []string{"gzip"},
+	ForwardAll: true, Headers: []string{"X-Tenant", "X-Forwarded-Host"}, Cookies: []string{"sid"}, AcceptEncoding: []string{"gzip"},
 }
 
 func FuzzForwardEqualsKey(f *testing.F) {
@@ -60,6 +60,9 @@ func FuzzForwardEqualsKey(f *testing.F) {
 	f.Add(byte(0x40), "GET", "/a", "", "", "", "\xff", "X-Tenant", "a")
 	f.Add(byte(0x40), "GET", "/a", "", "", "", " , ,, ", "X-Tenant", ",")
 	f.Add(byte(0x20), "GET", "/a", "", "sid=1", "br", " a ,b", "X-Tenant", "c\x00")
+	// FR-KEY-6 under ForwardAll: Connection names Cookie, so no cookie is
+	// forwarded and none may be keyed.
+	f.Add(byte(0x20), "GET", "/a", "", "sid=1", "", "cookie", "X-Tenant", "")
 	f.Fuzz(func(t *testing.T, sel byte, method, path, query, cookie, ae, extra, name, tracestate2 string) {
 		cfg := &fuzzCfgs[int(sel)%len(fuzzCfgs)]
 		switch {

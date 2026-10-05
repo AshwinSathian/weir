@@ -29,6 +29,11 @@ type ResponseDirectives struct {
 	// stale-while-revalidate, stale-if-error) repeated with different values,
 	// which makes the lifetime zero (FR-FRS-2).
 	Duplicates bool
+	// Malformed reports a field whose meaning had to be guessed: an unclosed
+	// quoted string, or an argument on public or must-revalidate. The
+	// guesses only restrict; storing a response to an Authorization request
+	// needs a field without them (FR-STO-5, T-8).
+	Malformed bool
 }
 
 // Unusable reports an invalid or conflicting delta-seconds directive, which
@@ -50,9 +55,11 @@ type RequestDirectives struct {
 // are recorded as Invalid.
 func ParseResponse(h http.Header) ResponseDirectives {
 	var d ResponseDirectives
+	publicArg := false
 	for dv := range directives(h["Cache-Control"]) {
 		name := dv.name
 		var dup bool
+		d.Malformed = d.Malformed || dv.loose
 		switch {
 		case equalFold(name, "max-age"):
 			dup = d.MaxAge.add(dv)
@@ -69,15 +76,23 @@ func ParseResponse(h http.Header) ResponseDirectives {
 		case equalFold(name, "private"):
 			d.Private = true
 		case equalFold(name, "public"):
-			d.Public = true
+			// T-8: public only widens what may be stored (FR-STO-5), so
+			// "public=no" and a public read out of an unclosed quote are
+			// not it. Restricting directives keep any form.
+			publicArg = publicArg || dv.hasArg
+			d.Public = d.Public || !dv.hasArg && !dv.loose
 		case equalFold(name, "must-revalidate"):
 			d.MustRevalidate = true
+			d.Malformed = d.Malformed || dv.hasArg
 		case equalFold(name, "proxy-revalidate"):
 			d.ProxyRevalidate = true
 		case equalFold(name, "must-understand"):
 			d.MustUnderstand = true
 		}
 		d.Duplicates = d.Duplicates || dup
+	}
+	if publicArg { // "public, public=no" conflicts and fails closed
+		d.Public, d.Malformed = false, true
 	}
 	return d
 }
@@ -168,6 +183,7 @@ func parseDelta(dv directive) (int64, bool) {
 type directive struct {
 	name, arg string
 	hasArg    bool // an '=' was present
+	loose     bool // read from the rescan of a line with an unclosed quote
 }
 
 // directives yields each comma-separated element of lines, splitting only on
@@ -188,7 +204,7 @@ func directives(lines []string) iter.Seq[directive] {
 						i, open, rescan = open, -1, true
 						continue
 					}
-					if !emit(line[start:], yield) {
+					if !emit(line[start:], rescan, yield) {
 						return
 					}
 					break
@@ -203,7 +219,7 @@ func directives(lines []string) iter.Seq[directive] {
 						open = -1
 					}
 				case c == ',':
-					if !emit(line[start:i], yield) {
+					if !emit(line[start:i], rescan, yield) {
 						return
 					}
 					start, eq, argStart = i+1, false, false
@@ -221,13 +237,13 @@ func directives(lines []string) iter.Seq[directive] {
 	}
 }
 
-func emit(elem string, yield func(directive) bool) bool {
+func emit(elem string, loose bool, yield func(directive) bool) bool {
 	name, arg, hasArg := strings.Cut(elem, "=")
 	name = trimOWS(name)
 	if name == "" {
 		return true
 	}
-	return yield(directive{name: name, arg: trimOWS(arg), hasArg: hasArg})
+	return yield(directive{name: name, arg: trimOWS(arg), hasArg: hasArg, loose: loose})
 }
 
 func trimOWS(s string) string { return strings.Trim(s, " \t") }

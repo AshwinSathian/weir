@@ -792,3 +792,12 @@ Entry template:
 - Deviations: 01 FR-STO-12 and FR-NEG-4 (the fix, approved by Ashwin in the session); 06 T-7 row reworded (its test proves Range passes through unstored), T-8 and T-31 rows, INV-1 now names the Accept-Encoding bucket; 04 §3.1 comment; 07 two rows.
 - Follow-ups: four open attack-review findings in STATUS notes (two hardening, one hypothesis, one nit). The normal review ran before the fix; the fix itself had no independent review. Next: PLAN P0.0 with Ashwin's confirmation.
 - Context: medium; size S was right for the review, the fix added about 10 lines.
+
+## 2026-10-05 · M7-05 · review-fixes
+- Branch / PR: card/M7-05-key-boundary-security-review / #48
+- Done: decided and implemented every finding the attack reviews left open (delegated), then had the new code attacked again and fixed what that found. keys/headers.go `tokenIs` (literal match first; decoded separators and `+` trimmed around the name only); keys/forward.go trace byte set, 32-line cap, no empty line, no `..`; keys/classify.go drops keyed cookies the forward lacks; httpcc `ResponseDirectives.Malformed` and bare-only `public`, read by the Authorization case in storable.go.
+- Tests: TestBypassedCookieShapes, TestForwardAllConnectionNamedCookieNotKeyed, TestAuthorizationNeedsBarePublic (new); cases in TestTraceparentValidated, TestParseResponseDirectives, TestBypassCookieEvasion; `fuzzAllCfg` gains a keyed cookie and a seed. All failed first. `make check` passes; FuzzBypassed, FuzzForwardEqualsKey, FuzzCacheControl, FuzzEvaluate clean for 10 to 12 s each.
+- Deviations: 01 FR-STO-5, FR-FWD-6, FR-BYP-1, FR-STO-12; 04 §3.5 trace filter and the `ResponseDirectives` listing; 06 T-8, T-40, R-3, new R-7; 07 rows. Second-review must-fix (257 empty `tracestate` lines) and three should-fix all fixed.
+- Follow-ups: none open. The last round of fixes (trim-only `tokenIs`, `Malformed`, line cap) was not reviewed a third time. Next: PLAN P0.0 with Ashwin's confirmation.
+- Context: high; the review card grew to five small production fixes, each from a reproduced finding.
+
