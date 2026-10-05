@@ -581,7 +581,7 @@ func TestNoMarkerAfterUnkeyedInput(t *testing.T) {
 		marker bool
 	}{
 		{"Forward.Allow field present plants no marker", allow, [2]string{"X-Tenant", "a"}, false},
-		{"Forward.Allow naming keyed fields plants a marker", weir.Config{Freshness: weir.FreshnessConfig{NoJitter: true}, Forward: weir.ForwardConfig{Allow: []string{"Accept-Encoding", "Cookie"}}}, [2]string{"Accept-Encoding", "gzip"}, true},
+		{"Forward.Allow naming keyed fields plants a marker", weir.Config{Freshness: weir.FreshnessConfig{NoJitter: true}, Forward: weir.ForwardConfig{Allow: []string{"Accept-Encoding", "Authorization"}}}, [2]string{"Accept-Encoding", "gzip"}, true},
 		{"Forward.Allow configured but absent plants a marker", allow, [2]string{"Traceparent", "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01"}, true},
 		{"ForwardAll plants no marker", all, [2]string{"Traceparent", "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01"}, false},
 		{"trace header alone plants a marker", cacheCfg, [2]string{"Traceparent", "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01"}, true},

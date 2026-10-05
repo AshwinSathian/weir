@@ -329,20 +329,134 @@ func TestBodylessBypassUsesMainPool(t *testing.T) {
 	})
 }
 
-// FR-FWD-1, T-1; 01 §6: New refuses a Forward.Allow entry that names a keyed or
-// hop-by-hop field instead of silently ignoring it.
-func TestNewRejectsAllowOfKeyedOrHopByHop(t *testing.T) {
+// FR-BYP-1, T-8: under ForwardAll the origin sees the Cookie lines as sent,
+// so a session cookie in a shape only a lenient parser reads must still
+// bypass, or the sender's personalized response is stored for everyone.
+func TestBypassCookieEvasion(t *testing.T) {
+	for _, cookie := range []string{"session =alice", "SESSION=alice", "lang=en, session=alice", `"session"=alice`, "session"} {
+		t.Run(cookie, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				o := testorigin.NewChecked(t, 64, 16)
+				o.Default(testorigin.Behavior{Func: func(r *weir.Request) (*weir.Response, error) {
+					body := "anonymous"
+					if strings.Contains(strings.ToLower(r.Header.Get("Cookie")), "session") { // a lenient origin
+						body = "alice's page"
+					}
+					return &weir.Response{StatusCode: 200, Header: http.Header{"Cache-Control": {"max-age=60"}}, Body: bodyOf(body)}, nil
+				}})
+				cfg := cacheCfg
+				cfg.Forward.Mode = weir.ForwardAll
+				cfg.Bypass.Cookies = []string{"session"}
+				e := newEngine(t, cfg)
+				defer closeEngine(t, e)
+
+				resp, body := serve(t, e, withHeader(getReq("/a"), "Cookie", cookie), o)
+				if resp.Cache.Fwd != weir.FwdBypass || resp.Cache.Stored || body != "alice's page" {
+					t.Fatalf("%q: %q %+v; want fwd=bypass, not stored", cookie, body, resp.Cache)
+				}
+				if _, body := serve(t, e, getReq("/a"), o); body != "anonymous" {
+					t.Fatalf("anonymous client got %q", body)
+				}
+			})
+		})
+	}
+}
+
+// FR-WRM-1, FR-BYP-1: Warm does not send a request a bypass rule matches;
+// its response could never be stored.
+func TestWarmSkipsBypassed(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		o := testorigin.NewChecked(t, 64, 16)
+		o.Default(cacheable("v"))
+		cfg := cacheCfg
+		cfg.Bypass = weir.BypassConfig{Cookies: []string{"session"}, Headers: []string{"X-Preview"}}
+		e := newEngine(t, cfg)
+		defer closeEngine(t, e)
+
+		reqs := []*weir.Request{getReq("/a"), withHeader(getReq("/b"), "Cookie", "session=1"), withHeader(getReq("/c"), "X-Preview", "1")}
+		st, err := e.Warm(t.Context(), slices.Values(reqs), o)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := (weir.WarmStats{Fetched: 1, NotStored: 2}); st != want || o.TotalCalls() != 1 {
+			t.Fatalf("stats %+v with %d origin calls, want %+v and 1", st, o.TotalCalls(), want)
+		}
+	})
+}
+
+// 01 §5.2.3, T-13, T-31: the Accept-Encoding bucket is keyed only through
+// Vary by default, so a marker written for one bucket covers the others
+// until a storable response arrives. Key.Headers can name the field; the
+// key then holds the bucket and each bucket has its own entry and marker.
+func TestKeyedAcceptEncodingSeparatesBuckets(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		keyed  bool
+		marker bool // the identity client meets the gzip client's marker
+	}{
+		{"default: buckets share the primary key", false, true},
+		{"Key.Headers names Accept-Encoding", true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				o := testorigin.NewChecked(t, 64, 16)
+				o.Default(testorigin.Behavior{Func: func(r *weir.Request) (*weir.Response, error) {
+					cc := "max-age=60"
+					if r.Header.Get("Accept-Encoding") == "gzip" {
+						cc = "private" // storability differs by coding
+					}
+					return &weir.Response{StatusCode: 200, Header: http.Header{"Cache-Control": {cc}}, Body: bodyOf("v")}, nil
+				}})
+				cfg := cacheCfg
+				if tc.keyed {
+					cfg.Key.Headers = []string{"accept-encoding"}
+				}
+				e := newEngine(t, cfg)
+				defer closeEngine(t, e)
+
+				serve(t, e, withHeader(getReq("/a"), "Accept-Encoding", "gzip, br"), o)
+				resp, _ := serve(t, e, getReq("/a"), o)
+				if got := resp.Cache.Detail == "hit-for-miss"; got != tc.marker || !resp.Cache.Stored {
+					t.Fatalf("identity client: marker %v, want %v, and its response stored (%+v)", got, tc.marker, resp.Cache)
+				}
+				for _, r := range o.Requests() {
+					if ae := r.Header["Accept-Encoding"]; len(ae) != 1 || ae[0] != "gzip" && ae[0] != "identity" {
+						t.Fatalf("origin saw Accept-Encoding %q, want one bucket", ae)
+					}
+				}
+			})
+		})
+	}
+}
+
+// FR-FWD-1, T-1; 01 §6: New refuses a Forward.Allow or Key.Headers entry
+// that could never take effect instead of silently ignoring it.
+func TestNewRejectsDeadForwardNames(t *testing.T) {
+	allow := func(names ...string) weir.Config { return weir.Config{Forward: weir.ForwardConfig{Allow: names}} }
+	keyed := func(names ...string) weir.Config { return weir.Config{Key: weir.KeyConfig{Headers: names}} }
+	both := keyed("X-Tenant")
+	both.Forward.Allow = []string{"x-tenant"}
+	ok := keyed("X-Tenant", "accept-encoding", "Authorization", "traceparent")
+	ok.Forward.Allow = []string{"X-Debug", "proxy-authorization"}
 	for _, tc := range []struct {
 		name string
 		cfg  weir.Config
 		ok   bool
 	}{
-		{"keyed header", weir.Config{Key: weir.KeyConfig{Headers: []string{"X-Tenant"}}, Forward: weir.ForwardConfig{Allow: []string{"x-tenant"}}}, false},
-		{"Cookie with keyed cookies", weir.Config{Key: weir.KeyConfig{Cookies: []string{"lang"}}, Forward: weir.ForwardConfig{Allow: []string{"Cookie"}}}, false},
-		{"Cookie without keyed cookies", weir.Config{Forward: weir.ForwardConfig{Allow: []string{"Cookie"}}}, true},
-		{"hop-by-hop", weir.Config{Forward: weir.ForwardConfig{Allow: []string{"te"}}}, false},
-		{"Connection", weir.Config{Forward: weir.ForwardConfig{Allow: []string{"X-A", "Connection"}}}, false},
-		{"unrelated names", weir.Config{Key: weir.KeyConfig{Headers: []string{"X-Tenant"}}, Forward: weir.ForwardConfig{Allow: []string{"X-Debug"}}}, true},
+		{"Allow names a keyed header", both, false},
+		{"Allow names Cookie", allow("cookie"), false},
+		{"Allow names a hop-by-hop field", allow("te"), false},
+		{"Allow names Connection after a valid name", allow("X-A", "Connection"), false},
+		{"Allow names Host", allow("host"), false},
+		{"Allow names a client precondition", allow("If-None-Match"), false},
+		{"Allow names Range", allow("range"), false},
+		{"Allow names a body field", allow("Content-Length"), false},
+		{"Key.Headers names Cookie", keyed("Cookie"), false},
+		{"Key.Headers names a hop-by-hop field", keyed("X-Tenant", "upgrade"), false},
+		{"Key.Headers names Range", keyed("Range"), false},
+		{"Key.Headers names Host", keyed("Host"), false},
+		{"names that are forwarded", ok, true},
+		{"Allow names Accept-Encoding, sent as the bucket anyway", allow("Accept-Encoding"), true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			e, err := weir.New(tc.cfg)

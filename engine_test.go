@@ -312,7 +312,7 @@ func TestNewWarnsOnCredentialForwarding(t *testing.T) {
 	}{
 		{"strict with no allow list is quiet", weir.ForwardConfig{}, 0},
 		{"ForwardAll warns", weir.ForwardConfig{Mode: weir.ForwardAll}, 1},
-		{"credential headers in Allow warn", weir.ForwardConfig{Allow: []string{"cookie", "Authorization", "proxy-authorization", "X-Trace"}}, 3},
+		{"credential headers in Allow warn", weir.ForwardConfig{Allow: []string{"Authorization", "proxy-authorization", "X-Trace"}}, 2},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

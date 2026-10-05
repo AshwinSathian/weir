@@ -233,7 +233,7 @@ Package `store` (import path `github.com/AshwinSathian/weir/store`) defines `Sto
 
 #### 5.2.3 Header normalizers
 
-- `Accept-Encoding`: parsed per RFC 9110 §12.5.3. The value becomes the single most preferred coding from `Key.AcceptEncoding` (default `["gzip"]`) that has a non-zero qvalue, explicitly or via `*`; ties break by list order. If none qualifies the value is `identity`. A request without `Accept-Encoding` also gets `identity`: RFC 9110 permits any coding in that case, but clients that omit the header often cannot decode one. Malformed list members are skipped; a wholly malformed value becomes `identity`. The forwarded request carries `Accept-Encoding: <chosen>`. `Accept-Encoding` is always processed this way, keyed or not, because it is the CVE-2024-35296 input.
+- `Accept-Encoding`: parsed per RFC 9110 §12.5.3. The value becomes the single most preferred coding from `Key.AcceptEncoding` (default `["gzip"]`) that has a non-zero qvalue, explicitly or via `*`; ties break by list order. If none qualifies the value is `identity`. A request without `Accept-Encoding` also gets `identity`: RFC 9110 permits any coding in that case, but clients that omit the header often cannot decode one. Malformed list members are skipped; a wholly malformed value becomes `identity`. The forwarded request carries `Accept-Encoding: <chosen>`. `Accept-Encoding` is always processed this way, keyed or not, because it is the CVE-2024-35296 input. By default the bucket enters the key only through `Vary` (FR-KEY-7), so an origin that ignores the field keeps one entry per URL; the cost is that a hit-for-miss marker (30 s) or negative entry (2 s) written for one bucket covers the others until a storable response replaces it. An origin whose storability or failures differ by coding lists `Accept-Encoding` in `Key.Headers`: the primary key then holds the bucket and each bucket has its own entry, marker and negative entry.
 - Other keyed headers: trimmed, list lines combined with `, `, internal runs of optional whitespace around commas collapsed to one space after each comma. Case preserved (header values are case-sensitive unless their spec says otherwise). A byte outside visible ASCII, space and tab makes the value malformed. The size limit of FR-VAL-3 applies to the combined lines and also to the normalized form, which can be longer (`a,b` becomes `a, b`). A present header with an empty value is keyed and forwarded as empty, apart from an absent one, because the origin can tell them apart.
 - Operators cannot register custom normalizers in Phase 1. (Phase 3 key dimensions will use the same hook.)
 
@@ -310,7 +310,7 @@ A response is stored only if all of the following hold. Each failed check increm
 
 ### 5.9 Bypass
 
-- FR-BYP-1. `Bypass` rules (`Bypass.Cookies []string`: presence of any named cookie; `Bypass.Headers []string`: presence of any named header) mark a `GET`/`HEAD` request as bypassed. Bypassed requests are forwarded per FR-FWD-3, never stored, never coalesced, never served from cache, and still go through the limiter and breaker. `Cache-Status` reports `fwd=bypass`. A bypassed request with `only-if-cached` gets `ErrOnlyIfCached` and contacts nothing (FR-SRV-6: the client forbids the origin, and bypass forbids the cache).
+- FR-BYP-1. `Bypass` rules (`Bypass.Cookies []string`: presence of any named cookie; `Bypass.Headers []string`: presence of any named header) mark a `GET`/`HEAD` request as bypassed. A cookie name matches wherever it stands in a `Cookie` line as a whole token, in any letter case: before `=` with or without whitespace, without `=`, after a comma, in quotes, or as a value. The match is as wide as the most lenient origin parser on purpose: under `ForwardAll` the origin reads the lines as sent, so a missed session cookie would store the sender's personalized response for everyone (T-8), while a false match costs one uncached response. A name that is part of a longer token (`session2`, `my-session`) does not match. Bypassed requests are forwarded per FR-FWD-3, never stored, never coalesced, never served from cache, and still go through the limiter and breaker. `Cache-Status` reports `fwd=bypass`. A bypassed request with `only-if-cached` gets `ErrOnlyIfCached` and contacts nothing (FR-SRV-6: the client forbids the origin, and bypass forbids the cache).
 
 ### 5.10 Origin concurrency limiter (T6.3, T6.4, T6.5, T6.8)
 
@@ -361,7 +361,7 @@ A response is stored only if all of the following hold. Each failed check increm
 
 ### 5.16 Warm start (T6.4)
 
-- FR-WRM-1. `Warm` runs each request through the lookup and fetch path at background priority with `Warm.Concurrency` concurrent fetches (default 4, lowered to `MaxConcurrent − ReserveForeground` when that is smaller). Unlike background refresh, warm fetches wait for a slot (they do not drop), but they never use the foreground reserve, and a warm fetch waiting for a slot holds no flight that foreground requests would join. Requests Weir never stores (unsafe methods, `Range`, `only-if-cached`) are not sent and count as not stored.
+- FR-WRM-1. `Warm` runs each request through the lookup and fetch path at background priority with `Warm.Concurrency` concurrent fetches (default 4, lowered to `MaxConcurrent − ReserveForeground` when that is smaller). Unlike background refresh, warm fetches wait for a slot (they do not drop), but they never use the foreground reserve, and a warm fetch waiting for a slot holds no flight that foreground requests would join. Requests Weir never stores (unsafe methods, `Range`, `only-if-cached`, requests a bypass rule matches) are not sent and count as not stored.
 - FR-WRM-2. `Warm` skips requests that already have a fresh entry, checked again once a slot is granted, and requests whose key another request's fetch stores; when such a fetch is abandoned by its own warm caller, `Warm` fetches the key itself. It returns counts of fetched, skipped, not-stored and failed requests.
 
 ### 5.17 Storage failure (T6.5)
@@ -380,7 +380,7 @@ A response is stored only if all of the following hold. Each failed check increm
 
 ### 5.19 Lifecycle
 
-- FR-LCY-1. `New` MUST reject invalid configuration: negative sizes, `Storable.MaxObjectBytes` larger than the store can admit (checked when the store implements `MaxObjectBytes() int64`, as the memory store does), `LeaderMaxAge` or `FollowerMaxWait` above `Timeouts.Origin`, `Jitter` outside [0, 0.5], `FailureRatio` outside (0, 1], `Limiter.ReserveForeground` at or above `Limiter.MaxConcurrent` (no slot would be left for background refresh or `Warm`), `Warm.Concurrency` above `MaxConcurrent − ReserveForeground`, or a `Storable.Statuses` list containing 206, 304, 500, 502, 503 or 504 (those statuses have dedicated handling and are never stored as entries).
+- FR-LCY-1. `New` MUST reject invalid configuration: negative sizes, `Storable.MaxObjectBytes` larger than the store can admit (checked when the store implements `MaxObjectBytes() int64`, as the memory store does), `LeaderMaxAge` or `FollowerMaxWait` above `Timeouts.Origin`, `Jitter` outside [0, 0.5], `FailureRatio` outside (0, 1], `Limiter.ReserveForeground` at or above `Limiter.MaxConcurrent` (no slot would be left for background refresh or `Warm`), `Warm.Concurrency` above `MaxConcurrent − ReserveForeground`, a `Storable.Statuses` list containing 206, 304, 500, 502, 503 or 504 (those statuses have dedicated handling and are never stored as entries), or a `Key.Headers` or `Forward.Allow` entry that could never take effect: a name the cacheable fetch never carries (hop-by-hop fields, `Host`, the client preconditions and `Range`, the body fields `Content-Length`, `Expect` and `Trailer`, and `Cookie`, which goes only as the `Key.Cookies` pairs), or a `Forward.Allow` name that `Key.Headers` already lists. Rejecting beats ignoring: the operator learns the list is wrong.
 - FR-LCY-2. After `Close` returns, no goroutine started by the engine is running. `Close` does not wait for `Serve` calls in progress: they run on their callers' goroutines, and the adapter drains them first (`http.Server.Shutdown`). A call still waiting on a flight when `Close` cancels it gets its stale entry or `ErrClosed`; a new call gets `ErrClosed`.
 - FR-LCY-3. The engine is safe for concurrent use by any number of goroutines.
 
@@ -394,13 +394,13 @@ All fields are optional. The zero value of `Config` is valid and yields the defa
 | `Key.QueryDrop`, `Key.QueryKeep` | empty | patterns, trailing `*` allowed |
 | `Key.QuerySort` | false | |
 | `Key.NormalizePath` | false | |
-| `Key.Headers`, `Key.Cookies` | empty | deny by default |
+| `Key.Headers`, `Key.Cookies` | empty | deny by default. `Key.Headers` may name `Accept-Encoding` (the key then holds the bucket, §5.2.3); names that are never forwarded are rejected (FR-LCY-1) |
 | `Key.Vary` | `VaryAuto` | or `VaryStrict` |
 | `Key.VaryAllow` | empty | required for sensitive Vary names |
 | `Key.MaxVaryHeaders` / `Key.MaxVariants` | 8 / 8 | |
 | `Key.AcceptEncoding` | `["gzip"]` | set to what the origin produces, e.g. `["br","gzip"]` |
 | `Forward.Mode` | `ForwardStrict` | `ForwardAll` logs a warning |
-| `Forward.Allow` | empty | operator additions, on top of the trace defaults. `New` rejects an entry that names a `Key.Headers` field, `Cookie` while `Key.Cookies` is set, or a hop-by-hop field (`ErrInvalidConfig`): the first two already go in their keyed form and the last never goes |
+| `Forward.Allow` | empty | operator additions, on top of the trace defaults. `New` rejects an entry that names a `Key.Headers` field (it already goes, in its keyed form) or a field that is never forwarded (FR-LCY-1) |
 | `Forward.NoTraceHeaders` | false | D29: true stops forwarding `traceparent`, `tracestate`, `X-Request-Id` (a boolean, because nil-versus-empty slices do not survive JSON or Caddyfile round trips) |
 | `Bypass.Cookies`, `Bypass.Headers` | empty | |
 | `Storable.Statuses` | 200, 203, 204, 300, 301, 302, 307, 308, 404, 405, 410, 414, 501 | 302/307 need explicit freshness (D39) |

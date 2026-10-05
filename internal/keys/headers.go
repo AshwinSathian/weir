@@ -80,10 +80,15 @@ func keyedHeaders(fh http.Header, c *Config) []Header {
 }
 
 // bypassed reports a Bypass rule match (FR-BYP-1): any Bypass.Headers name
-// present, or any Bypass.Cookies name in any Cookie line. A pair without
-// "=" counts by its whole text, and whitespace before "=" is ignored: a
-// malformed session cookie still means a client that must not get a shared
-// response, and under ForwardAll a lenient origin would read it as one.
+// present, or any Bypass.Cookies name in any Cookie line. T-8: the cookie
+// match is as wide as the most lenient origin parser, because under
+// ForwardAll the origin reads the lines as sent. A miss here stores the
+// sender's personalized response for everyone, while a false match costs
+// one uncached response. So a name matches in any letter case wherever it
+// stands as a whole token: before "=" with or without whitespace, without
+// "=", after a comma, in quotes, or as a value. The scan costs line bytes
+// times len(Bypass.Cookies), and the server's header limit bounds the
+// lines (P5).
 func bypassed(h http.Header, c *Config) bool {
 	for _, name := range c.BypassHeaders {
 		if len(h[name]) > 0 {
@@ -94,18 +99,29 @@ func bypassed(h http.Header, c *Config) bool {
 		return false
 	}
 	for _, line := range h["Cookie"] {
-		for pair := range strings.SplitSeq(line, ";") {
-			name, _, _ := strings.Cut(pair, "=")
-			if indexOf(c.BypassCookies, strings.Trim(name, " \t")) >= 0 {
-				return true
+		for i := 0; i < len(line); {
+			if !isTchar(line[i]) {
+				i++
+				continue
+			}
+			start := i
+			for i < len(line) && isTchar(line[i]) {
+				i++
+			}
+			for _, name := range c.BypassCookies {
+				if len(name) == i-start && strings.EqualFold(name, line[start:i]) {
+					return true
+				}
 			}
 		}
 	}
 	return false
 }
 
-// IsHopByHop reports whether the canonical header name is one DropHopByHop
-// always removes, so a Forward.Allow entry naming it can never take effect.
-func IsHopByHop(name string) bool {
-	return slices.Contains(hopByHop, name)
+// Unforwardable reports a canonical header name that no Forward.Allow or
+// Key.Headers entry can put into a cacheable fetch: forwardHeader always
+// deletes hop-by-hop fields, Host and the dropped fields, and writes Cookie
+// from the keyed cookies only (FR-FWD-1, FR-KEY-6).
+func Unforwardable(name string) bool {
+	return name == "Cookie" || name == "Host" || slices.Contains(hopByHop, name) || slices.Contains(dropped, name)
 }

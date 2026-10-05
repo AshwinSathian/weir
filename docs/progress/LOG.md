@@ -752,3 +752,11 @@ Entry template:
 - Deviations: 01 §5.2.3 (generic normalizer details) and the `Forward.Allow` config row; 04 §3.1 step 3 and §3.5; 06 T-1 and T-13 test lists; 07 fuzz table. Review: no must-fix; should-fix 1-4 fixed (allocation bound, fuzz and test coverage), 5 answered by making the code follow FR-VAL-3 and listing three choices under Waiting on Ashwin.
 - Follow-ups: the three confirmations in STATUS (not blocking); dead `Forward.Allow` and `Key.Headers` names and FR-WRM-1 wording for M7-05 (STATUS notes).
 - Context: medium; size M right.
+
+## 2026-10-05 · M7-03 · review-fixes
+- Branch / PR: card/M7-03-keyed-headers-bypass / #46
+- Done: decided every open question from the handoff and the notes addressed to M7-03 (delegated by Ashwin), each after trying to break the obvious answer. Code: bypass cookie names match any whole token in any case (keys/headers.go), because the exact `name=` match was evadable under ForwardAll (T-8); `New` rejects every `Key.Headers` and `Forward.Allow` name that is never forwarded (`keys.Unforwardable`), `Cookie` included. No change: empty keyed header stays apart from absent, limit on the normalized form, `Unkeyed` under Vary, `HasBody`, default Accept-Encoding keying (operator knob documented).
+- Tests: TestBypassCookieEvasion, TestNewRejectsDeadForwardNames (replaces TestNewRejectsAllowOfKeyedOrHopByHop), TestUnforwardable (replaces TestIsHopByHop), TestWarmSkipsBypassed, TestKeyedAcceptEncodingSeparatesBuckets, new TestClassifyBypass rows. The bypass and rejection rows failed first. FuzzBypassed and FuzzForwardEqualsKey 15 s clean. Hit-path benchmarks equal on main and branch. `make check` passes.
+- Deviations: 01 FR-BYP-1, FR-LCY-1, FR-WRM-1, §5.2.3 and the config table; 04 §3.1 and §3.5; 06 T-8 and R-3. Two existing tests changed because `Cookie` in `Forward.Allow` is now rejected (TestNewWarnsOnCredentialForwarding, TestNoMarkerAfterUnkeyedInput).
+- Follow-ups: none. Nothing is waiting on Ashwin.
+- Context: medium.

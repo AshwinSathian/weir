@@ -172,10 +172,14 @@ func TestClassifyBypass(t *testing.T) {
 		{"cookie present", "GET", http.Header{"Cookie": {"lang=en; session=abc"}}, FwdBypass, ClassPass},
 		{"cookie in a later line", "GET", http.Header{"Cookie": {"lang=en", " session=abc"}}, FwdBypass, ClassPass},
 		{"cookie without a value", "GET", http.Header{"Cookie": {"session"}}, FwdBypass, ClassPass},
-		{"cookie name is case-sensitive", "GET", http.Header{"Cookie": {"Session=abc"}}, FwdNone, ClassCacheable},
-		{"longer cookie name", "GET", http.Header{"Cookie": {"session2=abc; xsession=1"}}, FwdNone, ClassCacheable},
-		{"name inside a value", "GET", http.Header{"Cookie": {"lang=session"}}, FwdNone, ClassCacheable},
+		{"longer cookie name", "GET", http.Header{"Cookie": {"session2=abc; xsession=1; my-session=2; session.id=3"}}, FwdNone, ClassCacheable},
+		{"name inside a longer value", "GET", http.Header{"Cookie": {"lang=mysession; a=session_b"}}, FwdNone, ClassCacheable},
+		// T-8: shapes a lenient origin parser still reads as the cookie.
 		{"whitespace before the equals sign", "GET", http.Header{"Cookie": {"lang=en;\tsession =abc"}}, FwdBypass, ClassPass},
+		{"name in another case", "GET", http.Header{"Cookie": {"SESSION=abc"}}, FwdBypass, ClassPass},
+		{"comma-separated pairs", "GET", http.Header{"Cookie": {"lang=en, session=abc"}}, FwdBypass, ClassPass},
+		{"quoted name", "GET", http.Header{"Cookie": {`"session"=abc`}}, FwdBypass, ClassPass},
+		{"name as a whole value", "GET", http.Header{"Cookie": {"lang=session"}}, FwdBypass, ClassPass},
 		{"unsafe method keeps its reason", "POST", http.Header{"X-Preview": {"1"}}, FwdMethod, ClassPass},
 	}
 	for _, tt := range tests {
@@ -205,15 +209,32 @@ func TestClassifyBypass(t *testing.T) {
 	}
 }
 
-func TestIsHopByHop(t *testing.T) {
-	// FR-FWD-2: the names Forward.Allow can never bring back.
-	for _, n := range []string{"Connection", "Keep-Alive", "Proxy-Connection", "Te", "Transfer-Encoding", "Upgrade", "Http2-Settings"} {
-		if !IsHopByHop(n) {
-			t.Errorf("%s not hop-by-hop", n)
+func TestUnforwardable(t *testing.T) {
+	// FR-FWD-1, FR-FWD-2: the names no Forward.Allow or Key.Headers entry
+	// can put into a cacheable fetch.
+	for _, n := range []string{
+		"Connection", "Keep-Alive", "Proxy-Connection", "Te", "Transfer-Encoding", "Upgrade", "Http2-Settings", "Host",
+		"If-None-Match", "If-Modified-Since", "If-Match", "If-Unmodified-Since", "If-Range", "Range",
+		"Content-Length", "Expect", "Trailer", "Cookie",
+	} {
+		if !Unforwardable(n) {
+			t.Errorf("%s reported forwardable", n)
+		}
+		// The claim itself: listed in both, the field still never goes.
+		cfg := classifyCfg()
+		cfg.Cookies, cfg.Allow, cfg.Headers = nil, []string{n}, []string{n}
+		c, err := Classify(classifyReq("GET", http.Header{n: {"x=1"}}), cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if v, ok := c.Forwarded.Header[n]; ok {
+			t.Errorf("%s forwarded as %q", n, v)
 		}
 	}
-	if IsHopByHop("X-Tenant") || IsHopByHop("Cookie") {
-		t.Error("end-to-end field reported hop-by-hop")
+	for _, n := range []string{"X-Tenant", "Accept-Encoding", "Authorization", "Traceparent"} {
+		if Unforwardable(n) {
+			t.Errorf("%s reported unforwardable", n)
+		}
 	}
 }
 
@@ -227,7 +248,7 @@ func FuzzBypassed(f *testing.F) {
 	f.Fuzz(func(t *testing.T, line1, line2 string) {
 		cfg := &Config{BypassCookies: []string{"session"}}
 		got := bypassed(http.Header{"Cookie": {line1, line2}}, cfg)
-		if got && !strings.Contains(line1+";"+line2, "session") {
+		if got && !strings.Contains(strings.ToLower(line1+";"+line2), "session") {
 			t.Fatalf("bypass without the cookie name: %q %q", line1, line2)
 		}
 		if !bypassed(http.Header{"Cookie": {line1, line2, "session=1"}}, cfg) {
