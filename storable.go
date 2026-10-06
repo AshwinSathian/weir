@@ -7,6 +7,7 @@ import (
 
 	"github.com/AshwinSathian/weir/internal/httpcc"
 	"github.com/AshwinSathian/weir/internal/keys"
+	"github.com/AshwinSathian/weir/internal/sfv"
 )
 
 // storeDecision is the outcome of storability. It carries the parsed
@@ -22,10 +23,11 @@ type storeDecision struct {
 	lifetime       time.Duration
 	heuristic      bool
 	varyNames      []string // keys.VaryNames of the response's Vary (FR-KEY-7)
+	groups         []string // distinct Cache-Groups members (FR-STO-10)
 }
 
-// storability applies FR-STO-1 to FR-STO-9 to a fully read response received
-// at respTime. Cache-Groups limits (FR-STO-10) join in M9-03.
+// storability applies FR-STO-1 to FR-STO-10 to a fully read response
+// received at respTime.
 func storability(cfg *Config, c *keys.Classified, resp *Response, body []byte, respTime time.Time) storeDecision {
 	d := storeDecision{cc: httpcc.ParseResponse(resp.Header)}
 	d.lifetime, d.heuristic = httpcc.Lifetime(d.cc, resp.Header, resp.StatusCode, respTime, cfg.freshness())
@@ -40,6 +42,10 @@ func storability(cfg *Config, c *keys.Classified, resp *Response, body []byte, r
 	var star bool
 	d.varyNames, star = keys.VaryNames(h["Vary"])
 	statusOK := slices.Contains(cfg.Storable.Statuses, resp.StatusCode)
+	// CacheGroups.Ignore does not apply here: it switches off
+	// Cache-Group-Invalidation only, so an operator Purge by group still works.
+	var groupsErr error
+	d.groups, groupsErr = groupList(cfg, h["Cache-Groups"])
 	switch {
 	case c.Forwarded.Method != http.MethodGet:
 		return fail("method", false)
@@ -68,9 +74,22 @@ func storability(cfg *Config, c *keys.Classified, resp *Response, body []byte, r
 		return fail("no-freshness", true) // T-6: never inferred from the path
 	case int64(len(body))+headerBytes(h) > cfg.Storable.MaxObjectBytes:
 		return fail("too-large", true)
+	case groupsErr != nil:
+		// FR-STO-10, T-21: stored without its groups, a purge would miss it.
+		return fail("groups", true)
 	}
 	d.ok = true
 	return d
+}
+
+// groupList parses the lines of a Cache-Groups or Cache-Group-Invalidation
+// field under Limits (FR-STO-10) and returns each distinct name once, in
+// byte order: equal names give equal tags, and a repeated tag only costs
+// entry size and epoch lookups.
+func groupList(cfg *Config, lines []string) ([]string, error) {
+	g, err := sfv.ParseStringList(lines, cfg.Limits.MaxGroups, cfg.Limits.MaxGroupBytes)
+	slices.Sort(g)
+	return slices.Compact(g), err
 }
 
 // varyRefused reports a Vary name that Key.VaryAllow does not list and that

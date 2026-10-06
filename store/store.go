@@ -66,7 +66,7 @@ type Entry struct {
 	LastModified        time.Time // zero when absent
 	FetchDuration       time.Duration
 	VaryNames           []string // canonical names this variant was keyed on; nil when no Vary
-	Tags                []Tag    // implicit tags + groups
+	Tags                []Tag    // global, URI, groups
 	Owner               Tag      // origin tag; opaque to stores, used for per-owner quotas (M14)
 
 	// KindVarySpec: VaryNames (shared field) plus Variants.

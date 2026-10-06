@@ -866,3 +866,30 @@ Entry template:
 - Deviations: 01 FR-PRG-2 and FR-STF-2, 04 §4.3, §5.2 and §7, 05 E-6 and E-8 state the new behavior and its two bounded costs.
 - Follow-ups: none open. Group-name validation stays with M9-03.
 - Context: medium.
+
+## 2026-10-06 · M9-03 · blocked
+- Branch / PR: card/M9-03-cache-groups / none
+- Done: `Cache-Groups` parsed in `storability` (`EvNotStored{groups}` on a bad or over-limit list), one `TagGroup` per distinct name in `buildEntry`, `Cache-Group-Invalidation` soft-purges groups in `invalidate`, `Purge` rejects unmatchable group names (`purge-group`).
+- Tests: TestGroupsScopedByOrigin, TestGroupInvalidationIsSoft, TestInvalidationFloodBounded (engine), TestCacheGroupsStorability, groups part of TestUnsafeMethodInvalidates, group form of TestPurge5000KeysBounded. `make check` passed twice, but TestInvalidationFloodBounded fails about 1 run in 20 (4 of 60).
+- Deviations: 04 §7 gains a groups paragraph and the `purge-group` reason; 04 §8.5 says the invalid-field warning is logged once per engine (FR-OBS-3 wins over "a warning is logged").
+- Review: card reviewer found the flake and its store-level cause (must-fix, needs Ashwin), a per-request warning (fixed: once per engine), a weak `/gm` assertion (fixed), duplicate group tags (fixed: deduped), missing accept rows for `""` and a 128-byte name (added). Open: the `Ignore` row of TestGroupInvalidationIsSoft has no teeth until question 2 is answered.
+- Follow-ups: three questions under "Waiting on Ashwin": the origin tag in the epoch sketch (blocks), the scope of `CacheGroups.Ignore`, the `purge-group` reason.
+- Context: medium; size M was right for the card, the store finding is extra.
+
+## 2026-10-06 · M9-03 · done
+- Branch / PR: card/M9-03-cache-groups / #53
+- Done: decided the three items that waited on Ashwin, under his delegation. Entries drop the origin tag from `Entry.Tags` (it stays as `Owner`); `CacheGroups.Ignore` switches off `Cache-Group-Invalidation` only; `purge-group` stays.
+- Tests: TestBuildEntry and TestCacheGroupsStorability rows changed first and failed; TestInvalidationFloodBounded passes 300 of 300 (was about 1 failure in 20); the `Ignore` row of TestGroupInvalidationIsSoft now fails when the `Ignore` branch is removed. `make check` passes, trace 127/152.
+- Deviations: 01 §2 glossary, FR-STO-10 and the defaults table; 02 purge ADR; 04 §3 and §7; 05 §4 and E-8; 06 T-23 and T-29. Reasons in STATUS "Decided 2026-10-06 (M9-03)".
+- Review: card reviewer ran once, before these decisions; its findings are all closed. The decisions were attacked by this session, not by a second agent.
+- Follow-ups: notes for M10-01 in STATUS (events for an invalid invalidation field and a rejected purge; engine-level `EvNotStored{groups}` test).
+- Context: high; size M was right for the card, the store finding doubled it.
+
+## 2026-10-06 · M9-03 · review-fixes
+- Branch / PR: card/M9-03-cache-groups / #53
+- Done: closed the four items PR #53 left open. `invalidate` emits `EvPurge{group}` (`Status` = distinct groups) and `EvPurge{group-invalid}`. The 32-epochs-per-response residual (T-23) is pinned by a test and stated with the RFC 9875 reason it cannot be capped lower. An independent second review ran on the whole branch.
+- Tests: TestMalformedCacheGroupsNotStored, TestGroupInvalidationFloodStaysServable, TestInvalidGroupInvalidationLoggedOnce; event, other-origin and repeated-name rows in TestGroupInvalidationIsSoft; a DEL row in TestPurgeRejectsInvalidInput. `make check` passes, trace 128/152.
+- Deviations: 04 §7, §9.2 and §13.5 (events, `Status`), 05 E-8 and 06 T-23, T-28, T-29 (residuals), 07 (two test lines).
+- Review: second card reviewer, 20 mutations: 16 killed at first, now 18. Fixed: no test pinned the origin scope of group invalidation; the once-per-engine log was untested; DEL untested; stale comment in store/store.go. Left: `Partition` on the group events is unchecked; moving the `groups` case in `storability` changes only the reason label.
+- Follow-ups: one must-fix could only be documented, not fixed: a group tag shared by many entries can be falsely invalidated as a whole by a URI invalidation flood (about 4% per group). The fix changes the store contract or a default; question 1 under "Waiting on Ashwin", not blocking the merge.
+- Context: high. This session went well past one card's budget; the next one should start fresh.

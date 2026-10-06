@@ -166,7 +166,11 @@ type MissRateConfig struct {
 	Disable  bool
 }
 
-// CacheGroupsConfig controls RFC 9875 cache groups. The zero value honors them.
+// CacheGroupsConfig controls RFC 9875 cache groups. The zero value honors
+// them. Ignore switches off Cache-Group-Invalidation, the field with which
+// an origin response invalidates groups (FR-INV-2); set it when parties that
+// do not trust each other share one host (T-25). Cache-Groups is read either
+// way, so Purge by group keeps working (FR-STO-10).
 type CacheGroupsConfig struct{ Ignore bool }
 
 // ClientConfig controls client request directives. HonorRevalidation lets

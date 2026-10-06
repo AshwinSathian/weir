@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -364,7 +365,8 @@ func TestBuildEntry(t *testing.T) {
 			if !e.StoredAt.Equal(testRespTime) || !e.RequestTime.Equal(t0) || e.FetchDuration != 2*time.Second {
 				t.Errorf("times: stored %v request %v fetch %v", e.StoredAt, e.RequestTime, e.FetchDuration)
 			}
-			if !slices.Equal(e.Tags, []store.Tag{store.TagGlobal(), c.OriginTag, c.URITag}) || e.Owner != c.OriginTag {
+			// 05 E-8: no purge names an origin, so the origin tag is the owner only.
+			if !slices.Equal(e.Tags, []store.Tag{store.TagGlobal(), c.URITag}) || e.Owner != c.OriginTag {
 				t.Error("tags or owner wrong")
 			}
 			if e.Flags != tc.flags {
@@ -507,6 +509,69 @@ func TestVaryPolicyStorability(t *testing.T) {
 			}
 			if d.ok || d.reason != tc.reason || !d.responseDriven {
 				t.Fatalf("got %+v, want reason %q, response-driven", d, tc.reason)
+			}
+		})
+	}
+}
+
+// FR-STO-10, T-21: a Cache-Groups field that is not an RFC 9651 List of
+// Strings, or that exceeds Limits.MaxGroups or Limits.MaxGroupBytes, makes
+// the response unstorable; a purge could otherwise miss it. FR-PRG-6: each
+// distinct member becomes one group tag scoped to the entry's origin.
+func TestCacheGroupsStorability(t *testing.T) {
+	// names returns n distinct names of size bytes, in byte order.
+	names := func(n, size int) []string {
+		out := make([]string, n)
+		for i := range out {
+			out[i] = (string(rune('0'+i/10)) + string(rune('0'+i%10)) + strings.Repeat("x", size))[:size]
+		}
+		return out
+	}
+	list := func(n, size int) string { return `"` + strings.Join(names(n, size), `", "`) + `"` }
+	for _, tc := range []struct {
+		name   string
+		lines  []string
+		ignore bool
+		groups []string
+		refuse bool
+	}{
+		{name: "no field"},
+		{name: "empty field", lines: []string{""}},
+		{name: "two lines, parameters dropped", lines: []string{`"a";x=1, "b c"`, `""`}, groups: []string{"", "a", "b c"}},
+		{name: "a repeated member gives one tag", lines: []string{`"b", "a", "b"`, `"a"`}, groups: []string{"a", "b"}},
+		{name: "32 members of 128 bytes", lines: []string{list(32, 128)}, groups: names(32, 128)},
+		{name: "33 members", lines: []string{list(33, 1)}, refuse: true},
+		{name: "129-byte member", lines: []string{list(1, 129)}, refuse: true},
+		{name: "token member", lines: []string{`"a", b`}, refuse: true},
+		{name: "unterminated string", lines: []string{`"a`}, refuse: true},
+		// CacheGroups.Ignore switches off Cache-Group-Invalidation only (FR-INV-2).
+		{name: "Ignore still refuses a malformed field", lines: []string{`"a", b`}, ignore: true, refuse: true},
+		{name: "Ignore keeps the group tags", lines: []string{`"a"`}, ignore: true, groups: []string{"a"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := storableConfig(t, func(c *Config) { c.CacheGroups.Ignore = tc.ignore })
+			c := classifiedGET("/", false)
+			resp := originResp(200, "Cache-Control", "max-age=60")
+			if tc.lines != nil {
+				resp.Header["Cache-Groups"] = tc.lines
+			}
+			d := storability(cfg, c, resp, nil, testRespTime)
+			if tc.refuse {
+				if d.ok || d.reason != "groups" || !d.responseDriven {
+					t.Fatalf("got %+v, want reason groups, response-driven", d)
+				}
+				return
+			}
+			if !d.ok {
+				t.Fatalf("not stored: %q", d.reason)
+			}
+			want := []store.Tag{store.TagGlobal(), c.URITag}
+			for _, g := range tc.groups {
+				want = append(want, keys.TagGroup(c.Origin, g))
+			}
+			e := buildEntry(cfg, c, resp, nil, testRespTime.Add(-time.Second), testRespTime, d)
+			if !slices.Equal(e.Tags, want) {
+				t.Fatalf("entry has %d tags, want %d: global, URI and one per group", len(e.Tags), len(want))
 			}
 		})
 	}

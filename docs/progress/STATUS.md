@@ -4,9 +4,9 @@ Updated: 2026-10-06
 Phase: 1
 Current card: none
 Card state: awaiting-merge
-Branch: card/M9-02-purge-api
-PR: #52 https://github.com/AshwinSathian/weir/pull/52
-Next card: M9-03
+Branch: card/M9-03-cache-groups
+PR: #53 https://github.com/AshwinSathian/weir/pull/53
+Next card: M10-01
 
 ## Blockers
 
@@ -14,7 +14,17 @@ none
 
 ## Waiting on Ashwin
 
-none
+Does not block merging PR #53; it decides whether a follow-up card is written.
+
+1. Shared group tags and the epoch sketch (found by the final M9-03 review, stated in 05 E-8 and 06 T-29). The memory store reads every tag of an entry in the invalid plane, group tags included, though the engine never writes an invalid epoch to a group. Under the docs/07 flood (60 000 unsafe requests to distinct URIs inside one entry lifetime) a group has about a 4% chance that all its entries revalidate before serving, once; the reviewer measured 6 of 150 engines. `CacheGroups.Ignore` does not help. Coalescing and the limiter bound the burst. Options: (a) an optional store capability (or a changed `NewestEpoch`) that lets the engine say which planes to read per tag, so group tags skip the invalid plane: removes the blocking case, leaves a soft one; public store API. (b) raise the default `EpochSlots` from 2^19 to 2^22 (4 MiB to 32 MiB): about 0.08% instead of 4% for every tag, no API change, a default changes. (c) accept it as documented. I recommend (b) now and (a) with the Phase 2.5 store work, when the contract is reopened anyway.
+
+## Decided 2026-10-06 (M9-03)
+
+Ashwin delegated all three in chat ("adversarially review and take decisions"). Each was attacked against the code and the documents first.
+
+- Origin tag: entries no longer carry it in `Entry.Tags`; it stays as `Owner`. The option first recommended (the memory store skips the sketch for origin tags) cannot be built, because tags are opaque hashes and a store cannot tell an origin tag from any other. Filtering it at lookup would need a copy on the hit path or a fixed position in the slice. Dropping it is safe because no purge or invalidation names an origin, and it removes the failure: one sketch false positive on a tag that all entries of an origin share revalidated the whole origin (about 4% of processes under the 07 flood). `TestInvalidationFloodBounded` now passes 300 of 300. 01 §2, 02 ADR, 05 §4 and E-8, 06 T-29 say so; E-8 also states the rate per tag looked up, so an entry in `g` groups sees about `1 - 0.96^(1+g)`. An origin-wide purge, if ever added, needs an exact epoch like the global one.
+- `CacheGroups.Ignore` switches off `Cache-Group-Invalidation` only. `Cache-Groups` is parsed, limited and tagged either way. This is the reading the requirements already had (FR-STO-10 unconditional, `Ignore` named only in FR-INV-2); the first draft's wider reading would have taken `Purge` by group away from operators who set `Ignore` for T-25, silently. A malformed `Cache-Groups` therefore refuses storage under `Ignore` too, the safe side of hard rule 12. 01 FR-STO-10 and the defaults table, 04 §7 and the `CacheGroupsConfig` comment say so.
+- `purge-group` stays. Rejecting a name no stored response can carry catches operator mistakes and saves hard-epoch slots (05 E-6). Known edge for Phase 2.5: nodes with different `Limits.MaxGroupBytes` disagree on which names are valid; the error is explicit, so the operator sees it.
 
 ## Decided 2026-10-06 (M9-02, the two items that waited)
 
@@ -173,7 +183,9 @@ The cards' Notes give the reasons and the options rejected. All three come befor
 ## Notes for the next session
 
 - M9-02: `(*Engine).classifyURL(raw, originOnly)` in purge.go gives the `Classified` of a GET for an absolute URL; `Purge` uses `.URITag` and, for `Origin`, `.Origin`. `Purge.Groups` already writes `keys.TagGroup(origin, name)` epochs, but nothing shows they reach entries until M9-03 tags them.
-- M9-03: add the shared-group form to `TestPurge5000KeysBounded` (07 T6.12, the card lists it now). Validate `Purge.Groups` names there: reject names over `Limits.MaxGroupBytes` or with bytes outside 0x20-0x7E (they can never match, FR-STO-10, and a hard one burns a `MaxHardEpochs` slot) with reason `purge-group`; keep accepting `""` (a valid `Cache-Groups` member) and do not cap the count (`MaxGroups` is per response).
+- M9-03: `Entry.Tags` is global, URI, then one tag per distinct group; the origin tag is `Owner` only. Do not add a tag that many entries share unless a purge can name it and its epoch is kept exactly (05 E-8).
+- M9-03: `groupList` (storable.go) parses, sorts and dedupes both group fields. `invalidate` emits `EvPurge{invalid}`, then `EvPurge{group}` with `Status` = number of distinct groups, or `EvPurge{group-invalid}` for a refused field, which is also logged once per engine (`Engine.badGroup`, FR-OBS-3).
+- M10-01: `EvPurge` now has five reasons (04 §9.2) and `Status` means the group count on `group`, the scrubbed count on `hard` (M15). A rejected `Purge` emits no event, by design (04 §7).
 - M9-02: a soft purge is stale at +0 now (`TestSoftPurgeAppliesAtOnce`). Under synctest a refresh sent in the purge's own clock tick is purged again (05 E-3, `At >= since`), so tests sleep at least 1 ms after `Purge` before the request whose refresh they count. The older purge tests still sleep 2 s; that is harmless.
 - M9-02: Phase 2.5 note. With `MaxClockSkew`, an epoch from a fast node is now applied at once instead of ignored until the local clock catches up, and refreshes repeat until it does. Size the skew allowance with that in mind.
 - M9-02: a background refresh that finds no slot is dropped, not queued: 5 000 stale hits start 48 refreshes and drop 4 952.

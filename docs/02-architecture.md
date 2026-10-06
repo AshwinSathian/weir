@@ -1,7 +1,7 @@
 # Weir architecture
 
 Status: v1.0
-Date: 2026-09-27
+Date: 2026-10-06
 Depends on: [01-technical-spec.md](01-technical-spec.md)
 
 This document fixes the structure: what the parts are, which way dependencies point, who owns which state, and why each major choice was made. Request-level behavior is in [03-hld.md](03-hld.md). Exact types are in [04-lld.md](04-lld.md).
@@ -202,7 +202,7 @@ Consequences: operators must list headers their origin needs (for example `Accep
 
 Context: seed T6.12 wants soft purge; T6.13 wants generation bumps. Iterating tagged entries is O(n), needs a reverse index in every store, and for large tags does a lot of work at purge time.
 
-Decision: each purge writes `epoch[tag] = (time, mode)`. Every entry carries three implicit tags (the global tag, its origin `scheme://host:port`, and its URI `scheme://host:port/path?query` after query rewriting, which deliberately excludes keyed headers and cookies so a URL purge or unsafe-method invalidation reaches every variant and every keyed-header partition of that URL) plus one tag per `Cache-Groups` member, scoped to its origin. At lookup, an entry whose producing request was sent at or before the most severe applicable epoch among its tags is soft-stale, invalid, or hard-purged depending on that epoch's mode (comparing against request time, not store time, closes the purge race of T-10).
+Decision: each purge writes `epoch[tag] = (time, mode)`. Every entry carries two implicit tags (the global tag and its URI `scheme://host:port/path?query` after query rewriting, which deliberately excludes keyed headers and cookies so a URL purge or unsafe-method invalidation reaches every variant and every keyed-header partition of that URL) plus one tag per `Cache-Groups` member, scoped to its origin. There is no origin tag: nothing purges by origin, and a tag shared by every entry of an origin would let one false positive of an approximate epoch table revalidate them all (05 E-8). At lookup, an entry whose producing request was sent at or before the most severe applicable epoch among its tags is soft-stale, invalid, or hard-purged depending on that epoch's mode (comparing against request time, not store time, closes the purge race of T-10).
 
 Alternatives: reverse index plus iteration (what Varnish xkey and Souin do); key generation counters folded into the key (purges become misses, which is hard purge only).
 

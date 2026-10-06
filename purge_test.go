@@ -1,8 +1,10 @@
 package weir_test
 
 import (
+	"bytes"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"slices"
 	"strconv"
@@ -52,6 +54,9 @@ func TestUnsafeMethodInvalidates(t *testing.T) {
 		o.Route("/x", unsafeAnswer(http.StatusCreated, http.Header{"Location": {"https://other.example/y"}}, "x"))
 		o.Route("/f", unsafeAnswer(http.StatusSeeOther, http.Header{"Location": {"/g"}}, "f"))
 		o.Route("/d", unsafeAnswer(http.StatusNotFound, http.Header{"Location": {"/e"}}, "d"))
+		// FR-INV-2: Cache-Group-Invalidation on a response to a safe method is ignored.
+		o.Route("/gm", grouped(`"g"`, nil))
+		o.Route("/gi", grouped(`"g"`, http.Header{"Cache-Group-Invalidation": {`"g"`}}))
 		obs := &purgeObserver{}
 		cfg := cacheCfg
 		cfg.Observer = obs
@@ -77,8 +82,15 @@ func TestUnsafeMethodInvalidates(t *testing.T) {
 		serve(t, e, postReq("/x"), o)
 		serve(t, e, postReq("/f"), o)
 		serve(t, e, postReq("/d"), o)
+		serve(t, e, getReq("/gm"), o)
+		time.Sleep(time.Second)
+		serve(t, e, getReq("/gi"), o)
 		time.Sleep(2 * time.Second) // epochs round up to whole seconds (E-7)
 
+		// A group invalidation is soft, so /gm must be fresh, not just a hit.
+		if resp, _ := serve(t, e, getReq("/gm"), o); !resp.Cache.Hit || resp.Cache.Stale != weir.StaleNone {
+			t.Errorf("/gm: hit=%v stale=%v, want a fresh hit: a GET response invalidated its group", resp.Cache.Hit, resp.Cache.Stale)
+		}
 		for name, want := range map[string]bool{"/a": false, "/b?q": false, "/c": false, "/x": false, "/g": false, "/d": true, "/e": true, "oy": true} {
 			resp, _ := serve(t, e, reqs[name](), o)
 			if resp.Cache.Hit != want {
@@ -519,12 +531,20 @@ func TestGlobalEpochSoft(t *testing.T) {
 // FR-PRG-4, INV-7, T6.12: after a soft purge of 5 000 cached keys, 5 000
 // concurrent requests are all served stale at once and the origin never sees
 // more than MaxConcurrent fetches in flight (NewChecked fails the test if it
-// does). The purge names the keys by URL; M9-03 adds the shared-group form.
+// does). The purge names the keys by URL, or by one group they all share
+// (FR-PRG-6): one epoch then covers all 5 000.
 func TestPurge5000KeysBounded(t *testing.T) {
+	t.Run("by URL", func(t *testing.T) { purge5000(t, false) })
+	t.Run("by shared group", func(t *testing.T) { purge5000(t, true) })
+}
+
+func purge5000(t *testing.T, byGroup bool) {
 	synctest.Test(t, func(t *testing.T) {
 		const n = 5000
 		o := testorigin.NewChecked(t, 64, 16)
-		o.Default(purgeable("v"))
+		answer := purgeable("v")
+		answer.Header.Set("Cache-Groups", `"all"`)
+		o.Default(answer)
 		e := newEngine(t, cacheCfg)
 		defer closeEngine(t, e)
 
@@ -535,9 +555,13 @@ func TestPurge5000KeysBounded(t *testing.T) {
 			serve(t, e, getReq(p), o)
 		}
 		time.Sleep(time.Second)
-		mustPurge(t, e, weir.Purge{URLs: urls})
+		p := weir.Purge{URLs: urls}
+		if byGroup {
+			p = weir.Purge{Origin: "https://example.com", Groups: []string{"all"}}
+		}
+		mustPurge(t, e, p)
 		time.Sleep(2 * time.Second)
-		b := purgeable("v")
+		b := answer
 		b.Delay = 100 * time.Millisecond // refreshes overlap
 		o.Default(b)
 		o.Reset()
@@ -603,6 +627,11 @@ func TestPurgeRejectsInvalidInput(t *testing.T) {
 		{"origin without groups", weir.Purge{URLs: []string{good}, Origin: "garbage"}},
 		{"unknown mode", weir.Purge{Mode: weir.PurgeHard + 1, URLs: []string{good}}},
 		{"eager with soft mode (FR-PRG-8)", weir.Purge{Eager: true, URLs: []string{good}}},
+		// FR-STO-10: no stored response can carry these names, so they never match.
+		{"group name over MaxGroupBytes", weir.Purge{Origin: "https://example.com", Groups: []string{"g", strings.Repeat("x", 129)}}},
+		{"group name with DEL", weir.Purge{Origin: "https://example.com", Groups: []string{"g\x7f"}}},
+		{"group name with a control byte", weir.Purge{Origin: "https://example.com", Groups: []string{"g\n"}}},
+		{"group name with a non-ASCII byte", weir.Purge{Origin: "https://example.com", Groups: []string{"caf\xc3\xa9"}}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -634,8 +663,8 @@ func TestPurgeRejectsInvalidInput(t *testing.T) {
 	}
 }
 
-// FR-PRG-1: a group purge with a valid origin is accepted (M9-03 tests that
-// it reaches entries). FR-LCY-2: Purge on a closed engine is ErrClosed.
+// FR-PRG-1: a group purge with a valid origin is accepted
+// (TestGroupsScopedByOrigin shows it reaches entries). FR-LCY-2: Purge on a closed engine is ErrClosed.
 // 05 E-6: a hard purge past the store's cap reports the store's error, and
 // the epochs written before it stay and are reported (04 §9.2). FR-PRG-8: an
 // eager hard purge writes its epoch and returns ErrEagerUnsupported.
@@ -656,7 +685,7 @@ func TestPurgeGroupsAndStoreErrors(t *testing.T) {
 
 		serve(t, e, getReq("/a"), o)
 		time.Sleep(time.Second)
-		mustPurge(t, e, weir.Purge{Origin: "HTTPS://Example.com:443", Groups: []string{"g", "h"}})
+		mustPurge(t, e, weir.Purge{Origin: "HTTPS://Example.com:443", Groups: []string{"g", "h", "", strings.Repeat("x", 128)}})
 		mustPurge(t, e, weir.Purge{})
 		err = e.Purge(t.Context(), weir.Purge{Mode: weir.PurgeHard, URLs: []string{"https://example.com/a", "https://example.com/b"}})
 		if !errors.Is(err, store.ErrUnavailable) {
@@ -715,4 +744,332 @@ func TestPurgeDuringInflightFetchPurgeAPI(t *testing.T) {
 			}
 		})
 	}
+}
+
+// grouped answers GET with a purgeable response in the Cache-Groups list
+// groups, plus extra; unsafe methods get 201 with extra alone.
+func grouped(groups string, extra http.Header) testorigin.Behavior {
+	return testorigin.Behavior{Func: func(r *weir.Request) (*weir.Response, error) {
+		h := extra.Clone()
+		if h == nil {
+			h = http.Header{}
+		}
+		if r.Method != http.MethodGet {
+			return &weir.Response{StatusCode: http.StatusCreated, Header: h, Body: http.NoBody}, nil
+		}
+		h.Set("Cache-Control", "max-age=60, stale-while-revalidate=30")
+		h.Set("Etag", `"v"`)
+		if groups != "" {
+			h.Set("Cache-Groups", groups)
+		}
+		return &weir.Response{StatusCode: http.StatusOK, Header: h, Body: io.NopCloser(strings.NewReader("v"))}, nil
+	}}
+}
+
+func hostReq(host, path string) *weir.Request {
+	r := getReq(path)
+	r.Host = host
+	return r
+}
+
+// wantCache serves req and checks whether it was a fresh hit or a
+// stale-while-revalidate hit, then lets a background refresh finish.
+func wantCache(t *testing.T, e *weir.Engine, o *testorigin.Origin, req *weir.Request, stale weir.StaleReason) {
+	t.Helper()
+	resp, _ := serve(t, e, req, o)
+	if !resp.Cache.Hit || resp.Cache.Stale != stale {
+		t.Errorf("%s%s: hit=%v stale=%v, want a hit with stale=%v (%s)", req.Host, req.Path, resp.Cache.Hit, resp.Cache.Stale, stale, resp.Header.Get("Cache-Status"))
+	}
+	synctest.Wait()
+}
+
+// FR-PRG-6, FR-STO-10, T-25: a group purge reaches the entries whose
+// Cache-Groups list names the group on that origin, and no entry on another
+// origin. Names are compared byte for byte; a member's parameters are dropped.
+func TestGroupsScopedByOrigin(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		o := testorigin.NewChecked(t, 64, 16)
+		o.Default(grouped(`"g"`, nil))
+		o.Route("/two", grouped(`"x";v=1, "g"`, nil))
+		o.Route("/upper", grouped(`"G"`, nil))
+		o.Route("/none", grouped("", nil))
+		e := newEngine(t, cacheCfg)
+		defer closeEngine(t, e)
+
+		all := []*weir.Request{
+			hostReq("a.example", "/1"), hostReq("a.example", "/two"), hostReq("a.example", "/upper"),
+			hostReq("a.example", "/none"), hostReq("b.example", "/1"), hostReq("a.example:8443", "/1"),
+		}
+		for _, r := range all {
+			serve(t, e, r, o)
+		}
+		time.Sleep(time.Second)
+		mustPurge(t, e, weir.Purge{Origin: "https://a.example", Groups: []string{"g"}})
+		time.Sleep(2 * time.Second)
+
+		for i, stale := range []weir.StaleReason{weir.StaleWhileRevalidate, weir.StaleWhileRevalidate, weir.StaleNone, weir.StaleNone, weir.StaleNone, weir.StaleNone} {
+			wantCache(t, e, o, all[i], stale)
+		}
+
+		// A hard group purge makes the entry a miss, again only on its origin.
+		mustPurge(t, e, weir.Purge{Mode: weir.PurgeHard, Origin: "https://b.example", Groups: []string{"g"}})
+		time.Sleep(2 * time.Second)
+		if resp, _ := serve(t, e, all[4], o); resp.Cache.Hit {
+			t.Errorf("b.example/1 is a hit after a hard purge of its group")
+		}
+		wantCache(t, e, o, all[5], weir.StaleNone)
+	})
+}
+
+// FR-INV-2, T-28: a 2xx response to an unsafe method that carries
+// Cache-Group-Invalidation soft-purges the listed groups on its own origin,
+// so their entries are still served inside the stale-while-revalidate
+// window. A list that does not parse or exceeds Limits invalidates no group,
+// and CacheGroups.Ignore switches the field off while the entries keep their
+// group tags.
+func TestGroupInvalidationIsSoft(t *testing.T) {
+	tests := []struct {
+		name   string
+		field  []string
+		ignore bool
+		host   string           // of the unsafe request; "" is the entries' own
+		want   weir.StaleReason // for the entries in group g
+		events string           // EvPurge reasons, with the group count where one is set (04 §9.2)
+	}{
+		{"listed group is soft-purged", []string{`"g", "nobody"`}, false, "", weir.StaleWhileRevalidate, "invalid group:2"},
+		{"field split over two lines", []string{`"nobody"`, `"g"`}, false, "", weir.StaleWhileRevalidate, "invalid group:2"},
+		{"a repeated name is one epoch", []string{`"g", "g", "g"`}, false, "", weir.StaleWhileRevalidate, "invalid group:1"},
+		{"empty field writes nothing", []string{""}, false, "", weir.StaleNone, "invalid"},
+		{"token member invalidates nothing", []string{`"g", g`}, false, "", weir.StaleNone, "invalid group-invalid"},
+		{"33 members invalidate nothing", []string{`"g"` + strings.Repeat(`, "g"`, 32)}, false, "", weir.StaleNone, "invalid group-invalid"},
+		{"CacheGroups.Ignore", []string{`"g"`}, true, "", weir.StaleNone, "invalid"},
+		// T-25, FR-PRG-6: the groups named are those of the response's own origin.
+		{"response from another origin", []string{`"g"`}, false, "third.example", weir.StaleNone, "invalid group:1"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				o := testorigin.NewChecked(t, 64, 16)
+				o.Default(grouped(`"g"`, nil))
+				o.Route("/h", grouped(`"h"`, nil))
+				o.Route("/post", grouped("", http.Header{"Cache-Group-Invalidation": tc.field}))
+				obs := &purgeEvents{}
+				cfg := cacheCfg
+				cfg.CacheGroups.Ignore = tc.ignore
+				cfg.Observer = obs
+				e := newEngine(t, cfg)
+				defer closeEngine(t, e)
+
+				all := []*weir.Request{getReq("/a"), getReq("/b"), getReq("/h"), hostReq("other.example", "/a")}
+				for _, r := range all {
+					serve(t, e, r, o)
+				}
+				time.Sleep(time.Second)
+				post := postReq("/post")
+				if tc.host != "" {
+					post.Host = tc.host
+				}
+				serve(t, e, post, o)
+				time.Sleep(2 * time.Second)
+
+				wantCache(t, e, o, all[0], tc.want)
+				wantCache(t, e, o, all[1], tc.want)
+				wantCache(t, e, o, all[2], weir.StaleNone)
+				wantCache(t, e, o, all[3], weir.StaleNone) // T-25: same origin only
+				if got := strings.Join(obs.evs, " "); got != tc.events {
+					t.Errorf("EvPurge events = %q, want %q", got, tc.events)
+				}
+			})
+		})
+	}
+}
+
+// T-29, 05 E-8: 60 000 unsafe requests to distinct URIs inside one
+// 60 s entry lifetime. Of 1 000 entries nothing invalidated, at most 8%
+// are revalidated early (the sketch's expected rate is about 4%), and every
+// entry whose URI was invalidated is validated before it is served.
+func TestInvalidationFloodBounded(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		const hot, hit, flood = 1000, 100, 60000
+		o := testorigin.NewChecked(t, 64, 16)
+		o.Default(unsafeAnswer(http.StatusCreated, http.Header{"Cache-Group-Invalidation": {`"flood"`}}, "v"))
+		e := newEngine(t, cacheCfg)
+		defer closeEngine(t, e)
+
+		for i := range hot {
+			serve(t, e, getReq("/hot"+strconv.Itoa(i)), o)
+		}
+		for i := range hit {
+			serve(t, e, getReq("/x"+strconv.Itoa(i)), o)
+		}
+		time.Sleep(time.Second)
+		for i := range flood {
+			serve(t, e, postReq("/x"+strconv.Itoa(i)), o)
+		}
+		time.Sleep(2 * time.Second)
+		o.Reset()
+
+		early := 0
+		for i := range hot {
+			if resp, _ := serve(t, e, getReq("/hot"+strconv.Itoa(i)), o); !resp.Cache.Hit {
+				early++
+			}
+		}
+		if early > hot*8/100 {
+			t.Errorf("%d of %d untouched entries were revalidated early, want at most 8%%", early, hot)
+		}
+		for i := range hit {
+			p := "/x" + strconv.Itoa(i)
+			if resp, _ := serve(t, e, getReq(p), o); resp.Cache.Hit || o.Calls(p) != 1 {
+				t.Fatalf("%s: hit=%v calls=%d, want a validation before serving", p, resp.Cache.Hit, o.Calls(p))
+			}
+		}
+	})
+}
+
+// purgeEvents records every EvPurge as its reason, plus ":Status" when set.
+type purgeEvents struct {
+	mu  sync.Mutex
+	evs []string
+}
+
+func (o *purgeEvents) Observe(ev weir.Event) {
+	if ev.Kind != weir.EvPurge {
+		return
+	}
+	s := ev.Reason
+	if ev.Status != 0 {
+		s += ":" + strconv.Itoa(ev.Status)
+	}
+	o.mu.Lock()
+	o.evs = append(o.evs, s)
+	o.mu.Unlock()
+}
+
+// FR-STO-10, FR-STO-12: a response whose Cache-Groups field is not a List of
+// Strings is delivered but not stored, EvNotStored{groups} says why, and the
+// hit-for-miss marker it leaves makes the next request fetch on its own.
+func TestMalformedCacheGroupsNotStored(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		o := testorigin.NewChecked(t, 64, 16)
+		o.Default(grouped(`"a", b`, nil))
+		var ev eventCounter
+		cfg := cacheCfg
+		cfg.CacheGroups.Ignore = true // FR-STO-10 holds with Ignore set
+		cfg.Observer = &ev
+		e := newEngine(t, cfg)
+		defer closeEngine(t, e)
+
+		resp, body := serve(t, e, getReq("/a"), o)
+		if body != "v" || resp.Cache.Stored || resp.Header.Get("Cache-Groups") != `"a", b` {
+			t.Fatalf("first response: body %q stored=%v Cache-Groups %q, want it delivered whole and not stored", body, resp.Cache.Stored, resp.Header.Get("Cache-Groups"))
+		}
+		resp, _ = serve(t, e, getReq("/a"), o)
+		if resp.Cache.Hit || resp.Cache.Detail != "hit-for-miss" || o.Calls("/a") != 2 {
+			t.Fatalf("second request: hit=%v detail=%q calls=%d, want a hit-for-miss fetch", resp.Cache.Hit, resp.Cache.Detail, o.Calls("/a"))
+		}
+		if n := ev.count(weir.EvNotStored.String() + "/groups"); n != 2 {
+			t.Fatalf("EvNotStored{groups} = %d, want 2", n)
+		}
+	})
+}
+
+// T-23, T-28: unsafe requests whose responses each invalidate 32 new groups
+// fill the store's soft sketch plane, so entries in no group at all go
+// soft-stale. The damage stops there: every entry is still served from the
+// cache inside its stale-while-revalidate window, refreshes stay inside the
+// limiter, and CacheGroups.Ignore switches the attack off. The sketch here
+// has 4 096 cells; 500 responses write 16 000 epochs into it.
+func TestGroupInvalidationFloodStaysServable(t *testing.T) {
+	for _, ignore := range []bool{false, true} {
+		t.Run("Ignore="+strconv.FormatBool(ignore), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				const hot, flood = 200, 500
+				st, err := memory.New(memory.Config{EpochSlots: 1 << 12})
+				if err != nil {
+					t.Fatal(err)
+				}
+				var n atomic.Int64
+				o := testorigin.NewChecked(t, 64, 16)
+				o.Default(testorigin.Behavior{Func: func(r *weir.Request) (*weir.Response, error) {
+					if r.Method == http.MethodGet {
+						return grouped("", nil).Func(r)
+					}
+					id := strconv.FormatInt(n.Add(1), 10)
+					var list []string
+					for i := range 32 {
+						list = append(list, `"`+id+"-"+strconv.Itoa(i)+`"`)
+					}
+					return &weir.Response{StatusCode: http.StatusNoContent, Header: http.Header{"Cache-Group-Invalidation": {strings.Join(list, ", ")}}, Body: http.NoBody}, nil
+				}})
+				var ev eventCounter
+				cfg := cacheCfg
+				cfg.Store = st
+				cfg.CacheGroups.Ignore = ignore
+				cfg.Observer = &ev
+				e := newEngine(t, cfg)
+				defer closeEngine(t, e)
+
+				for i := range hot {
+					serve(t, e, getReq("/hot"+strconv.Itoa(i)), o)
+				}
+				time.Sleep(time.Second)
+				for range flood {
+					serve(t, e, postReq("/post"), o)
+				}
+				time.Sleep(2 * time.Second)
+
+				stale := 0
+				for i := range hot {
+					resp, _ := serve(t, e, getReq("/hot"+strconv.Itoa(i)), o)
+					if !resp.Cache.Hit {
+						t.Fatalf("/hot%d was not served from the cache (%s)", i, resp.Header.Get("Cache-Status"))
+					}
+					if resp.Cache.Stale == weir.StaleWhileRevalidate {
+						stale++
+					}
+					synctest.Wait()
+				}
+				groups := ev.count(weir.EvPurge.String() + "/group")
+				if ignore {
+					if stale != 0 || groups != 0 {
+						t.Fatalf("with Ignore: %d entries went stale, %d group events; want 0 and 0", stale, groups)
+					}
+					return
+				}
+				// 32 000 cell writes into 4 096 cells: a miss needs a cell nothing hit.
+				if stale < hot*9/10 || groups != flood {
+					t.Fatalf("%d of %d entries went stale, %d group events; want the plane saturated and %d events", stale, hot, groups, flood)
+				}
+			})
+		})
+	}
+}
+
+// FR-OBS-3, FR-INV-2: refused Cache-Group-Invalidation fields are logged
+// once per engine, however many arrive, and the line names the origin, never
+// the field's text. Each one still emits EvPurge{group-invalid}.
+func TestInvalidGroupInvalidationLoggedOnce(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var buf bytes.Buffer
+		o := testorigin.NewChecked(t, 64, 16)
+		o.Default(grouped("", http.Header{"Cache-Group-Invalidation": {`"SECRETGROUP", bad`}}))
+		var ev eventCounter
+		cfg := cacheCfg
+		cfg.Logger = slog.New(slog.NewTextHandler(&buf, nil))
+		cfg.Observer = &ev
+		e := newEngine(t, cfg)
+		defer closeEngine(t, e)
+
+		for i := range 3 {
+			serve(t, e, postReq("/p"+strconv.Itoa(i)), o)
+		}
+		log := buf.String()
+		if n := strings.Count(log, "Cache-Group-Invalidation"); n != 1 || !strings.Contains(log, "https://example.com") || strings.Contains(log, "SECRETGROUP") {
+			t.Fatalf("log has %d warnings, want 1 naming the origin and not the field:\n%s", n, log)
+		}
+		if n := ev.count(weir.EvPurge.String() + "/group-invalid"); n != 3 {
+			t.Fatalf("EvPurge{group-invalid} = %d, want 3", n)
+		}
+	})
 }

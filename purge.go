@@ -17,8 +17,14 @@ import (
 // URIs its 2xx or 3xx response names in Location and Content-Location,
 // invalid (FR-INV-1, FR-INV-3, RFC 9111 §4.4). The epoch is written after
 // the response arrived, so every entry requested before it is covered
-// (FR-PRG-7). A failed write is ignored: the client's response does not
-// depend on it, and the memory store fails only once closed.
+// (FR-PRG-7). Unless CacheGroups.Ignore is set, the groups its
+// Cache-Group-Invalidation field lists are soft-purged on the request's
+// origin (FR-INV-2); the soft form keeps their stale windows, so one cheap
+// request cannot force a whole group to revalidate before it is served
+// (T-28). A field that does not parse or exceeds Limits invalidates no
+// group; each is reported as EvPurge{group-invalid} and the first is logged.
+// A failed write is ignored: the client's response does not depend on it,
+// and the memory store fails only once closed.
 func (e *Engine) invalidate(ctx context.Context, c *keys.Classified, resp *Response) {
 	ctx = context.WithoutCancel(ctx) // the response is already on its way to the client
 	tags := []store.Tag{c.URITag}
@@ -37,6 +43,30 @@ func (e *Engine) invalidate(ctx context.Context, c *keys.Classified, resp *Respo
 	for _, t := range tags {
 		_ = e.sg.setEpoch(ctx, t, ep)
 	}
+	if e.cfg.CacheGroups.Ignore {
+		return
+	}
+	// T-23: at most Limits.MaxGroups epochs per response, all in the store's
+	// fixed-size sketch.
+	groups, err := groupList(&e.cfg, resp.Header["Cache-Group-Invalidation"])
+	if err != nil {
+		// FR-OBS-3: once per engine, never one line per response.
+		e.badGroup.Do(func() {
+			e.cfg.Logger.Warn("weir: invalid Cache-Group-Invalidation field; no group invalidated (logged once)", "origin", c.Origin)
+		})
+		emit(e.cfg.Observer, Event{Kind: EvPurge, Time: ep.At, Partition: c.Partition, Reason: "group-invalid"})
+		return
+	}
+	if len(groups) == 0 {
+		return
+	}
+	ep.Mode = store.EpochSoft
+	for _, g := range groups {
+		_ = e.sg.setEpoch(ctx, keys.TagGroup(c.Origin, g), ep)
+	}
+	// Status is the number of group epochs, so an exporter can see a
+	// response-driven flood of them (T-23).
+	emit(e.cfg.Observer, Event{Kind: EvPurge, Time: ep.At, Partition: c.Partition, Status: len(groups), Reason: "group"})
 }
 
 // sameOriginTag resolves ref against base and returns its URI tag when it
@@ -65,7 +95,9 @@ func (e *Engine) sameOriginTag(c *keys.Classified, base *url.URL, ref string) (s
 // the number of tags, not the number of matching entries, which are judged
 // at their next lookup (FR-PRG-4). All of p is validated before the first
 // write; invalid input returns an error matching ErrInvalidRequest and
-// purges nothing. A store error stops the call and is returned: epochs
+// purges nothing. That includes a group name no stored response can carry:
+// one longer than Limits.MaxGroupBytes or with a byte outside 0x20 to 0x7E
+// (FR-STO-10). A store error stops the call and is returned: epochs
 // already written stay, EvPurge is still emitted for them, and repeating
 // the call is safe. The memory store refuses a hard purge of a new URL or
 // group past its MaxHardEpochs with an error matching store.ErrUnavailable
@@ -113,6 +145,9 @@ func (e *Engine) Purge(ctx context.Context, p Purge) error {
 			return &RequestError{Reason: "purge-origin"}
 		}
 		for _, g := range p.Groups {
+			if !storableGroup(g, e.cfg.Limits.MaxGroupBytes) {
+				return &RequestError{Reason: "purge-group"}
+			}
 			tags = append(tags, keys.TagGroup(kc.Origin, g)) // FR-PRG-6
 		}
 	}
@@ -136,6 +171,19 @@ func (e *Engine) Purge(ctx context.Context, p Purge) error {
 		return ErrEagerUnsupported // FR-PRG-8: the epochs are written, nothing was deleted
 	}
 	return nil
+}
+
+// storableGroup reports whether a Cache-Groups member can be named g: an
+// RFC 9651 String holds bytes 0x20 to 0x7E only, and FR-STO-10 caps its
+// length. Any other name matches no entry, and purging it hard would spend
+// one of the store's hard epochs (05 E-6) on nothing.
+func storableGroup(g string, maxLen int) bool {
+	for i := range len(g) {
+		if g[i] < 0x20 || g[i] > 0x7e {
+			return false
+		}
+	}
+	return len(g) <= maxLen
 }
 
 // classifyURL classifies a GET for the absolute URL raw, so its tags and

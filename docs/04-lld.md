@@ -125,7 +125,7 @@ type MissRateConfig struct {
 	Disable   bool
 }
 
-type CacheGroupsConfig struct{ Ignore bool } // zero value honors RFC 9875
+type CacheGroupsConfig struct{ Ignore bool } // zero value honors RFC 9875; Ignore switches off Cache-Group-Invalidation only
 type ClientConfig struct{ HonorRevalidation bool }
 type WarmConfig struct{ Concurrency int } // 0: min(4, MaxConcurrent-ReserveForeground); at most that
 
@@ -254,7 +254,7 @@ type Entry struct {
 	LastModified        time.Time // zero when absent
 	FetchDuration       time.Duration
 	VaryNames           []string  // canonical names this variant was keyed on; nil when no Vary
-	Tags                []Tag     // implicit tags + groups
+	Tags                []Tag     // global, URI, groups
 	Owner               Tag       // origin tag; opaque to stores, used for per-owner quotas (M14)
 
 	// KindVarySpec
@@ -937,14 +937,19 @@ func (e *Engine) invalidate(ctx, c, resp):
     for h in [Location, Content-Location]:
         if u, ok := resolveSameOrigin(c, resp.Header.Get(h)); ok: tags += TagURI(u)   // u validated and query-rewritten like a request; invalid values are ignored
     write EpochInvalid for each tag so far                // RFC 9111 §4.4
+    emit EvPurge{invalid}
     if !e.cfg.CacheGroups.Ignore:
-        for g in sfv.ParseStringList(resp.Header["Cache-Group-Invalidation"]) (bounded by Limits):
-            write EpochSoft for TagGroup(c.Origin, g)     // FR-INV-2, T-28
+        groups, err := groupList(resp.Header["Cache-Group-Invalidation"])   // parsed under Limits, sorted, deduped
+        if err != nil: warn once per engine; emit EvPurge{group-invalid}; return
+        for g in groups: write EpochSoft for TagGroup(c.Origin, g)          // FR-INV-2, T-28
+        if len(groups) > 0: emit EvPurge{group, Status: len(groups)}
 ```
 
 `NewestEpoch` returns the most severe mode among epochs newer than the entry, so a soft purge after a hard purge never resurrects the hard-purged entry.
 
-`classifyURL` (purge.go) cuts the URL at `://`, the first `/` or `?`, and the `?` by hand, then runs `keys.Classify` on a GET for it. It does not use `net/url`, which re-escapes path bytes such as `|` and `"` that a request keeps as sent, so the purge tag would differ from the entry's. Userinfo and fragments are not stripped: `@` in the host and `#` anywhere fail request validation, while `@` in a path or query is kept, as in a request. An empty path is `/`, and the scheme is lowercased. `Origin` is validated whenever it is set, with or without `Groups`. Rejections are a `RequestError` with reason `purge-mode`, `purge-eager`, `purge-origin`, `purge-url` (no `://`) or the request validation reason of the URL; a URL error also carries the URL's index, never its text, and no `EvKeyRejected` is emitted because the input is the operator's. A `Purge` with nothing to purge returns nil and emits nothing; a store error stops the loop and is returned, with the epochs already written left in place, and `EvPurge` is still emitted when at least one was written. A store error after `Close` started is `ErrClosed`. Until a store implements `Scrubber` (M15), `Eager` with `PurgeHard` writes its epochs and returns `ErrEagerUnsupported`.
+`classifyURL` (purge.go) cuts the URL at `://`, the first `/` or `?`, and the `?` by hand, then runs `keys.Classify` on a GET for it. It does not use `net/url`, which re-escapes path bytes such as `|` and `"` that a request keeps as sent, so the purge tag would differ from the entry's. Userinfo and fragments are not stripped: `@` in the host and `#` anywhere fail request validation, while `@` in a path or query is kept, as in a request. An empty path is `/`, and the scheme is lowercased. `Origin` is validated whenever it is set, with or without `Groups`. Rejections are a `RequestError` with reason `purge-mode`, `purge-eager`, `purge-origin`, `purge-group`, `purge-url` (no `://`) or the request validation reason of the URL; a URL error also carries the URL's index, never its text, and no `EvKeyRejected` is emitted because the input is the operator's. A `Purge` with nothing to purge returns nil and emits nothing; a store error stops the loop and is returned, with the epochs already written left in place, and `EvPurge` is still emitted when at least one was written. A store error after `Close` started is `ErrClosed`. Until a store implements `Scrubber` (M15), `Eager` with `PurgeHard` writes its epochs and returns `ErrEagerUnsupported`.
+
+Groups (M9-03). `storability` parses `Cache-Groups` with `sfv.ParseStringList` under `Limits.MaxGroups` and `Limits.MaxGroupBytes`; an error is `EvNotStored{groups}`, response-driven, so a hit-for-miss marker may follow (FR-STO-10). `groupList` (storable.go) sorts the names and drops repeats, since equal names give equal tags, and `buildEntry` appends one `TagGroup(c.Origin, g)` per distinct name after the two implicit tags (global, URI), so an entry carries at most 2 + `MaxGroups` tags. The origin tag is `Entry.Owner` only and is not in `Tags`: no purge names an origin, and all entries of an origin would share it, so one false positive of the memory store's sketch (05 E-8) would revalidate the whole origin. An origin-wide purge, if one is added, needs an exact epoch like the global one (05 E-5), never a sketch tag. `CacheGroups.Ignore` switches off `Cache-Group-Invalidation` only (FR-INV-2). `Cache-Groups` is parsed, limited and tagged either way (FR-STO-10 is unconditional), so an operator who sets `Ignore` for T-25 keeps `Purge` by group, the only way to purge a section (D32). T-25 stays closed: a tenant can add only its own responses to a group, and nothing a response carries can invalidate one. `Purge` rejects with `purge-group` a group name no stored response can carry, one longer than `Limits.MaxGroupBytes` or with a byte outside 0x20 to 0x7E; the empty name is a valid member and is accepted, and the number of names is not capped (`MaxGroups` is per response). `invalidate` runs only for unsafe methods, so `Cache-Group-Invalidation` on a GET response is never read. After the `EvPurge{invalid}` of the URI epochs, a field that names at least one group emits `EvPurge{group}` with `Status` set to the number of distinct groups, and a refused field emits `EvPurge{group-invalid}`; an empty or absent field emits neither. The first refused field an engine sees also logs one warning naming the origin, never the field's text; the log stays silent after that (FR-OBS-3) and the event carries the rate. A rejected `Purge` emits no event: the caller is the operator and gets the error. RFC 9875 §2 requires support for at least 32 groups per field, so the per-response count cannot be capped lower; `EvPurge{group}` with its `Status` is how an operator sees a flood of them (06 T-23).
 
 Every purge shows at the next lookup. The memory store times a soft purge by URL or group to the next whole second (05 E-7), and `Evaluate` (§4.3) counts an epoch timed ahead of now as now, so the entry is stale at once. Two bounded costs follow from the rounding, both in the over-invalidating direction (05 E-8): the SWR and SIE windows of such a purge can run up to 1 s long, and a refresh sent inside that second is purged again when its request time is not after the newest epoch the store has seen (another purge or invalidation arrived since, or the refresh went out in the purge's own clock tick). The repeats end when the second has passed (`TestSoftPurgeRepeatsEndWithTheSecond`). `Purge` writes through `storeGuard.purgeEpoch` (§5.2), so a refusal at the hard-epoch cap does not count toward the store breaker.
 
@@ -1112,7 +1117,7 @@ The engine calls `Observe` once per cacheable request after the outcome is known
 
 ### 8.5 `internal/sfv`
 
-`ParseStringList(lines []string, maxMembers, maxLen int) ([]string, error)`: RFC 9651 §4.2.1 list parsing restricted to members that are Strings (members with parameters: parameters ignored; members of other types: error). Any error means "not a valid field": for `Cache-Groups` the response is not stored (FR-STO-10); for `Cache-Group-Invalidation` nothing is invalidated beyond the target URI and a warning is logged.
+`ParseStringList(lines []string, maxMembers, maxLen int) ([]string, error)`: RFC 9651 §4.2.1 list parsing restricted to members that are Strings (members with parameters: parameters ignored; members of other types: error). Any error means "not a valid field": for `Cache-Groups` the response is not stored (FR-STO-10); for `Cache-Group-Invalidation` nothing is invalidated beyond the target URI, `Location` and `Content-Location`, and a warning is logged once per engine (FR-OBS-3).
 
 ## 9. Observability
 
@@ -1150,7 +1155,7 @@ type Event struct {
 | `EvNotStored` | storability failed | `method` (defensive: cacheable forwards are always GET), `status`, `no-store`, `private`, `authorization`, `set-cookie`, `vary-star`, `vary-sensitive`, `vary-strict`, `vary-too-many`, `no-freshness`, `too-large`, `incomplete`, `groups` |
 | `EvVaryOverflow` | variant cap reached | |
 | `EvNegativeServed` | negative entry used | |
-| `EvPurge` | `Purge` or invalidation wrote epochs | `soft`, `hard`, `invalid` |
+| `EvPurge` | `Purge` wrote at least one epoch, or a response to an unsafe method invalidated (emitted whether or not the store took the writes, whose errors that path ignores) | `soft`, `hard` (`Purge`); `invalid` (unsafe-method invalidation of URIs); `group` (`Cache-Group-Invalidation` soft-purged groups, `Status` is how many); `group-invalid` (that field was refused, no group epoch written) |
 | `EvMissRateAnomaly` | window closed with an anomalous partition | `flag`, `throttle` |
 | `EvEvict` | memory store evicted (batched per shard per call) | `small`, `main`, `expired` |
 | `EvMode` | `SetMode` changed the incident mode or it expired (FR-MODE-1) | `normal`, `stale-on-error`, `bypass` (new mode) |
@@ -1253,7 +1258,7 @@ Limiter: `byHost map[uint64]int32` alongside `byPart`; `canRun` adds `byHost[hos
 
 ### 13.5 Eager purge (M15)
 
-`Purge` writes epochs exactly as before, then, when `Eager`, type-asserts `store.Scrubber` and calls `Scrub` with the same tags. The returned count goes into `EvPurge` as `Status` (number scrubbed).
+`Purge` writes epochs exactly as before, then, when `Eager`, type-asserts `store.Scrubber` and calls `Scrub` with the same tags. The returned count goes into `EvPurge` as `Status` (number scrubbed). That is on `EvPurge{hard}` only; on `EvPurge{group}` `Status` is the number of groups (§9.2).
 
 ## 14. Designs for decisions D25 to D42
 
