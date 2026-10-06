@@ -78,6 +78,24 @@ func (g *storeGuard) setEpoch(ctx context.Context, t store.Tag, ep store.Epoch) 
 	return g.exit(ctx, "set-epoch", g.s.SetEpoch(ctx, t, ep))
 }
 
+// purgeEpoch is setEpoch for Engine.Purge. A refused write is reported but
+// not counted toward the breaker: the memory store refuses a new hard tag
+// past MaxHardEpochs with ErrUnavailable (05 E-6), and an operator retrying
+// that must not turn every lookup into a miss or lock out Purge{All}. A
+// store that is really down is counted by the requests that find it so.
+func (g *storeGuard) purgeEpoch(ctx context.Context, t store.Tag, ep store.Epoch) error {
+	ctx, cancel, err := g.enter(ctx)
+	if err != nil {
+		return err
+	}
+	defer cancel()
+	if err := g.s.SetEpoch(ctx, t, ep); err != nil {
+		emit(g.obs, Event{Kind: EvStoreError, Time: time.Now(), Reason: "set-epoch"})
+		return err
+	}
+	return g.exit(ctx, "set-epoch", nil)
+}
+
 func noCancel() {}
 
 // enter refuses the call while the breaker is open and adds the remote

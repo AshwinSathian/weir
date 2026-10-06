@@ -2,8 +2,11 @@ package weir
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/AshwinSathian/weir/internal/keys"
@@ -55,4 +58,118 @@ func (e *Engine) sameOriginTag(c *keys.Classified, base *url.URL, ref string) (s
 		return store.Tag{}, false
 	}
 	return kc.URITag, true
+}
+
+// Purge makes the entries p names stale (PurgeSoft) or unreachable
+// (PurgeHard) by writing one epoch per tag (FR-PRG-1, 04 §7). Its cost is
+// the number of tags, not the number of matching entries, which are judged
+// at their next lookup (FR-PRG-4). All of p is validated before the first
+// write; invalid input returns an error matching ErrInvalidRequest and
+// purges nothing. A store error stops the call and is returned: epochs
+// already written stay, EvPurge is still emitted for them, and repeating
+// the call is safe. The memory store refuses a hard purge of a new URL or
+// group past its MaxHardEpochs with an error matching store.ErrUnavailable
+// (05 E-6); purge with All instead. Such a refusal does not count toward
+// the store breaker.
+//
+// A purge shows at the next lookup. With the memory store a soft purge by
+// URL or group is timed to the next whole second (05 E-7), so its
+// stale-while-revalidate and stale-if-error windows can run up to 1 s long,
+// and a refresh sent in that second may be repeated once.
+//
+// Eager with PurgeSoft is invalid input. No store scrubs yet (M15), so
+// Eager with PurgeHard writes its epochs and returns ErrEagerUnsupported
+// (FR-PRG-8).
+func (e *Engine) Purge(ctx context.Context, p Purge) error {
+	if e.closed.Load() {
+		return ErrClosed
+	}
+	mode, reason := store.EpochSoft, "soft"
+	switch p.Mode {
+	case PurgeSoft:
+	case PurgeHard:
+		mode, reason = store.EpochHard, "hard"
+	default:
+		return &RequestError{Reason: "purge-mode"}
+	}
+	if p.Eager && p.Mode != PurgeHard {
+		return &RequestError{Reason: "purge-eager"} // FR-PRG-8
+	}
+	// Sized by the operator's own call, not by request input (P5).
+	tags := make([]store.Tag, 0, 1+len(p.URLs)+len(p.Groups))
+	if p.All {
+		tags = append(tags, keys.TagGlobal()) // FR-PRG-5
+	}
+	for i, u := range p.URLs {
+		kc, err := e.classifyURL(u, false)
+		if err != nil {
+			return fmt.Errorf("%w: purge url %d", err, i) // the index, never the URL's text
+		}
+		tags = append(tags, kc.URITag)
+	}
+	if len(p.Groups) > 0 || p.Origin != "" { // an Origin nothing uses is still checked
+		kc, err := e.classifyURL(p.Origin, true)
+		if err != nil {
+			return &RequestError{Reason: "purge-origin"}
+		}
+		for _, g := range p.Groups {
+			tags = append(tags, keys.TagGroup(kc.Origin, g)) // FR-PRG-6
+		}
+	}
+	if len(tags) == 0 {
+		return nil
+	}
+	ep := store.Epoch{At: time.Now(), Mode: mode}
+	for i, t := range tags {
+		if err := e.sg.purgeEpoch(ctx, t, ep); err != nil {
+			if e.closed.Load() { // Close won the race and closed the store
+				return ErrClosed
+			}
+			if i > 0 { // 04 §9.2: epochs were written, so the purge is reported
+				emit(e.cfg.Observer, Event{Kind: EvPurge, Time: ep.At, Reason: reason})
+			}
+			return fmt.Errorf("weir: purge: %w", err)
+		}
+	}
+	emit(e.cfg.Observer, Event{Kind: EvPurge, Time: ep.At, Reason: reason})
+	if p.Eager {
+		return ErrEagerUnsupported // FR-PRG-8: the epochs are written, nothing was deleted
+	}
+	return nil
+}
+
+// classifyURL classifies a GET for the absolute URL raw, so its tags and
+// origin are the ones a request for it gets (FR-PRG-1). The URL is cut by
+// hand: net/url would re-escape path bytes a request keeps as sent, and the
+// purge would then miss the entry. Userinfo and fragments are not stripped:
+// "@" in the host and "#" anywhere fail validation, while "@" in a path or
+// query is kept, as in a request. With originOnly, raw must be exactly
+// scheme://host[:port].
+func (e *Engine) classifyURL(raw string, originOnly bool) (keys.Classified, error) {
+	scheme, rest, ok := strings.Cut(raw, "://")
+	if !ok {
+		return keys.Classified{}, &RequestError{Reason: "purge-url"}
+	}
+	host, path, query := rest, "/", ""
+	if i := strings.IndexAny(rest, "/?"); i >= 0 {
+		if originOnly {
+			return keys.Classified{}, &RequestError{Reason: "purge-url"}
+		}
+		host = rest[:i]
+		p, q, _ := strings.Cut(rest[i:], "?")
+		if query = q; p != "" {
+			path = p
+		}
+	}
+	// Schemes are case-insensitive (RFC 9110 §4.2.3); Validate takes the lowercase form.
+	kc, err := keys.Classify(&keys.Request{Method: http.MethodGet, Scheme: strings.ToLower(scheme), Host: host,
+		Path: path, RawQuery: query}, &e.kcfg)
+	if err != nil {
+		reason := "purge-url"
+		if re, ok := errors.AsType[*keys.RequestError](err); ok {
+			reason = re.Reason
+		}
+		return keys.Classified{}, &RequestError{Reason: reason}
+	}
+	return kc, nil
 }

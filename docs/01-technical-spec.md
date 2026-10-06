@@ -339,7 +339,7 @@ A response is stored only if all of the following hold. Each failed check increm
 ### 5.13 Purge (T6.12, T6.13)
 
 - FR-PRG-1. `Purge` accepts any combination of `All`, `URLs` (absolute URLs, validated and rewritten exactly like requests) and `Groups`, and a `Mode` of `PurgeSoft` (default) or `PurgeHard`. `Groups` requires `Origin` (`scheme://host[:port]`) because RFC 9875 groups are scoped to an origin. Any invalid input rejects the whole call before any epoch is written.
-- FR-PRG-2. Soft purge makes matching entries stale as of the purge time: an entry's expiry becomes the earlier of its original expiry and the purge time. Its SWR and SIE windows are measured from that expiry, and it is revalidated with conditional requests.
+- FR-PRG-2. Soft purge makes matching entries stale as of the purge time: an entry's expiry becomes the earlier of its original expiry and the purge time. Its SWR and SIE windows are measured from that expiry, and it is revalidated with conditional requests. The purge applies from the next lookup. A store may time it up to 1 s late ([05 E-7](05-storage-interface-spec.md)); the entry is stale at once all the same, and only the windows run up to 1 s long.
 - FR-PRG-3. Hard purge makes matching entries unusable: treated as a miss, no stale serving, no conditional revalidation.
 - FR-PRG-4. Purge cost is O(number of tags given), independent of how many entries match. Entries are evaluated lazily at lookup (epoch model, [05-storage-interface-spec.md §4](05-storage-interface-spec.md)).
 - FR-PRG-5. `All` purges by bumping the global epoch. This is the generation mechanism for T6.13.
@@ -367,7 +367,7 @@ A response is stored only if all of the following hold. Each failed check increm
 ### 5.17 Storage failure (T6.5)
 
 - FR-STF-1. Every call to a remote store (`Info().Remote` true) is bounded by `Timeouts.Store` (default 50 ms). A timeout counts as `ErrUnavailable`. In-process stores are called with the request context only, so the hit path does not allocate a timer.
-- FR-STF-2. A store breaker opens after 5 consecutive `ErrUnavailable` results and stays open for 1 s (doubling to 30 s). While it is open, Weir skips store calls and treats lookups as misses.
+- FR-STF-2. A store breaker opens after 5 consecutive `ErrUnavailable` results and stays open for 1 s (doubling to 30 s). While it is open, Weir skips store calls and treats lookups as misses. Epoch writes made by `Purge` return their error to the operator and do not count toward the 5: a store's refusal of a hard purge at its cap (05 E-6) is not an outage.
 - FR-STF-3. Store unavailability never bypasses coalescing, the limiter or the origin breaker.
 - FR-STF-4. `ErrNotFound` is a normal miss and never counts toward the store breaker.
 

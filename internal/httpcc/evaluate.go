@@ -36,7 +36,11 @@ func Evaluate(e *store.Entry, ep store.Epoch, epOK bool, now time.Time) (st Stat
 		case store.EpochSoft:
 			// FR-PRG-2: expiry becomes min(expiry, age at purge), so staleness
 			// becomes max(staleness, time since purge). time.Sub saturates.
-			staleness = max(staleness, now.Sub(ep.At))
+			// The floor of 0 is for an epoch timed ahead of now: the memory
+			// store rounds up to a whole second (05 E-7) and a remote node's
+			// clock may run ahead (05 §4.3). It applies, so the entry is
+			// stale now; without the floor the purge would wait for the clock.
+			staleness = max(staleness, now.Sub(ep.At), 0)
 		default: // T-9: a zero or unknown mode from a decoder fails closed
 			return Unusable, staleness, false
 		}

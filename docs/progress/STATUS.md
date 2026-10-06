@@ -4,9 +4,9 @@ Updated: 2026-10-06
 Phase: 1
 Current card: none
 Card state: awaiting-merge
-Branch: card/M9-01-sf-list-parser
-PR: #51 https://github.com/AshwinSathian/weir/pull/51
-Next card: M9-02
+Branch: card/M9-02-purge-api
+PR: #52 https://github.com/AshwinSathian/weir/pull/52
+Next card: M9-03
 
 ## Blockers
 
@@ -15,6 +15,24 @@ none
 ## Waiting on Ashwin
 
 none
+
+## Decided 2026-10-06 (M9-02, the two items that waited)
+
+Ashwin delegated both in chat ("choose the best course of action"). Each was attacked against the code before it was decided.
+
+- Soft purge delay: fixed in `httpcc.Evaluate`, `staleness = max(staleness, now - epoch.At, 0)`. An epoch that applies makes the entry stale now, even when the store times it ahead of the clock. Chosen over a store-side change (returning a rounded-down time) because it needs no store contract or conformance change and also covers Phase 2.5, where a purge written by a node with a fast clock would otherwise be ignored for the skew. The M1-03 row "soft purge in the future leaves a fresh entry fresh" is reversed; no document motivated it. Costs, both bounded by the 1 s rounding and stated in 01 FR-PRG-2, 04 §7 and 05 E-8: stale windows up to 1 s long, and a refresh sent inside the purge's second can repeat until the second passes (the first review missed this; `TestSoftPurgeRepeatsEndWithTheSecond` pins it). Unsafe-method invalidation always behaved that way.
+- Hard-epoch cap and the store breaker: `Purge` writes through `storeGuard.purgeEpoch`, which reports a failed write (`EvStoreError`, the returned error) without counting it. Chosen over a new `store.ErrEpochCap` sentinel: that adds public store API and protects only stores that adopt it, while this holds for any store. Not counting a real outage here loses nothing, since requests count it. 01 FR-STF-2, 04 §5.2 and 05 E-6 say so.
+
+## Decided 2026-10-06 (M9-02)
+
+Decided by the session that wrote the card after the card reviewer and a second, adversarial agent attacked each open item with scratch tests (Ashwin asked for that review in chat).
+
+- Purge URLs are cut by hand and classified with `keys.Classify`, not `net/url`: kept. 37 request targets under 6 key configs went through `weirhttp.RequestFrom`, `Serve`, a hard purge of the same URL and `Serve` again; none stayed a hit. The first version rejected any `@`, which made `/@scope/pkg` unpurgeable; host validation already rejects userinfo, so that check is gone.
+- `TestPurge5000KeysBounded` purges by URL here: kept, and 07 T6.12 now names both forms. It asserts exactly 48 refreshes (`MaxConcurrent - ReserveForeground`); the looser 1..64 passed with a limiter that allowed one.
+- `Eager`: changed from ignored to FR-PRG-8's behavior without a scrubber. Soft is `purge-eager`; hard writes its epochs and returns `ErrEagerUnsupported`. M15-01 adds only the `Scrubber` branch.
+- `EvPurge` on a half-written purge: changed, emitted when at least one epoch was written (04 §9.2). Not emitted before writing, which would report a purge an open store breaker refused.
+- URL error text: changed to `weir: invalid request: <reason>: purge url <index>`, the shape `config.go` uses, with one prefix.
+- Kept: an empty `Purge{}` is nil (FR-PRG-1 "any combination"); the caller's ctx is not detached (a caller waits on the error, and detaching would hold it for tags x `Timeouts.Store`); `Origin` must be exactly `scheme://host[:port]` and is checked whenever set.
 
 ## Decided 2026-10-06 (M9-01)
 
@@ -153,6 +171,12 @@ Already built, now confirmed: the weirhttp default transport (compression off, n
 The cards' Notes give the reasons and the options rejected. All three come before M1-18, because closing M1 makes the repo public.
 
 ## Notes for the next session
+
+- M9-02: `(*Engine).classifyURL(raw, originOnly)` in purge.go gives the `Classified` of a GET for an absolute URL; `Purge` uses `.URITag` and, for `Origin`, `.Origin`. `Purge.Groups` already writes `keys.TagGroup(origin, name)` epochs, but nothing shows they reach entries until M9-03 tags them.
+- M9-03: add the shared-group form to `TestPurge5000KeysBounded` (07 T6.12, the card lists it now). Validate `Purge.Groups` names there: reject names over `Limits.MaxGroupBytes` or with bytes outside 0x20-0x7E (they can never match, FR-STO-10, and a hard one burns a `MaxHardEpochs` slot) with reason `purge-group`; keep accepting `""` (a valid `Cache-Groups` member) and do not cap the count (`MaxGroups` is per response).
+- M9-02: a soft purge is stale at +0 now (`TestSoftPurgeAppliesAtOnce`). Under synctest a refresh sent in the purge's own clock tick is purged again (05 E-3, `At >= since`), so tests sleep at least 1 ms after `Purge` before the request whose refresh they count. The older purge tests still sleep 2 s; that is harmless.
+- M9-02: Phase 2.5 note. With `MaxClockSkew`, an epoch from a fast node is now applied at once instead of ignored until the local clock catches up, and refreshes repeat until it does. Size the skew allowance with that in mind.
+- M9-02: a background refresh that finds no slot is dropped, not queued: 5 000 stale hits start 48 refreshes and drop 4 952.
 
 - M9-01: `sfv.ParseStringList(lines, maxMembers, maxLen)` returns `sfv.ErrInvalid` for bad syntax and for over-limit input alike, with no members. Pass the resolved `Limits.MaxGroups` and `Limits.MaxGroupBytes`. Hash each member with `keys.TagGroup` and drop it: a member without escapes is a substring of the header line, so keeping one anywhere else (a log field, an event) needs `strings.Clone`. Duplicates are kept; equal names hash to equal tags, so dedupe the tags.
 - M8-02: `missrate.Tracker.Observe` takes one mutex per cacheable request. Parallel hit benchmark, M4 Pro 12 procs: 600 ns/op with the tracker, 343 with `MissRate.Disable`; serial `BenchmarkServeHitSmall` 1.1 µs against NFR-5's 4 µs, so no budget is broken (ADR-9 accepts the mutex). `TryLock` gets 367 ns/op but drops 50% of samples at 12 procs (20% at 4, 3% at 2): the ratio stays unbiased, `MinMisses` is effectively doubled. M10-05 decides whether a parallel budget exists and, if so, between `TryLock` and per-shard counters.

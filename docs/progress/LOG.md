@@ -849,3 +849,20 @@ Entry template:
 - Deviations: none.
 - Follow-ups: none open. This round was attacked by the session that wrote it, not by an independent agent.
 - Context: low.
+
+## 2026-10-06 · M9-02 · done
+- Branch / PR: card/M9-02-purge-api / #52
+- Done: `(*Engine).Purge` in purge.go: soft, hard, `All`, URLs and group tags, validated in full before the first epoch; `classifyURL` cuts purge URLs by hand so the tag equals the request's `URITag`. `Eager` follows FR-PRG-8 for a store without `Scrubber`.
+- Tests: TestPurge5000KeysBounded, TestSoftPurgeServesStaleWhileRevalidating, TestHardPurgeIsMiss, TestSoftAfterHardStaysHard, TestGlobalEpochSoft, TestPurgeRejectsInvalidInput, TestPurgeGroupsAndStoreErrors, TestPurgeDuringInflightFetchPurgeAPI; `make check` passes, trace 126/152.
+- Deviations: 04 §7 names `e.classifyURL` (the `keys.ClassifyURL` and `keys.NormalizeOrigin` it cited never existed), lists the purge reasons, the partial-failure event, `ErrClosed` and the 1 s soft delay. 07 T6.12 names the URL form (here) and the group form (M9-03) of the 5 000-key test; the M9-03 card lists it.
+- Review: card reviewer found one must-fix (any `@` in a URL was rejected), fixed test-first. An adversarial agent then attacked ten open decisions: four changed (partial `EvPurge`, `Eager`, error text, sharper 48-refresh assertion), the rest kept; see STATUS "Decided 2026-10-06 (M9-02)".
+- Follow-ups: two questions under "Waiting on Ashwin" (1 s soft purge delay; hard-epoch cap opening the store breaker). Group-name validation goes to M9-03.
+- Context: medium; size M was right.
+
+## 2026-10-06 · M9-02 · review-fixes
+- Branch / PR: card/M9-02-purge-api / #52
+- Done: decided the two items that waited on Ashwin, under his delegation. `httpcc.Evaluate` floors a soft epoch's staleness at 0, so a soft purge by URL is stale at the next lookup instead of up to 1 s later. `Purge` writes epochs through `storeGuard.purgeEpoch`, which does not count a refusal toward the store breaker.
+- Tests: TestSoftPurgeAppliesAtOnce, TestSoftPurgeRepeatsEndWithTheSecond, TestCappedHardPurgeKeepsStoreBreakerClosed, four TestEvaluate rows (one M1-03 row reversed); `make check` passes.
+- Deviations: 01 FR-PRG-2 and FR-STF-2, 04 §4.3, §5.2 and §7, 05 E-6 and E-8 state the new behavior and its two bounded costs.
+- Follow-ups: none open. Group-name validation stays with M9-03.
+- Context: medium.
