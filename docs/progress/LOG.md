@@ -866,3 +866,12 @@ Entry template:
 - Deviations: 01 FR-PRG-2 and FR-STF-2, 04 §4.3, §5.2 and §7, 05 E-6 and E-8 state the new behavior and its two bounded costs.
 - Follow-ups: none open. Group-name validation stays with M9-03.
 - Context: medium.
+
+## 2026-10-06 · M9-03 · blocked
+- Branch / PR: card/M9-03-cache-groups / none
+- Done: `Cache-Groups` parsed in `storability` (`EvNotStored{groups}` on a bad or over-limit list), one `TagGroup` per distinct name in `buildEntry`, `Cache-Group-Invalidation` soft-purges groups in `invalidate`, `Purge` rejects unmatchable group names (`purge-group`).
+- Tests: TestGroupsScopedByOrigin, TestGroupInvalidationIsSoft, TestInvalidationFloodBounded (engine), TestCacheGroupsStorability, groups part of TestUnsafeMethodInvalidates, group form of TestPurge5000KeysBounded. `make check` passed twice, but TestInvalidationFloodBounded fails about 1 run in 20 (4 of 60).
+- Deviations: 04 §7 gains a groups paragraph and the `purge-group` reason; 04 §8.5 says the invalid-field warning is logged once per engine (FR-OBS-3 wins over "a warning is logged").
+- Review: card reviewer found the flake and its store-level cause (must-fix, needs Ashwin), a per-request warning (fixed: once per engine), a weak `/gm` assertion (fixed), duplicate group tags (fixed: deduped), missing accept rows for `""` and a 128-byte name (added). Open: the `Ignore` row of TestGroupInvalidationIsSoft has no teeth until question 2 is answered.
+- Follow-ups: three questions under "Waiting on Ashwin": the origin tag in the epoch sketch (blocks), the scope of `CacheGroups.Ignore`, the `purge-group` reason.
+- Context: medium; size M was right for the card, the store finding is extra.

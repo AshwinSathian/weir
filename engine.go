@@ -48,6 +48,7 @@ type Engine struct {
 	mode     atomic.Pointer[modeState] // nil: ModeNormal (FR-MODE-1)
 	cr       *cookieReport             // nil when disabled (FR-OBS-5)
 	mr       *missrate.Tracker         // nil when MissRate.Disable
+	badGroup sync.Once                 // one warning for invalid Cache-Group-Invalidation (FR-OBS-3)
 
 	mu        sync.Mutex  // orders setting closed against wg.Add in goBackground
 	closed    atomic.Bool // written under mu; read without it on the Serve path

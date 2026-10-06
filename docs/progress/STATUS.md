@@ -2,19 +2,21 @@
 
 Updated: 2026-10-06
 Phase: 1
-Current card: none
-Card state: awaiting-merge
-Branch: card/M9-02-purge-api
-PR: #52 https://github.com/AshwinSathian/weir/pull/52
+Current card: M9-03
+Card state: blocked
+Branch: card/M9-03-cache-groups
+PR: none
 Next card: M9-03
 
 ## Blockers
 
-none
+- M9-03: `TestInvalidationFloodBounded` (engine, purge_test.go) fails about 1 run in 20 with "1000 of 1000 untouched entries were revalidated early". The cause is in the memory store, outside the card: `newestOf` (store/memory/epochs.go) looks up every non-global tag in the sketch, the origin tag included, and all 1 000 hot entries share one origin tag. When the flood raises both cells of that tag (the 4% E-8 gives for one tag), the whole origin revalidates. Nothing writes a soft or invalid epoch to an origin tag, so that lookup only over-invalidates. The test is committed as it fails; no PR is open until question 1 is answered.
 
 ## Waiting on Ashwin
 
-none
+1. Invalidation flood and the origin tag (blocks M9-03). An invalidation flood has about a 4% chance per process of making every entry on an origin revalidate once, where 06 T-29 and 05 E-8 promise "about 4% of entries". Even on distinct origins an entry reads two sketch tags (origin, URI), so its rate is about 8.2%, over the 8% bound in 07. Options: (a) the memory store skips the sketch for origin tags, which no soft or invalid epoch is ever written to (smallest change, restores 4% per entry; a later origin-wide soft purge would need the exact table or a slot like the global one); (b) keep the store and rewrite 05 E-8, 06 T-29 and the 07 criterion to the real numbers. I recommend (a), as a store fix in this card or a card of its own before M9-03 closes.
+2. `CacheGroups.Ignore` and `Cache-Groups`. 01 names `Ignore` only in FR-INV-2; FR-STO-10 and 04 §8.5 are unconditional; the 01 defaults table says "RFC 9875 honored by default". The diff reads `Ignore` as switching off both fields (no parse, no refusal, no group tags). The reviewer argues for the other reading: keep parsing and tagging, switch off only `Cache-Group-Invalidation`. Then operators who follow 06 T-25 and set `Ignore` keep `Purge` by group (D32 makes groups the only section purge), and T-25 is still closed because a tenant can only add its own responses to a group. I recommend the reviewer's reading. Either way FR-STO-10 or FR-INV-2 and the `CacheGroupsConfig` comment must say it.
+3. `purge-group`. `Purge` rejects a group name longer than `Limits.MaxGroupBytes` or with a byte outside 0x20 to 0x7E with this new `RequestError` reason. It came from the M9-02 session's note, not from you. Keep it?
 
 ## Decided 2026-10-06 (M9-02, the two items that waited)
 
@@ -173,7 +175,9 @@ The cards' Notes give the reasons and the options rejected. All three come befor
 ## Notes for the next session
 
 - M9-02: `(*Engine).classifyURL(raw, originOnly)` in purge.go gives the `Classified` of a GET for an absolute URL; `Purge` uses `.URITag` and, for `Origin`, `.Origin`. `Purge.Groups` already writes `keys.TagGroup(origin, name)` epochs, but nothing shows they reach entries until M9-03 tags them.
-- M9-03: add the shared-group form to `TestPurge5000KeysBounded` (07 T6.12, the card lists it now). Validate `Purge.Groups` names there: reject names over `Limits.MaxGroupBytes` or with bytes outside 0x20-0x7E (they can never match, FR-STO-10, and a hard one burns a `MaxHardEpochs` slot) with reason `purge-group`; keep accepting `""` (a valid `Cache-Groups` member) and do not cap the count (`MaxGroups` is per response).
+- M9-03 (blocked, branch `card/M9-03-cache-groups`, no PR): code and tests are written and reviewed once; `make check` passes except for the flake under Blockers. After Ashwin answers: apply answers 1 and 2, give the `CacheGroups.Ignore` row of `TestGroupInvalidationIsSoft` teeth (it passes with the `Ignore` branch in `invalidate` removed, because entries have no group tags under `Ignore`), then run `/handoff`. Security checklist answers for the PR are in the reviewer's report, summarized in the LOG entry.
+- M9-03: `groupList` (storable.go) parses, sorts and dedupes both group fields. An invalid `Cache-Group-Invalidation` logs once per engine (`Engine.badGroup`), because FR-OBS-3 forbids a line per request.
+- M9-03, for the threat model: one unsafe response can write 32 distinct soft group epochs, so about 1 900 requests load the sketch's soft plane as much as E-8's 60 000 invalidations. Memory stays fixed (all T-23 claims), but over-invalidation grows 32 times faster than T-29 states. No document says so yet.
 - M9-02: a soft purge is stale at +0 now (`TestSoftPurgeAppliesAtOnce`). Under synctest a refresh sent in the purge's own clock tick is purged again (05 E-3, `At >= since`), so tests sleep at least 1 ms after `Purge` before the request whose refresh they count. The older purge tests still sleep 2 s; that is harmless.
 - M9-02: Phase 2.5 note. With `MaxClockSkew`, an epoch from a fast node is now applied at once instead of ignored until the local clock catches up, and refreshes repeat until it does. Size the skew allowance with that in mind.
 - M9-02: a background refresh that finds no slot is dropped, not queued: 5 000 stale hits start 48 refreshes and drop 4 952.

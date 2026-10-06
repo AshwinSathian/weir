@@ -50,6 +50,9 @@ func buildEntry(cfg *Config, c *keys.Classified, resp *Response, body []byte, re
 		Tags:                []store.Tag{store.TagGlobal(), c.OriginTag, c.URITag},
 		Owner:               c.OriginTag,
 	}
+	for _, g := range d.groups { // at most Limits.MaxGroups (FR-STO-10)
+		e.Tags = append(e.Tags, keys.TagGroup(c.Origin, g)) // FR-PRG-6, T-25: scoped to the origin
+	}
 	// Retention (04 §4.2). Both terms of lifetime-cia are non-negative, so
 	// it cannot overflow; the rest is added to the time one term at a time,
 	// so a huge Keep cannot wrap a Duration sum into the past.
