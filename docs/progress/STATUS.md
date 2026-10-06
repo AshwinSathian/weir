@@ -26,6 +26,9 @@ Decided by two independent adversarial reviews under Ashwin's delegation, then c
 - Shed counts as a miss: kept. Without it the cap flaps between 16 and 1 every other window, about 8.5 times the origin load.
 - Uncacheable or always-revalidated busy paths are flagged every window and capped under `Throttle`: kept and documented (`Throttle` comment, 04 §8.4, 06 R-8). Request headers cannot be excluded without handing a flood a "do not count me" flag; a bypass rule is the remedy.
 - Tracker mutex on the hit path: kept, measured, left to M10-05 (first note below).
+- `MissRate.MinRatio` above 1: now rejected by `New` (`ErrInvalidConfig`). It turned detection, and `Throttle` with it, off silently. `Breaker.FailureRatio` already had the same rule. Rejected: clamping to 1 (hides the mistake).
+- Throttle against the other classes, attacked and kept: a shed half-open probe is handed back, a background refresh without a slot is dropped with the stale entry served, `Warm` runs one fetch at a time. Each is pinned by a test that fails when the behavior is removed.
+- `TestOneHitWondersDoNotEvictHot` now runs the flood on 16 goroutines beside the hot reads, as docs/07 words it. With store promotion broken it scores 28 of 200.
 
 ## Decided 2026-10-05 (M8-01)
 
@@ -144,7 +147,6 @@ The cards' Notes give the reasons and the options rejected. All three come befor
 - M8-02: `missrate.Tracker.Observe` takes one mutex per cacheable request. Parallel hit benchmark, M4 Pro 12 procs: 600 ns/op with the tracker, 343 with `MissRate.Disable`; serial `BenchmarkServeHitSmall` 1.1 µs against NFR-5's 4 µs, so no budget is broken (ADR-9 accepts the mutex). `TryLock` gets 367 ns/op but drops 50% of samples at 12 procs (20% at 4, 3% at 2): the ratio stays unbiased, `MinMisses` is effectively doubled. M10-05 decides whether a parallel budget exists and, if so, between `TryLock` and per-shard counters.
 - M8-02 review: with `MissRate.Throttle`, a legitimate cold path with far more keys than the cap can fetch stays throttled (300 000 random keys at 1 000 rps on one path: throttled for all 30 windows measured). That is what FR-MR-3 asks for and `Throttle` is off by default; the runbook (M10-06) should say so. `Throttle` is also a lever: 60 distinct-query requests a second to one path kept it capped and served 390 of 1 200 legitimate misses there (06 R-8).
 - M8-02: supersedes the "Decided 2026-10-05 (M8-01)" bullet above on throttle timing. The engine applies a report only while `end + Window` is ahead; the limiter drops it at `end + 2*Window` or when the next report replaces it (01 FR-MR-3, 04 §8.2).
-- M8-02: `MissRate.MinRatio` above 1 passes `New` and silently disables detection, although `internal/missrate`'s `Config` comment says (0, 1]. M8-01 behavior; rejecting it would fail configs that load today. Decide in a later card.
 
 - PLAN P0.0 ran on 2026-10-05 after Ashwin confirmed it in chat: the repository is public, private vulnerability reporting is enabled, and `v0.1.0` is an annotated tag on 560d2af (the #48 merge). Commit author emails are public with it.
 - M8-01: `missrate.New(cfg, emit)` calls `emit(end, found)` once per closed window, an empty slice included, after its lock is released. `end` is the closed window's end time. M8-02's limiter callback keeps the report with the latest `end`, throttles only while `end + Window` is ahead and drops the map at that time (card notes, 04 §8.4).

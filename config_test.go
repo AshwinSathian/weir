@@ -171,6 +171,7 @@ func TestInvalidConfigRejected(t *testing.T) {
 		{"negative jitter", Config{Freshness: FreshnessConfig{Jitter: -0.1}}, "Freshness.Jitter"},
 		{"failure ratio above 1", Config{Breaker: BreakerConfig{FailureRatio: 1.01}}, "Breaker.FailureRatio"},
 		{"negative failure ratio", Config{Breaker: BreakerConfig{FailureRatio: -0.5}}, "Breaker.FailureRatio"},
+		{"miss ratio above 1", Config{MissRate: MissRateConfig{MinRatio: 1.01}}, "MissRate.MinRatio"}, // FR-MR-2: no partition could ever reach it
 		{"status 206 storable", Config{Storable: StorableConfig{Statuses: []int{200, 206}}}, "Storable.Statuses"},
 		{"status 304 storable", Config{Storable: StorableConfig{Statuses: []int{304}}}, "Storable.Statuses"},
 		{"status 500 storable", Config{Storable: StorableConfig{Statuses: []int{500}}}, "Storable.Statuses"},

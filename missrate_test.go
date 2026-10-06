@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"strings"
 	"sync"
 	"testing"
@@ -238,14 +239,17 @@ func TestMissRateThrottle(t *testing.T) {
 	})
 }
 
-// T6.11, ADR-6: a flood of one-hit keys far larger than the store does not
-// push a hot-key workload's hit ratio below 90% of its ratio without the
-// flood.
+// T6.11, ADR-6: a flood of one-hit keys far larger than the store, running
+// 16 fetches at a time, does not push a concurrent hot-key workload's hit
+// ratio below 90% of its ratio without the flood.
 func TestOneHitWondersDoNotEvictHot(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		const hot = 100
-		o := testorigin.New()
-		o.Default(cacheable(strings.Repeat("x", 1024)))
+		o := testorigin.NewChecked(t, 64, 16)
+		b := cacheable(strings.Repeat("x", 1024))
+		o.Default(b)
+		b.Delay = time.Millisecond // the flood takes fake time, so the hot reads fall inside it
+		o.Route("/p", b)
 		// About 500 entries: five times the hot set, a twentieth of the flood.
 		st, err := memory.New(memory.Config{MaxBytes: 512 << 10, Shards: 1})
 		if err != nil {
@@ -258,33 +262,45 @@ func TestOneHitWondersDoNotEvictHot(t *testing.T) {
 		defer closeEngine(t, e)
 		defer st.Close()
 
-		hits := func(round int) (n int) {
-			if resp, _ := serve(t, e, getReq(fmt.Sprintf("/hot%d", round%hot)), o); resp.Cache.Hit {
-				n = 1
+		// Two reads of each hot key on either side, so a key the flood
+		// evicts costs at least half its reads: with small-to-main
+		// promotion broken, 1 000 reads hid the fault at 892 of 1 000.
+		const reads = 2 * hot
+		hotReads := func(every time.Duration) (n int) {
+			for i := range reads {
+				if resp, _ := serve(t, e, getReq(fmt.Sprintf("/hot%d", i%hot)), o); resp.Cache.Hit {
+					n++
+				}
+				time.Sleep(every)
 			}
 			return n
 		}
-		for i := range 2 * hot { // fill, then one read each
-			hits(i)
-		}
-		// Two reads of each hot key on either side, so a key the flood
-		// evicts costs at least half its reads: with small-to-main
-		// promotion broken this scored 26 of 200, where 1 000 reads hid
-		// the same fault at 892 of 1 000.
-		const reads = 2 * hot
-		var base int
-		for i := range reads {
-			base += hits(i)
-		}
-		var during int
-		for i := range 10000 {
-			serve(t, e, floodReq("/p", i), o)
-			if i%(10000/reads) == 0 {
-				during += hits(i / (10000 / reads))
-			}
-		}
+		hotReads(0) // fill, then one read each
+		base := hotReads(0)
 		if base != reads {
 			t.Fatalf("baseline: %d of %d hot reads hit", base, reads)
+		}
+
+		// 16 workers, 625 fetches of 1 ms each: the flood lasts 625 ms and
+		// the hot reads, 3 ms apart, span 600 ms of it.
+		const workers, each = 16, 625
+		var wg sync.WaitGroup
+		for w := range workers {
+			wg.Go(func() {
+				for i := range each {
+					resp, err := e.Serve(t.Context(), floodReq("/p", w*each+i), o)
+					if err != nil {
+						t.Errorf("flood %d/%d: %v", w, i, err)
+						return
+					}
+					resp.Body.Close()
+				}
+			})
+		}
+		during := hotReads(3 * time.Millisecond)
+		wg.Wait()
+		if n := o.Calls("/p"); n != workers*each {
+			t.Fatalf("flood fetches = %d, want %d", n, workers*each)
 		}
 		if during*10 < base*9 {
 			t.Fatalf("during the flood: %d of %d hot reads hit, want at least 90%% of the baseline %d", during, reads, base)
@@ -532,6 +548,113 @@ func TestMissRateThrottleSkipsLateReport(t *testing.T) {
 		}
 		if n := obs.count("miss-rate-anomaly/flag"); n != 1 {
 			t.Fatalf("%d flag events, want 1", n)
+		}
+	})
+}
+
+// FR-MR-3, FR-CB-4, T-11: a half-open probe for a throttled partition whose
+// one slot is taken is shed after MaxQueueWait and hands its probe back, so
+// the next request probes and closes the breaker. A probe lost here would
+// leave the breaker half-open with no probe left to send.
+func TestThrottledPartitionReturnsProbe(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		gate := make(chan struct{})
+		o := testorigin.NewChecked(t, 64, 16)
+		o.Default(cacheable("v"))
+		o.Route("/down", ccBehavior(http.StatusServiceUnavailable, "", "down"))
+		held := cacheable("held")
+		held.Gate = gate
+		cfg := cacheCfg
+		cfg.MissRate.Throttle = true
+		cfg.Rand = func() float64 { return 0.5 } // no jitter: open for exactly OpenFor
+		e := newEngine(t, cfg)
+		defer closeEngine(t, e)
+
+		weir.MissWindow(e, time.Now(), getReq("/p")) // caps /p at 1 for 20 s
+		o.Route("/p", held)
+		slow := serveAsync(t.Context(), e, floodReq("/p", 0), o) // holds /p's slot
+		synctest.Wait()
+		o.Route("/p", cacheable("v"))
+		for i := range 30 {
+			if _, _, err := serveResult(t, e, floodReq("/down", i), o); err != nil && !errors.Is(err, weir.ErrCircuitOpen) {
+				t.Fatalf("failure %d: %v", i, err)
+			}
+		}
+		if _, _, err := serveResult(t, e, getReq("/x"), o); !errors.Is(err, weir.ErrCircuitOpen) {
+			t.Fatalf("after 30 failures: %v, want ErrCircuitOpen", err)
+		}
+		time.Sleep(5 * time.Second) // half-open
+
+		if _, _, err := serveResult(t, e, floodReq("/p", 1), o); !isShed(err, 2*time.Second) {
+			t.Fatalf("probe behind the throttle: %v, want a shed", err)
+		}
+		if _, body, err := serveResult(t, e, getReq("/ok"), o); err != nil || body != "v" {
+			t.Fatalf("next request: %q, %v; want it to probe and succeed", body, err)
+		}
+		if _, _, err := serveResult(t, e, getReq("/ok2"), o); err != nil {
+			t.Fatalf("after the probe succeeded: %v, want a closed breaker", err)
+		}
+		close(gate)
+		if s := <-slow; s.err != nil {
+			t.Fatalf("held fetch: %v", s.err)
+		}
+	})
+}
+
+// FR-MR-3, FR-LIM-4, FR-WRM-1: the cap binds every class. With the
+// partition's one slot taken, a background refresh is dropped and the stale
+// entry served; a warm run of that path proceeds one fetch at a time.
+func TestThrottleBindsBackgroundAndWarm(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		gate := make(chan struct{})
+		o := testorigin.NewChecked(t, 64, 16)
+		o.Default(ccBehavior(http.StatusOK, "max-age=1, stale-while-revalidate=600", "w"))
+		obs := &eventCounter{}
+		cfg := cacheCfg
+		cfg.Observer = obs
+		cfg.MissRate.Throttle = true
+		e := newEngine(t, cfg)
+		defer closeEngine(t, e)
+
+		serve(t, e, floodReq("/p", 0), o)
+		time.Sleep(2 * time.Second) // stale, inside stale-while-revalidate
+		weir.MissWindow(e, time.Now(), getReq("/p"))
+		held := cacheable("held")
+		held.Gate = gate
+		o.Default(held)
+		slow := serveAsync(t.Context(), e, floodReq("/p", 1), o) // holds /p's slot
+		synctest.Wait()
+
+		resp, body := serve(t, e, floodReq("/p", 0), o)
+		synctest.Wait()
+		if body != "w" || resp.Cache.Stale != weir.StaleWhileRevalidate {
+			t.Fatalf("stale key under throttle: %q stale=%v, want the stale entry", body, resp.Cache.Stale)
+		}
+		if n := obs.count("refresh-dropped/no-slot"); n != 1 {
+			t.Fatalf("%d refreshes dropped for no slot, want 1", n)
+		}
+		close(gate)
+		if s := <-slow; s.err != nil {
+			t.Fatalf("held fetch: %v", s.err)
+		}
+
+		b := cacheable("v")
+		b.Delay = 10 * time.Millisecond
+		o.Default(b)
+		o.Reset()
+		warm := func(yield func(*weir.Request) bool) {
+			for i := range 20 {
+				if !yield(floodReq("/p", 100+i)) {
+					return
+				}
+			}
+		}
+		st, err := e.Warm(t.Context(), warm, o)
+		if err != nil || st.Fetched != 20 {
+			t.Fatalf("Warm under throttle: %+v, %v; want 20 fetched", st, err)
+		}
+		if n := o.MaxInflightPartition(); n != 1 {
+			t.Fatalf("warm max in-flight on /p = %d, want 1", n)
 		}
 	})
 }

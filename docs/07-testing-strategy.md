@@ -166,6 +166,7 @@ Each seed taxonomy entry maps to the tests below. "Engine" tests run under synct
 - `TestMissRateThrottleHoldsAcrossWindows` (engine): under a continuous flood of 1 000 requests a second the cap holds from one report to the next, with no burst at a window boundary.
 - `TestMissRateThrottleSkipsLateReport` (engine): a report that arrives a window or more after its window's end sets no cap.
 - `TestMissRateIgnoresFreeRequests`, `TestMissRateCountsOwnFetchesOnly` (engine): followers (served, canceled, or handed their flight's error), `only-if-cached` refusals and circuit-open refusals raise no anomaly; creators that cancel still do.
+- `TestThrottledPartitionReturnsProbe`, `TestThrottleBindsBackgroundAndWarm` (engine): under a throttle a shed half-open probe is handed back, a background refresh without a slot is dropped with the stale entry served, and a warm run fetches one URL at a time.
 - `TestSpaceSavingBound` (component): with 100 000 distinct partitions and one heavy hitter at 20% of traffic, the heavy hitter is tracked and reported; memory stays at `TopK` counters.
 
 ### T6.9 Malformed input

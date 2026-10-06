@@ -153,7 +153,7 @@ type MissRateConfig struct {
 	Window    time.Duration // 0: 10s
 	TopK      int           // 0: 64
 	MinMisses int           // 0: 500
-	MinRatio  float64       // 0: 0.9
+	MinRatio  float64       // 0: 0.9; at most 1
 	// Throttle caps an anomalous partition at one origin fetch for the
 	// following window (FR-MR-3). The tracker cannot tell a flood from a
 	// busy path whose responses are never stored or always revalidated
@@ -411,6 +411,11 @@ func (c *Config) validate() error {
 	}
 	if r := c.Breaker.FailureRatio; !(r > 0 && r <= 1) {
 		return invalid("Breaker.FailureRatio", "outside (0, 1]")
+	}
+	// FR-MR-2: misses never exceed requests, so a ratio above 1 would turn
+	// detection, and Throttle with it, off without a word.
+	if c.MissRate.MinRatio > 1 {
+		return invalid("MissRate.MinRatio", "above 1")
 	}
 	if c.Key.Vary > VaryStrict {
 		return invalid("Key.Vary", "unknown mode")

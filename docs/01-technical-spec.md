@@ -424,7 +424,7 @@ All fields are optional. The zero value of `Config` is valid and yields the defa
 | `Breaker.CountStatus500` | false | |
 | `Breaker.Disable` | false | |
 | `Negative.TTL` | 2 s | `Negative.Disable` turns it off |
-| `MissRate.Window` / `TopK` / `MinMisses` / `MinRatio` | 10 s / 64 / 500 / 0.9 | |
+| `MissRate.Window` / `TopK` / `MinMisses` / `MinRatio` | 10 s / 64 / 500 / 0.9 | `MinRatio` above 1 is rejected: no partition could reach it |
 | `MissRate.Throttle` | false | |
 | `MissRate.Disable` | false | |
 | `CacheGroups.Ignore` | false | RFC 9875 honored by default |

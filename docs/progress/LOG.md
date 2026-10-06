@@ -825,3 +825,11 @@ Entry template:
 - Deviations: 01 FR-MR-1 (definition of a miss) and FR-MR-3 (throttle holds until the next report, at most two windows), both under Ashwin's delegation; 04 §8.2 and §8.4; 06 R-8 (new residual risk) and T-11 tests; 07 T6.8 tests; M8-02 card note. flight.go is outside the card's Touch list.
 - Follow-ups: two adversarial reviews and the card review ran; no must-fix left. Open: tracker mutex contention at high core counts (M10-05), runbook text for `Throttle` (M10-06), `MinRatio` above 1 disables detection silently. Not tested: half-open probes, background refresh and `Warm` on a throttled partition.
 - Context: high; size S was too small once the reviews ran (three review rounds, nine tests).
+
+## 2026-10-06 · M8-02 · review-fixes
+- Branch / PR: card/M8-02-miss-rate-wiring / #50
+- Done: closed every item PR #50 listed as left open (delegated; "Waiting on Ashwin" was empty). `MissRate.MinRatio` above 1 is rejected by `New`. The eviction test runs its flood concurrently. The tracker-mutex numbers and the `Throttle` runbook points moved into the M10-05 and M10-06 card notes, so they outlive STATUS.
+- Tests: TestThrottledPartitionReturnsProbe, TestThrottleBindsBackgroundAndWarm (new, passed at once: the behavior was already right); TestInvalidConfigRejected row for `MinRatio` (failed first). Five mutations, each caught: promotion broken, `sharedError` unwrap removed, cap floor removed, probe not handed back on shed, plus the config row. `make check` passes.
+- Deviations: 01 config table (`MinRatio` at most 1); 04 §5 and §8.2 (the cap binds every class); 07 T6.8 list.
+- Follow-ups: none open from the PR. This round was attacked by the session that wrote it, not by an independent agent.
+- Context: high.
