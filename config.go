@@ -148,14 +148,22 @@ type NegativeConfig struct {
 	Disable bool
 }
 
-// MissRateConfig tunes the miss-rate detector (FR-MIS).
+// MissRateConfig tunes the miss-rate detector (FR-MR-*).
 type MissRateConfig struct {
 	Window    time.Duration // 0: 10s
 	TopK      int           // 0: 64
 	MinMisses int           // 0: 500
-	MinRatio  float64       // 0: 0.9
-	Throttle  bool
-	Disable   bool
+	MinRatio  float64       // 0: 0.9; at most 1
+	// Throttle caps an anomalous partition at one origin fetch for the
+	// following window (FR-MR-3). The tracker cannot tell a flood from a
+	// busy path whose responses are never stored or always revalidated
+	// (no-store, no-cache, max-age=0, Authorization or Range traffic): past MinMisses such a path is throttled too, and
+	// most of its requests are then shed. Run with Throttle off first:
+	// every partition the warning names would be capped. Give paths known
+	// to be uncacheable a bypass rule; bypassed requests are not counted.
+	// No effect with Disable.
+	Throttle bool
+	Disable  bool
 }
 
 // CacheGroupsConfig controls RFC 9875 cache groups. The zero value honors them.
@@ -403,6 +411,11 @@ func (c *Config) validate() error {
 	}
 	if r := c.Breaker.FailureRatio; !(r > 0 && r <= 1) {
 		return invalid("Breaker.FailureRatio", "outside (0, 1]")
+	}
+	// FR-MR-2: misses never exceed requests, so a ratio above 1 would turn
+	// detection, and Throttle with it, off without a word.
+	if c.MissRate.MinRatio > 1 {
+		return invalid("MissRate.MinRatio", "above 1")
 	}
 	if c.Key.Vary > VaryStrict {
 		return invalid("Key.Vary", "unknown mode")

@@ -46,7 +46,25 @@ func (e *Engine) Serve(ctx context.Context, req *Request, origin Origin) (*Respo
 		return e.pass(ctx, c.AsBypass(), origin, FwdBypass)
 	}
 	e.cr.observe(req.Header)
-	return e.cacheable(ctx, &c, origin, nil)
+	resp, err := e.cacheable(ctx, &c, origin, nil)
+	se, follower := errors.AsType[sharedError](err)
+	if follower {
+		err = se.error
+	}
+	// FR-MR-1: counted once the outcome is known. A miss is a request that
+	// started a fetch of its own and was not answered from the store. One
+	// that was shed or whose fetch failed is a miss, so a throttled flood
+	// keeps its partition anomalous for as long as it lasts. A follower
+	// shared another request's fetch, whatever came of it, and is counted
+	// like a hit. Two refusals are not counted at all. Only-if-cached
+	// (T-11): as a miss it would get a path flagged without one origin
+	// call, as a hit it would let a flood dilute its own ratio. Circuit
+	// open: the origin is down, which is the breaker's event, and counting
+	// it would cap every busy path at one fetch just as the origin recovers.
+	if !errors.Is(err, ErrOnlyIfCached) && !errors.Is(err, ErrCircuitOpen) {
+		e.mr.Observe(c.PartitionH, c.Partition, !follower && (resp == nil || !resp.Cache.Hit && !resp.Cache.Collapsed))
+	}
+	return resp, err
 }
 
 // rejected maps a classification error to the public one (04 §6.2).

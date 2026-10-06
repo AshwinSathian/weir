@@ -15,6 +15,7 @@ import (
 	"github.com/AshwinSathian/weir/internal/coalesce"
 	"github.com/AshwinSathian/weir/internal/keys"
 	"github.com/AshwinSathian/weir/internal/limiter"
+	"github.com/AshwinSathian/weir/internal/missrate"
 	"github.com/AshwinSathian/weir/store"
 	"github.com/AshwinSathian/weir/store/memory"
 )
@@ -46,6 +47,7 @@ type Engine struct {
 	cb       *breaker.Breaker          // nil when Breaker.Disable
 	mode     atomic.Pointer[modeState] // nil: ModeNormal (FR-MODE-1)
 	cr       *cookieReport             // nil when disabled (FR-OBS-5)
+	mr       *missrate.Tracker         // nil when MissRate.Disable
 
 	mu        sync.Mutex  // orders setting closed against wg.Add in goBackground
 	closed    atomic.Bool // written under mu; read without it on the Serve path
@@ -99,6 +101,11 @@ func New(cfg Config) (*Engine, error) {
 			OpenFor: b.OpenFor, MaxOpenFor: b.MaxOpenFor, HalfOpenProbes: b.HalfOpenProbes,
 			CountStatus500: b.CountStatus500,
 		}, c.Rand, e.breakerChanged)
+	}
+	if m := &c.MissRate; !m.Disable {
+		e.mr = missrate.New(missrate.Config{
+			Window: m.Window, TopK: m.TopK, MinMisses: m.MinMisses, MinRatio: m.MinRatio,
+		}, e.missWindow)
 	}
 	e.bgCtx, e.bgCancel = context.WithCancel(context.Background())
 	return e, nil

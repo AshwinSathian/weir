@@ -18,6 +18,14 @@ import (
 
 var errOriginGoexit = errors.New("weir: origin called runtime.Goexit")
 
+// sharedError marks an error returned to a request that ran no fetch of its
+// own: a follower that left while it waited, or one that took its flight's
+// error (FR-COA-6). Serve unwraps it and counts the request like any other
+// follower (FR-MR-1); it never reaches a caller.
+type sharedError struct{ error }
+
+func (s sharedError) Unwrap() error { return s.error }
+
 // fetchSpec is what a fetch-and-store needs from the request that starts it.
 type fetchSpec struct {
 	c      *keys.Classified
@@ -52,6 +60,13 @@ func (r *flightResult) live() bool { return r.err == nil && (r.over || r.stream)
 func (e *Engine) fetchCoalesced(ctx context.Context, sp *fetchSpec, origin Origin) (*Response, error) {
 	c := sp.c
 	f, created := e.flights.Join(sp.lk.ck, time.Now(), e.cfg.Coalesce.LeaderMaxAge)
+	// FR-MR-1: an error a follower returns without a fetch of its own.
+	shared := func(err error) error {
+		if created || err == nil {
+			return err
+		}
+		return sharedError{err}
+	}
 	if created {
 		if !e.goBackground(func(bg context.Context) { e.runFlight(bg, ctx, f, sp, origin) }) {
 			f.Publish(&flightResult{fetchResult: fetchResult{err: ErrClosed}})
@@ -87,7 +102,7 @@ func (e *Engine) fetchCoalesced(ctx context.Context, sp *fetchSpec, origin Origi
 			if created {
 				e.leaveFlight(f)
 			}
-			return nil, ctx.Err()
+			return nil, shared(ctx.Err())
 		}
 	}
 
@@ -102,10 +117,11 @@ func (e *Engine) fetchCoalesced(ctx context.Context, sp *fetchSpec, origin Origi
 	// through its own lookup's stale entry (01 §7.2). Followers of an
 	// over-size 5xx stream re-enter below and fetch once more.
 	if (owner || !fr.live()) && failed(ctx, fr) {
-		return e.onFetchError(sp, fr, owner)
+		resp, err := e.onFetchError(sp, fr, owner)
+		return resp, shared(err)
 	}
 	if fr.err != nil {
-		return nil, fr.err
+		return nil, shared(fr.err)
 	}
 	if owner {
 		return e.respond(c, fr), nil

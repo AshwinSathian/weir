@@ -147,7 +147,7 @@ Refs: FR-KEY-7, FR-KEY-9..11, FR-BYP-1, FR-STO-6, T6.7, T-8, T-15.
 Refs: FR-MR-*, T6.8, T-11.
 
 - [x] M8.1 `internal/missrate` Space-Saving with windows. AC: `TestSpaceSavingBound` passes.
-- [ ] M8.2 Engine wiring and throttle callback into the limiter. AC: `TestRandomQueryFloodBounded`, `TestMissRateAnomaly`, `TestMissRateThrottle`, `TestOneHitWondersDoNotEvictHot` pass.
+- [x] M8.2 Engine wiring and throttle callback into the limiter. AC: `TestRandomQueryFloodBounded`, `TestMissRateAnomaly`, `TestMissRateThrottle`, `TestOneHitWondersDoNotEvictHot` pass.
 
 #### M9 Purge and Cache Groups (~1 week)
 
