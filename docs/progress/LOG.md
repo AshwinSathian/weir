@@ -851,7 +851,7 @@ Entry template:
 - Context: low.
 
 ## 2026-10-06 · M9-02 · done
-- Branch / PR: card/M9-02-purge-api / pending
+- Branch / PR: card/M9-02-purge-api / #52
 - Done: `(*Engine).Purge` in purge.go: soft, hard, `All`, URLs and group tags, validated in full before the first epoch; `classifyURL` cuts purge URLs by hand so the tag equals the request's `URITag`. `Eager` follows FR-PRG-8 for a store without `Scrubber`.
 - Tests: TestPurge5000KeysBounded, TestSoftPurgeServesStaleWhileRevalidating, TestHardPurgeIsMiss, TestSoftAfterHardStaysHard, TestGlobalEpochSoft, TestPurgeRejectsInvalidInput, TestPurgeGroupsAndStoreErrors, TestPurgeDuringInflightFetchPurgeAPI; `make check` passes, trace 126/152.
 - Deviations: 04 §7 names `e.classifyURL` (the `keys.ClassifyURL` and `keys.NormalizeOrigin` it cited never existed), lists the purge reasons, the partial-failure event, `ErrClosed` and the 1 s soft delay. 07 T6.12 names the URL form (here) and the group form (M9-03) of the 5 000-key test; the M9-03 card lists it.

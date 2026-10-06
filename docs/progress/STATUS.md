@@ -5,7 +5,7 @@ Phase: 1
 Current card: none
 Card state: awaiting-merge
 Branch: card/M9-02-purge-api
-PR: pending
+PR: #52 https://github.com/AshwinSathian/weir/pull/52
 Next card: M9-03
 
 ## Blockers
@@ -14,7 +14,7 @@ none
 
 ## Waiting on Ashwin
 
-Neither blocks merging #PR or starting M9-03. Both were found by the adversarial review of M9-02 and need a decision because they change a pinned behavior or a requirement's wording.
+Neither blocks merging #52 or starting M9-03. Both were found by the adversarial review of M9-02 and need a decision because they change a pinned behavior or a requirement's wording.
 
 - Soft purge delay. A soft purge by URL (and by group, from M9-03) shows up to 1 s after `Purge` returns: the memory store rounds soft epochs up to the next second (05 E-7) and `httpcc.Evaluate` takes `now - epoch.At`, negative until then. 01 FR-PRG-2 says "stale as of the purge time" and 05 E-8 says rounding "only over-invalidates". Proposed fix, tried in a scratch copy: `staleness = max(staleness, now.Sub(ep.At), 0)` in internal/httpcc/evaluate.go. It reverses the M1-03 test row "soft purge in the future leaves a fresh entry fresh" (evaluate_test.go:56), which no document motivates. Fix it (own small card), or keep the delay and say so in FR-PRG-2 and E-8? Today the delay is stated in the `Purge` comment and 04 §7.
 - Hard-epoch cap and the store breaker. A hard purge of a new tag past `MaxHardEpochs` (10 000 inside 24 h) returns `store.ErrUnavailable` (05 E-6), which `storeGuard.exit` counts as a store failure. Five such `Purge` calls with no successful store call between them (a retry loop on a quiet engine) open the store breaker for 1 s: every lookup is a miss and `Purge{All: true}`, the remedy E-6 names, fails too. Options: (a) `Purge` writes through a guard method that reports the error without counting it (storeguard.go, narrows FR-STF-2's "5 consecutive `ErrUnavailable` results"); (b) a new `store.ErrEpochCap` sentinel (store contract change, 05 E-6 and S-3). Reviewer's pick is (a).
