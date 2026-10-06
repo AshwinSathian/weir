@@ -424,7 +424,7 @@ func TestLimiterInvariants(t *testing.T) {
 				}
 			}
 			for range 200 {
-				switch r.IntN(4) {
+				switch r.IntN(5) {
 				case 0, 1:
 					c, part := Class(r.IntN(3)), uint64(r.IntN(4))
 					ctx, cancel := context.WithTimeout(t.Context(), time.Duration(r.IntN(8))*time.Millisecond)
@@ -442,6 +442,9 @@ func TestLimiterInvariants(t *testing.T) {
 					}
 				case 3:
 					time.Sleep(time.Duration(r.IntN(3)) * time.Millisecond)
+				case 4: // FR-MR-3: throttles come, go and expire between steps
+					now := time.Now()
+					l.Throttle(now, now.Add(time.Duration(r.IntN(4))*time.Millisecond), map[uint64]int{uint64(r.IntN(4)): 1})
 				}
 				synctest.Wait()
 				for len(got) > 0 {
@@ -512,4 +515,145 @@ func mustAcquireB(b *testing.B, l *Limiter, part uint64) *Permit {
 		b.Fatal(err)
 	}
 	return p
+}
+
+// FR-MR-3, 04 §8.2: a throttle report caps its partitions until its
+// deadline. The limiter keeps the report with the latest end, ignores one
+// that is already over, and runs the grant walk whenever a cap rises.
+func TestLimiterThrottle(t *testing.T) {
+	one := map[uint64]int{1: 1}
+	t.Run("caps the partition and leaves the others", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			l := newLimiter(8, 8, 4, 0)
+			now := time.Now()
+			l.Throttle(now, now.Add(time.Minute), one)
+			p := mustAcquire(t, l, Foreground, 1)
+			second := acquireAsync(t.Context(), l, Foreground, 1)
+			synctest.Wait()
+			if !pending(second) {
+				t.Fatal("second fetch of a throttled partition ran")
+			}
+			for range 4 {
+				defer mustAcquire(t, l, Foreground, 2).Release()
+			}
+			p.Release()
+			(<-second).p.Release()
+		})
+	})
+	t.Run("drops at the deadline and grants parked waiters first", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			l := newLimiter(8, 8, 2, 0)
+			now := time.Now()
+			l.Throttle(now, now.Add(time.Second), one)
+			p := mustAcquire(t, l, Foreground, 1)
+			parked := acquireAsync(t.Context(), l, Foreground, 1)
+			synctest.Wait()
+			time.Sleep(time.Second)
+			// The cap is 2 again. The newcomer must not take the place the
+			// parked waiter is owed (FIFO, 04 §8.2 step 1).
+			late := acquireAsync(t.Context(), l, Foreground, 1)
+			synctest.Wait()
+			if !pending(late) {
+				t.Fatal("a newcomer ran ahead of the parked waiter")
+			}
+			select {
+			case r := <-parked:
+				defer r.p.Release()
+			default:
+				t.Fatal("parked waiter not granted when the throttle ended")
+			}
+			l.mu.Lock()
+			kept := l.throttled
+			l.mu.Unlock()
+			if kept != nil {
+				t.Fatalf("throttle map kept past its deadline: %v", kept)
+			}
+			p.Release()
+			(<-late).p.Release()
+		})
+	})
+	t.Run("a waiter's own timeout drops an ended throttle", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			// Nothing else touches the limiter after the deadline, so the
+			// waiter's timeout is the call that must notice it.
+			l := newLimiter(8, 8, 2, 0)
+			now := time.Now()
+			l.Throttle(now, now.Add(time.Second), one)
+			defer mustAcquire(t, l, Foreground, 1).Release()
+			time.Sleep(900 * time.Millisecond)
+			w := acquireAsync(t.Context(), l, Foreground, 1)
+			time.Sleep(wait + time.Second)
+			synctest.Wait()
+			r := <-w
+			if r.err != nil {
+				t.Fatalf("waiter shed (%v) after the throttle ended with room in its partition", r.err)
+			}
+			r.p.Release()
+		})
+	})
+	t.Run("Release drops an ended throttle", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			l := newLimiter(8, 8, 2, 0)
+			a := mustAcquire(t, l, Foreground, 1)
+			b := mustAcquire(t, l, Foreground, 1)
+			now := time.Now()
+			l.Throttle(now, now.Add(time.Second), one)
+			w := acquireAsync(t.Context(), l, Warm, 1)
+			time.Sleep(1500 * time.Millisecond)
+			a.Release() // one fetch still in flight: only the lifted cap frees a slot
+			synctest.Wait()
+			if pending(w) {
+				t.Fatal("waiter still parked after a Release past the deadline")
+			}
+			b.Release()
+		})
+	})
+	t.Run("an older report does not replace a newer one", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			l := newLimiter(8, 8, 4, 0)
+			now := time.Now()
+			l.Throttle(now, now.Add(time.Minute), one)
+			l.Throttle(now.Add(-time.Second), now.Add(time.Minute), nil) // the earlier window, delivered late
+			defer mustAcquire(t, l, Foreground, 1).Release()
+			second := acquireAsync(t.Context(), l, Foreground, 1)
+			synctest.Wait()
+			if !pending(second) {
+				t.Fatal("a late report of an earlier window lifted the throttle")
+			}
+			// A newer empty report lifts it and wakes the waiter.
+			l.Throttle(now.Add(time.Second), now.Add(time.Minute), nil)
+			(<-second).p.Release()
+		})
+	})
+	t.Run("a report past its deadline is not applied", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			l := newLimiter(8, 8, 2, 0)
+			now := time.Now()
+			l.Throttle(now.Add(-time.Hour), now.Add(-time.Hour+time.Second), one)
+			defer mustAcquire(t, l, Foreground, 1).Release()
+			defer mustAcquire(t, l, Foreground, 1).Release()
+		})
+	})
+	t.Run("a cap below 1 counts as 1", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			// A cap of 0 would park waiters with no fetch in flight to wake them.
+			l := newLimiter(8, 8, 2, 0)
+			now := time.Now()
+			l.Throttle(now, now.Add(time.Minute), map[uint64]int{1: 0, 2: -5})
+			mustAcquire(t, l, Foreground, 1).Release()
+			mustAcquire(t, l, Foreground, 2).Release()
+		})
+	})
+	t.Run("a cap above PerPartition does not raise it", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			l := newLimiter(8, 8, 2, 0)
+			now := time.Now()
+			l.Throttle(now, now.Add(time.Minute), map[uint64]int{1: 5})
+			defer mustAcquire(t, l, Foreground, 1).Release()
+			defer mustAcquire(t, l, Foreground, 1).Release()
+			if _, err := l.Acquire(t.Context(), Background, 1); !errors.Is(err, ErrShed) {
+				t.Fatalf("third fetch: %v, want ErrShed", err)
+			}
+		})
+	})
 }

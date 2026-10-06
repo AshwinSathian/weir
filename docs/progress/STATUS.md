@@ -1,12 +1,12 @@
 # Status
 
-Updated: 2026-10-05
+Updated: 2026-10-06
 Phase: 1
 Current card: none
 Card state: awaiting-merge
-Branch: card/M8-01-space-saving-tracker
-PR: #49 https://github.com/AshwinSathian/weir/pull/49
-Next card: M8-02
+Branch: card/M8-02-miss-rate-wiring
+PR: (recorded in the next commit)
+Next card: M9-01
 
 ## Blockers
 
@@ -15,6 +15,17 @@ none
 ## Waiting on Ashwin
 
 none
+
+## Decided 2026-10-06 (M8-02)
+
+Decided by two independent adversarial reviews under Ashwin's delegation, then checked by the card reviewer. Each item was attacked with scratch tests before it was kept or changed.
+
+- What a miss is (01 FR-MR-1 now says it): a request that started a fetch of its own and was not answered from the store. Shed and failed fetches are misses. Followers count like hits whatever their flight returned. `only-if-cached` and circuit-open refusals are not counted. Found by attack: 600 `only-if-cached` requests, or 600 followers of one failed fetch, got a path throttled for at most one origin call.
+- Throttle timing (01 FR-MR-3 now says it): the engine applies a report only while `end + Window` is ahead; the limiter holds it until the next report or `end + 2*Window`. A cap that ended at `end + Window` let 16 fetches through at every window boundary.
+- No timer for expiry: the next `Acquire`, `Release` or waiter timeout drops the report. Rejected: `time.AfterFunc` (a goroutine for `Close` to own).
+- Shed counts as a miss: kept. Without it the cap flaps between 16 and 1 every other window, about 8.5 times the origin load.
+- Uncacheable or always-revalidated busy paths are flagged every window and capped under `Throttle`: kept and documented (`Throttle` comment, 04 §8.4, 06 R-8). Request headers cannot be excluded without handing a flood a "do not count me" flag; a bypass rule is the remedy.
+- Tracker mutex on the hit path: kept, measured, left to M10-05 (first note below).
 
 ## Decided 2026-10-05 (M8-01)
 
@@ -129,6 +140,11 @@ Already built, now confirmed: the weirhttp default transport (compression off, n
 The cards' Notes give the reasons and the options rejected. All three come before M1-18, because closing M1 makes the repo public.
 
 ## Notes for the next session
+
+- M8-02: `missrate.Tracker.Observe` takes one mutex per cacheable request. Parallel hit benchmark, M4 Pro 12 procs: 600 ns/op with the tracker, 343 with `MissRate.Disable`; serial `BenchmarkServeHitSmall` 1.1 µs against NFR-5's 4 µs, so no budget is broken (ADR-9 accepts the mutex). `TryLock` gets 367 ns/op but drops 50% of samples at 12 procs (20% at 4, 3% at 2): the ratio stays unbiased, `MinMisses` is effectively doubled. M10-05 decides whether a parallel budget exists and, if so, between `TryLock` and per-shard counters.
+- M8-02 review: with `MissRate.Throttle`, a legitimate cold path with far more keys than the cap can fetch stays throttled (300 000 random keys at 1 000 rps on one path: throttled for all 30 windows measured). That is what FR-MR-3 asks for and `Throttle` is off by default; the runbook (M10-06) should say so. `Throttle` is also a lever: 60 distinct-query requests a second to one path kept it capped and served 390 of 1 200 legitimate misses there (06 R-8).
+- M8-02: supersedes the "Decided 2026-10-05 (M8-01)" bullet above on throttle timing. The engine applies a report only while `end + Window` is ahead; the limiter drops it at `end + 2*Window` or when the next report replaces it (01 FR-MR-3, 04 §8.2).
+- M8-02: `MissRate.MinRatio` above 1 passes `New` and silently disables detection, although `internal/missrate`'s `Config` comment says (0, 1]. M8-01 behavior; rejecting it would fail configs that load today. Decide in a later card.
 
 - PLAN P0.0 ran on 2026-10-05 after Ashwin confirmed it in chat: the repository is public, private vulnerability reporting is enabled, and `v0.1.0` is an annotated tag on 560d2af (the #48 merge). Commit author emails are public with it.
 - M8-01: `missrate.New(cfg, emit)` calls `emit(end, found)` once per closed window, an empty slice included, after its lock is released. `end` is the closed window's end time. M8-02's limiter callback keeps the report with the latest `end`, throttles only while `end + Window` is ahead and drops the map at that time (card notes, 04 §8.4).

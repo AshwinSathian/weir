@@ -1,7 +1,7 @@
 # Weir testing strategy
 
 Status: v1.0
-Date: 2026-10-05
+Date: 2026-10-06
 Depends on: [01-technical-spec.md](01-technical-spec.md), [06-threat-model.md](06-threat-model.md)
 Seed name: `03-testing-strategy.md` (renumbered, see [docs/README.md](README.md))
 
@@ -163,6 +163,9 @@ Each seed taxonomy entry maps to the tests below. "Engine" tests run under synct
 - `TestRandomQueryFloodBounded` (engine): 10 000 requests to `/p?r=<random>`; origin in-flight never exceeds `MaxPerPartition`; hot keys on other paths stay hits.
 - `TestMissRateAnomaly` (engine): the same flood raises exactly one `EvMissRateAnomaly` for `/p` per window; normal traffic at 50% miss ratio does not.
 - `TestMissRateThrottle` (engine): with `Throttle`, the anomalous partition is capped to 1 in the next window.
+- `TestMissRateThrottleHoldsAcrossWindows` (engine): under a continuous flood of 1 000 requests a second the cap holds from one report to the next, with no burst at a window boundary.
+- `TestMissRateThrottleSkipsLateReport` (engine): a report that arrives a window or more after its window's end sets no cap.
+- `TestMissRateIgnoresFreeRequests`, `TestMissRateCountsOwnFetchesOnly` (engine): followers (served, canceled, or handed their flight's error), `only-if-cached` refusals and circuit-open refusals raise no anomaly; creators that cancel still do.
 - `TestSpaceSavingBound` (component): with 100 000 distinct partitions and one heavy hitter at 20% of traffic, the heavy hitter is tracked and reported; memory stays at `TopK` counters.
 
 ### T6.9 Malformed input

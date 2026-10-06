@@ -1,7 +1,7 @@
 # Weir threat model
 
 Status: v1.0
-Date: 2026-10-05
+Date: 2026-10-06
 Depends on: [01-technical-spec.md](01-technical-spec.md), [02-architecture.md](02-architecture.md)
 
 The seed's §7.3 makes the cache key a security boundary. This document says what that boundary protects, from whom, how each known attack class is answered, and what remains the operator's problem. Every threat has an ID so tests and code comments can cite it (`// T-3: ...`).
@@ -53,7 +53,7 @@ Each row: the attack, where it comes from, Weir's answer, the requirement or ADR
 
 | ID | Threat | Answer | Refs | Test |
 |---|---|---|---|---|
-| T-11 | Cache busting by unique query strings on one path (Ferretti and Ghini 2012) | per-partition cap bounds concurrent origin work for that path, and the queued waiters for it (at most a quarter of the queue), so the flood cannot fill the shared queue; miss-rate anomaly event; S3-FIFO keeps one-hit entries out of the main queue | FR-LIM-3, FR-MR-*, ADR-6, ADR-8 | `TestRandomQueryFloodBounded`, `TestPartitionFairness`, `TestLimiterPartitionQueueCap`, `TestMissRateAnomaly`, `TestS3FIFOScanResistance` |
+| T-11 | Cache busting by unique query strings on one path (Ferretti and Ghini 2012) | per-partition cap bounds concurrent origin work for that path, and the queued waiters for it (at most a quarter of the queue), so the flood cannot fill the shared queue; miss-rate anomaly event; S3-FIFO keeps one-hit entries out of the main queue | FR-LIM-3, FR-MR-*, ADR-6, ADR-8 | `TestRandomQueryFloodBounded`, `TestPartitionFairness`, `TestLimiterPartitionQueueCap`, `TestMissRateAnomaly`, `TestMissRateThrottle`, `TestMissRateThrottleHoldsAcrossWindows`, `TestMissRateThrottleSkipsLateReport`, `TestMissRateIgnoresFreeRequests`, `TestMissRateCountsOwnFetchesOnly`, `TestS3FIFOScanResistance` |
 | T-12 | Cache busting across many distinct paths | global cap bounds origin load; legitimate misses on other paths may shed. Residual: this is rate-limiting territory (for example `caddy-ratelimit` in front of Weir) | ADR-8 | `TestPathFloodOriginBounded` |
 | T-13 | Malformed keyed header forcing bypass (CVE-2024-35296, `Accept-Encoding`) | normalizers map any malformed value to one canonical bucket, both in key and forward; never a bypass, never an error. The `Cookie` limit counts keyed pairs only, so a large unkeyed cookie cannot push a keyed one to absent | FR-VAL-3, §5.2.3 | `TestCVE202435296`, `FuzzAcceptEncoding`, `TestKeyedCookieLimitCountsKeyedPairs`, `TestNormalizeHeader`, `TestClassifyKeyedHeaders` |
 | T-14 | Client revalidation directives as a bypass (`Cache-Control: no-cache`, `Pragma: no-cache`) | ignored by default | D5, FR-SRV-8 | `TestClientNoCacheIgnored` |
@@ -114,6 +114,7 @@ These hold for every build. Each has at least one test that fails if it breaks.
 - R-5. Web cache deception still works if the origin itself marks a per-user page as publicly cacheable. No cache can fix that.
 - R-6. An in-process origin that varies its response on context values set by middleware in front of Weir (T-45). Put that middleware behind Weir, or bypass the route.
 - R-7. A flight led by a request with unkeyed input (`Cache-Control`, `Pragma`, a `Forward.Allow` field, anything under `ForwardAll`) shares a 500, 502, 503 or 504 answer with the followers that joined it (FR-COA-5), although nothing is written to the store (T-31). An attacker needs an origin that answers 5xx to client-chosen bytes and must win the leader race on a key with no fresh entry; the reach is one flight, bounded by the origin timeout. Not coalescing such requests would switch coalescing off under `ForwardAll` and for every browser reload, which costs more than it saves.
+- R-8. With `MissRate.Throttle`, a client that sends max(500, 9 × the path's hits) distinct-query requests per window to one path keeps it capped at one origin fetch for as long as it sends (60 requests a second served 390 of 1 200 legitimate misses on that path in test, against all 1 200 without `Throttle`). Sheds from a full global limiter count too, so a slow origin or a distinct-path flood (T-12) can get a busy, miss-heavy path capped in the next window. An attacker who floods every other window is never throttled at all. `Throttle` trades the path's own misses for origin protection; it is off by default, and `MaxPerPartition` is the bound either way.
 
 ## 6. Review checklist for security-sensitive code
 

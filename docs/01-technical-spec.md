@@ -1,7 +1,7 @@
 # Weir technical specification
 
 Status: v1.0, approved for Phase 0 and Phase 1 implementation
-Date: 2026-10-05
+Date: 2026-10-06
 Owner: Ashwin Sathian
 Module: `github.com/AshwinSathian/weir`
 Supersedes: the interface sketch in [00-design-doc.md §7.2](00-design-doc.md)
@@ -355,9 +355,9 @@ A response is stored only if all of the following hold. Each failed check increm
 
 ### 5.15 Miss-rate signal (T6.8)
 
-- FR-MR-1. Weir tracks requests and misses per partition in a Space-Saving summary of `MissRate.TopK` (default 64) counters per `MissRate.Window` (default 10 s). Memory is O(TopK). The summary is exact enough for heavy hitters only: a partition with less than 1/`TopK` of a window's requests may go untracked (ADR-9).
+- FR-MR-1. Weir tracks requests and misses per partition in a Space-Saving summary of `MissRate.TopK` (default 64) counters per `MissRate.Window` (default 10 s). Memory is O(TopK). The summary is exact enough for heavy hitters only: a partition with less than 1/`TopK` of a window's requests may go untracked (ADR-9). A request is counted when it is cacheable (GET or HEAD, outside bypass rules and `ModeBypass`) and its outcome is known. It is a miss when it started an origin fetch of its own and was not answered from the store. That includes a fetch that was shed or failed, and requests whose responses are never stored (a hit-for-miss marker, `Authorization`, request `no-store`, a `Range` pass-through). A request answered from the store (fresh, stale or a negative entry) or by another request's fetch (a coalesced follower, whatever that fetch returned) is counted and is not a miss. A request refused by `only-if-cached` or by the open circuit breaker is not counted. The ratio is a signal, not a defense: a flood that mixes in one hit for every nine misses stays under the default `MinRatio`, and `Limiter.MaxPerPartition` is what bounds it (FR-LIM-3).
 - FR-MR-2. At the end of each window, a partition with at least `MissRate.MinMisses` (default 500) misses and a miss ratio of at least `MissRate.MinRatio` (default 0.9) raises a `miss_rate_anomaly` event and a warning log with the partition string truncated to 256 bytes.
-- FR-MR-3. With `MissRate.Throttle` true (default false), an anomalous partition's limiter cap is set to 1 for the following window.
+- FR-MR-3. With `MissRate.Throttle` true (default false), an anomalous partition's limiter cap is set to 1 for the following window: from the window's report until the next window's report replaces it, and for at most two windows after the anomalous window's end when no report comes. A report that arrives a window or more after its window ended, because traffic stopped, sets no cap. Requests shed under the cap count as misses (FR-MR-1), so the cap holds for as long as the partition stays over both thresholds, flood or not.
 
 ### 5.16 Warm start (T6.4)
 
@@ -523,7 +523,7 @@ Evaluated in order after validation, bypass check, and store lookup.
 | T6.5 storage outage | FR-STF-*, FR-COA-7 | M4 | `TestStoreOutageStillCoalescedAndLimited` |
 | T6.6 origin outage | FR-STL-*, FR-CB-* | M5 | `TestStaleIfErrorOnOriginDown`, `TestBreakerOpensHalfOpenCloses`, `TestBreaker500DoesNotTrip` |
 | T6.7 unkeyed inputs | FR-KEY-*, FR-FWD-* | M1, M7 | `TestForwardEqualsKey`, `TestVaryUnconfiguredHeader`, `TestKettleUserAgent` |
-| T6.8 cache busting | FR-LIM-3, FR-MR-* | M4, M8 | `TestRandomQueryFloodBounded`, `TestMissRateAnomaly` |
+| T6.8 cache busting | FR-LIM-3, FR-MR-* | M4, M8 | `TestRandomQueryFloodBounded`, `TestMissRateAnomaly`, `TestMissRateThrottle`, `TestMissRateThrottleHoldsAcrossWindows`, `TestMissRateThrottleSkipsLateReport`, `TestMissRateIgnoresFreeRequests`, `TestMissRateCountsOwnFetchesOnly` |
 | T6.9 malformed input | FR-VAL-*, §5.2.3 | M1, M7 | `FuzzAcceptEncoding`, `FuzzKeyEncodingInjective`, `TestCVE202435296` |
 | T6.10 negative caching | FR-NEG-* | M6 | `TestNegativeCacheBurst` |
 | T6.11 eviction storms | [05-storage-interface-spec.md §5](05-storage-interface-spec.md) | M1 (store), 2.5 | `TestS3FIFOScanResistance`, `TestOneHitWondersDoNotEvictHot` |
