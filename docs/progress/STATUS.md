@@ -5,7 +5,7 @@ Phase: 1
 Current card: none
 Card state: awaiting-merge
 Branch: card/M9-01-sf-list-parser
-PR: (recorded in the next commit)
+PR: #51 https://github.com/AshwinSathian/weir/pull/51
 Next card: M9-02
 
 ## Blockers
