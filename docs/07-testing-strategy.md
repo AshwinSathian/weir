@@ -190,7 +190,7 @@ Each seed taxonomy entry maps to the tests below. "Engine" tests run under synct
 
 ### T6.12 Purge herd
 
-- `TestPurge5000KeysBounded` (engine): 5 000 cached keys; soft purge by a group they share; 5 000 concurrent requests; origin in-flight ≤ `MaxConcurrent`; with `stale-while-revalidate=30`, every request returns within 1 ms of fake time (served stale).
+- `TestPurge5000KeysBounded` (engine): 5 000 cached keys; soft purge of all of them by URL (M9-02) and by a group they share (M9-03); 5 000 concurrent requests; origin in-flight ≤ `MaxConcurrent`, and exactly `MaxConcurrent - ReserveForeground` refreshes run; with `stale-while-revalidate=30`, every request returns within 1 ms of fake time (served stale).
 - `TestSoftPurgeServesStaleWhileRevalidating`, `TestHardPurgeIsMiss`, `TestSoftAfterHardStaysHard`, `TestPurgeDuringInflightFetch` (engine).
 - `TestUnsafeMethodInvalidates` (engine): POST 201 invalidates the URI and a same-origin `Location`, not a cross-origin one; `Cache-Group-Invalidation` on a GET response is ignored.
 - `TestGroupInvalidationIsSoft` (engine): a POST whose response invalidates group `g` leaves `g`'s entries servable under their SWR window.

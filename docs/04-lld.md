@@ -919,10 +919,11 @@ func (e *Engine) pass(ctx, c, origin):
 func (e *Engine) Purge(ctx, p):
     tags := []
     if p.All: tags += TagGlobal
-    for u in p.URLs: c := keys.ClassifyURL(u) (validation errors abort); tags += c.URITag
-    if len(p.Groups) > 0:
+    for u in p.URLs: c := e.classifyURL(u) (validation errors abort); tags += c.URITag
+    if p.Eager and p.Mode != PurgeHard: return RequestError{"purge-eager"}   // FR-PRG-8
+    if len(p.Groups) > 0 or p.Origin != "":
         if p.Origin == "": return RequestError{"purge-origin"}
-        o := keys.NormalizeOrigin(p.Origin)
+        o := e.classifyURL(p.Origin, origin only).Origin   // anything but scheme://host[:port] aborts
         for g in p.Groups: tags += TagGroup(o, g)
     mode := EpochSoft; if p.Mode == PurgeHard: mode = EpochHard
     at := time.Now()
@@ -940,6 +941,10 @@ func (e *Engine) invalidate(ctx, c, resp):
 ```
 
 `NewestEpoch` returns the most severe mode among epochs newer than the entry, so a soft purge after a hard purge never resurrects the hard-purged entry.
+
+`classifyURL` (purge.go) cuts the URL at `://`, the first `/` or `?`, and the `?` by hand, then runs `keys.Classify` on a GET for it. It does not use `net/url`, which re-escapes path bytes such as `|` and `"` that a request keeps as sent, so the purge tag would differ from the entry's. Userinfo and fragments are not stripped: `@` in the host and `#` anywhere fail request validation, while `@` in a path or query is kept, as in a request. An empty path is `/`, and the scheme is lowercased. `Origin` is validated whenever it is set, with or without `Groups`. Rejections are a `RequestError` with reason `purge-mode`, `purge-eager`, `purge-origin`, `purge-url` (no `://`) or the request validation reason of the URL; a URL error also carries the URL's index, never its text, and no `EvKeyRejected` is emitted because the input is the operator's. A `Purge` with nothing to purge returns nil and emits nothing; a store error stops the loop and is returned, with the epochs already written left in place, and `EvPurge` is still emitted when at least one was written. A store error after `Close` started is `ErrClosed`. Until a store implements `Scrubber` (M15), `Eager` with `PurgeHard` writes its epochs and returns `ErrEagerUnsupported`.
+
+The memory store rounds soft epochs up to the next whole second (05 E-7) and `httpcc.Evaluate` measures staleness from the epoch's time, so a soft purge by URL or group shows up to 1 s after `Purge` returns. Hard purges, `All` and unsafe-method invalidation apply at once.
 
 ## 8. Other internal packages
 
