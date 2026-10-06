@@ -822,7 +822,8 @@ func TestGroupsScopedByOrigin(t *testing.T) {
 // Cache-Group-Invalidation soft-purges the listed groups on its own origin,
 // so their entries are still served inside the stale-while-revalidate
 // window. A list that does not parse or exceeds Limits invalidates no group,
-// and CacheGroups.Ignore switches the field off.
+// and CacheGroups.Ignore switches the field off while the entries keep their
+// group tags.
 func TestGroupInvalidationIsSoft(t *testing.T) {
 	tests := []struct {
 		name   string

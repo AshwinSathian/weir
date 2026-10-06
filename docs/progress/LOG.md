@@ -875,3 +875,12 @@ Entry template:
 - Review: card reviewer found the flake and its store-level cause (must-fix, needs Ashwin), a per-request warning (fixed: once per engine), a weak `/gm` assertion (fixed), duplicate group tags (fixed: deduped), missing accept rows for `""` and a 128-byte name (added). Open: the `Ignore` row of TestGroupInvalidationIsSoft has no teeth until question 2 is answered.
 - Follow-ups: three questions under "Waiting on Ashwin": the origin tag in the epoch sketch (blocks), the scope of `CacheGroups.Ignore`, the `purge-group` reason.
 - Context: medium; size M was right for the card, the store finding is extra.
+
+## 2026-10-06 · M9-03 · done
+- Branch / PR: card/M9-03-cache-groups / (see STATUS)
+- Done: decided the three items that waited on Ashwin, under his delegation. Entries drop the origin tag from `Entry.Tags` (it stays as `Owner`); `CacheGroups.Ignore` switches off `Cache-Group-Invalidation` only; `purge-group` stays.
+- Tests: TestBuildEntry and TestCacheGroupsStorability rows changed first and failed; TestInvalidationFloodBounded passes 300 of 300 (was about 1 failure in 20); the `Ignore` row of TestGroupInvalidationIsSoft now fails when the `Ignore` branch is removed. `make check` passes, trace 127/152.
+- Deviations: 01 §2 glossary, FR-STO-10 and the defaults table; 02 purge ADR; 04 §3 and §7; 05 §4 and E-8; 06 T-23 and T-29. Reasons in STATUS "Decided 2026-10-06 (M9-03)".
+- Review: card reviewer ran once, before these decisions; its findings are all closed. The decisions were attacked by this session, not by a second agent.
+- Follow-ups: notes for M10-01 in STATUS (events for an invalid invalidation field and a rejected purge; engine-level `EvNotStored{groups}` test).
+- Context: high; size M was right for the card, the store finding doubled it.

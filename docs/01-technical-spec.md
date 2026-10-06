@@ -103,7 +103,7 @@ Terms from the seed glossary ([00-design-doc.md §12](00-design-doc.md)) apply. 
 - Forwarded request: the request Weir hands to the `Origin`. It is derived from the client request by the rewrite rules in §5.3 and is the only input the key is computed from.
 - Flight: one in-progress origin fetch shared by a leader and zero or more followers.
 - Partition: the scheme, host and path of a request, without the query. Used for fairness and miss-rate tracking.
-- Epoch: a timestamp and mode (soft, invalid, hard) attached to a tag. An entry stored before its tag's epoch is treated as soft-stale, invalid, or purged. Every entry has three implicit tags (global, origin, URI) plus its `Cache-Groups`.
+- Epoch: a timestamp and mode (soft, invalid, hard) attached to a tag. An entry stored before its tag's epoch is treated as soft-stale, invalid, or purged. Every entry has two implicit tags (global, URI) plus its `Cache-Groups`.
 - Origin-health failure: a transport error, an origin timeout, or a response with status 502, 503 or 504. These are the only failures that move the circuit breaker or create negative entries.
 
 ## 4. Public API
@@ -259,7 +259,7 @@ A response is stored only if all of the following hold. Each failed check increm
 - FR-STO-7. Vary checks FR-KEY-8 to FR-KEY-10 pass.
 - FR-STO-8. The response has explicit freshness (`s-maxage`, `max-age`, or `Expires`), or a heuristic lifetime from §5.5, or `public`, or a validator (`ETag` or `Last-Modified`) together with `no-cache` or a zero lifetime. A response with none of these is not stored.
 - FR-STO-9. The complete body was received and its size plus header size is at most `Storable.MaxObjectBytes` (default 1 MiB). Oversized bodies are streamed to the requesting client and not stored.
-- FR-STO-10. The `Cache-Groups` field, if present, parses as an RFC 9651 List of Strings with at most `Limits.MaxGroups` (32) members of at most `Limits.MaxGroupBytes` (128) bytes each. A response whose groups exceed these limits is not stored, because a purge could then miss it.
+- FR-STO-10. The `Cache-Groups` field, if present, parses as an RFC 9651 List of Strings with at most `Limits.MaxGroups` (32) members of at most `Limits.MaxGroupBytes` (128) bytes each. A response whose groups exceed these limits is not stored, because a purge could then miss it. This holds with `CacheGroups.Ignore` set too, so `Purge` by group works either way.
 - FR-STO-11. Stored headers exclude hop-by-hop fields, fields named in `Connection`, `Proxy-Authenticate`, `Proxy-Authentication-Info`, `Age` (recomputed on serve), and `Set-Cookie` (when stripped).
 - FR-STO-12. When a response is not storable and no stored response exists at the coalescing key (a marker must not displace a response that could still be revalidated or served under stale-if-error), Weir stores a hit-for-miss marker under the coalescing key (FR-COA-1) for `Coalesce.HitForMissTTL` (default 30 s). Requests that find a marker skip coalescing and go straight to the origin (still through the limiter). A later storable response replaces the marker. Markers are written only when the non-storability comes from the response under keyed inputs: never for a request that carried `Authorization` or a `no-store` request directive, never for a request that forwarded a `Forward.Allow` field, or a `Cache-Control` or `Pragma` field that `Key.Headers` does not name, and never under `ForwardAll`, because all of these reach the origin unkeyed and would let one client disable coalescing of a URL for everyone, renewably (T-31). `Cache-Control` and `Pragma` count whatever their value: they are forwarded as sent (FR-FWD-1), with no limit on length or bytes, so an origin or WAF that rejects one (431, 400) would otherwise answer on the shared key. Trace headers alone do not suppress markers, because their shape and byte set are restricted (FR-FWD-6). The cost: on those requests (a browser reload sends `Cache-Control: max-age=0` or `no-cache`, and operators who opt into unkeyed forwarding) an uncacheable URL gets no marker, so it coalesces and followers re-enter (FR-COA-5).
 - FR-STO-13. A response without a valid `Date` gets `Date` set to the time it was received before it is stored (RFC 9110 §6.6.1).
@@ -427,7 +427,7 @@ All fields are optional. The zero value of `Config` is valid and yields the defa
 | `MissRate.Window` / `TopK` / `MinMisses` / `MinRatio` | 10 s / 64 / 500 / 0.9 | `MinRatio` above 1 is rejected: no partition could reach it |
 | `MissRate.Throttle` | false | |
 | `MissRate.Disable` | false | |
-| `CacheGroups.Ignore` | false | RFC 9875 honored by default |
+| `CacheGroups.Ignore` | false | RFC 9875 honored by default. Set, it switches off `Cache-Group-Invalidation` (FR-INV-2); `Cache-Groups` is still read (FR-STO-10) |
 | `Client.HonorRevalidation` | false | decision D5 |
 | `Timeouts.Origin` / `Background` / `Store` | 30 s / 30 s / 50 ms | |
 | `Warm.Concurrency` | 4 | a default is lowered to `MaxConcurrent − ReserveForeground` when that is smaller; an explicit value above it is rejected (FR-LCY-1) |

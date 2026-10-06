@@ -23,7 +23,7 @@ type storeDecision struct {
 	lifetime       time.Duration
 	heuristic      bool
 	varyNames      []string // keys.VaryNames of the response's Vary (FR-KEY-7)
-	groups         []string // Cache-Groups members; nil under CacheGroups.Ignore (FR-STO-10)
+	groups         []string // distinct Cache-Groups members (FR-STO-10)
 }
 
 // storability applies FR-STO-1 to FR-STO-10 to a fully read response
@@ -42,10 +42,10 @@ func storability(cfg *Config, c *keys.Classified, resp *Response, body []byte, r
 	var star bool
 	d.varyNames, star = keys.VaryNames(h["Vary"])
 	statusOK := slices.Contains(cfg.Storable.Statuses, resp.StatusCode)
+	// CacheGroups.Ignore does not apply here: it switches off
+	// Cache-Group-Invalidation only, so an operator Purge by group still works.
 	var groupsErr error
-	if !cfg.CacheGroups.Ignore {
-		d.groups, groupsErr = groupList(cfg, h["Cache-Groups"])
-	}
+	d.groups, groupsErr = groupList(cfg, h["Cache-Groups"])
 	switch {
 	case c.Forwarded.Method != http.MethodGet:
 		return fail("method", false)

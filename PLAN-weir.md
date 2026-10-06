@@ -154,7 +154,7 @@ Refs: FR-MR-*, T6.8, T-11.
 Refs: FR-PRG-*, FR-INV-2, FR-STO-10, T6.12, T6.13, T-10, T-23, T-25.
 
 - [x] M9.1 `internal/sfv` List-of-Strings parser. AC: `FuzzSFStringList` passes; RFC 9651 examples for lists of strings pass.
-- [ ] M9.2 `Purge` (soft, hard, all, URLs, groups), `Cache-Groups` tags on stored entries, `Cache-Group-Invalidation` on unsafe responses, epoch overflow behavior. AC: `TestPurge5000KeysBounded`, `TestSoftPurgeServesStaleWhileRevalidating`, `TestHardPurgeIsMiss`, `TestSoftAfterHardStaysHard`, `TestGlobalEpochSoft`, `TestGroupsScopedByOrigin`, `TestGroupInvalidationIsSoft`, `TestInvalidationFloodBounded`, `TestUnsafeMethodInvalidates` (groups part) pass.
+- [x] M9.2 `Purge` (soft, hard, all, URLs, groups), `Cache-Groups` tags on stored entries, `Cache-Group-Invalidation` on unsafe responses, epoch overflow behavior. AC: `TestPurge5000KeysBounded`, `TestSoftPurgeServesStaleWhileRevalidating`, `TestHardPurgeIsMiss`, `TestSoftAfterHardStaysHard`, `TestGlobalEpochSoft`, `TestGroupsScopedByOrigin`, `TestGroupInvalidationIsSoft`, `TestInvalidationFloodBounded`, `TestUnsafeMethodInvalidates` (groups part) pass.
 
 #### M10 Observability, performance, conformance (~2 weeks)
 
