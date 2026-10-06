@@ -5,7 +5,7 @@ Phase: 1
 Current card: none
 Card state: awaiting-merge
 Branch: card/M10-01-event-catalog-stats
-PR: PENDING
+PR: #54 https://github.com/AshwinSathian/weir/pull/54
 Next card: M10-02
 
 ## Blockers

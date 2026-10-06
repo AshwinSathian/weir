@@ -895,7 +895,7 @@ Entry template:
 - Context: high. This session went well past one card's budget; the next one should start fresh.
 
 ## 2026-10-06 · M10-01 · done
-- Branch / PR: card/M10-01-event-catalog-stats / PENDING
+- Branch / PR: card/M10-01-event-catalog-stats / #54
 - Done: audit of 04 §9.2 against the emit sites. Added `EvRequest` (Serve wraps `serve`), `EvFetchStart`/`EvFetchEnd` around each origin call, `EvNotStored` for over-size (`too-large`), buffered 5xx (`status`) and a failed body read (`incomplete`), reasons on `EvCoalesceTimeout`, `EvEvict` from the store `New` builds. `Engine.Stats()` in stats.go, with `limiter.Counts` and a read-only `breaker.Peek`.
 - Tests: TestEveryEventKindEmitted (7 scenarios, all 19 kinds, every recorded reason checked against the catalog), TestStats. `make check` passes, trace 129/152. Hit benchmark unchanged at 14 allocs/op.
 - Deviations: 04 §9.2 rows for EvRequest, EvFetchStart/End, EvCoalesceTimeout, EvNotStored and EvEvict state what the fields carry; 04 §9.3 says `Stats` only reads. One behavior change: a creator with no stale entry that keeps waiting no longer emits `EvCoalesceTimeout`.
