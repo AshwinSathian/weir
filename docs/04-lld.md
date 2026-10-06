@@ -536,7 +536,7 @@ if epOK:
     case EpochHard:    return Unusable
     case EpochInvalid: return NeedsValidation, sieOK=false
     case EpochSoft:    // stale as of the purge time, windows capped at original expiry
-        purgeAge := age - now.Sub(ep.At)     // the entry's age at purge time
+        purgeAge := age - max(now.Sub(ep.At), 0)   // the entry's age at purge time; an epoch timed ahead of now (05 E-7 rounding, §4.3 skew) counts as now
         expiry = min(expiry, purgeAge)
     default:           return Unusable      // zero or unknown mode fails closed (T-9)
 staleness := age - expiry
@@ -575,6 +575,8 @@ type storeGuard struct {
 ```
 
 `get`, `set`, `newestEpoch`, `setEpoch`: if the guard is open, return `ErrUnavailable` immediately. If `remote`, wrap the context with `Timeouts.Store` (`context.WithTimeoutCause`). Any error other than `ErrNotFound` is a failure (05 S-3), except when the caller's context ended before the guard's own deadline: a store then returns `ErrUnavailable` (S-2), but a client leaving says nothing about the store, and counting it would let disconnecting clients open the breaker. On a failure emit `EvStoreError` with the operation and increment `fails`; at 5, or on any failure after an open period ended, open for `backoff`, double it and emit `EvStoreBreaker{open}`. A call already in flight that fails while the breaker is open neither reopens it nor doubles the backoff (with `Timeouts.Store` above 1 s, one could fail after the period ended and count as a new failure). After an open period every call goes through; there is no single half-open probe. On success reset `fails`, `openTil` and `backoff`, emitting `EvStoreBreaker{closed}` when the breaker had opened. `ErrNotFound` is a success for guard purposes.
+
+`purgeEpoch` is `setEpoch` for `Engine.Purge`: a failed write emits `EvStoreError` and is returned, but does not increment `fails`. The memory store refuses a new hard tag past `MaxHardEpochs` with `ErrUnavailable` (05 E-6); counted, five refusals in a retry loop would open the breaker, turn lookups into misses and refuse `Purge{All}`, the remedy E-6 names. A store that is really down is counted by the requests that find it so. A successful write resets `fails` like any other call.
 
 ## 6. Engine internals (package `weir`)
 
@@ -944,7 +946,7 @@ func (e *Engine) invalidate(ctx, c, resp):
 
 `classifyURL` (purge.go) cuts the URL at `://`, the first `/` or `?`, and the `?` by hand, then runs `keys.Classify` on a GET for it. It does not use `net/url`, which re-escapes path bytes such as `|` and `"` that a request keeps as sent, so the purge tag would differ from the entry's. Userinfo and fragments are not stripped: `@` in the host and `#` anywhere fail request validation, while `@` in a path or query is kept, as in a request. An empty path is `/`, and the scheme is lowercased. `Origin` is validated whenever it is set, with or without `Groups`. Rejections are a `RequestError` with reason `purge-mode`, `purge-eager`, `purge-origin`, `purge-url` (no `://`) or the request validation reason of the URL; a URL error also carries the URL's index, never its text, and no `EvKeyRejected` is emitted because the input is the operator's. A `Purge` with nothing to purge returns nil and emits nothing; a store error stops the loop and is returned, with the epochs already written left in place, and `EvPurge` is still emitted when at least one was written. A store error after `Close` started is `ErrClosed`. Until a store implements `Scrubber` (M15), `Eager` with `PurgeHard` writes its epochs and returns `ErrEagerUnsupported`.
 
-The memory store rounds soft epochs up to the next whole second (05 E-7) and `httpcc.Evaluate` measures staleness from the epoch's time, so a soft purge by URL or group shows up to 1 s after `Purge` returns. Hard purges, `All` and unsafe-method invalidation apply at once.
+Every purge shows at the next lookup. The memory store times a soft purge by URL or group to the next whole second (05 E-7), and `Evaluate` (§4.3) counts an epoch timed ahead of now as now, so the entry is stale at once. Two bounded costs follow from the rounding, both in the over-invalidating direction (05 E-8): the SWR and SIE windows of such a purge can run up to 1 s long, and a refresh sent inside that second is purged again when its request time is not after the newest epoch the store has seen (another purge or invalidation arrived since, or the refresh went out in the purge's own clock tick). The repeats end when the second has passed (`TestSoftPurgeRepeatsEndWithTheSecond`). `Purge` writes through `storeGuard.purgeEpoch` (§5.2), so a refusal at the hard-epoch cap does not count toward the store breaker.
 
 ## 8. Other internal packages
 

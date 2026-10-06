@@ -858,3 +858,11 @@ Entry template:
 - Review: card reviewer found one must-fix (any `@` in a URL was rejected), fixed test-first. An adversarial agent then attacked ten open decisions: four changed (partial `EvPurge`, `Eager`, error text, sharper 48-refresh assertion), the rest kept; see STATUS "Decided 2026-10-06 (M9-02)".
 - Follow-ups: two questions under "Waiting on Ashwin" (1 s soft purge delay; hard-epoch cap opening the store breaker). Group-name validation goes to M9-03.
 - Context: medium; size M was right.
+
+## 2026-10-06 · M9-02 · review-fixes
+- Branch / PR: card/M9-02-purge-api / #52
+- Done: decided the two items that waited on Ashwin, under his delegation. `httpcc.Evaluate` floors a soft epoch's staleness at 0, so a soft purge by URL is stale at the next lookup instead of up to 1 s later. `Purge` writes epochs through `storeGuard.purgeEpoch`, which does not count a refusal toward the store breaker.
+- Tests: TestSoftPurgeAppliesAtOnce, TestSoftPurgeRepeatsEndWithTheSecond, TestCappedHardPurgeKeepsStoreBreakerClosed, four TestEvaluate rows (one M1-03 row reversed); `make check` passes.
+- Deviations: 01 FR-PRG-2 and FR-STF-2, 04 §4.3, §5.2 and §7, 05 E-6 and E-8 state the new behavior and its two bounded costs.
+- Follow-ups: none open. Group-name validation stays with M9-03.
+- Context: medium.

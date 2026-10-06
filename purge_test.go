@@ -268,6 +268,136 @@ func TestSoftPurgeServesStaleWhileRevalidating(t *testing.T) {
 	})
 }
 
+// FR-PRG-2, 05 E-7: a soft purge shows at the next lookup, although the
+// memory store reports its time rounded up to the next whole second. The
+// refreshed entry is fresh again at once.
+func TestSoftPurgeAppliesAtOnce(t *testing.T) {
+	for _, p := range []weir.Purge{
+		{URLs: []string{"https://example.com/a"}},
+		{All: true},
+	} {
+		synctest.Test(t, func(t *testing.T) {
+			o := testorigin.NewChecked(t, 64, 16)
+			o.Default(purgeable("v"))
+			e := newEngine(t, cacheCfg)
+			defer closeEngine(t, e)
+
+			serve(t, e, getReq("/a"), o)
+			time.Sleep(1300 * time.Millisecond)
+			mustPurge(t, e, p)
+			time.Sleep(time.Millisecond) // a refresh sent in the purge's own clock tick is purged too (05 E-3)
+			resp, _ := serve(t, e, getReq("/a"), o)
+			if !resp.Cache.Hit || resp.Cache.Stale != weir.StaleWhileRevalidate {
+				t.Fatalf("%+v: right after the purge: hit=%v stale=%v, want stale-while-revalidate", p, resp.Cache.Hit, resp.Cache.Stale)
+			}
+			synctest.Wait()
+			time.Sleep(100 * time.Millisecond)
+			if resp, _ = serve(t, e, getReq("/a"), o); !resp.Cache.Hit || resp.Cache.Stale != weir.StaleNone || o.Calls("/a") != 2 {
+				t.Fatalf("%+v: after the refresh: hit=%v stale=%v calls=%d, want a fresh hit and 2 calls", p, resp.Cache.Hit, resp.Cache.Stale, o.Calls("/a"))
+			}
+		})
+	}
+}
+
+// 05 E-7, E-8: the memory store times a soft purge by URL to the next whole
+// second, so while other epochs keep arriving a refresh sent inside that
+// second is purged again. The repeats end once the second has passed: the
+// cost is bounded and never serves the entry as fresh in between.
+func TestSoftPurgeRepeatsEndWithTheSecond(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		o := testorigin.NewChecked(t, 64, 16)
+		o.Default(purgeable("v"))
+		e := newEngine(t, cacheCfg)
+		defer closeEngine(t, e)
+
+		serve(t, e, getReq("/a"), o)
+		time.Sleep(1300 * time.Millisecond)
+		mustPurge(t, e, weir.Purge{URLs: []string{"https://example.com/a"}}) // timed 2 s
+		stale := func(at time.Duration, want bool, calls int) {
+			t.Helper()
+			resp, _ := serve(t, e, getReq("/a"), o)
+			synctest.Wait()
+			if got := resp.Cache.Stale == weir.StaleWhileRevalidate; got != want || !resp.Cache.Hit || o.Calls("/a") != calls {
+				t.Fatalf("at %v: stale=%v hit=%v calls=%d, want stale=%v and %d calls", at, resp.Cache.Stale, resp.Cache.Hit, o.Calls("/a"), want, calls)
+			}
+		}
+		time.Sleep(100 * time.Millisecond)
+		stale(1400*time.Millisecond, true, 2)
+		time.Sleep(100 * time.Millisecond)
+		mustPurge(t, e, weir.Purge{URLs: []string{"https://example.com/other"}}) // an unrelated epoch defeats the E-10 fast path
+		stale(1500*time.Millisecond, true, 3)                                    // requested at 1.4 s, at or before 2 s
+		time.Sleep(700 * time.Millisecond)
+		stale(2200*time.Millisecond, true, 4) // requested at 1.5 s
+		time.Sleep(100 * time.Millisecond)
+		stale(2300*time.Millisecond, false, 4) // requested at 2.2 s: past the epoch
+	})
+}
+
+// 05 E-6, FR-STF-2: a hard purge the store refuses at its cap is reported
+// to the operator but is not a store outage. A retry loop of such purges
+// leaves the store breaker closed, so cached entries stay hits and
+// Purge{All}, the remedy E-6 names, still works.
+func TestCappedHardPurgeKeepsStoreBreakerClosed(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		st, err := memory.New(memory.Config{MaxHardEpochs: 1})
+		if err != nil {
+			t.Fatal(err)
+		}
+		o := testorigin.NewChecked(t, 64, 16)
+		o.Default(purgeable("v"))
+		obs := &kindCounter{}
+		cfg := cacheCfg
+		cfg.Store = st
+		cfg.Observer = obs
+		e := newEngine(t, cfg)
+		defer closeEngine(t, e)
+
+		serve(t, e, getReq("/keep"), o)
+		time.Sleep(time.Second)
+		mustPurge(t, e, weir.Purge{Mode: weir.PurgeHard, URLs: []string{"https://example.com/first"}})
+		for i := range 8 {
+			err := e.Purge(t.Context(), weir.Purge{Mode: weir.PurgeHard, URLs: []string{"https://example.com/n" + strconv.Itoa(i)}})
+			if !errors.Is(err, store.ErrUnavailable) {
+				t.Fatalf("capped purge %d = %v, want store.ErrUnavailable", i, err)
+			}
+		}
+		if n := obs.count(weir.EvStoreBreaker); n != 0 {
+			t.Fatalf("store breaker events = %d, want 0", n)
+		}
+		if n := obs.count(weir.EvStoreError); n != 8 {
+			t.Errorf("EvStoreError events = %d, want 8 (each refusal is still reported)", n)
+		}
+		if resp, _ := serve(t, e, getReq("/keep"), o); !resp.Cache.Hit || o.Calls("/keep") != 1 {
+			t.Fatalf("/keep after capped purges: hit=%v calls=%d, want a hit", resp.Cache.Hit, o.Calls("/keep"))
+		}
+		mustPurge(t, e, weir.Purge{Mode: weir.PurgeHard, All: true})
+		if resp, _ := serve(t, e, getReq("/keep"), o); resp.Cache.Hit {
+			t.Fatalf("/keep is a hit after Purge{All} hard")
+		}
+	})
+}
+
+// kindCounter counts events by kind.
+type kindCounter struct {
+	mu sync.Mutex
+	n  map[weir.EventKind]int
+}
+
+func (o *kindCounter) Observe(ev weir.Event) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.n == nil {
+		o.n = map[weir.EventKind]int{}
+	}
+	o.n[ev.Kind]++
+}
+
+func (o *kindCounter) count(k weir.EventKind) int {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.n[k]
+}
+
 // FR-PRG-1, FR-PRG-3, T6.12: a hard-purged entry is a miss: fetched in full
 // with no validator, and never served stale when the origin is down. The
 // purge URL is rewritten like a request, so another spelling of the same URI

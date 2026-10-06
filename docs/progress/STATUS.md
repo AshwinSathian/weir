@@ -14,10 +14,14 @@ none
 
 ## Waiting on Ashwin
 
-Neither blocks merging #52 or starting M9-03. Both were found by the adversarial review of M9-02 and need a decision because they change a pinned behavior or a requirement's wording.
+none
 
-- Soft purge delay. A soft purge by URL (and by group, from M9-03) shows up to 1 s after `Purge` returns: the memory store rounds soft epochs up to the next second (05 E-7) and `httpcc.Evaluate` takes `now - epoch.At`, negative until then. 01 FR-PRG-2 says "stale as of the purge time" and 05 E-8 says rounding "only over-invalidates". Proposed fix, tried in a scratch copy: `staleness = max(staleness, now.Sub(ep.At), 0)` in internal/httpcc/evaluate.go. It reverses the M1-03 test row "soft purge in the future leaves a fresh entry fresh" (evaluate_test.go:56), which no document motivates. Fix it (own small card), or keep the delay and say so in FR-PRG-2 and E-8? Today the delay is stated in the `Purge` comment and 04 §7.
-- Hard-epoch cap and the store breaker. A hard purge of a new tag past `MaxHardEpochs` (10 000 inside 24 h) returns `store.ErrUnavailable` (05 E-6), which `storeGuard.exit` counts as a store failure. Five such `Purge` calls with no successful store call between them (a retry loop on a quiet engine) open the store breaker for 1 s: every lookup is a miss and `Purge{All: true}`, the remedy E-6 names, fails too. Options: (a) `Purge` writes through a guard method that reports the error without counting it (storeguard.go, narrows FR-STF-2's "5 consecutive `ErrUnavailable` results"); (b) a new `store.ErrEpochCap` sentinel (store contract change, 05 E-6 and S-3). Reviewer's pick is (a).
+## Decided 2026-10-06 (M9-02, the two items that waited)
+
+Ashwin delegated both in chat ("choose the best course of action"). Each was attacked against the code before it was decided.
+
+- Soft purge delay: fixed in `httpcc.Evaluate`, `staleness = max(staleness, now - epoch.At, 0)`. An epoch that applies makes the entry stale now, even when the store times it ahead of the clock. Chosen over a store-side change (returning a rounded-down time) because it needs no store contract or conformance change and also covers Phase 2.5, where a purge written by a node with a fast clock would otherwise be ignored for the skew. The M1-03 row "soft purge in the future leaves a fresh entry fresh" is reversed; no document motivated it. Costs, both bounded by the 1 s rounding and stated in 01 FR-PRG-2, 04 §7 and 05 E-8: stale windows up to 1 s long, and a refresh sent inside the purge's second can repeat until the second passes (the first review missed this; `TestSoftPurgeRepeatsEndWithTheSecond` pins it). Unsafe-method invalidation always behaved that way.
+- Hard-epoch cap and the store breaker: `Purge` writes through `storeGuard.purgeEpoch`, which reports a failed write (`EvStoreError`, the returned error) without counting it. Chosen over a new `store.ErrEpochCap` sentinel: that adds public store API and protects only stores that adopt it, while this holds for any store. Not counting a real outage here loses nothing, since requests count it. 01 FR-STF-2, 04 §5.2 and 05 E-6 say so.
 
 ## Decided 2026-10-06 (M9-02)
 
@@ -170,7 +174,8 @@ The cards' Notes give the reasons and the options rejected. All three come befor
 
 - M9-02: `(*Engine).classifyURL(raw, originOnly)` in purge.go gives the `Classified` of a GET for an absolute URL; `Purge` uses `.URITag` and, for `Origin`, `.Origin`. `Purge.Groups` already writes `keys.TagGroup(origin, name)` epochs, but nothing shows they reach entries until M9-03 tags them.
 - M9-03: add the shared-group form to `TestPurge5000KeysBounded` (07 T6.12, the card lists it now). Validate `Purge.Groups` names there: reject names over `Limits.MaxGroupBytes` or with bytes outside 0x20-0x7E (they can never match, FR-STO-10, and a hard one burns a `MaxHardEpochs` slot) with reason `purge-group`; keep accepting `""` (a valid `Cache-Groups` member) and do not cap the count (`MaxGroups` is per response).
-- M9-02: tests sleep 2 s after a soft purge because of the 1 s rounding (see "Waiting on Ashwin"). If the `Evaluate` fix lands, those sleeps can go and a test should pin "stale at +0".
+- M9-02: a soft purge is stale at +0 now (`TestSoftPurgeAppliesAtOnce`). Under synctest a refresh sent in the purge's own clock tick is purged again (05 E-3, `At >= since`), so tests sleep at least 1 ms after `Purge` before the request whose refresh they count. The older purge tests still sleep 2 s; that is harmless.
+- M9-02: Phase 2.5 note. With `MaxClockSkew`, an epoch from a fast node is now applied at once instead of ignored until the local clock catches up, and refreshes repeat until it does. Size the skew allowance with that in mind.
 - M9-02: a background refresh that finds no slot is dropped, not queued: 5 000 stale hits start 48 refreshes and drop 4 952.
 
 - M9-01: `sfv.ParseStringList(lines, maxMembers, maxLen)` returns `sfv.ErrInvalid` for bad syntax and for over-limit input alike, with no members. Pass the resolved `Limits.MaxGroups` and `Limits.MaxGroupBytes`. Hash each member with `keys.TagGroup` and drop it: a member without escapes is a substring of the header line, so keeping one anywhere else (a log field, an event) needs `strings.Clone`. Duplicates are kept; equal names hash to equal tags, so dedupe the tags.

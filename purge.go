@@ -67,9 +67,15 @@ func (e *Engine) sameOriginTag(c *keys.Classified, base *url.URL, ref string) (s
 // write; invalid input returns an error matching ErrInvalidRequest and
 // purges nothing. A store error stops the call and is returned: epochs
 // already written stay, EvPurge is still emitted for them, and repeating
-// the call is safe. The memory store rounds soft epochs up to the next
-// whole second (05 E-7), so a soft purge by URL or group can take up to 1 s
-// to show; hard purges and All apply at once.
+// the call is safe. The memory store refuses a hard purge of a new URL or
+// group past its MaxHardEpochs with an error matching store.ErrUnavailable
+// (05 E-6); purge with All instead. Such a refusal does not count toward
+// the store breaker.
+//
+// A purge shows at the next lookup. With the memory store a soft purge by
+// URL or group is timed to the next whole second (05 E-7), so its
+// stale-while-revalidate and stale-if-error windows can run up to 1 s long,
+// and a refresh sent in that second may be repeated once.
 //
 // Eager with PurgeSoft is invalid input. No store scrubs yet (M15), so
 // Eager with PurgeHard writes its epochs and returns ErrEagerUnsupported
@@ -115,7 +121,7 @@ func (e *Engine) Purge(ctx context.Context, p Purge) error {
 	}
 	ep := store.Epoch{At: time.Now(), Mode: mode}
 	for i, t := range tags {
-		if err := e.sg.setEpoch(ctx, t, ep); err != nil {
+		if err := e.sg.purgeEpoch(ctx, t, ep); err != nil {
 			if e.closed.Load() { // Close won the race and closed the store
 				return ErrClosed
 			}
