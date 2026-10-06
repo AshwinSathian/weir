@@ -877,7 +877,7 @@ Entry template:
 - Context: medium; size M was right for the card, the store finding is extra.
 
 ## 2026-10-06 · M9-03 · done
-- Branch / PR: card/M9-03-cache-groups / (see STATUS)
+- Branch / PR: card/M9-03-cache-groups / #53
 - Done: decided the three items that waited on Ashwin, under his delegation. Entries drop the origin tag from `Entry.Tags` (it stays as `Owner`); `CacheGroups.Ignore` switches off `Cache-Group-Invalidation` only; `purge-group` stays.
 - Tests: TestBuildEntry and TestCacheGroupsStorability rows changed first and failed; TestInvalidationFloodBounded passes 300 of 300 (was about 1 failure in 20); the `Ignore` row of TestGroupInvalidationIsSoft now fails when the `Ignore` branch is removed. `make check` passes, trace 127/152.
 - Deviations: 01 §2 glossary, FR-STO-10 and the defaults table; 02 purge ADR; 04 §3 and §7; 05 §4 and E-8; 06 T-23 and T-29. Reasons in STATUS "Decided 2026-10-06 (M9-03)".
