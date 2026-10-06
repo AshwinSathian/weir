@@ -1,0 +1,4 @@
+go test fuzz v1
+string("\"a\";w=::;x=:aGk:;y=:YQ=:;z=:YQ==:, \"b\";x=:=a=:")
+byte(' ')
+byte('\x80')

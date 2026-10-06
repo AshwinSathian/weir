@@ -833,3 +833,19 @@ Entry template:
 - Deviations: 01 config table (`MinRatio` at most 1); 04 §5 and §8.2 (the cap binds every class); 07 T6.8 list.
 - Follow-ups: none open from the PR. This round was attacked by the session that wrote it, not by an independent agent.
 - Context: high.
+
+## 2026-10-06 · M9-01 · done
+- Branch / PR: card/M9-01-sf-list-parser / (recorded in the next commit)
+- Done: internal/sfv (`ParseStringList`, `ErrInvalid`): RFC 9651 List of Strings with member count and decoded length limits. Each line is parsed alone, with the result the ", " join gives except that a String spanning two lines fails. Parameters of every bare-item type are validated and dropped.
+- Tests: TestParseStringList (65 rows), TestParseStringListZeroLimits, TestParseStringListParameterCostLinear, FuzzSFStringList (13 seeds; limits, line-by-line equals joined, round trip). Compile failure first; the cost test failed first at 330 MB for a 64 KiB line. `make check` passes, trace 124/152. Fuzzed 30 s twice, no crasher.
+- Deviations: none in the docs. internal/sfv/doc.go is outside the card's Touch list (package doc convention).
+- Follow-ups: card review found one must-fix (display-string buffer sized to the rest of the line, quadratic), fixed with a regression test; both should-fix items and the nits are done. Left as is: byte-sequence parameters are checked for alphabet only. The member aliasing note for M9-03 is in STATUS.
+- Context: low; size S was right.
+
+## 2026-10-06 · M9-01 · review-fixes
+- Branch / PR: card/M9-01-sf-list-parser / #51
+- Done: decided the item PR #51 left open and its listed design choices (delegated; "Waiting on Ashwin" was empty). One code change: Byte Sequence parameter values must now be decodable base64 (characters, then no more padding than the length calls for). The other four choices are kept, with reasons in STATUS "Decided 2026-10-06 (M9-01)".
+- Tests: six TestParseStringList rows for byte sequences (five reject rows failed first, one accept row), seed14. `make check` passes; fuzzed 30 s, no crasher.
+- Deviations: none.
+- Follow-ups: none open. This round was attacked by the session that wrote it, not by an independent agent.
+- Context: low.
