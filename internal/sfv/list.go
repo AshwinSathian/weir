@@ -201,18 +201,24 @@ func skipNumber(s string) (rest string, integer, ok bool) {
 	return s[i:], false, frac >= 1 && frac <= 3
 }
 
-// skipBytes consumes a Byte Sequence (RFC 9651 §4.2.7). Only the alphabet is
-// checked, so undecodable base64 passes: the RFC lets a parser accept bad
-// padding, and the value is dropped either way.
+// skipBytes consumes a Byte Sequence (RFC 9651 §4.2.7): base64 characters,
+// then at most as much padding as the length calls for. Missing padding is
+// accepted, as the RFC asks; whatever no base64 decoder could read is not.
 func skipBytes(s string) (string, bool) {
 	end := strings.IndexByte(s[1:], ':')
 	if end < 0 {
 		return "", false
 	}
-	for _, c := range []byte(s[1 : 1+end]) {
-		if !isAlpha(c) && !isDigit(c) && c != '+' && c != '/' && c != '=' {
+	data := strings.TrimRight(s[1:1+end], "=")
+	pad := end - len(data)
+	for _, c := range []byte(data) {
+		if !isAlpha(c) && !isDigit(c) && c != '+' && c != '/' {
 			return "", false
 		}
+	}
+	// One leftover character carries 6 bits, less than a byte.
+	if rem := len(data) % 4; rem == 1 || pad > (4-rem)%4 {
+		return "", false
 	}
 	return s[end+2:], true
 }

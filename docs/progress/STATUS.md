@@ -16,6 +16,16 @@ none
 
 none
 
+## Decided 2026-10-06 (M9-01)
+
+Decided under Ashwin's delegation by the session that wrote the card, after the card reviewer's attack. "Waiting on Ashwin" was empty; these are the item PR #51 left open and the design choices it listed.
+
+- Byte Sequence parameter values: tightened. The alphabet-only check accepted `:=a=:` and `:a=Gk:`, which no base64 decoder reads and RFC 9651 §4.2.7 says fail. Now: base64 characters, then at most the padding the length calls for; missing padding is still accepted (the RFC's SHOULD). Rejected: decoding with `encoding/base64` (an allocation for a value that is dropped).
+- One sentinel for bad syntax and over-limit input: kept. 04 §8.5 gives both the same outcome and no document names separate reasons. Split it when an event or log field needs the difference.
+- Line-by-line parsing instead of the ", " join: kept. The fuzz target asserts equality with the joined parse on every accepted input; the only inputs the join accepts and this rejects are a String split across lines, which fails closed.
+- Members alias the header line: kept. `store.Tag` is a 32-byte hash, so the consumer never keeps the name; cloning would cost up to 32 allocations per stored response for nothing.
+- Limit of 0 admits nothing: kept. `New` resolves 0 to the default and rejects negatives, so the engine never passes one.
+
 ## Decided 2026-10-06 (M8-02)
 
 Decided by two independent adversarial reviews under Ashwin's delegation, then checked by the card reviewer. Each item was attacked with scratch tests before it was kept or changed.
@@ -144,7 +154,7 @@ The cards' Notes give the reasons and the options rejected. All three come befor
 
 ## Notes for the next session
 
-- M9-01: `sfv.ParseStringList(lines, maxMembers, maxLen)` returns `sfv.ErrInvalid` for bad syntax and for over-limit input alike, with no members. Pass the resolved `Limits.MaxGroups` and `Limits.MaxGroupBytes`: a limit of 0 admits nothing. Members without escapes are substrings of the header line, so a 1-byte group name can pin a whole line; `strings.Clone` them wherever groups outlive the entry's header or are size-accounted apart from it (M9-03 tags, group index). Duplicates are kept; the caller dedupes.
+- M9-01: `sfv.ParseStringList(lines, maxMembers, maxLen)` returns `sfv.ErrInvalid` for bad syntax and for over-limit input alike, with no members. Pass the resolved `Limits.MaxGroups` and `Limits.MaxGroupBytes`. Hash each member with `keys.TagGroup` and drop it: a member without escapes is a substring of the header line, so keeping one anywhere else (a log field, an event) needs `strings.Clone`. Duplicates are kept; equal names hash to equal tags, so dedupe the tags.
 - M8-02: `missrate.Tracker.Observe` takes one mutex per cacheable request. Parallel hit benchmark, M4 Pro 12 procs: 600 ns/op with the tracker, 343 with `MissRate.Disable`; serial `BenchmarkServeHitSmall` 1.1 µs against NFR-5's 4 µs, so no budget is broken (ADR-9 accepts the mutex). `TryLock` gets 367 ns/op but drops 50% of samples at 12 procs (20% at 4, 3% at 2): the ratio stays unbiased, `MinMisses` is effectively doubled. M10-05 decides whether a parallel budget exists and, if so, between `TryLock` and per-shard counters.
 - M8-02 review: with `MissRate.Throttle`, a legitimate cold path with far more keys than the cap can fetch stays throttled (300 000 random keys at 1 000 rps on one path: throttled for all 30 windows measured). That is what FR-MR-3 asks for and `Throttle` is off by default; the runbook (M10-06) should say so. `Throttle` is also a lever: 60 distinct-query requests a second to one path kept it capped and served 390 of 1 200 legitimate misses there (06 R-8).
 - M8-02: supersedes the "Decided 2026-10-05 (M8-01)" bullet above on throttle timing. The engine applies a report only while `end + Window` is ahead; the limiter drops it at `end + 2*Window` or when the next report replaces it (01 FR-MR-3, 04 §8.2).
