@@ -902,3 +902,12 @@ Entry template:
 - Review: card reviewer, no must-fix. Fixed: `Stats` moved the breaker and called the Observer (now `Peek`); the timeout change and the vocabulary were unpinned (exact count, catalog check); missing assertions for EvRequest count, empty partition, fetch-end `pass`. Open: four nits in STATUS notes.
 - Follow-ups: question 2 under "Waiting on Ashwin" (four catalog choices, not blocking).
 - Context: medium; size M was right.
+
+## 2026-10-06 · M10-01 · review-fixes
+- Branch / PR: card/M10-01-event-catalog-stats / #54
+- Done: decided every item under "Waiting on Ashwin", under his delegation. New `EvRequest` reason `collapsed` for followers answered from their flight; new `EvNotStored` reason `stream`; `revalidated` only for a forward made for a stale entry; `EvFetchEnd` deferred so it pairs with its start through `runtime.Goexit`. The epoch-sketch question became card M10-08 (optional `store.SharedTagEpochs` capability), now the next card.
+- Tests: TestEveryEventKindEmitted gains rows for collapsed, stream, Range pass, unconditional 304, the repeated conditional fetch and an origin Goexit scenario; each failed first. `make check` passes, trace 129/152.
+- Deviations: 04 §9.2 (two new reasons, exact `revalidated`, paired fetch events). Reasons in STATUS "Decided 2026-10-06 (M10-01)".
+- Review: no second agent ran on these changes; the decisions were attacked by this session.
+- Follow-ups: M10-08 added to docs/cards/10-m10.md and PLAN M10.9.
+- Context: high; start M10-08 in a fresh session.

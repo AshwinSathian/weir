@@ -39,8 +39,12 @@ func (e *Engine) Serve(ctx context.Context, req *Request, origin Origin) (*Respo
 	return resp, err
 }
 
-// requestReason is the EvRequest reason of a response (04 §9.2). A Range
-// request no entry answered was passed through (FR-SRV-5).
+// requestReason is the EvRequest reason of a response (04 §9.2). A follower
+// that shared its flight's response sent nothing to the origin, so it is
+// neither a miss nor a revalidation (FR-MR-1 counts it the same way). A
+// Range request no entry answered was passed through (FR-SRV-5). A 304
+// revalidates only a request that went forward for a stale entry: an origin
+// answering 304 to a forward without validators validated nothing.
 func requestReason(c *keys.Classified, ci *CacheInfo) string {
 	switch {
 	case ci.Detail == "negative":
@@ -49,11 +53,13 @@ func requestReason(c *keys.Classified, ci *CacheInfo) string {
 		return "stale"
 	case ci.Hit:
 		return "hit"
+	case ci.Collapsed:
+		return "collapsed"
 	case ci.Fwd == FwdBypass:
 		return "bypass"
 	case c.Class == keys.ClassPass || c.Range:
 		return "pass"
-	case ci.FwdStatus == http.StatusNotModified:
+	case ci.FwdStatus == http.StatusNotModified && (ci.Fwd == FwdStale || ci.Fwd == FwdRequest):
 		return "revalidated"
 	}
 	return "miss"
@@ -271,7 +277,8 @@ func (e *Engine) fetchStored(ctx context.Context, sp *fetchSpec, origin Origin) 
 		fr.ci.Detail = "hit-for-miss"
 	}
 	switch {
-	case res.stream: // FR-STR-1: never stored, and 04 §9.2 has no EvNotStored reason for it
+	case res.stream: // FR-STR-1
+		emit(e.cfg.Observer, Event{Kind: EvNotStored, Time: res.respTime, Partition: c.Partition, Reason: "stream"})
 	case res.over:
 		emit(e.cfg.Observer, Event{Kind: EvNotStored, Time: res.respTime, Partition: c.Partition, Reason: "too-large"})
 	case serverError(res.resp.StatusCode):

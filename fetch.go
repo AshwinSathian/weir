@@ -99,19 +99,24 @@ func (e *Engine) fetch(ctx context.Context, c *keys.Classified, origin Origin, c
 	}
 	// FR-OBS-1: an event on each side of every origin call. EvFetchEnd is the
 	// headers arriving, or the error; its Status is 0 for an error.
+	// ponytail: with no Observer the end event still costs one clock read
+	// per fetch; guard it if a profile ever shows it next to an origin call.
 	reason := fetchReason(class, buffered)
 	var reqTime time.Time
-	send := func(r *Request) (*Response, error) {
+	send := func(r *Request) (resp *Response, err error) {
 		reqTime = time.Now()
 		emit(e.cfg.Observer, Event{Kind: EvFetchStart, Time: reqTime, Partition: c.Partition, Reason: reason})
-		resp, err := safeFetch(tctx, origin, r)
-		end := Event{Kind: EvFetchEnd, Time: time.Now(), Partition: c.Partition, Reason: reason}
-		end.Duration = end.Time.Sub(reqTime)
-		if err == nil {
-			end.Status = resp.StatusCode
-		}
-		emit(e.cfg.Observer, end)
-		return resp, err
+		// Deferred: an origin that calls runtime.Goexit still ends its
+		// fetch, so starts and ends pair up for an exporter.
+		defer func() {
+			end := Event{Kind: EvFetchEnd, Time: time.Now(), Partition: c.Partition, Reason: reason}
+			end.Duration = end.Time.Sub(reqTime)
+			if err == nil && resp != nil {
+				end.Status = resp.StatusCode
+			}
+			emit(e.cfg.Observer, end)
+		}()
+		return safeFetch(tctx, origin, r)
 	}
 	resp, err := send(fwd)
 	if err == nil && prior != nil && resp.StatusCode == http.StatusNotModified && strongETagMismatch(resp.Header, prior.ETag) {

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"runtime"
 	"runtime/debug"
 	"slices"
 	"strings"
@@ -57,7 +58,7 @@ func (l *eventLog) count(kind weir.EventKind) int {
 // vocabulary is the 04 §9.2 reason column. EvKeyRejected is absent: its
 // reasons are RequestError.Reason values.
 var vocabulary = map[weir.EventKind][]string{
-	weir.EvRequest:         {"hit", "stale", "miss", "revalidated", "pass", "bypass", "negative", "error"},
+	weir.EvRequest:         {"hit", "stale", "miss", "revalidated", "collapsed", "pass", "bypass", "negative", "error"},
 	weir.EvFetchStart:      {"foreground", "background", "warm", "pass"},
 	weir.EvFetchEnd:        {"foreground", "background", "warm", "pass"},
 	weir.EvCoalesceJoin:    {""},
@@ -69,7 +70,7 @@ var vocabulary = map[weir.EventKind][]string{
 	weir.EvStoreError:      {"get", "set", "epoch", "set-epoch"},
 	weir.EvStoreBreaker:    {"open", "closed"},
 	weir.EvNotStored: {"method", "status", "no-store", "private", "authorization", "set-cookie", "vary-star", "vary-sensitive",
-		"vary-strict", "vary-too-many", "no-freshness", "too-large", "incomplete", "groups"},
+		"vary-strict", "vary-too-many", "no-freshness", "too-large", "incomplete", "stream", "groups"},
 	weir.EvVaryOverflow:    {""},
 	weir.EvNegativeServed:  {""},
 	weir.EvPurge:           {"soft", "hard", "invalid", "group", "group-invalid"},
@@ -89,6 +90,18 @@ func (l *eventLog) checkVocabulary(t *testing.T) {
 			t.Errorf("%v event has reason %q, outside the 04 §9.2 vocabulary", ev.Kind, ev.Reason)
 		}
 	}
+}
+
+// lastRequest returns the newest EvRequest.
+func (l *eventLog) lastRequest() weir.Event {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for i := len(l.evs) - 1; i >= 0; i-- {
+		if l.evs[i].Kind == weir.EvRequest {
+			return l.evs[i]
+		}
+	}
+	return weir.Event{}
 }
 
 // kindSet is the kinds the scenarios of one test made an observer receive.
@@ -151,6 +164,22 @@ func TestEveryEventKindEmitted(t *testing.T) {
 					Header: http.Header{"Cache-Control": {"max-age=1"}, "Etag": {`"v"`}},
 					Body:   http.NoBody}, nil
 			}})
+			o.Route("/r", cacheable("range"))
+			o.Route("/sse", testorigin.Behavior{Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: []byte("data: x\n\n")})
+			o.Route("/nm", testorigin.Behavior{Status: http.StatusNotModified})
+			co := cacheable("co")
+			co.Delay = delay
+			o.Route("/co", co)
+			// A 304 whose strong ETag is not the entry's: the fetch is
+			// repeated without validators (FR-SRV-3).
+			o.Route("/flip", testorigin.Behavior{Func: func(r *weir.Request) (*weir.Response, error) {
+				h := http.Header{"Cache-Control": {"max-age=1"}, "Etag": {`"old"`}}
+				if r.Header.Get("If-None-Match") != "" {
+					h["Etag"] = []string{`"new"`}
+					return &weir.Response{StatusCode: http.StatusNotModified, Header: h}, nil
+				}
+				return &weir.Response{StatusCode: http.StatusOK, Header: h, Body: http.NoBody}, nil
+			}})
 			e := newEngine(t, cfg)
 			defer closeEngine(t, e)
 
@@ -185,6 +214,7 @@ func TestEveryEventKindEmitted(t *testing.T) {
 
 			serve(t, e, getReq("/etag"), o)
 			serve(t, e, getReq("/swr"), o)
+			serve(t, e, getReq("/flip"), o)
 			time.Sleep(2 * time.Second)
 			serve(t, e, getReq("/etag"), o)
 			seen.want(t, l, weir.EvRequest, "revalidated")
@@ -209,14 +239,49 @@ func TestEveryEventKindEmitted(t *testing.T) {
 			seen.want(t, l, weir.EvKeyRejected)
 			// One EvRequest per Serve return, refusals included; a request
 			// refused by classification has no partition.
-			if n := l.count(weir.EvRequest); n != 12 {
-				t.Errorf("EvRequest events = %d, want 12, one per Serve call so far", n)
+			if n := l.count(weir.EvRequest); n != 13 {
+				t.Errorf("EvRequest events = %d, want 13, one per Serve call so far", n)
 			}
 			l.mu.Lock()
 			last := l.evs[len(l.evs)-1]
 			l.mu.Unlock()
 			if last.Kind != weir.EvRequest || last.Reason != "error" || last.Partition != "" || last.Status != http.StatusBadRequest {
 				t.Errorf("rejected request's event = %+v, want request/error, status 400, no partition", last)
+			}
+
+			// A follower that shares its flight's response fetched nothing.
+			lead := serveTimed(t, e, getReq("/co"), o)
+			synctest.Wait()
+			follow := serveTimed(t, e, getReq("/co"), o)
+			for _, ch := range []<-chan timedServe{lead, follow} {
+				if r := <-ch; r.err != nil {
+					t.Fatalf("/co: %v", r.err)
+				}
+			}
+			if ev := seen.want(t, l, weir.EvRequest, "collapsed"); !ev.Info.Collapsed || ev.Duration != delay {
+				t.Errorf("collapsed event = %+v, want Info.Collapsed and the wait as Duration", ev)
+			}
+
+			serve(t, e, getReq("/sse"), o)
+			seen.want(t, l, weir.EvNotStored, "stream")
+
+			// FR-SRV-5: a Range request no entry answers is passed through.
+			ranged := getReq("/r")
+			ranged.Header.Set("Range", "bytes=0-1")
+			serve(t, e, ranged, o)
+			if ev := l.lastRequest(); ev.Reason != "pass" {
+				t.Errorf("Range miss: reason %q, want pass", ev.Reason)
+			}
+			// A 304 to a request that carried no validators validated nothing.
+			serve(t, e, getReq("/nm"), o)
+			if ev := l.lastRequest(); ev.Reason != "miss" || ev.Status != http.StatusNotModified {
+				t.Errorf("unconditional 304: reason %q status %d, want miss 304", ev.Reason, ev.Status)
+			}
+			// Both origin calls of a repeated conditional fetch are reported.
+			starts, ends := l.count(weir.EvFetchStart), l.count(weir.EvFetchEnd)
+			serve(t, e, getReq("/flip"), o)
+			if s, n := l.count(weir.EvFetchStart)-starts, l.count(weir.EvFetchEnd)-ends; s != 2 || n != 2 {
+				t.Errorf("repeated conditional fetch: %d starts, %d ends, want 2 and 2", s, n)
 			}
 
 			if st, err := e.Warm(t.Context(), warmReqs("/w"), o); err != nil || st.Fetched != 1 {
@@ -330,6 +395,25 @@ func TestEveryEventKindEmitted(t *testing.T) {
 		}
 		if n := l.count(weir.EvBreakerState); n != 1 {
 			t.Errorf("EvBreakerState events = %d, want 1: Stats must not emit", n)
+		}
+	})
+
+	// NFR-2: an origin that ends its goroutine still closes the fetch, so
+	// starts minus ends is the number of fetches in flight.
+	scenario("origin Goexit", weir.Config{}, func(t *testing.T, cfg weir.Config, l *eventLog) {
+		o := testorigin.NewChecked(t, 64, 16)
+		o.Default(testorigin.Behavior{Func: func(*weir.Request) (*weir.Response, error) {
+			runtime.Goexit()
+			return nil, nil
+		}})
+		e := newEngine(t, cfg)
+		defer closeEngine(t, e)
+
+		if _, _, err := serveResult(t, e, getReq("/x"), o); err == nil {
+			t.Fatal("want the flight's error")
+		}
+		if s, n := l.count(weir.EvFetchStart), l.count(weir.EvFetchEnd); s != 1 || n != 1 {
+			t.Errorf("%d fetch starts, %d ends, want 1 and 1", s, n)
 		}
 	})
 

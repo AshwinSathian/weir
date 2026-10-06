@@ -1141,8 +1141,8 @@ type Event struct {
 
 | Kind | Emitted when | Reason vocabulary |
 |---|---|---|
-| `EvRequest` | every `Serve` return; `Duration` is the time in `Serve`, `Status` the response status or `StatusCode(err)`, `Partition` empty when the request was refused before classification | `hit`, `stale`, `miss`, `revalidated` (the origin answered 304), `pass` (includes a Range request no entry answered), `bypass`, `negative`, `error`. A follower carries its flight's reason (`miss` or `revalidated`) with `Info.Collapsed` set, which is how an exporter tells it from a request that fetched |
-| `EvFetchStart`, `EvFetchEnd` | around every `Origin.Fetch`, so twice for a conditional fetch repeated without validators; `EvFetchEnd` is the headers arriving or the error, with `Duration` since the start and `Status` (0 for an error) | `foreground`, `background`, `warm`, `pass` |
+| `EvRequest` | every `Serve` return; `Duration` is the time in `Serve`, `Status` the response status or `StatusCode(err)`, `Partition` empty when the request was refused before classification | `hit`, `stale`, `miss`, `revalidated` (the origin answered 304 to a forward made for a stale entry), `collapsed` (a follower answered from its flight's response or buffered 5xx; it sent nothing to the origin, and FR-MR-1 counts it like a hit), `pass` (includes a Range request no entry answered), `bypass`, `negative`, `error`. So `miss` plus `revalidated` plus `pass` plus `bypass` is the number of requests that fetched for themselves |
+| `EvFetchStart`, `EvFetchEnd` | around every `Origin.Fetch`, so twice for a conditional fetch repeated without validators; `EvFetchEnd` is the headers arriving or the error, with `Duration` since the start and `Status` (0 for an error). Every start has an end, also when the origin panics or calls `runtime.Goexit` | `foreground`, `background`, `warm`, `pass` |
 | `EvCoalesceJoin` | a request joined an existing flight | |
 | `EvCoalesceTimeout` | a wait on a flight expired and the request stopped waiting: any waiter that serves stale, or a follower that fetches for itself. The creator without a stale entry keeps waiting on its own fetch and emits nothing | `stale`, `direct` |
 | `EvShed` | limiter refused | `queue-full`, `queue-timeout`, `background` |
@@ -1152,7 +1152,7 @@ type Event struct {
 | `EvStoreError` | guard saw `ErrUnavailable` | `get`, `set`, `epoch`, `set-epoch` |
 | `EvStoreBreaker` | store guard opened or closed | `open`, `closed` |
 | `EvKeyRejected` | validation failed | `RequestError.Reason` values |
-| `EvNotStored` | storability failed | `method` (defensive: cacheable forwards are always GET), `status`, `no-store`, `private`, `authorization`, `set-cookie`, `vary-star`, `vary-sensitive`, `vary-strict`, `vary-too-many`, `no-freshness`, `too-large`, `incomplete` (a buffered body that failed mid-read), `groups`. A buffered 5xx is `status`. An event-stream response (FR-STR-1) emits nothing |
+| `EvNotStored` | storability failed | `method` (defensive: cacheable forwards are always GET), `status`, `no-store`, `private`, `authorization`, `set-cookie`, `vary-star`, `vary-sensitive`, `vary-strict`, `vary-too-many`, `no-freshness`, `too-large`, `incomplete` (a buffered body that failed mid-read), `stream` (an event-stream response, FR-STR-1), `groups`. A buffered 5xx is `status` |
 | `EvVaryOverflow` | variant cap reached | |
 | `EvNegativeServed` | negative entry used | |
 | `EvPurge` | `Purge` wrote at least one epoch, or a response to an unsafe method invalidated (emitted whether or not the store took the writes, whose errors that path ignores) | `soft`, `hard` (`Purge`); `invalid` (unsafe-method invalidation of URIs); `group` (`Cache-Group-Invalidation` soft-purged groups, `Status` is how many); `group-invalid` (that field was refused, no group epoch written) |
