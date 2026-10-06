@@ -1,0 +1,4 @@
+go test fuzz v1
+string("\"a\";x;i=-12;d=1.5;s=\"q, \\\"\";t=*tok/en:x;b=?0;y=:aGk=:;at=@1;ds=%\"f%c3%bc\"; z, \"b\"")
+byte(' ')
+byte('\x80')

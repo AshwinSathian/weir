@@ -1,0 +1,4 @@
+go test fuzz v1
+string("\"a\";x=%\"%c3\";y=1234567890123456;z=1.")
+byte(' ')
+byte('\x80')
