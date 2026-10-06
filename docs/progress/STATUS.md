@@ -5,7 +5,7 @@ Phase: 1
 Current card: none
 Card state: awaiting-merge
 Branch: card/M8-02-miss-rate-wiring
-PR: (recorded in the next commit)
+PR: #50 https://github.com/AshwinSathian/weir/pull/50
 Next card: M9-01
 
 ## Blockers
