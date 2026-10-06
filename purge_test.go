@@ -1,8 +1,10 @@
 package weir_test
 
 import (
+	"bytes"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"slices"
 	"strconv"
@@ -627,6 +629,7 @@ func TestPurgeRejectsInvalidInput(t *testing.T) {
 		{"eager with soft mode (FR-PRG-8)", weir.Purge{Eager: true, URLs: []string{good}}},
 		// FR-STO-10: no stored response can carry these names, so they never match.
 		{"group name over MaxGroupBytes", weir.Purge{Origin: "https://example.com", Groups: []string{"g", strings.Repeat("x", 129)}}},
+		{"group name with DEL", weir.Purge{Origin: "https://example.com", Groups: []string{"g\x7f"}}},
 		{"group name with a control byte", weir.Purge{Origin: "https://example.com", Groups: []string{"g\n"}}},
 		{"group name with a non-ASCII byte", weir.Purge{Origin: "https://example.com", Groups: []string{"caf\xc3\xa9"}}},
 	}
@@ -829,13 +832,19 @@ func TestGroupInvalidationIsSoft(t *testing.T) {
 		name   string
 		field  []string
 		ignore bool
+		host   string           // of the unsafe request; "" is the entries' own
 		want   weir.StaleReason // for the entries in group g
+		events string           // EvPurge reasons, with the group count where one is set (04 §9.2)
 	}{
-		{"listed group is soft-purged", []string{`"g", "nobody"`}, false, weir.StaleWhileRevalidate},
-		{"field split over two lines", []string{`"nobody"`, `"g"`}, false, weir.StaleWhileRevalidate},
-		{"token member invalidates nothing", []string{`"g", g`}, false, weir.StaleNone},
-		{"33 members invalidate nothing", []string{`"g"` + strings.Repeat(`, "g"`, 32)}, false, weir.StaleNone},
-		{"CacheGroups.Ignore", []string{`"g"`}, true, weir.StaleNone},
+		{"listed group is soft-purged", []string{`"g", "nobody"`}, false, "", weir.StaleWhileRevalidate, "invalid group:2"},
+		{"field split over two lines", []string{`"nobody"`, `"g"`}, false, "", weir.StaleWhileRevalidate, "invalid group:2"},
+		{"a repeated name is one epoch", []string{`"g", "g", "g"`}, false, "", weir.StaleWhileRevalidate, "invalid group:1"},
+		{"empty field writes nothing", []string{""}, false, "", weir.StaleNone, "invalid"},
+		{"token member invalidates nothing", []string{`"g", g`}, false, "", weir.StaleNone, "invalid group-invalid"},
+		{"33 members invalidate nothing", []string{`"g"` + strings.Repeat(`, "g"`, 32)}, false, "", weir.StaleNone, "invalid group-invalid"},
+		{"CacheGroups.Ignore", []string{`"g"`}, true, "", weir.StaleNone, "invalid"},
+		// T-25, FR-PRG-6: the groups named are those of the response's own origin.
+		{"response from another origin", []string{`"g"`}, false, "third.example", weir.StaleNone, "invalid group:1"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -844,8 +853,10 @@ func TestGroupInvalidationIsSoft(t *testing.T) {
 				o.Default(grouped(`"g"`, nil))
 				o.Route("/h", grouped(`"h"`, nil))
 				o.Route("/post", grouped("", http.Header{"Cache-Group-Invalidation": tc.field}))
+				obs := &purgeEvents{}
 				cfg := cacheCfg
 				cfg.CacheGroups.Ignore = tc.ignore
+				cfg.Observer = obs
 				e := newEngine(t, cfg)
 				defer closeEngine(t, e)
 
@@ -854,13 +865,20 @@ func TestGroupInvalidationIsSoft(t *testing.T) {
 					serve(t, e, r, o)
 				}
 				time.Sleep(time.Second)
-				serve(t, e, postReq("/post"), o)
+				post := postReq("/post")
+				if tc.host != "" {
+					post.Host = tc.host
+				}
+				serve(t, e, post, o)
 				time.Sleep(2 * time.Second)
 
 				wantCache(t, e, o, all[0], tc.want)
 				wantCache(t, e, o, all[1], tc.want)
 				wantCache(t, e, o, all[2], weir.StaleNone)
 				wantCache(t, e, o, all[3], weir.StaleNone) // T-25: same origin only
+				if got := strings.Join(obs.evs, " "); got != tc.events {
+					t.Errorf("EvPurge events = %q, want %q", got, tc.events)
+				}
 			})
 		})
 	}
@@ -905,6 +923,153 @@ func TestInvalidationFloodBounded(t *testing.T) {
 			if resp, _ := serve(t, e, getReq(p), o); resp.Cache.Hit || o.Calls(p) != 1 {
 				t.Fatalf("%s: hit=%v calls=%d, want a validation before serving", p, resp.Cache.Hit, o.Calls(p))
 			}
+		}
+	})
+}
+
+// purgeEvents records every EvPurge as its reason, plus ":Status" when set.
+type purgeEvents struct {
+	mu  sync.Mutex
+	evs []string
+}
+
+func (o *purgeEvents) Observe(ev weir.Event) {
+	if ev.Kind != weir.EvPurge {
+		return
+	}
+	s := ev.Reason
+	if ev.Status != 0 {
+		s += ":" + strconv.Itoa(ev.Status)
+	}
+	o.mu.Lock()
+	o.evs = append(o.evs, s)
+	o.mu.Unlock()
+}
+
+// FR-STO-10, FR-STO-12: a response whose Cache-Groups field is not a List of
+// Strings is delivered but not stored, EvNotStored{groups} says why, and the
+// hit-for-miss marker it leaves makes the next request fetch on its own.
+func TestMalformedCacheGroupsNotStored(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		o := testorigin.NewChecked(t, 64, 16)
+		o.Default(grouped(`"a", b`, nil))
+		var ev eventCounter
+		cfg := cacheCfg
+		cfg.CacheGroups.Ignore = true // FR-STO-10 holds with Ignore set
+		cfg.Observer = &ev
+		e := newEngine(t, cfg)
+		defer closeEngine(t, e)
+
+		resp, body := serve(t, e, getReq("/a"), o)
+		if body != "v" || resp.Cache.Stored || resp.Header.Get("Cache-Groups") != `"a", b` {
+			t.Fatalf("first response: body %q stored=%v Cache-Groups %q, want it delivered whole and not stored", body, resp.Cache.Stored, resp.Header.Get("Cache-Groups"))
+		}
+		resp, _ = serve(t, e, getReq("/a"), o)
+		if resp.Cache.Hit || resp.Cache.Detail != "hit-for-miss" || o.Calls("/a") != 2 {
+			t.Fatalf("second request: hit=%v detail=%q calls=%d, want a hit-for-miss fetch", resp.Cache.Hit, resp.Cache.Detail, o.Calls("/a"))
+		}
+		if n := ev.count(weir.EvNotStored.String() + "/groups"); n != 2 {
+			t.Fatalf("EvNotStored{groups} = %d, want 2", n)
+		}
+	})
+}
+
+// T-23, T-28: unsafe requests whose responses each invalidate 32 new groups
+// fill the store's soft sketch plane, so entries in no group at all go
+// soft-stale. The damage stops there: every entry is still served from the
+// cache inside its stale-while-revalidate window, refreshes stay inside the
+// limiter, and CacheGroups.Ignore switches the attack off. The sketch here
+// has 4 096 cells; 500 responses write 16 000 epochs into it.
+func TestGroupInvalidationFloodStaysServable(t *testing.T) {
+	for _, ignore := range []bool{false, true} {
+		t.Run("Ignore="+strconv.FormatBool(ignore), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				const hot, flood = 200, 500
+				st, err := memory.New(memory.Config{EpochSlots: 1 << 12})
+				if err != nil {
+					t.Fatal(err)
+				}
+				var n atomic.Int64
+				o := testorigin.NewChecked(t, 64, 16)
+				o.Default(testorigin.Behavior{Func: func(r *weir.Request) (*weir.Response, error) {
+					if r.Method == http.MethodGet {
+						return grouped("", nil).Func(r)
+					}
+					id := strconv.FormatInt(n.Add(1), 10)
+					var list []string
+					for i := range 32 {
+						list = append(list, `"`+id+"-"+strconv.Itoa(i)+`"`)
+					}
+					return &weir.Response{StatusCode: http.StatusNoContent, Header: http.Header{"Cache-Group-Invalidation": {strings.Join(list, ", ")}}, Body: http.NoBody}, nil
+				}})
+				var ev eventCounter
+				cfg := cacheCfg
+				cfg.Store = st
+				cfg.CacheGroups.Ignore = ignore
+				cfg.Observer = &ev
+				e := newEngine(t, cfg)
+				defer closeEngine(t, e)
+
+				for i := range hot {
+					serve(t, e, getReq("/hot"+strconv.Itoa(i)), o)
+				}
+				time.Sleep(time.Second)
+				for range flood {
+					serve(t, e, postReq("/post"), o)
+				}
+				time.Sleep(2 * time.Second)
+
+				stale := 0
+				for i := range hot {
+					resp, _ := serve(t, e, getReq("/hot"+strconv.Itoa(i)), o)
+					if !resp.Cache.Hit {
+						t.Fatalf("/hot%d was not served from the cache (%s)", i, resp.Header.Get("Cache-Status"))
+					}
+					if resp.Cache.Stale == weir.StaleWhileRevalidate {
+						stale++
+					}
+					synctest.Wait()
+				}
+				groups := ev.count(weir.EvPurge.String() + "/group")
+				if ignore {
+					if stale != 0 || groups != 0 {
+						t.Fatalf("with Ignore: %d entries went stale, %d group events; want 0 and 0", stale, groups)
+					}
+					return
+				}
+				// 32 000 cell writes into 4 096 cells: a miss needs a cell nothing hit.
+				if stale < hot*9/10 || groups != flood {
+					t.Fatalf("%d of %d entries went stale, %d group events; want the plane saturated and %d events", stale, hot, groups, flood)
+				}
+			})
+		})
+	}
+}
+
+// FR-OBS-3, FR-INV-2: refused Cache-Group-Invalidation fields are logged
+// once per engine, however many arrive, and the line names the origin, never
+// the field's text. Each one still emits EvPurge{group-invalid}.
+func TestInvalidGroupInvalidationLoggedOnce(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var buf bytes.Buffer
+		o := testorigin.NewChecked(t, 64, 16)
+		o.Default(grouped("", http.Header{"Cache-Group-Invalidation": {`"SECRETGROUP", bad`}}))
+		var ev eventCounter
+		cfg := cacheCfg
+		cfg.Logger = slog.New(slog.NewTextHandler(&buf, nil))
+		cfg.Observer = &ev
+		e := newEngine(t, cfg)
+		defer closeEngine(t, e)
+
+		for i := range 3 {
+			serve(t, e, postReq("/p"+strconv.Itoa(i)), o)
+		}
+		log := buf.String()
+		if n := strings.Count(log, "Cache-Group-Invalidation"); n != 1 || !strings.Contains(log, "https://example.com") || strings.Contains(log, "SECRETGROUP") {
+			t.Fatalf("log has %d warnings, want 1 naming the origin and not the field:\n%s", n, log)
+		}
+		if n := ev.count(weir.EvPurge.String() + "/group-invalid"); n != 3 {
+			t.Fatalf("EvPurge{group-invalid} = %d, want 3", n)
 		}
 	})
 }

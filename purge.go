@@ -22,8 +22,9 @@ import (
 // origin (FR-INV-2); the soft form keeps their stale windows, so one cheap
 // request cannot force a whole group to revalidate before it is served
 // (T-28). A field that does not parse or exceeds Limits invalidates no
-// group; the first such response is logged. A failed write is ignored: the client's response does not depend
-// on it, and the memory store fails only once closed.
+// group; each is reported as EvPurge{group-invalid} and the first is logged.
+// A failed write is ignored: the client's response does not depend on it,
+// and the memory store fails only once closed.
 func (e *Engine) invalidate(ctx context.Context, c *keys.Classified, resp *Response) {
 	ctx = context.WithoutCancel(ctx) // the response is already on its way to the client
 	tags := []store.Tag{c.URITag}
@@ -53,12 +54,19 @@ func (e *Engine) invalidate(ctx context.Context, c *keys.Classified, resp *Respo
 		e.badGroup.Do(func() {
 			e.cfg.Logger.Warn("weir: invalid Cache-Group-Invalidation field; no group invalidated (logged once)", "origin", c.Origin)
 		})
+		emit(e.cfg.Observer, Event{Kind: EvPurge, Time: ep.At, Partition: c.Partition, Reason: "group-invalid"})
+		return
+	}
+	if len(groups) == 0 {
 		return
 	}
 	ep.Mode = store.EpochSoft
 	for _, g := range groups {
 		_ = e.sg.setEpoch(ctx, keys.TagGroup(c.Origin, g), ep)
 	}
+	// Status is the number of group epochs, so an exporter can see a
+	// response-driven flood of them (T-23).
+	emit(e.cfg.Observer, Event{Kind: EvPurge, Time: ep.At, Partition: c.Partition, Status: len(groups), Reason: "group"})
 }
 
 // sameOriginTag resolves ref against base and returns its URI tag when it

@@ -884,3 +884,12 @@ Entry template:
 - Review: card reviewer ran once, before these decisions; its findings are all closed. The decisions were attacked by this session, not by a second agent.
 - Follow-ups: notes for M10-01 in STATUS (events for an invalid invalidation field and a rejected purge; engine-level `EvNotStored{groups}` test).
 - Context: high; size M was right for the card, the store finding doubled it.
+
+## 2026-10-06 · M9-03 · review-fixes
+- Branch / PR: card/M9-03-cache-groups / #53
+- Done: closed the four items PR #53 left open. `invalidate` emits `EvPurge{group}` (`Status` = distinct groups) and `EvPurge{group-invalid}`. The 32-epochs-per-response residual (T-23) is pinned by a test and stated with the RFC 9875 reason it cannot be capped lower. An independent second review ran on the whole branch.
+- Tests: TestMalformedCacheGroupsNotStored, TestGroupInvalidationFloodStaysServable, TestInvalidGroupInvalidationLoggedOnce; event, other-origin and repeated-name rows in TestGroupInvalidationIsSoft; a DEL row in TestPurgeRejectsInvalidInput. `make check` passes, trace 128/152.
+- Deviations: 04 §7, §9.2 and §13.5 (events, `Status`), 05 E-8 and 06 T-23, T-28, T-29 (residuals), 07 (two test lines).
+- Review: second card reviewer, 20 mutations: 16 killed at first, now 18. Fixed: no test pinned the origin scope of group invalidation; the once-per-engine log was untested; DEL untested; stale comment in store/store.go. Left: `Partition` on the group events is unchecked; moving the `groups` case in `storability` changes only the reason label.
+- Follow-ups: one must-fix could only be documented, not fixed: a group tag shared by many entries can be falsely invalidated as a whole by a URI invalidation flood (about 4% per group). The fix changes the store contract or a default; question 1 under "Waiting on Ashwin", not blocking the merge.
+- Context: high. This session went well past one card's budget; the next one should start fresh.

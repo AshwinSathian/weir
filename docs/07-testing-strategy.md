@@ -194,6 +194,8 @@ Each seed taxonomy entry maps to the tests below. "Engine" tests run under synct
 - `TestSoftPurgeServesStaleWhileRevalidating`, `TestHardPurgeIsMiss`, `TestSoftAfterHardStaysHard`, `TestPurgeDuringInflightFetch` (engine).
 - `TestUnsafeMethodInvalidates` (engine): POST 201 invalidates the URI and a same-origin `Location`, not a cross-origin one; `Cache-Group-Invalidation` on a GET response is ignored.
 - `TestGroupInvalidationIsSoft` (engine): a POST whose response invalidates group `g` leaves `g`'s entries servable under their SWR window.
+- `TestGroupInvalidationFloodStaysServable` (engine): 500 unsafe responses that each invalidate 32 new groups, against a 4 096-cell sketch; at least 90% of 200 entries in no group go soft-stale, every one is still served from the cache inside its SWR window, and `EvPurge{group}` fires once per response; with `CacheGroups.Ignore` none goes stale (T-23, T-28).
+- `TestMalformedCacheGroupsNotStored` (engine): a response whose `Cache-Groups` is not a List of Strings is delivered whole, emits `EvNotStored{groups}` and leaves a hit-for-miss marker, with `CacheGroups.Ignore` set too (FR-STO-10).
 - `TestInvalidationFloodBounded` (component, on the memory store): 1 000 000 soft and invalid epochs for distinct tags; store memory unchanged; every tag's lookup is at least its own epoch. (engine): 60 000 POSTs to distinct URIs inside one 60 s entry lifetime; of 1 000 hot entries with `max-age=60` that were not invalidated, at most 8% revalidate early (the sketch's expected rate is about 4%, E-8); every entry whose URI was invalidated is validated before it is served.
 
 ### T6.13 Rolling deploy
