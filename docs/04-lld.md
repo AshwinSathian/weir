@@ -1141,10 +1141,10 @@ type Event struct {
 
 | Kind | Emitted when | Reason vocabulary |
 |---|---|---|
-| `EvRequest` | every `Serve` return | `hit`, `stale`, `miss`, `revalidated`, `pass`, `bypass`, `negative`, `error` |
-| `EvFetchStart`, `EvFetchEnd` | around every `Origin.Fetch` | `foreground`, `background`, `warm`, `pass` |
+| `EvRequest` | every `Serve` return; `Duration` is the time in `Serve`, `Status` the response status or `StatusCode(err)`, `Partition` empty when the request was refused before classification | `hit`, `stale`, `miss`, `revalidated` (the origin answered 304 to a forward made for a stale entry), `collapsed` (a follower answered from its flight's response or buffered 5xx; it sent nothing to the origin, and FR-MR-1 counts it like a hit), `pass` (includes a Range request no entry answered), `bypass`, `negative`, `error`. So `miss` plus `revalidated` plus `pass` plus `bypass` is the number of requests that fetched for themselves |
+| `EvFetchStart`, `EvFetchEnd` | around every `Origin.Fetch`, so twice for a conditional fetch repeated without validators; `EvFetchEnd` is the headers arriving or the error, with `Duration` since the start and `Status` (0 for an error). Every start has an end, also when the origin panics or calls `runtime.Goexit` | `foreground`, `background`, `warm`, `pass` |
 | `EvCoalesceJoin` | a request joined an existing flight | |
-| `EvCoalesceTimeout` | follower wait expired | `stale`, `direct` |
+| `EvCoalesceTimeout` | a wait on a flight expired and the request stopped waiting: any waiter that serves stale, or a follower that fetches for itself. The creator without a stale entry keeps waiting on its own fetch and emits nothing | `stale`, `direct` |
 | `EvShed` | limiter refused | `queue-full`, `queue-timeout`, `background` |
 | `EvStaleServed` | a stale response was served | `swr`, `sie`, `shed`, `circuit-open`, `coalesce-timeout` |
 | `EvRefreshDropped` | background refresh not started | `no-slot`, `circuit-open`, `closed` |
@@ -1152,12 +1152,12 @@ type Event struct {
 | `EvStoreError` | guard saw `ErrUnavailable` | `get`, `set`, `epoch`, `set-epoch` |
 | `EvStoreBreaker` | store guard opened or closed | `open`, `closed` |
 | `EvKeyRejected` | validation failed | `RequestError.Reason` values |
-| `EvNotStored` | storability failed | `method` (defensive: cacheable forwards are always GET), `status`, `no-store`, `private`, `authorization`, `set-cookie`, `vary-star`, `vary-sensitive`, `vary-strict`, `vary-too-many`, `no-freshness`, `too-large`, `incomplete`, `groups` |
+| `EvNotStored` | storability failed | `method` (defensive: cacheable forwards are always GET), `status`, `no-store`, `private`, `authorization`, `set-cookie`, `vary-star`, `vary-sensitive`, `vary-strict`, `vary-too-many`, `no-freshness`, `too-large`, `incomplete` (a buffered body that failed mid-read), `stream` (an event-stream response, FR-STR-1), `groups`. A buffered 5xx is `status` |
 | `EvVaryOverflow` | variant cap reached | |
 | `EvNegativeServed` | negative entry used | |
 | `EvPurge` | `Purge` wrote at least one epoch, or a response to an unsafe method invalidated (emitted whether or not the store took the writes, whose errors that path ignores) | `soft`, `hard` (`Purge`); `invalid` (unsafe-method invalidation of URIs); `group` (`Cache-Group-Invalidation` soft-purged groups, `Status` is how many); `group-invalid` (that field was refused, no group epoch written) |
 | `EvMissRateAnomaly` | window closed with an anomalous partition | `flag`, `throttle` |
-| `EvEvict` | memory store evicted (batched per shard per call) | `small`, `main`, `expired` |
+| `EvEvict` | the memory store `New` built evicted (batched per shard per call); `Status` is how many records. A store passed in `Config.Store` reports through its own `memory.Config.OnEvict` | `small`, `main`, `expired` |
 | `EvMode` | `SetMode` changed the incident mode or it expired (FR-MODE-1) | `normal`, `stale-on-error`, `bypass` (new mode) |
 
 Reasons never contain request data. `Partition` is the only field derived from request input; exporters must not use it as a metric label.
@@ -1186,7 +1186,7 @@ Reasons never contain request data. `Partition` is the only field derived from r
 | `weir_evictions_total` | counter | `queue` |
 | `weir_store_bytes` | gauge | |
 
-Gauges for in-flight and queue depth come from an optional `Stats()` method on the engine (`EngineStats{Inflight, Queued, BreakerState, StoreBytes}`), polled by the exporter's collector, rather than from events.
+Gauges for in-flight and queue depth come from an optional `Stats()` method on the engine (`EngineStats{Inflight, Queued, BreakerState, StoreBytes}`), polled by the exporter's collector, rather than from events. `Stats` only reads: it emits no event and moves no state, so a collector may call it while holding the lock its `Observe` takes.
 
 ## 10. `weirhttp`
 

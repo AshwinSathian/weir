@@ -160,7 +160,7 @@ Refs: FR-PRG-*, FR-INV-2, FR-STO-10, T6.12, T6.13, T-10, T-23, T-25.
 
 Refs: FR-OBS-*, NFR-*, seed §7.5.
 
-- [ ] M10.1 Event catalog complete ([04 §9.2](docs/04-lld.md)); `Stats()`; one test per event kind asserting it fires. AC: `TestEveryEventKindEmitted` passes.
+- [x] M10.1 Event catalog complete ([04 §9.2](docs/04-lld.md)); `Stats()`; one test per event kind asserting it fires. AC: `TestEveryEventKindEmitted` passes.
 - [ ] M10.2 `observe/prom` module (own `go.mod`, added to `go.work`). AC: metrics from [04 §9.3](docs/04-lld.md) exported; `testutil` checks in its tests; root module still has zero third-party imports.
 - [ ] M10.3 Load tests ([07 §9](docs/07-testing-strategy.md)) and nightly workflow. AC: all scenarios pass on the reference machine; results in `docs/benchmarks.md`.
 - [ ] M10.4 Nightly fuzz and cache-tests jobs; `testdata/cache-tests-baseline.json`; `docs/cache-tests-expected-failures.md`. AC: both jobs green; every expected failure cites a decision ID.
@@ -168,6 +168,7 @@ Refs: FR-OBS-*, NFR-*, seed §7.5.
 - [ ] M10.5b GC cost at 1M entries measured (D36). AC: `docs/benchmarks.md` reports GC CPU share and p99; if GC CPU exceeds 10% at 1M entries, a pointer-light layout task is added to Phase 1.x.
 - [ ] M10.6 `TRACE_STRICT=1` in CI. AC: trace report empty.
 - [ ] M10.7 README usage guide: quick start with `weirhttp`, the strict-forwarding explanation, every opt-out that weakens a default (R-3). AC: README reviewed against [06 §5](docs/06-threat-model.md).
+- [ ] M10.9 Group tags skip the invalid epoch plane ([05 E-8](docs/05-storage-interface-spec.md), T-29): optional `store.SharedTagEpochs` capability, memory store support. AC: `TestSharedTagsSkipInvalidPlane`, `TestInvalidationFloodLeavesGroupsServable` pass.
 - [ ] M10.8 RFC 9110 gaps found in review: `Date` on forwarded responses (§6.6.1), empty absolute-form path as `/` (§4.2.3). AC: `TestForwardedResponseGetsDate`, `TestAbsoluteFormEmptyPath` pass.
 
 Exit criteria for Phase 1: [07 §12](docs/07-testing-strategy.md).

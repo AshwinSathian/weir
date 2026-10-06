@@ -85,18 +85,20 @@ func (e *Engine) fetchCoalesced(ctx context.Context, sp *fetchSpec, origin Origi
 			if published(f) {
 				continue
 			}
-			emit(e.cfg.Observer, Event{Kind: EvCoalesceTimeout, Time: time.Now(), Partition: c.Partition})
 			if r := e.staleOnTimeout(sp); r != nil {
+				emit(e.cfg.Observer, Event{Kind: EvCoalesceTimeout, Time: time.Now(), Partition: c.Partition, Reason: "stale"})
 				if created {
 					e.leaveFlight(f)
 				}
 				return r, nil
 			}
 			if !created {
+				emit(e.cfg.Observer, Event{Kind: EvCoalesceTimeout, Time: time.Now(), Partition: c.Partition, Reason: "direct"})
 				return e.fetchDirect(ctx, sp, origin)
 			}
 			// The creator's fetch is the flight, already bounded by the
-			// origin timeout; a second fetch would only race it.
+			// origin timeout; a second fetch would only race it. It keeps
+			// waiting, which is neither outcome of 04 §9.2: no event.
 			tc = nil
 		case <-ctx.Done():
 			if created {

@@ -31,7 +31,7 @@ const (
 	EvFetchStart                           // before every Origin.Fetch
 	EvFetchEnd                             // after every Origin.Fetch
 	EvCoalesceJoin                         // a request joined an existing flight
-	EvCoalesceTimeout                      // a follower wait expired
+	EvCoalesceTimeout                      // a wait on a flight expired and the request stopped waiting
 	EvShed                                 // the limiter refused
 	EvStaleServed                          // a stale response was served
 	EvRefreshDropped                       // a background refresh was not started

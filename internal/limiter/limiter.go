@@ -77,6 +77,13 @@ type Permit struct {
 	released bool // guarded by l.mu
 }
 
+// Counts returns the slots held and the waiters queued, for gauges.
+func (l *Limiter) Counts() (inflight, queued int) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.inflight, len(l.queue)
+}
+
 // New returns a limiter with the given bounds.
 func New(cfg Config) *Limiter {
 	return &Limiter{cfg: cfg, byPart: make(map[uint64]int), queuedBy: make(map[uint64]int)}
