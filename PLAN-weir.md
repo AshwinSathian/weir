@@ -160,7 +160,7 @@ Refs: FR-PRG-*, FR-INV-2, FR-STO-10, T6.12, T6.13, T-10, T-23, T-25.
 
 Refs: FR-OBS-*, NFR-*, seed §7.5.
 
-- [ ] M10.1 Event catalog complete ([04 §9.2](docs/04-lld.md)); `Stats()`; one test per event kind asserting it fires. AC: `TestEveryEventKindEmitted` passes.
+- [x] M10.1 Event catalog complete ([04 §9.2](docs/04-lld.md)); `Stats()`; one test per event kind asserting it fires. AC: `TestEveryEventKindEmitted` passes.
 - [ ] M10.2 `observe/prom` module (own `go.mod`, added to `go.work`). AC: metrics from [04 §9.3](docs/04-lld.md) exported; `testutil` checks in its tests; root module still has zero third-party imports.
 - [ ] M10.3 Load tests ([07 §9](docs/07-testing-strategy.md)) and nightly workflow. AC: all scenarios pass on the reference machine; results in `docs/benchmarks.md`.
 - [ ] M10.4 Nightly fuzz and cache-tests jobs; `testdata/cache-tests-baseline.json`; `docs/cache-tests-expected-failures.md`. AC: both jobs green; every expected failure cites a decision ID.

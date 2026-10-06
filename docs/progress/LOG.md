@@ -893,3 +893,12 @@ Entry template:
 - Review: second card reviewer, 20 mutations: 16 killed at first, now 18. Fixed: no test pinned the origin scope of group invalidation; the once-per-engine log was untested; DEL untested; stale comment in store/store.go. Left: `Partition` on the group events is unchecked; moving the `groups` case in `storability` changes only the reason label.
 - Follow-ups: one must-fix could only be documented, not fixed: a group tag shared by many entries can be falsely invalidated as a whole by a URI invalidation flood (about 4% per group). The fix changes the store contract or a default; question 1 under "Waiting on Ashwin", not blocking the merge.
 - Context: high. This session went well past one card's budget; the next one should start fresh.
+
+## 2026-10-06 · M10-01 · done
+- Branch / PR: card/M10-01-event-catalog-stats / PENDING
+- Done: audit of 04 §9.2 against the emit sites. Added `EvRequest` (Serve wraps `serve`), `EvFetchStart`/`EvFetchEnd` around each origin call, `EvNotStored` for over-size (`too-large`), buffered 5xx (`status`) and a failed body read (`incomplete`), reasons on `EvCoalesceTimeout`, `EvEvict` from the store `New` builds. `Engine.Stats()` in stats.go, with `limiter.Counts` and a read-only `breaker.Peek`.
+- Tests: TestEveryEventKindEmitted (7 scenarios, all 19 kinds, every recorded reason checked against the catalog), TestStats. `make check` passes, trace 129/152. Hit benchmark unchanged at 14 allocs/op.
+- Deviations: 04 §9.2 rows for EvRequest, EvFetchStart/End, EvCoalesceTimeout, EvNotStored and EvEvict state what the fields carry; 04 §9.3 says `Stats` only reads. One behavior change: a creator with no stale entry that keeps waiting no longer emits `EvCoalesceTimeout`.
+- Review: card reviewer, no must-fix. Fixed: `Stats` moved the breaker and called the Observer (now `Peek`); the timeout change and the vocabulary were unpinned (exact count, catalog check); missing assertions for EvRequest count, empty partition, fetch-end `pass`. Open: four nits in STATUS notes.
+- Follow-ups: question 2 under "Waiting on Ashwin" (four catalog choices, not blocking).
+- Context: medium; size M was right.

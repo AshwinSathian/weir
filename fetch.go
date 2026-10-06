@@ -97,13 +97,27 @@ func (e *Engine) fetch(ctx context.Context, c *keys.Classified, origin Origin, c
 	if prior != nil {
 		fwd = withValidators(req, prior)
 	}
-	reqTime := time.Now()
-	resp, err := safeFetch(tctx, origin, fwd)
+	// FR-OBS-1: an event on each side of every origin call. EvFetchEnd is the
+	// headers arriving, or the error; its Status is 0 for an error.
+	reason := fetchReason(class, buffered)
+	var reqTime time.Time
+	send := func(r *Request) (*Response, error) {
+		reqTime = time.Now()
+		emit(e.cfg.Observer, Event{Kind: EvFetchStart, Time: reqTime, Partition: c.Partition, Reason: reason})
+		resp, err := safeFetch(tctx, origin, r)
+		end := Event{Kind: EvFetchEnd, Time: time.Now(), Partition: c.Partition, Reason: reason}
+		end.Duration = end.Time.Sub(reqTime)
+		if err == nil {
+			end.Status = resp.StatusCode
+		}
+		emit(e.cfg.Observer, end)
+		return resp, err
+	}
+	resp, err := send(fwd)
 	if err == nil && prior != nil && resp.StatusCode == http.StatusNotModified && strongETagMismatch(resp.Header, prior.ETag) {
 		closeBody(resp)
 		prior = nil
-		reqTime = time.Now()
-		resp, err = safeFetch(tctx, origin, req)
+		resp, err = send(req)
 	}
 	// The outcome is counted at the headers, or after a buffered body. A
 	// fetch whose caller left says nothing about the origin.
@@ -155,6 +169,9 @@ func (e *Engine) fetch(ctx context.Context, c *keys.Classified, origin Origin, c
 	body, rerr := io.ReadAll(io.LimitReader(resp.Body, limit+1))
 	res.respTime = time.Now()
 	if rerr != nil { // a truncated body is never stored or served
+		if ctx.Err() == nil { // a caller that left cut the body itself
+			emit(e.cfg.Observer, Event{Kind: EvNotStored, Time: res.respTime, Partition: c.Partition, Reason: "incomplete"})
+		}
 		record(breaker.Failure)
 		closeBody(resp)
 		cancel()
@@ -173,6 +190,20 @@ func (e *Engine) fetch(ctx context.Context, c *keys.Classified, origin Origin, c
 	resp.Body = http.NoBody
 	res.body = body
 	return res
+}
+
+// fetchReason is the EvFetchStart and EvFetchEnd reason (04 §9.2). Only a
+// pass-through fetch is unbuffered.
+func fetchReason(class limiter.Class, buffered bool) string {
+	switch {
+	case class == limiter.Background:
+		return "background"
+	case class == limiter.Warm:
+		return "warm"
+	case !buffered:
+		return "pass"
+	}
+	return "foreground"
 }
 
 // limFor returns the pool c's fetch takes its slot from: the upload pool

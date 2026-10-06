@@ -105,6 +105,20 @@ func (b *Breaker) State() State {
 	return to
 }
 
+// Peek returns the state State would, without moving the breaker or
+// calling onChange. Gauges read it, so a poll never reports a transition.
+func (b *Breaker) Peek() State {
+	if b == nil {
+		return Closed
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.state == Open && !time.Now().Before(b.openUntil) {
+		return HalfOpen
+	}
+	return b.state
+}
+
 // Allow admits a fetch or returns ErrCircuitOpen (FR-CB-5). Every admitted
 // fetch must end in Record or Cancel.
 func (b *Breaker) Allow() (Probe, error) {

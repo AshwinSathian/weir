@@ -4,9 +4,9 @@ Updated: 2026-10-06
 Phase: 1
 Current card: none
 Card state: awaiting-merge
-Branch: card/M9-03-cache-groups
-PR: #53 https://github.com/AshwinSathian/weir/pull/53
-Next card: M10-01
+Branch: card/M10-01-event-catalog-stats
+PR: PENDING
+Next card: M10-02
 
 ## Blockers
 
@@ -17,6 +17,8 @@ none
 Does not block merging PR #53; it decides whether a follow-up card is written.
 
 1. Shared group tags and the epoch sketch (found by the final M9-03 review, stated in 05 E-8 and 06 T-29). The memory store reads every tag of an entry in the invalid plane, group tags included, though the engine never writes an invalid epoch to a group. Under the docs/07 flood (60 000 unsafe requests to distinct URIs inside one entry lifetime) a group has about a 4% chance that all its entries revalidate before serving, once; the reviewer measured 6 of 150 engines. `CacheGroups.Ignore` does not help. Coalescing and the limiter bound the burst. Options: (a) an optional store capability (or a changed `NewestEpoch`) that lets the engine say which planes to read per tag, so group tags skip the invalid plane: removes the blocking case, leaves a soft one; public store API. (b) raise the default `EpochSlots` from 2^19 to 2^22 (4 MiB to 32 MiB): about 0.08% instead of 4% for every tag, no API change, a default changes. (c) accept it as documented. I recommend (b) now and (a) with the Phase 2.5 store work, when the contract is reopened anyway.
+
+2. Event catalog choices made in M10-01 (04 §9.2, PR for M10-01). None blocks the merge; say so if one is wrong. (a) `EvCoalesceTimeout` is no longer emitted for a creator that has no stale entry and keeps waiting on its own fetch; it used to fire with an empty reason, and neither `stale` nor `direct` describes it. (b) An event-stream response emits no `EvNotStored`, because the vocabulary has no reason for it; a `stream` reason would be a vocabulary change. (c) A follower's `EvRequest` carries its flight's reason (`miss` or `revalidated`) with `Info.Collapsed` set; a separate `collapsed` reason would also be a vocabulary change. (d) `EvEvict.Status` is the number of records, and only the store `New` builds emits it.
 
 ## Decided 2026-10-06 (M9-03)
 
@@ -181,6 +183,10 @@ Already built, now confirmed: the weirhttp default transport (compression off, n
 The cards' Notes give the reasons and the options rejected. All three come before M1-18, because closing M1 makes the repo public.
 
 ## Notes for the next session
+
+- M10-02 (exporter): `Engine.Stats()` only reads. It uses `breaker.Peek`, emits nothing and may be called under the lock `Observe` takes. `Inflight` and `Queued` sum the main and upload pools.
+- M10-02: hit ratio from `EvRequest` must use `Info.Collapsed` to separate followers from requests that fetched (question 2c above). `EvEvict` and `EvPurge{group}` carry a count in `Status`. A store passed in `Config.Store` reports evictions only through its own `memory.Config.OnEvict`.
+- M10-01 review nits left open: an origin that calls `runtime.Goexit` leaves `EvFetchStart` without `EvFetchEnd`; an origin answering 304 to an unconditional forward is labelled `revalidated`; `TestStats` cites no requirement ID because 01 has none for `Stats`; a Range pass and the doubled fetch events of a repeated conditional fetch have no assertion.
 
 - M9-02: `(*Engine).classifyURL(raw, originOnly)` in purge.go gives the `Classified` of a GET for an absolute URL; `Purge` uses `.URITag` and, for `Origin`, `.Origin`. `Purge.Groups` already writes `keys.TagGroup(origin, name)` epochs, but nothing shows they reach entries until M9-03 tags them.
 - M9-03: `Entry.Tags` is global, URI, then one tag per distinct group; the origin tag is `Owner` only. Do not add a tag that many entries share unless a purge can name it and its epoch is kept exactly (05 E-8).

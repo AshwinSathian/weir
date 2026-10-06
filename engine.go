@@ -71,7 +71,14 @@ func New(cfg Config) (*Engine, error) {
 		if !fromLimit {
 			c.Logger.Warn("weir: no GOMEMLIMIT set; the memory store uses 256 MiB. Set GOMEMLIMIT to size it at 40% of the limit")
 		}
-		m, err := memory.New(memory.Config{MaxBytes: n, Shards: defaultShards(n, c.Storable.MaxObjectBytes)})
+		mc := memory.Config{MaxBytes: n, Shards: defaultShards(n, c.Storable.MaxObjectBytes)}
+		if obs := c.Observer; obs != nil {
+			// 04 §9.2: Status is how many records left the queue Reason names.
+			mc.OnEvict = func(queue string, n int) {
+				emit(obs, Event{Kind: EvEvict, Time: time.Now(), Status: n, Reason: queue})
+			}
+		}
+		m, err := memory.New(mc)
 		if err != nil {
 			return nil, err
 		}

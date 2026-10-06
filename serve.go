@@ -20,24 +20,67 @@ import (
 // caller owns resp.Body and must close it. A non-nil error means no response
 // could be produced; StatusCode(err) gives the status an adapter should send.
 func (e *Engine) Serve(ctx context.Context, req *Request, origin Origin) (*Response, error) {
+	var c keys.Classified
+	if e.cfg.Observer == nil { // the hit path reads no clock for an event nobody receives
+		return e.serve(ctx, req, origin, &c)
+	}
+	start := time.Now()
+	resp, err := e.serve(ctx, req, origin, &c)
+	// FR-OBS-1: one EvRequest per Serve return. Partition is empty when the
+	// request was refused before classification.
+	now := time.Now()
+	ev := Event{Kind: EvRequest, Time: now, Partition: c.Partition, Duration: now.Sub(start), Reason: "error"}
+	if err != nil {
+		ev.Status = StatusCode(err)
+	} else {
+		ev.Status, ev.Info, ev.Reason = resp.StatusCode, resp.Cache, requestReason(&c, &resp.Cache)
+	}
+	emit(e.cfg.Observer, ev)
+	return resp, err
+}
+
+// requestReason is the EvRequest reason of a response (04 §9.2). A Range
+// request no entry answered was passed through (FR-SRV-5).
+func requestReason(c *keys.Classified, ci *CacheInfo) string {
+	switch {
+	case ci.Detail == "negative":
+		return "negative"
+	case ci.Stale != StaleNone:
+		return "stale"
+	case ci.Hit:
+		return "hit"
+	case ci.Fwd == FwdBypass:
+		return "bypass"
+	case c.Class == keys.ClassPass || c.Range:
+		return "pass"
+	case ci.FwdStatus == http.StatusNotModified:
+		return "revalidated"
+	}
+	return "miss"
+}
+
+// serve is Serve without its event. It fills c, which stays zero when the
+// request is refused before or by classification.
+func (e *Engine) serve(ctx context.Context, req *Request, origin Origin, c *keys.Classified) (*Response, error) {
 	if e.closed.Load() {
 		return nil, ErrClosed
 	}
 	if req == nil {
 		return nil, &RequestError{Reason: "nil request"}
 	}
-	c, err := keys.Classify((*keys.Request)(req), &e.kcfg)
+	cl, err := keys.Classify((*keys.Request)(req), &e.kcfg)
 	if err != nil {
 		return nil, e.rejected(err)
 	}
+	*c = cl
 	if c.Class == keys.ClassPass {
 		if c.FwdReason != keys.FwdBypass {
-			return e.pass(ctx, &c, origin, FwdMethod)
+			return e.pass(ctx, c, origin, FwdMethod)
 		}
 		if c.ReqCC.OnlyIfCached { // FR-BYP-1, FR-SRV-6: the client forbids the origin and the rule forbids the cache
 			return nil, ErrOnlyIfCached
 		}
-		return e.pass(ctx, &c, origin, FwdBypass)
+		return e.pass(ctx, c, origin, FwdBypass)
 	}
 	if e.currentMode() == ModeBypass { // FR-MODE-3
 		if c.ReqCC.OnlyIfCached { // FR-SRV-6: the client forbade the origin
@@ -46,7 +89,7 @@ func (e *Engine) Serve(ctx context.Context, req *Request, origin Origin) (*Respo
 		return e.pass(ctx, c.AsBypass(), origin, FwdBypass)
 	}
 	e.cr.observe(req.Header)
-	resp, err := e.cacheable(ctx, &c, origin, nil)
+	resp, err := e.cacheable(ctx, c, origin, nil)
 	se, follower := errors.AsType[sharedError](err)
 	if follower {
 		err = se.error
@@ -227,11 +270,15 @@ func (e *Engine) fetchStored(ctx context.Context, sp *fetchSpec, origin Origin) 
 	if sp.lk.marker {
 		fr.ci.Detail = "hit-for-miss"
 	}
-	if !res.over && !res.stream && serverError(res.resp.StatusCode) {
+	switch {
+	case res.stream: // FR-STR-1: never stored, and 04 §9.2 has no EvNotStored reason for it
+	case res.over:
+		emit(e.cfg.Observer, Event{Kind: EvNotStored, Time: res.respTime, Partition: c.Partition, Reason: "too-large"})
+	case serverError(res.resp.StatusCode):
 		// Before Publish, so before the creator's respond writes to resp.
 		fr.errHeader = maps.Clone(res.resp.Header)
-	}
-	if !res.over && !res.stream && !serverError(res.resp.StatusCode) {
+		emit(e.cfg.Observer, Event{Kind: EvNotStored, Time: res.respTime, Partition: c.Partition, Reason: "status"})
+	default:
 		fr.entry, fr.ci.Stored = e.storeResponse(ctx, c, res, sp)
 		if fr.entry != nil {
 			fr.vk = keys.VariantKey(c.Primary, fr.entry.VaryNames, c.Forwarded.Header)
