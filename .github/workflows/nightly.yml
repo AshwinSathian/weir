@@ -1,0 +1,76 @@
+name: nightly
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+    inputs:
+      fuzztime:
+        description: Time per fuzz target
+        default: 5m
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz-targets:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.list.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - id: list
+        name: list fuzz targets
+        run: |
+          for pkg in $(go list ./...); do
+            for f in $(go test -list '^Fuzz' "$pkg" 2>/dev/null | grep '^Fuzz'); do
+              echo "{\"pkg\":\"$pkg\",\"target\":\"$f\"}"
+            done
+          done | jq -sc '{include: .}' > matrix.json
+          echo "matrix=$(cat matrix.json)" >> "$GITHUB_OUTPUT"
+
+  fuzz:
+    needs: fuzz-targets
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.fuzz-targets.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: fuzz ${{ matrix.target }}
+        env:
+          FUZZTIME: ${{ inputs.fuzztime || '5m' }}
+        run: go test -run='^$' -fuzz="^${{ matrix.target }}\$" -fuzztime="$FUZZTIME" "${{ matrix.pkg }}"
+      # A crasher is written under testdata/fuzz/<Target>/ in the package
+      # directory. Check it in as a seed together with its fix (docs/07 §5).
+      - name: upload crashers
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: crasher-${{ matrix.target }}
+          path: "**/testdata/fuzz/${{ matrix.target }}/*"
+          if-no-files-found: warn
+
+  cache-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: cache-tests against weirproxy
+        run: scripts/cache-tests.sh

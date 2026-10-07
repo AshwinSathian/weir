@@ -299,7 +299,7 @@ Named in [06-threat-model.md](06-threat-model.md), [01-technical-spec.md](01-tec
 
 ## 8. External conformance: http-tests/cache-tests
 
-`examples/weirproxy` is a small reverse proxy built from `weirhttp.Handler` and `TransportOrigin`. A nightly CI job starts it in front of the cache-tests server and runs the suite (Node.js, `http-tests/cache-tests`). Results are stored as `testdata/cache-tests-baseline.json`. The job fails when a test that passed in the baseline fails now. Tests Weir fails by design (for example client `no-cache` handling under D5, stale serving without origin permission under D6) are listed in `docs/cache-tests-expected-failures.md` with the reason and the decision ID.
+`examples/weirproxy` is a small reverse proxy built from `weirhttp.Handler` and `TransportOrigin`. A nightly CI job starts it in front of the cache-tests server and runs the suite (Node.js, `http-tests/cache-tests`). The proxy runs with `-forward-allow` for the suite's bookkeeping headers and the request headers its Vary tests set, because strict forwarding (D4) would hide them. The suite is pinned to a commit in `scripts/cache-tests.sh` (`make cache-tests` runs it locally). Results are stored as `testdata/cache-tests-baseline.json` (pass or fail per test). The job fails when a test that passed in the baseline fails now. Tests Weir fails by design (for example client `no-cache` handling under D5, stale serving without origin permission under D6) are listed in `docs/cache-tests-expected-failures.md` with the reason and the decision ID.
 
 The suite's authors say passing everything "means nothing" by itself. It is used here as a regression net and a way to spot unintended behavior, not as a conformance claim.
 

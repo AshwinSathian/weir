@@ -2,17 +2,17 @@
 
 Updated: 2026-10-07
 Phase: 1
-Current card: M10-03
-Card state: awaiting-merge
-Branch: claude/gifted-meitner-19l6l6
-PR: #57 https://github.com/AshwinSathian/weir/pull/57
+Current card: M10-04
+Card state: in-progress
+Branch: claude/zealous-ritchie-wdpztv
+PR: none yet
 Next card: M10-04
 
+## Waiting on Ashwin (M10-04)
+
+The `/handoff` skill cannot be run by the session. Run `/handoff` on branch `claude/zealous-ritchie-wdpztv` to review, mark the card done and open the PR. Also decide the 26 "Unexplained" cache-tests failures in docs/cache-tests-expected-failures.md (bug card or recorded decision).
+
 ## Blockers
-
-none
-
-## Waiting on Ashwin
 
 none
 

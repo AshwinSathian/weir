@@ -972,3 +972,11 @@ Entry template:
 - Deviations: none beyond the 07 §9 notes already in the PR.
 - Follow-ups: rerun `make load` on the reference machine and replace the benchmarks table.
 - Context: low.
+
+## 2026-10-07 · M10-04 · blocked
+- Branch / PR: claude/zealous-ritchie-wdpztv / none yet
+- Done: `.github/workflows/nightly.yml` (fuzz matrix, 5 min per target, crasher artifacts; cache-tests job), `scripts/cache-tests.sh` (suite pinned to d644cf4, rerun-once, `UPDATE=1`), `make cache-tests`, `testdata/cache-tests-baseline.json` (260 pass, 105 fail), docs/cache-tests-expected-failures.md, Go version matrix in ci.yml (D42), `-forward-allow` flag on examples/weirproxy.
+- Tests: three full local suite runs gave identical pass/fail; a doctored baseline made the script fail. `make check` and card-reviewer not run: `/handoff` must be run by Ashwin.
+- Deviations: 07 §8 paragraph added; weirproxy flag is outside the card's file list (strict forwarding hides the suite's headers). Only 79 of 105 failures cite a decision or requirement; 26 are listed as unexplained.
+- Follow-ups: decide the unexplained 26 (bug cards likely for invalid Expires, Age parameters, max-age spacing, If-Modified-Since). AC "nightly green once" needs a run on GitHub.
+- Context: medium; size S was a little small because of the failure triage.
