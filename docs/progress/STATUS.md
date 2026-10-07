@@ -1,12 +1,12 @@
 # Status
 
-Updated: 2026-10-06
+Updated: 2026-10-07
 Phase: 1
 Current card: none
 Card state: awaiting-merge
-Branch: card/M10-01-event-catalog-stats
-PR: #54 https://github.com/AshwinSathian/weir/pull/54
-Next card: M10-08
+Branch: claude/quirky-feynman-yni9ir
+PR: pending
+Next card: M10-02
 
 ## Blockers
 

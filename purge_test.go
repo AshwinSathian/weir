@@ -1121,3 +1121,22 @@ func TestInvalidationFloodLeavesGroupsServable(t *testing.T) {
 		})
 	}
 }
+
+// T-29, 05 E-12: with the capability present, the global and URI tags are
+// still read in the invalid plane, so a POST invalidates its own URI.
+func TestSharedTagsKeepURIInvalidation(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		o := testorigin.NewChecked(t, 64, 16)
+		o.Default(grouped(`"g"`, nil))
+		e := newEngine(t, cacheCfg)
+		defer closeEngine(t, e)
+
+		serve(t, e, getReq("/a"), o)
+		time.Sleep(time.Second)
+		serve(t, e, postReq("/a"), o)
+		time.Sleep(time.Second)
+		if resp, _ := serve(t, e, getReq("/a"), o); resp.Cache.Hit {
+			t.Fatalf("hit after a POST to the same URI (%s), want a validation", resp.Header.Get("Cache-Status"))
+		}
+	})
+}

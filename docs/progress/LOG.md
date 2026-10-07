@@ -911,3 +911,12 @@ Entry template:
 - Review: no second agent ran on these changes; the decisions were attacked by this session.
 - Follow-ups: M10-08 added to docs/cards/10-m10.md and PLAN M10.9.
 - Context: high; start M10-08 in a fresh session.
+
+## 2026-10-07 · M10-08 · done
+- Branch / PR: claude/quirky-feynman-yni9ir / pending
+- Done: optional `store.SharedTagEpochs` (`NewestEpochShared`), memory store support in epochs.go, `storeGuard.newestEpoch` splits `Entry.Tags` after `[global, URI]` and passes groups as shared; falls back to `NewestEpoch`.
+- Tests: TestSharedTagsSkipInvalidPlane, TestInvalidationFloodLeavesGroupsServable (fails without the guard change), TestSharedTagsKeepURIInvalidation, storetest `SharedTagEpochs`. Race tests, vet, gofmt pass, trace 129/152; hit benchmark unchanged at 14 allocs/op. `make check` could not run lint here (golangci-lint built with Go 1.25, config targets 1.27).
+- Deviations: 04 §3 (tag order), 05 capability list, E-8 and new E-12, 06 T-28 and T-29.
+- Review: card reviewer, no must-fix. Nit fixed: URI invalidation with the capability present is now tested. Nit checked: allocations unchanged.
+- Follow-ups: run lint in CI. Branch is claude/quirky-feynman-yni9ir, not card/M10-08-...
+- Context: medium; size M was right.
