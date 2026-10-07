@@ -270,3 +270,49 @@ func TestUnknownKindsAreIgnored(t *testing.T) {
 		t.Errorf("series = %d, want 2", got)
 	}
 }
+
+// FR-OBS-2: Weir does not recover observer panics, and client_golang panics
+// on invalid UTF-8 labels, so the exporter scrubs them. A negative duration
+// or status must not panic either.
+func TestInvalidReasonDoesNotPanic(t *testing.T) {
+	o := prom.NewObserver()
+	for k := weir.EvRequest; k <= weir.EvMode; k++ {
+		o.Observe(weir.Event{Kind: k, Reason: "\xff\xfe", Status: -5, Duration: -time.Second})
+	}
+	want := `# HELP weir_requests_total Requests served, by outcome.
+# TYPE weir_requests_total counter
+weir_requests_total{outcome="?"} 1
+`
+	if err := testutil.CollectAndCompare(o, strings.NewReader(want), "weir_requests_total"); err != nil {
+		t.Error(err)
+	}
+}
+
+// NFR-3, 04 §9.2: series count is set by the reason vocabularies, never by
+// request data; Partition is not a label.
+func TestSeriesBoundedByVocabulary(t *testing.T) {
+	vocab := map[weir.EventKind][]string{
+		weir.EvRequest:         {"hit", "stale", "miss", "revalidated", "collapsed", "pass", "bypass", "negative", "error"},
+		weir.EvFetchEnd:        {"foreground", "background", "warm", "pass"},
+		weir.EvShed:            {"queue-full", "queue-timeout", "background"},
+		weir.EvStaleServed:     {"swr", "sie", "shed", "circuit-open", "coalesce-timeout"},
+		weir.EvCoalesceTimeout: {"stale", "direct"},
+		weir.EvPurge:           {"soft", "hard", "invalid", "group", "group-invalid"},
+	}
+	o := prom.NewObserver()
+	feed := func(partition string) {
+		for k, reasons := range vocab {
+			for _, r := range reasons {
+				o.Observe(weir.Event{Kind: k, Reason: r, Partition: partition, Status: 200})
+			}
+		}
+	}
+	feed("a")
+	before := testutil.CollectAndCount(o)
+	for i := range 50 {
+		feed(strings.Repeat("p", i+1))
+	}
+	if after := testutil.CollectAndCount(o); after != before {
+		t.Errorf("series grew from %d to %d with new partitions", before, after)
+	}
+}

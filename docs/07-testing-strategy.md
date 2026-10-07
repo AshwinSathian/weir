@@ -1,7 +1,7 @@
 # Weir testing strategy
 
 Status: v1.0
-Date: 2026-10-06
+Date: 2026-10-07
 Depends on: [01-technical-spec.md](01-technical-spec.md), [06-threat-model.md](06-threat-model.md)
 Seed name: `03-testing-strategy.md` (renumbered, see [docs/README.md](README.md))
 
@@ -214,6 +214,8 @@ Named in [06-threat-model.md](06-threat-model.md), [01-technical-spec.md](01-tec
 | `TestInvalidConfigRejected` (unit) | one row per FR-LCY-1 rule; each returns an error wrapping `ErrInvalidConfig` naming the field |
 | `TestServePassThroughStub` (engine, Phase 0 only) | the Phase 0 stub forwards to `testorigin` and returns its response |
 | `TestNoThirdPartyImports` (unit) | `go list -deps -json ./...` for the root module lists only standard-library packages and the module's own (NFR-6) |
+| `TestObserverCounters`, `TestFetchSecondsHistogram`, `TestCollectorGauges`, `TestAllMetricNamesRegisterAndLint`, `TestUnknownKindsAreIgnored`, `TestInvalidReasonDoesNotPanic`, `TestSeriesBoundedByVocabulary` (`observe/prom`, own module) | every metric and label in 04 §9.3 with `prometheus/testutil`; kinds the table omits mint no series; an invalid-UTF-8 reason or negative duration never panics; repeating events with different partitions adds no series (FR-OBS-4, NFR-3) |
+| `TestExporterWithRealEngine` (`observe/prom`) | an engine wired to the exporter exports the reason strings it emits, so a renamed reason fails here |
 | `TestEveryEventKindEmitted` (engine) | a scenario per `EventKind` in 04 §9.2 makes the observer receive it |
 | `TestKeyEncodingInjective` (unit) | hand-picked collision attempts: `("a","bc")` vs `("ab","c")` across every adjacent field pair, the Akamai `__` shape, empty versus absent header |
 | `TestUnkeyedHeaderNotForwarded` (engine) | `X-Forwarded-Host`, `X-Forwarded-Port`, `User-Agent`, `Origin`, `Accept`, `Upgrade`, `Max-Forwards` never reach the origin on a cacheable request in strict mode |

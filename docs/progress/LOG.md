@@ -946,3 +946,12 @@ Entry template:
 - Review: card-reviewer, no must-fix. Should-fix (real-engine test) done; doc nit done; vuln and fuzz loops for submodules deferred (no effect today).
 - Follow-ups: `make vuln` should cover submodules (add to M10-04 or a later card); drop the `replace` once the root is tagged.
 - Context: low; size M was right.
+
+## 2026-10-07 · M10-02 · review-fixes
+- Branch / PR: claude/optimistic-davinci-9ac46r / #56
+- Done: decided every item of an independent adversarial review (Ashwin delegated; "Waiting on Ashwin" was empty). Fixed: invalid-UTF-8 reasons scrubbed in `Observe` (client_golang panics on them and FR-OBS-2 forbids recovery); fetch buckets extended to 60 s; `make vuln` now also scans submodules; Makefile `find` skips `.claude` and `.git`; CI cache glob `**/go.sum`; docs/07 lists the new tests; 04 §9.3 corrected (`gateway_failure` is 502/503/504 only, 500 is the breaker's separate option) and states the caveats on `error`, purges and evictions; `doc.go` states one Observer and Collector per registry, lazy series, lazy half-open, unmapped events.
+- Tests: TestInvalidReasonDoesNotPanic, TestSeriesBoundedByVocabulary added; prom race tests, root tests, vet, gofmt pass, trace 130/152. Lint and govulncheck unrun locally (tool builds older than Go 1.27); CI must be green.
+- Deviations: 04 §9.3 and 07 (clarifications and test list).
+- Review: adversarial agent, no must-fix. Declined: dependabot (a new config the card does not ask for); a metric for `EvStoreBreaker` (04 §9.3 does not list one, so adding it is a spec change for Ashwin); pre-seeding labelled series (would hard-code vocabularies; documented instead).
+- Follow-ups: v0.1.0 exists on the root but predates `Stats` and the M10 events, so the `replace` stays until the next root tag.
+- Context: low.

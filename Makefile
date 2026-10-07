@@ -8,7 +8,7 @@ endif
 
 # Every module below the root. Each is also built alone (GOWORK=off) so none
 # leans on an unpublished sibling by accident (docs/02 §3.2).
-SUBMODULES := $(patsubst ./%/go.mod,%,$(shell find . -mindepth 2 -name go.mod -not -path './testdata/*' | sort))
+SUBMODULES := $(patsubst ./%/go.mod,%,$(shell find . -mindepth 2 -name go.mod -not -path './testdata/*' -not -path './.claude/*' -not -path './.git/*' | sort))
 
 .PHONY: check fmt-check vet lint test modules test-short trace trace-strict fuzz-short bench vuln card next
 
@@ -59,6 +59,10 @@ bench:
 
 vuln:
 	go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
+	@for m in $(SUBMODULES); do \
+	  echo "== $$m"; \
+	  (cd $$m && GOWORK=off go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...) || exit 1; \
+	done
 
 ## card ID=P0-02: print one task card; next: print the next open card
 card:

@@ -1,6 +1,8 @@
 package prom
 
 import (
+	"strings"
+
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/AshwinSathian/weir"
@@ -30,7 +32,8 @@ type Observer struct {
 
 var _ weir.Observer = (*Observer)(nil)
 
-// NewObserver returns an Observer with every counter at zero.
+// NewObserver returns an Observer. Labelled series appear on their first
+// event; the two label-free counters start at zero.
 func NewObserver() *Observer {
 	o := &Observer{
 		requests:        vec("weir_requests_total", "Requests served, by outcome.", "outcome"),
@@ -46,9 +49,10 @@ func NewObserver() *Observer {
 		anomalies:       vec("weir_miss_rate_anomalies_total", "Miss-rate anomalies, by action.", "action"),
 		evictions:       vec("weir_evictions_total", "Records the memory store evicted, by queue.", "queue"),
 		fetchSeconds: prometheus.NewHistogramVec(prometheus.HistogramOpts{
-			Name:    "weir_origin_fetch_seconds",
-			Help:    "Time from origin call to response headers or error, by class.",
-			Buckets: prometheus.DefBuckets,
+			Name: "weir_origin_fetch_seconds",
+			Help: "Time from origin call to response headers or error, by class.",
+			// Out to 60 s: Timeouts.Origin defaults to 30 s and may be higher.
+			Buckets: []float64{.005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5, 10, 30, 60},
 		}, []string{"class"}),
 		coalesced:      prometheus.NewCounter(prometheus.CounterOpts{Name: "weir_coalesced_total", Help: "Requests that joined an existing flight."}),
 		negativeServed: prometheus.NewCounter(prometheus.CounterOpts{Name: "weir_negative_served_total", Help: "Negative cache entries served."}),
@@ -71,41 +75,49 @@ func vec(name, help string, labels ...string) *prometheus.CounterVec {
 func (o *Observer) Observe(ev weir.Event) {
 	switch ev.Kind {
 	case weir.EvRequest:
-		o.requests.WithLabelValues(ev.Reason).Inc()
+		o.requests.WithLabelValues(label(ev.Reason)).Inc()
 	case weir.EvFetchEnd:
-		o.fetches.WithLabelValues(ev.Reason, fetchResult(ev.Status)).Inc()
-		o.fetchSeconds.WithLabelValues(ev.Reason).Observe(ev.Duration.Seconds())
+		o.fetches.WithLabelValues(label(ev.Reason), fetchResult(ev.Status)).Inc()
+		o.fetchSeconds.WithLabelValues(label(ev.Reason)).Observe(ev.Duration.Seconds())
 	case weir.EvCoalesceJoin:
 		o.coalesced.Inc()
 	case weir.EvCoalesceTimeout:
-		o.coalesceTimeout.WithLabelValues(ev.Reason).Inc()
+		o.coalesceTimeout.WithLabelValues(label(ev.Reason)).Inc()
 	case weir.EvShed:
-		o.shed.WithLabelValues(ev.Reason).Inc()
+		o.shed.WithLabelValues(label(ev.Reason)).Inc()
 	case weir.EvStaleServed:
-		o.staleServed.WithLabelValues(ev.Reason).Inc()
+		o.staleServed.WithLabelValues(label(ev.Reason)).Inc()
 	case weir.EvBreakerState:
-		o.breakerTrans.WithLabelValues(ev.Reason).Inc()
+		o.breakerTrans.WithLabelValues(label(ev.Reason)).Inc()
 	case weir.EvStoreError:
-		o.storeErrors.WithLabelValues(ev.Reason).Inc()
+		o.storeErrors.WithLabelValues(label(ev.Reason)).Inc()
 	case weir.EvKeyRejected:
-		o.keyRejections.WithLabelValues(ev.Reason).Inc()
+		o.keyRejections.WithLabelValues(label(ev.Reason)).Inc()
 	case weir.EvNotStored:
-		o.notStored.WithLabelValues(ev.Reason).Inc()
+		o.notStored.WithLabelValues(label(ev.Reason)).Inc()
 	case weir.EvNegativeServed:
 		o.negativeServed.Inc()
 	case weir.EvPurge:
-		o.purges.WithLabelValues(ev.Reason).Inc()
+		o.purges.WithLabelValues(label(ev.Reason)).Inc()
 	case weir.EvMissRateAnomaly:
-		o.anomalies.WithLabelValues(ev.Reason).Inc()
+		o.anomalies.WithLabelValues(label(ev.Reason)).Inc()
 	case weir.EvEvict:
 		// Status is the batch size (04 §9.2).
-		o.evictions.WithLabelValues(ev.Reason).Add(float64(max(ev.Status, 0)))
+		o.evictions.WithLabelValues(label(ev.Reason)).Add(float64(max(ev.Status, 0)))
 	}
 }
 
-// fetchResult classifies an EvFetchEnd status: 0 is a transport error or
-// timeout, 502, 503 and 504 are the gateway failures the breaker counts, and
-// anything else is a response.
+// label makes a reason safe for Prometheus, which panics on invalid UTF-8,
+// and Weir does not recover observer panics (FR-OBS-2). Every reason is a
+// fixed string today (04 §9.2); this keeps a future derived one from taking
+// down a request goroutine. A valid string comes back unchanged and
+// allocation-free.
+func label(reason string) string { return strings.ToValidUTF8(reason, "?") }
+
+// fetchResult classifies an EvFetchEnd status: 0 is a transport error,
+// timeout or caller cancellation, 502, 503 and 504 are the gateway failures
+// (the same statuses as internal/breaker, but not its CountStatus500 option),
+// and anything else is a response.
 func fetchResult(status int) string {
 	switch status {
 	case 0:

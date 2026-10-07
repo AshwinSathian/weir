@@ -1186,7 +1186,7 @@ Reasons never contain request data. `Partition` is the only field derived from r
 | `weir_evictions_total` | counter | `queue` |
 | `weir_store_bytes` | gauge | |
 
-The fetch `result` label comes from the `EvFetchEnd` status: 0 is `error`, 502, 503 and 504 are `gateway_failure` (the statuses the breaker counts), anything else is `ok`.
+The fetch `result` label comes from the `EvFetchEnd` status: 0 is `error`, 502, 503 and 504 are `gateway_failure`, anything else is `ok`. A 500 counts as `ok` even when `Breaker.CountStatus500` makes the breaker count it. `error` includes a fetch the caller cancelled, and a body that fails after the headers is not visible, because `EvFetchEnd` fires on the headers. `weir_purges_total` counts events (a `group` purge is one), not groups. `weir_evictions_total` stays 0 for a store passed in `Config.Store`, which reports through its own `OnEvict`.
 
 Gauges for in-flight and queue depth come from an optional `Stats()` method on the engine (`EngineStats{Inflight, Queued, BreakerState, StoreBytes}`), polled by the exporter's collector, rather than from events. `Stats` only reads: it emits no event and moves no state, so a collector may call it while holding the lock its `Observe` takes.
 
