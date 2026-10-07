@@ -5,7 +5,7 @@ Phase: 1
 Current card: M10-03
 Card state: awaiting-merge
 Branch: claude/gifted-meitner-19l6l6
-PR: none yet (not opened; Ashwin has not asked for one)
+PR: #57 https://github.com/AshwinSathian/weir/pull/57
 Next card: M10-04
 
 ## Blockers
