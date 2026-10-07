@@ -2,15 +2,17 @@
 
 Updated: 2026-10-07
 Phase: 1
-Current card: M10-04
-Card state: in-progress
+Current card: none
+Card state: awaiting-merge
 Branch: claude/zealous-ritchie-wdpztv
 PR: none yet
-Next card: M10-04
+Next card: M10-07
 
-## Waiting on Ashwin (M10-04)
+## Waiting on Ashwin
 
-The `/handoff` skill cannot be run by the session. Run `/handoff` on branch `claude/zealous-ritchie-wdpztv` to review, mark the card done and open the PR. Also decide the 26 "Unexplained" cache-tests failures in docs/cache-tests-expected-failures.md (bug card or recorded decision).
+- Decide the 27 "Unexplained" cache-tests failures in docs/cache-tests-expected-failures.md. No bug cards are filed yet; likely candidates are invalid `Expires`, `Age` parameters, `max-age` spacing, `If-Modified-Since` without `Last-Modified`, and the `Transfer-Encoding` 502.
+- After merge, run the nightly workflow once (workflow_dispatch). PLAN-weir.md M10.4 stays unticked until it is green.
+- Check that branch protection does not require a check named `check`: the Go matrix renames it `check (1.27)`.
 
 ## Blockers
 

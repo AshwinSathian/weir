@@ -19,7 +19,7 @@ Passing everything means nothing (the suite's own words). Rows with a requiremen
 | `status-299-fresh`, `status-303-fresh`, `status-400-fresh`, `status-499-fresh`, `status-500-fresh`, `status-502-fresh`, `status-503-fresh`, `status-504-fresh`, `status-599-fresh`, `heuristic-599-cached` | Only the statuses in `Storable.Statuses` are stored | FR-STO-2, D39 |
 | `method-POST`, `head-200-freshness-update`, `head-200-retain`, `head-200-update`, `head-410-update`, `head-writethrough` | Only a forwarded `GET` response is stored, so a `POST` or `HEAD` response never updates an entry | FR-STO-1 |
 | `headers-store-Set-Cookie`, `other-set-cookie` | A response with `Set-Cookie` is not stored unless `Storable.StripSetCookie` is set | FR-STO-6, D31 |
-| `conditional-etag-forward`, `conditional-etag-forward-unquoted`, `conditional-etag-vary-headers-mismatch` | Client `If-None-Match` is not forwarded on a cacheable request; only the keyed, allowed and protocol headers are | D4, FR-FWD-1 |
+| `conditional-etag-forward`, `conditional-etag-forward-unquoted`, `conditional-etag-vary-headers-mismatch` | Client `If-None-Match` is not forwarded on a cacheable request; only the keyed, allowed and protocol headers are | D4 |
 | `304-etag-update-response-Content-Encoding`, `304-etag-update-response-Content-Type` | A 304 does not change `Content-Encoding` or `Content-Type`: they describe the stored body | FR-SRV-3 |
 | `304-etag-update-response-Set-Cookie` | The setup response carries `Set-Cookie`, so it is never stored | FR-STO-6, D31 |
 | `freshness-max-age-100a`, `freshness-max-age-a100`, `freshness-max-age-decimal-five`, `freshness-max-age-decimal-zero`, `freshness-max-age-two-fresh-stale-sameline`, `freshness-max-age-two-fresh-stale-sepline`, `freshness-max-age-two-stale-fresh-sameline`, `freshness-max-age-two-stale-fresh-sepline` | A non-integer `max-age`, or one repeated with different values, makes the lifetime zero | FR-FRS-2 |
@@ -27,7 +27,6 @@ Passing everything means nothing (the suite's own words). Rows with a requiremen
 | `freshness-expires-wrong-case-tz` | HTTP dates are case-sensitive; `gMT` is an invalid `Expires`, a time in the past | FR-FRS-2 |
 | `heuristic-delta-5`, `heuristic-delta-10`, `heuristic-delta-30` | The heuristic lifetime is 10% of `Date` minus `Last-Modified`, so 0.5 to 3 seconds here | FR-FRS-3 |
 | `other-age-delay` | `Age` is added to responses served from a stored entry, not to the response that triggered the fetch | FR-FRS-7 |
-| `headers-store-Transfer-Encoding` | The suite sends an invalid `Transfer-Encoding` value; Go's HTTP client rejects it and Weir answers 502 | FR-FWD-7 |
 | `conditional-etag-quoted-respond-unquoted`, `conditional-etag-unquoted-respond-quoted`, `conditional-etag-unquoted-respond-unquoted`, `conditional-etag-strong-generate-unquoted`, `conditional-etag-strong-respond-obs-text`, `conditional-etag-weak-respond-backslash`, `conditional-etag-weak-respond-lowercase`, `conditional-etag-weak-respond-omit-slash` | Entity tags are compared as RFC 9110 §8.8.3 defines them; unquoted, mis-cased or malformed tags never match | FR-SRV-2, FR-SRV-3 |
 
 ## Not built yet
@@ -54,4 +53,5 @@ These fail and no decision or requirement above accounts for them. Each needs a 
 | `pragma-response-no-cache-heuristic` | A response with only `Pragma: no-cache` and a heuristic lifetime is not reused; no requirement covers response `Pragma` |
 | `vary-normalise-space` | Whitespace inside a keyed `Vary` header value is part of the variant key (`1,2` and ` 1, 2 ` are two variants). An "optimal" test, not a conformance one |
 | `interim-102`, `interim-103`, `interim-no-header-reuse`, `interim-not-cached` | 1xx responses are not relayed to the client. The final response is cached correctly |
+| `headers-store-Transfer-Encoding` | The suite sends an invalid `Transfer-Encoding` value and gets a 502. Probably the Go HTTP client rejecting it, but FR-FWD-7 says the field is stripped, so this may be a bug |
 | `304-etag-update-response-ETag` | The suite reports a retry (`↻`); needs a manual look |

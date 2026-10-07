@@ -21,7 +21,7 @@ trap cleanup EXIT
 
 git clone --quiet https://github.com/http-tests/cache-tests "$WORK/suite"
 git -C "$WORK/suite" checkout --quiet "$CACHE_TESTS_REF"
-(cd "$WORK/suite" && npm install --no-audit --no-fund --silent)
+(cd "$WORK/suite" && npm ci --no-audit --no-fund --silent 2>/dev/null || npm install --no-audit --no-fund --silent)
 (cd "$ROOT" && go build -o "$WORK/weirproxy" ./examples/weirproxy)
 
 (cd "$WORK/suite" && npm run --silent server --port="$ORIGIN_PORT" >"$WORK/server.log" 2>&1) &
@@ -31,13 +31,20 @@ pids+=($!)
 "$WORK/weirproxy" -listen "127.0.0.1:$PROXY_PORT" -origin "http://127.0.0.1:$ORIGIN_PORT" \
   -forward-allow Req-Num,Test-ID,Test-Name,Foo,Bar,Baz,Abc >"$WORK/proxy.log" 2>&1 &
 pids+=($!)
-for _ in $(seq 50); do
-  curl -fsS -o /dev/null "http://127.0.0.1:$ORIGIN_PORT/" 2>/dev/null && break
-  sleep 0.2
-done
+wait_for() {
+  for _ in $(seq 100); do
+    curl -sS -o /dev/null "http://127.0.0.1:$1/" 2>/dev/null && return 0
+    sleep 0.2
+  done
+  echo "nothing answered on port $1" >&2
+  cat "$WORK/server.log" "$WORK/proxy.log" >&2
+  return 1
+}
+wait_for "$ORIGIN_PORT"
+wait_for "$PROXY_PORT"
 
 run() {
-  (cd "$WORK/suite" && npm run --silent cli --base="http://127.0.0.1:$PROXY_PORT" >"$1" 2>"$WORK/cli.err")
+  (cd "$WORK/suite" && npm run --silent cli --base="http://127.0.0.1:$PROXY_PORT" >"$1" 2>"$WORK/cli.err") || { cat "$WORK/cli.err" >&2; return 1; }
 }
 
 # Result values are true or [kind, detail]; the detail carries timestamps, so

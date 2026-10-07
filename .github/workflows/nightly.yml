@@ -27,10 +27,11 @@ jobs:
         name: list fuzz targets
         run: |
           for pkg in $(go list ./...); do
-            for f in $(go test -list '^Fuzz' "$pkg" 2>/dev/null | grep '^Fuzz'); do
+            for f in $(go test -list '^Fuzz' "$pkg" | grep '^Fuzz'); do
               echo "{\"pkg\":\"$pkg\",\"target\":\"$f\"}"
             done
           done | jq -sc '{include: .}' > matrix.json
+          test "$(jq '.include | length' matrix.json)" -gt 0
           echo "matrix=$(cat matrix.json)" >> "$GITHUB_OUTPUT"
 
   fuzz:

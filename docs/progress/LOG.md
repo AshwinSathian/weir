@@ -977,6 +977,15 @@ Entry template:
 - Branch / PR: claude/zealous-ritchie-wdpztv / none yet
 - Done: `.github/workflows/nightly.yml` (fuzz matrix, 5 min per target, crasher artifacts; cache-tests job), `scripts/cache-tests.sh` (suite pinned to d644cf4, rerun-once, `UPDATE=1`), `make cache-tests`, `testdata/cache-tests-baseline.json` (260 pass, 105 fail), docs/cache-tests-expected-failures.md, Go version matrix in ci.yml (D42), `-forward-allow` flag on examples/weirproxy.
 - Tests: three full local suite runs gave identical pass/fail; a doctored baseline made the script fail. `make check` and card-reviewer not run: `/handoff` must be run by Ashwin.
-- Deviations: 07 §8 paragraph added; weirproxy flag is outside the card's file list (strict forwarding hides the suite's headers). Only 79 of 105 failures cite a decision or requirement; 26 are listed as unexplained.
+- Deviations: 07 §8 paragraph added; weirproxy flag is outside the card's file list (strict forwarding hides the suite's headers). Only 79 of 105 failures cite a decision or requirement; 27 are listed as unexplained.
 - Follow-ups: decide the unexplained 26 (bug cards likely for invalid Expires, Age parameters, max-age spacing, If-Modified-Since). AC "nightly green once" needs a run on GitHub.
 - Context: medium; size S was a little small because of the failure triage.
+
+## 2026-10-07 · M10-04 · done
+- Branch / PR: claude/zealous-ritchie-wdpztv / see STATUS
+- Done: handoff of the work in the previous entry, plus review fixes: fuzz list no longer hides compile errors and fails on an empty matrix, script waits for origin and proxy and prints CLI errors, `npm ci` with fallback, weirproxy `splitList` test, `headers-store-Transfer-Encoding` moved to Unexplained, `conditional-etag-forward*` cites D4 only.
+- Tests: TestSplitList added; root race tests, gofmt, vet and trace (130/152) pass; the baseline run still reports no regressions. Lint unrun locally (Go 1.25 build); CI must confirm.
+- Deviations: none beyond the docs/07 §8 paragraph.
+- Review: card-reviewer, no must-fix. Left open: Unexplained failures need decisions (STATUS); matrix check rename; crasher upload also matches checked-in seeds; cache-tests failure leaves no logs artifact; Makefile/docs diff noise in the review was stacking only.
+- Follow-ups: decide the 27 unexplained failures; run nightly once.
+- Context: medium.
