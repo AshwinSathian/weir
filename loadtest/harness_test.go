@@ -47,7 +47,7 @@ type capOrigin struct {
 	mu       sync.Mutex
 	inflight int
 	peak     int
-	part     map[string]int
+	part     map[string]int // bounded by the distinct paths a scenario uses (at most 10 000)
 	partPeak map[string]int
 
 	calls  atomic.Int64
@@ -165,8 +165,8 @@ func (h *hist) quantile(q float64) time.Duration {
 
 // counters tallies Serve outcomes for one phase.
 type counters struct {
-	total, hits, stale, errs, shed, dropped atomic.Int64
-	statuses                                [6]atomic.Int64 // by status/100
+	total, hits, stale, errs, shed, dropped, offered atomic.Int64
+	statuses                                         [6]atomic.Int64 // by status/100
 }
 
 // serveOnce runs one request and records its latency and outcome. The body
@@ -230,7 +230,6 @@ func closedLoop(n int, stop <-chan struct{}, fn func(r *rand.Rand, h *hist)) *hi
 // the merged histogram once every issued request has finished.
 func openLoop(rps int, d time.Duration, maxOut int, fn func(r *rand.Rand, h *hist, i int), c *counters) *hist {
 	const tick = 5 * time.Millisecond
-	per := float64(rps) * tick.Seconds()
 	var (
 		mu  sync.Mutex
 		all = &hist{}
@@ -240,14 +239,15 @@ func openLoop(rps int, d time.Duration, maxOut int, fn func(r *rand.Rand, h *his
 	end := time.Now().Add(d)
 	tk := time.NewTicker(tick)
 	defer tk.Stop()
-	var owed float64
+	// Wall-clock accounting: a Ticker drops ticks when the process stalls,
+	// which would silently lower the offered load.
+	start := time.Now()
 	var i int
 	for now := range tk.C {
 		if now.After(end) {
 			break
 		}
-		owed += per
-		for ; owed >= 1; owed-- {
+		for float64(i) < float64(rps)*now.Sub(start).Seconds() {
 			i++
 			if out.Load() >= int64(maxOut) {
 				c.dropped.Add(1)
@@ -267,6 +267,7 @@ func openLoop(rps int, d time.Duration, maxOut int, fn func(r *rand.Rand, h *his
 		}
 	}
 	wg.Wait()
+	c.offered.Add(int64(i))
 	return all
 }
 

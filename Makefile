@@ -57,7 +57,7 @@ fuzz-short:
 bench:
 	go test -run '^$$' -bench . -benchmem ./...
 
-## load: real-time load and adversarial scenarios (docs/07 §9, about 4 minutes); WEIR_LOAD_SCALE=0.1 for a smoke run
+## load: real-time load and adversarial scenarios (docs/07 §9, about 5 minutes); WEIR_LOAD_SCALE=0.1 for a smoke run
 load:
 	go test -tags load -count=1 -timeout 15m -v ./loadtest/
 

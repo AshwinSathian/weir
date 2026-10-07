@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand/v2"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -61,25 +62,36 @@ func TestSteadyHits(t *testing.T) {
 
 	s := startSampler(e, org)
 	var c counters
-	stop = make(chan struct{})
-	time.AfterFunc(dur(60*time.Second, 5*time.Second), func() { close(stop) })
+	// Six windows: one scheduler hiccup or neighbor on a shared host moves
+	// one window's p99, so the assertion is on the median window.
+	const windows = 6
+	win := dur(60*time.Second, 5*time.Second) / windows
+	h := &hist{}
+	var p99s []time.Duration
 	t0 := time.Now()
-	h := closedLoopPaced(64, rate, stop, func(r *rand.Rand, h *hist) {
-		serveOnce(e, org, pathN("hot", r.IntN(keys)), "", h, &c)
-	})
+	for range windows {
+		stop = make(chan struct{})
+		time.AfterFunc(win, func() { close(stop) })
+		wh := closedLoopPaced(64, rate, stop, func(r *rand.Rand, h *hist) {
+			serveOnce(e, org, pathN("hot", r.IntN(keys)), "", h, &c)
+		})
+		p99s = append(p99s, wh.quantile(0.99))
+		h.merge(wh)
+	}
 	elapsed := time.Since(t0)
 	s.close()
 	settleThenClose(t, e, base)
 
 	ratio := float64(c.hits.Load()) / float64(c.total.Load())
-	p99 := h.quantile(0.99)
+	sorted := slices.Sorted(slices.Values(p99s))
+	p99 := sorted[len(sorted)/2]
 	table(t, "steady hits", row("requests", c.total.Load()), row("paced target (50% of saturated)", rate), row("achieved rate", int(float64(c.total.Load())/elapsed.Seconds())), row("hit ratio", fmt.Sprintf("%.4f", ratio)),
-		row("p50", h.quantile(0.5)), row("p99", p99), row("max", h.max), row("origin calls after warm", org.calls.Load()-int64(keys)))
+		row("p50", h.quantile(0.5)), row("p99 per window", p99s), row("p99 median window", p99), row("p99 overall", h.quantile(0.99)), row("max", h.max), row("origin calls after warm", org.calls.Load()-int64(keys)))
 	if ratio <= 0.99 {
 		t.Errorf("hit ratio %.4f, want > 0.99", ratio)
 	}
 	if p99 >= 200*time.Microsecond {
-		t.Errorf("engine p99 %v, want < 200µs", p99)
+		t.Errorf("median window p99 %v, want < 200µs", p99)
 	}
 }
 
@@ -123,9 +135,16 @@ func TestSynchronizedExpiry(t *testing.T) {
 	settleThenClose(t, e, base)
 
 	peak := s.peakCalls()
+	refetched := org.calls.Load() - keys
 	table(t, "synchronized expiry", row("keys", keys), row("max-age", maxAge), row("storing phase", storeTook.Round(10*time.Millisecond)), row("elapsed", time.Since(stored).Round(time.Second)),
 		row("origin peak in-flight", org.peakInflight()), row("origin peak calls/s", peak), row("limit calls/s (20%)", keys/5),
-		row("client errors", c.errs.Load()), row("peak queue", s.peakQ))
+		row("refetched after storing", refetched), row("client errors", c.errs.Load()), row("peak queue", s.peakQ))
+	if refetched < keys*9/10 {
+		t.Errorf("only %d of %d keys were refetched; the expiry never happened, so the bounds below prove nothing", refetched, keys)
+	}
+	if c.errs.Load() != 0 {
+		t.Errorf("%d client errors during expiry, want 0", c.errs.Load())
+	}
 	if got := org.peakInflight(); got > maxConc {
 		t.Errorf("origin peak in-flight %d, want <= MaxConcurrent %d", got, maxConc)
 	}
@@ -157,7 +176,7 @@ func closedLoopPaced(n, rps int, stop <-chan struct{}, fn func(r *rand.Rand, h *
 }
 
 // TestBustingFloodWithNormalTraffic: 5 000 rps of unique queries on one path
-// beside 500 rps of normal traffic. FR-LIM-3, FR-MR, T-6.
+// beside 500 rps of normal traffic. FR-LIM-3, FR-MR-1 to FR-MR-3, T-6.
 func TestBustingFloodWithNormalTraffic(t *testing.T) {
 	const maxPart = 8
 	phase := dur(20*time.Second, 4*time.Second)
@@ -191,10 +210,13 @@ func TestBustingFloodWithNormalTraffic(t *testing.T) {
 	table(t, "busting flood plus normal traffic",
 		row("normal p99 alone", b), row("normal p99 under flood", f), row("normal p50 alone / flood", fmt.Sprint(baseH.quantile(0.5), " / ", floodH.quantile(0.5))),
 		row("normal hit ratio under flood", fmt.Sprintf("%.4f", float64(floodC.hits.Load())/float64(floodC.total.Load()))),
-		row("flood requests / shed errors", fmt.Sprint(flood.total.Load(), " / ", flood.errs.Load())), row("flood client drops", flood.dropped.Load()),
+		row("flood requests / shed errors", fmt.Sprint(flood.total.Load(), " / ", flood.errs.Load())), row("flood client drops", flood.dropped.Load()), row("normal offered (target ~500/s)", fmt.Sprint(floodC.offered.Load()/int64(phase.Seconds()), "/s, drops ", baseC.dropped.Load()+floodC.dropped.Load())),
 		row("flood peak in-flight", org.peakPartition("/flood")), row("MaxPerPartition", maxPart))
 	if got := org.peakPartition("/flood"); got > maxPart {
 		t.Errorf("flooded path peak in-flight %d, want <= MaxPerPartition %d", got, maxPart)
+	}
+	if n := floodC.offered.Load(); n < int64(0.95*500*phase.Seconds()) || baseC.dropped.Load()+floodC.dropped.Load() != 0 {
+		t.Errorf("normal traffic offered %d requests (drops %d), want >= 95%% of 500 rps and no drops", n, baseC.dropped.Load()+floodC.dropped.Load())
 	}
 	// Both p99 are bucket upper bounds (12.5% apart), and at tens of
 	// microseconds one bucket is scheduler noise, so 20% gets a 50 µs floor.
@@ -204,7 +226,7 @@ func TestBustingFloodWithNormalTraffic(t *testing.T) {
 }
 
 // TestOriginBrownout: the origin's latency is multiplied by 20 for 30 s.
-// FR-BRK, FR-STL, FR-LIM-4.
+// FR-CB-1 to FR-CB-5, FR-STL, FR-LIM-4.
 func TestOriginBrownout(t *testing.T) {
 	const keys = 200
 	brown := dur(30*time.Second, 6*time.Second)
@@ -362,7 +384,7 @@ func TestStoreFlap(t *testing.T) {
 	open, closed := ev.count("store-breaker", "open"), ev.count("store-breaker", "closed")
 	table(t, "store flap (50% failing)", row("requests", c.total.Load()), row("client errors", c.errs.Load()),
 		row("slowest request", time.Duration(slowest.Load())), row("bound", bound),
-		row("store breaker open / closed", fmt.Sprint(open, " / ", closed)), row("store errors", ev.count("store-error", "get")+ev.count("store-error", "set")+ev.count("store-error", "epoch")))
+		row("store breaker open / closed", fmt.Sprint(open, " / ", closed)), row("store errors", ev.count("store-error", "get")+ev.count("store-error", "set")+ev.count("store-error", "epoch")+ev.count("store-error", "set-epoch")))
 	if got := time.Duration(slowest.Load()); got > bound {
 		t.Errorf("slowest request %v, want <= %v (a few Timeouts.Store plus origin time)", got, bound)
 	}

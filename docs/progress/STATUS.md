@@ -16,6 +16,17 @@ none
 
 none
 
+## Decided 2026-10-07 (M10-03)
+
+From the adversarial review of PR #57 (Ashwin delegated "take decisions on all items"). "Waiting on Ashwin" was empty.
+
+- Steady p99 had one bucket of headroom: now asserted on the median of six 10 s windows (one hiccup no longer fails the run). Headroom on a 4-core box is still one bucket; the reference machine should have more.
+- Flood comparison floor (50 µs): kept. Run-to-run "alone" p99 swung 98 to 180 µs, so a tighter floor would flake; the floor is written in docs/07 §9. Offered normal load is now asserted (>= 95% of 500 rps, no drops), and `openLoop` accounts by wall clock, not ticks.
+- Synchronized expiry could pass vacuously: now also asserts >= 90% of keys refetched and 0 client errors.
+- Goroutine baseline per test (not once in TestMain): declined. Each test settles to its own base before and after Close, and tests run sequentially; a TestMain base would be skewed by runtime goroutines started by the first scenario.
+- Citations fixed (FR-CB-*, FR-MR-1 to FR-MR-3), set-epoch added to the store-errors row, Makefile says 5 minutes. Seeded randomness and a tighter flap bound: declined (hard rule 7 covers engine code only; the flap bound is stated in docs/07).
+- The card AC "passes on the reference machine" is partly met: rerun `make load` there and replace the table in docs/benchmarks.md.
+
 ## Decided 2026-10-07 (M10-08)
 
 From the adversarial review of PR #55 (Ashwin delegated "take decisions on all items"). "Waiting on Ashwin" was empty.
