@@ -6,7 +6,7 @@ Tests from [http-tests/cache-tests](https://github.com/http-tests/cache-tests) t
 
 The proxy runs with default Weir settings plus `-forward-allow Req-Num,Test-ID,Test-Name,Foo,Bar,Baz,Abc`. The first three are the suite's own bookkeeping headers; the others are request headers its Vary tests set. Without them strict forwarding (D4) hides the headers and the suite cannot run.
 
-Passing everything means nothing (the suite's own words). Rows with a requirement ID but no decision ID follow from the spec text, not from a separate decision. The reasons were read off the requirements and the suite's request logs; they were not each traced through the code. The last section lists failures nobody has explained yet.
+Passing everything means nothing (the suite's own words). Rows with a requirement ID but no D-number follow from the spec text, not from a separate decision; rows that cite RFC text or a card are decided in STATUS (2026-10-07, M10-04). The reasons were read off the requirements and the suite's request logs; they were not each traced through the code. The last section lists failures nobody has explained yet.
 
 ## By design
 
@@ -28,6 +28,12 @@ Passing everything means nothing (the suite's own words). Rows with a requiremen
 | `heuristic-delta-5`, `heuristic-delta-10`, `heuristic-delta-30` | The heuristic lifetime is 10% of `Date` minus `Last-Modified`, so 0.5 to 3 seconds here | FR-FRS-3 |
 | `other-age-delay` | `Age` is added to responses served from a stored entry, not to the response that triggered the fetch | FR-FRS-7 |
 | `conditional-etag-quoted-respond-unquoted`, `conditional-etag-unquoted-respond-quoted`, `conditional-etag-unquoted-respond-unquoted`, `conditional-etag-strong-generate-unquoted`, `conditional-etag-strong-respond-obs-text`, `conditional-etag-weak-respond-backslash`, `conditional-etag-weak-respond-lowercase`, `conditional-etag-weak-respond-omit-slash` | Entity tags are compared as RFC 9110 §8.8.3 defines them; unquoted, mis-cased or malformed tags never match | FR-SRV-2, FR-SRV-3 |
+| `age-parse-numeric-parameter`, `age-parse-parameter` | An `Age` with parameters (`7200;foo=bar`) is not a delta-seconds value, so it is ignored (age 0) as RFC 9111 §5.1 says for an invalid `Age` | FR-FRS-4, RFC 9111 §5.1 |
+| `headers-omit-headers-listed-in-Cache-Control-no-cache`, `headers-omit-headers-listed-in-Cache-Control-no-cache-single` | A qualified `no-cache="a"` is read as unqualified (validate before every reuse), the same strict reading as qualified `private` | FR-STO-4, FR-SRV-1 |
+| `vary-normalise-space` | A keyed header value is compared exactly; `1,2` and ` 1, 2 ` are two variants. An "optimal" test; normalizing would be a key-boundary change | FR-KEY-9, P2 |
+| `interim-102`, `interim-103`, `interim-no-header-reuse`, `interim-not-cached` | 1xx responses are not relayed to the client (the final response is cached correctly). Relaying is not a Phase 1 goal | none, noted in STATUS |
+| `headers-store-Transfer-Encoding` | The suite sends an invalid `Transfer-Encoding` value and Go's HTTP client rejects the response, so Weir answers 502 for a malformed origin response | FR-FWD-7, `ErrOrigin` |
+| `304-etag-update-response-ETag` | The suite reports a retry (`↻`), which its authors say needs manual interpretation; nothing is asserted | none |
 
 ## Not built yet
 
@@ -39,19 +45,13 @@ Each row turns into a pass when its card lands; rerun with `UPDATE=1` then.
 | `partial-store-complete-reuse-partial`, `partial-store-complete-reuse-partial-no-last`, `partial-store-complete-reuse-partial-suffix` | Single-range 206 from a complete stored object (M11-01) | D11 |
 | `partial-store-partial-complete`, `partial-store-partial-reuse-partial`, `partial-store-partial-reuse-partial-absent`, `partial-store-partial-reuse-partial-byterange`, `partial-store-partial-reuse-partial-suffix`, `partial-use-headers`, `partial-use-stored-headers` | Storing partial content is not planned; M11 serves ranges from complete objects only | D11, FR-STO-2 |
 
-## Unexplained
+## Spec deviations (card M10-09)
 
-These fail and no decision or requirement above accounts for them. Each needs a decision (keep, then move it up with its ID) or a bug card. The list is a to-do, not an endorsement.
+These contradict a requirement as written, so they are bugs, not design. Each has a fix in card M10-09 and will flip to pass in the baseline then.
 
-| Tests | What the run shows |
-|---|---|
-| `age-parse-numeric-parameter`, `age-parse-parameter` | An `Age` value with parameters (`7200;foo=bar`) is served from cache as if fresh, so the response was probably read as age 0 |
-| `freshness-expires-invalid-1-digit-hour`, `freshness-expires-invalid-multiple-spaces` | A syntactically invalid `Expires` is reused from cache, which FR-FRS-2 says it must not be (an invalid `Expires` is a time in the past) |
-| `freshness-max-age-space-after-equals`, `freshness-max-age-space-before-equals` | `max-age= 3600` and `max-age =3600` are reused; FR-FRS-2 reads them as non-integer |
-| `conditional-lm-fresh-no-lm`, `conditional-lm-stale` | `If-Modified-Since` against an entry with no `Last-Modified` (FR-SRV-2 says use `Date`) and against a stale entry after validation get a 200, not a 304 |
-| `headers-omit-headers-listed-in-Cache-Control-no-cache`, `headers-omit-headers-listed-in-Cache-Control-no-cache-single` | A qualified `no-cache="a, b"` response is not reused. FR-SRV-1 only names the unqualified form |
-| `pragma-response-no-cache-heuristic` | A response with only `Pragma: no-cache` and a heuristic lifetime is not reused; no requirement covers response `Pragma` |
-| `vary-normalise-space` | Whitespace inside a keyed `Vary` header value is part of the variant key (`1,2` and ` 1, 2 ` are two variants). An "optimal" test, not a conformance one |
-| `interim-102`, `interim-103`, `interim-no-header-reuse`, `interim-not-cached` | 1xx responses are not relayed to the client. The final response is cached correctly |
-| `headers-store-Transfer-Encoding` | The suite sends an invalid `Transfer-Encoding` value and gets a 502. Probably the Go HTTP client rejecting it, but FR-FWD-7 says the field is stripped, so this may be a bug |
-| `304-etag-update-response-ETag` | The suite reports a retry (`↻`); needs a manual look |
+| Tests | What the run shows | Requirement |
+|---|---|---|
+| `freshness-expires-invalid-1-digit-hour`, `freshness-expires-invalid-multiple-spaces` | `ParseDate` accepts `2:01:18` and doubled spaces (Go's `time.Parse` is lax), so an invalid `Expires` is reused instead of counting as a time in the past | FR-FRS-2 |
+| `freshness-max-age-space-after-equals`, `freshness-max-age-space-before-equals` | `max-age= 3600` and `max-age =3600` are accepted because the directive parser trims around `=` | FR-FRS-2 |
+| `conditional-lm-fresh-no-lm`, `conditional-lm-stale` | `If-Modified-Since` gets a 200. Suspected cause: the stored `Date` carries sub-second time while the client date has whole seconds, so `Date` reads as later. Unconfirmed; the card starts by reproducing it | FR-SRV-2 |
+| `pragma-response-no-cache-heuristic` | A response with `Pragma: no-cache` and `Last-Modified` 10 000 s ago should get a 1 000 s heuristic lifetime (response `Pragma` has no meaning, RFC 9111 §5.4) but is not reused. Cause unknown | FR-FRS-3 |

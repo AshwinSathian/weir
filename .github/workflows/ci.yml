@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 jobs:
-  check:
+  check-go:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -30,3 +30,12 @@ jobs:
         run: make check
       - name: govulncheck
         run: make vuln
+
+  # Keeps a stable required-check name (`check`) however many Go versions the
+  # matrix holds.
+  check:
+    if: always()
+    needs: check-go
+    runs-on: ubuntu-latest
+    steps:
+      - run: test "${{ needs.check-go.result }}" = success

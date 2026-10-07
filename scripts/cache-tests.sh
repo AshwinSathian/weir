@@ -16,19 +16,32 @@ WORK="$(mktemp -d)"
 ORIGIN_PORT=8000
 PROXY_PORT=8001
 pids=()
-cleanup() { for p in "${pids[@]:-}"; do [ -n "$p" ] && kill "$p" 2>/dev/null || true; done; rm -rf "$WORK"; }
+# Each service runs in its own process group (setsid) so the node child of
+# `npm run` dies with it; a leaked origin would answer the next run's probes.
+cleanup() {
+  for p in "${pids[@]:-}"; do [ -n "$p" ] && { kill -- "-$p" 2>/dev/null || kill "$p" 2>/dev/null || true; }; done
+  if [ -n "${CACHE_TESTS_LOGS:-}" ]; then mkdir -p "$CACHE_TESTS_LOGS"; cp "$WORK"/*.log "$WORK"/*.json "$CACHE_TESTS_LOGS" 2>/dev/null || true; fi
+  rm -rf "$WORK"
+}
 trap cleanup EXIT
+
+for port in "$ORIGIN_PORT" "$PROXY_PORT"; do
+  if (exec 3<>"/dev/tcp/127.0.0.1/$port") 2>/dev/null; then
+    echo "port $port is already in use; stop the process holding it" >&2
+    exit 1
+  fi
+done
 
 git clone --quiet https://github.com/http-tests/cache-tests "$WORK/suite"
 git -C "$WORK/suite" checkout --quiet "$CACHE_TESTS_REF"
 (cd "$WORK/suite" && npm ci --no-audit --no-fund --silent 2>/dev/null || npm install --no-audit --no-fund --silent)
 (cd "$ROOT" && go build -o "$WORK/weirproxy" ./examples/weirproxy)
 
-(cd "$WORK/suite" && npm run --silent server --port="$ORIGIN_PORT" >"$WORK/server.log" 2>&1) &
+(cd "$WORK/suite" && exec setsid npm run --silent server --port="$ORIGIN_PORT" >"$WORK/server.log" 2>&1) &
 pids+=($!)
 # The suite's headers (Req-Num, Test-ID, Test-Name) and the request headers its
 # Vary tests set are unkeyed, so strict forwarding (D4) would hide them.
-"$WORK/weirproxy" -listen "127.0.0.1:$PROXY_PORT" -origin "http://127.0.0.1:$ORIGIN_PORT" \
+setsid "$WORK/weirproxy" -listen "127.0.0.1:$PROXY_PORT" -origin "http://127.0.0.1:$ORIGIN_PORT" \
   -forward-allow Req-Num,Test-ID,Test-Name,Foo,Bar,Baz,Abc >"$WORK/proxy.log" 2>&1 &
 pids+=($!)
 wait_for() {
@@ -58,6 +71,10 @@ summarize() {
   ' "$1" "$CACHE_TESTS_REF"
 }
 
+if [ "$CACHE_TESTS_REF" != "$(node -e 'console.log(JSON.parse(require("fs").readFileSync(process.argv[1])).ref)' "$BASELINE" 2>/dev/null || true)" ] && [ "${UPDATE:-}" != 1 ]; then
+  echo "warning: CACHE_TESTS_REF differs from the baseline's ref; results may not be comparable" >&2
+fi
+
 regressions() {
   node -e '
     const base = JSON.parse(require("fs").readFileSync(process.argv[1])).results
@@ -84,7 +101,8 @@ if [ -n "$bad" ]; then
   echo "possible regressions, rerunning once: $(echo $bad)"
   run "$WORK/raw2.json"
   summarize "$WORK/raw2.json" >"$WORK/now2.json"
-  bad="$(regressions "$WORK/now2.json")"
+  # Only a test that failed both times is a regression.
+  bad="$(comm -12 <(echo "$bad" | sort) <(regressions "$WORK/now2.json" | sort))"
 fi
 if [ -n "$bad" ]; then
   echo "cache-tests regressions (passed in the baseline, fail now):"

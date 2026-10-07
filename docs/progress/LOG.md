@@ -989,3 +989,11 @@ Entry template:
 - Review: card-reviewer, no must-fix. Left open: Unexplained failures need decisions (STATUS); matrix check rename; crasher upload also matches checked-in seeds; cache-tests failure leaves no logs artifact; Makefile/docs diff noise in the review was stacking only.
 - Follow-ups: decide the 27 unexplained failures; run nightly once.
 - Context: medium.
+
+## 2026-10-07 · M10-04 · review-fixes
+- Branch / PR: claude/zealous-ritchie-wdpztv / #58
+- Done: decided every item of an adversarial review (no must-fix; Ashwin delegated). Fixed: fuzz list failing on compile errors, script process groups, port precheck, rerun intersection, ref warning, log artifact, 30 min timeout, `check` aggregator job, counts (the earlier "26/27 unexplained" and "79 of 105" figures were wrong: 18 and 87). Settled the 18 in the doc; seven became card M10-09.
+- Tests: scripts/cache-tests.sh run twice, no regressions, no leaked processes; doc and baseline cover the same 105 ids once each. Lint unrun locally.
+- Deviations: none.
+- Follow-ups: M10-09; run the nightly workflow once after merge.
+- Context: low.
