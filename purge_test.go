@@ -1140,3 +1140,33 @@ func TestSharedTagsKeepURIInvalidation(t *testing.T) {
 		}
 	})
 }
+
+// T-29, 05 E-12: with the invalid plane saturated by a flood, a POST to the
+// entry's own URI still revalidates it. Pins the split of Entry.Tags: the
+// URI tag stays plain while the group is shared.
+func TestSharedTagsKeepURIInvalidationUnderFlood(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		mem, err := memory.New(memory.Config{EpochSlots: 1 << 4})
+		if err != nil {
+			t.Fatal(err)
+		}
+		o := testorigin.NewChecked(t, 64, 16)
+		o.Default(grouped(`"g"`, nil))
+		cfg := cacheCfg
+		cfg.Store = mem
+		e := newEngine(t, cfg)
+		defer closeEngine(t, e)
+
+		serve(t, e, getReq("/a"), o)
+		serve(t, e, getReq("/b"), o)
+		time.Sleep(time.Second)
+		for i := range 200 {
+			serve(t, e, postReq("/flood"+strconv.Itoa(i)), o)
+		}
+		serve(t, e, postReq("/a"), o)
+		time.Sleep(time.Second)
+		if resp, _ := serve(t, e, getReq("/a"), o); resp.Cache.Hit {
+			t.Fatalf("/a was a hit after a POST to it (%s), want a validation", resp.Header.Get("Cache-Status"))
+		}
+	})
+}

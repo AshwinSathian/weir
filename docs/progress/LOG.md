@@ -920,3 +920,12 @@ Entry template:
 - Review: card reviewer, no must-fix. Nit fixed: URI invalidation with the capability present is now tested. Nit checked: allocations unchanged.
 - Follow-ups: run lint in CI. Branch is claude/quirky-feynman-yni9ir, not card/M10-08-...
 - Context: medium; size M was right.
+
+## 2026-10-07 · M10-08 · review-fixes
+- Branch / PR: claude/quirky-feynman-yni9ir / #55
+- Done: decided every open item from an independent adversarial review (STATUS "Decided 2026-10-07 (M10-08)"). Added `TestSharedTagsKeepURIInvalidationUnderFlood`, a tag-order comment in the Cache-Groups table test, wrapper note on `SharedTagEpochs`, `Entry.Tags` order on the type comment, docs/07 entries, P25-00 AC for `SharedTagEpochs`, stale STATUS note replaced.
+- Tests: race tests, vet, gofmt pass, trace 129/152. Lint still unrun locally; CI must be green.
+- Deviations: none beyond the original PR.
+- Review: adversarial agent, no must-fix; all findings (stale note, implicit order, docs/07, combined test, wrapper note) fixed or decided.
+- Follow-ups: none.
+- Context: low.

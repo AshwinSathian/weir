@@ -565,6 +565,8 @@ func TestCacheGroupsStorability(t *testing.T) {
 			if !d.ok {
 				t.Fatalf("not stored: %q", d.reason)
 			}
+			// 05 E-12, T-29: storeGuard.newestEpoch splits Entry.Tags after
+			// the second tag, so this order is load-bearing.
 			want := []store.Tag{store.TagGlobal(), c.URITag}
 			for _, g := range tc.groups {
 				want = append(want, keys.TagGroup(c.Origin, g))

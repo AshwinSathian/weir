@@ -16,6 +16,17 @@ none
 
 none
 
+## Decided 2026-10-07 (M10-08)
+
+From the adversarial review of PR #55 (Ashwin delegated "take decisions on all items"). "Waiting on Ashwin" was empty.
+
+- Lint did not run locally (golangci-lint built with Go 1.25): merge on a green CI `make check`; no card.
+- Branch is `claude/quirky-feynman-yni9ir`, not `card/M10-08-...`: accepted, the session fixed it.
+- Tag order is an implicit contract: kept, now pinned from both sides (the order test in storable_test.go, `TestSharedTagsKeepURIInvalidation` and the under-flood variant), commented on `Entry.Tags`, and stated in 04 §3 and 05 E-12. Rejected: a typed field for group tags, which changes `store.Entry` and the codec for no behavior.
+- A wrapper store that hides the capability gets the old 4% residual: accepted and documented on the interface; no event, since the wrapper's author controls it.
+- Remote stores: P25-00 AC now requires `SharedTagEpochs`.
+- docs/07 lists the new tests. 04 §6 pseudo-code stays as is (the split is internal to the guard).
+
 ## Decided 2026-10-06 (M10-01)
 
 Ashwin delegated every waiting item in chat ("adversarially review and take decisions on all items"). Each was attacked against the code and the documents first.
@@ -193,7 +204,7 @@ The cards' Notes give the reasons and the options rejected. All three come befor
 
 - M10-02 (exporter): `Engine.Stats()` only reads. It uses `breaker.Peek`, emits nothing and may be called under the lock `Observe` takes. `Inflight` and `Queued` sum the main and upload pools.
 - M10-02: `weir_requests_total{outcome}` can take the `EvRequest` reason as is; followers are `collapsed`. `weir_not_stored_total` gains the reason `stream`. `EvEvict` and `EvPurge{group}` carry a count in `Status`. A store passed in `Config.Store` reports evictions only through its own `memory.Config.OnEvict`.
-- M10-08 is next and security-sensitive: read its Notes before the code. The capability shape and the `Entry.Tags` order it relies on are decided there.
+- M10-08 done (PR #55): `Entry.Tags` order `[global, URI, groups...]` is load-bearing for `storeGuard.newestEpoch`; the order is tested in the Cache-Groups table in storable_test.go. A Phase 2.5 store must implement `SharedTagEpochs` (P25-00 AC).
 
 - M9-02: `(*Engine).classifyURL(raw, originOnly)` in purge.go gives the `Classified` of a GET for an absolute URL; `Purge` uses `.URITag` and, for `Origin`, `.Origin`. `Purge.Groups` already writes `keys.TagGroup(origin, name)` epochs, but nothing shows they reach entries until M9-03 tags them.
 - M9-03: `Entry.Tags` is global, URI, then one tag per distinct group; the origin tag is `Owner` only. Do not add a tag that many entries share unless a purge can name it and its epoch is kept exactly (05 E-8).
