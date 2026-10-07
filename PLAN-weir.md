@@ -168,7 +168,7 @@ Refs: FR-OBS-*, NFR-*, seed §7.5.
 - [ ] M10.5b GC cost at 1M entries measured (D36). AC: `docs/benchmarks.md` reports GC CPU share and p99; if GC CPU exceeds 10% at 1M entries, a pointer-light layout task is added to Phase 1.x.
 - [ ] M10.6 `TRACE_STRICT=1` in CI. AC: trace report empty.
 - [ ] M10.7 README usage guide: quick start with `weirhttp`, the strict-forwarding explanation, every opt-out that weakens a default (R-3). AC: README reviewed against [06 §5](docs/06-threat-model.md).
-- [ ] M10.9 Group tags skip the invalid epoch plane ([05 E-8](docs/05-storage-interface-spec.md), T-29): optional `store.SharedTagEpochs` capability, memory store support. AC: `TestSharedTagsSkipInvalidPlane`, `TestInvalidationFloodLeavesGroupsServable` pass.
+- [x] M10.9 Group tags skip the invalid epoch plane ([05 E-8](docs/05-storage-interface-spec.md), T-29): optional `store.SharedTagEpochs` capability, memory store support. AC: `TestSharedTagsSkipInvalidPlane`, `TestInvalidationFloodLeavesGroupsServable` pass.
 - [ ] M10.8 RFC 9110 gaps found in review: `Date` on forwarded responses (§6.6.1), empty absolute-form path as `/` (§4.2.3). AC: `TestForwardedResponseGetsDate`, `TestAbsoluteFormEmptyPath` pass.
 
 Exit criteria for Phase 1: [07 §12](docs/07-testing-strategy.md).

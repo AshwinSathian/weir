@@ -154,9 +154,10 @@ func (ep *epochs) prune() {
 	}
 }
 
-// newestOf returns the most severe, then latest, epoch among tags at or
-// after since (E-3).
-func (ep *epochs) newestOf(tags []store.Tag, since time.Time) (store.Epoch, bool) {
+// newestOf returns the most severe, then latest, epoch among tags and shared
+// at or after since (E-3). Tags in shared are not read in the invalid plane
+// (E-12).
+func (ep *epochs) newestOf(tags, shared []store.Tag, since time.Time) (store.Epoch, bool) {
 	s := int64(since.Sub(ep.base))
 	if ep.newest.Load() < s {
 		return store.Epoch{}, false // E-10
@@ -164,10 +165,11 @@ func (ep *epochs) newestOf(tags []store.Tag, since time.Time) (store.Epoch, bool
 	for m := store.EpochHard; m >= store.EpochSoft; m-- {
 		best := int64(noEpoch)
 		for _, t := range tags {
-			if t != ep.globalTag {
-				best = max(best, ep.lookup(t, m, s))
-			} else if g := ep.global[m-1].Load(); g >= s {
-				best = max(best, g)
+			best = max(best, ep.tagEpoch(t, m, s))
+		}
+		if m != store.EpochInvalid { // E-12
+			for _, t := range shared {
+				best = max(best, ep.tagEpoch(t, m, s))
 			}
 		}
 		if best != noEpoch {
@@ -175,6 +177,17 @@ func (ep *epochs) newestOf(tags []store.Tag, since time.Time) (store.Epoch, bool
 		}
 	}
 	return store.Epoch{}, false
+}
+
+// tagEpoch returns t's mode-m epoch offset if it is at or after s, else noEpoch.
+func (ep *epochs) tagEpoch(t store.Tag, m store.EpochMode, s int64) int64 {
+	if t != ep.globalTag {
+		return ep.lookup(t, m, s)
+	}
+	if g := ep.global[m-1].Load(); g >= s {
+		return g
+	}
+	return noEpoch
 }
 
 // lookup returns t's mode-m epoch offset if it is at or after s, else noEpoch.

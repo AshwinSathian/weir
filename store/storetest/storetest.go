@@ -81,6 +81,7 @@ func Run(t *testing.T, newStore func(t *testing.T) store.Store, opts ...Option) 
 		{"EpochSinceBoundary", true, testEpochSinceBoundary},
 		{"EpochFastPath", true, testEpochFastPath},
 		{"EpochsMaxAcrossTags", true, testEpochsMaxAcrossTags},
+		{"SharedTagEpochs", true, testSharedTagEpochs},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -545,4 +546,35 @@ func testEpochHardCap(t *testing.T, newStore func(*testing.T) store.Store, o opt
 	for i := range 10 * o.hardCap {
 		mustSetEpoch(t, s, tag(o.hardCap+i), base, store.EpochSoft)
 	}
+}
+
+// E-12: for a store with the SharedTagEpochs capability, a shared tag is
+// read like any other in the soft and hard modes and never in the invalid
+// mode, while a plain tag keeps matching in all three. Skipped otherwise.
+func testSharedTagEpochs(t *testing.T, newStore func(*testing.T) store.Store, _ options) {
+	s, base := epochBase(t, newStore)
+	st, ok := s.(store.SharedTagEpochs)
+	if !ok {
+		t.Skip("store lacks the SharedTagEpochs capability")
+	}
+	want := func(plain, shared []store.Tag, since time.Time, mode store.EpochMode) {
+		t.Helper()
+		ep, ok, err := st.NewestEpochShared(t.Context(), plain, shared, since)
+		switch {
+		case err != nil:
+			t.Fatalf("NewestEpochShared: %v", err)
+		case mode == 0 && ok:
+			t.Fatalf("NewestEpochShared = %+v, want no epoch", ep)
+		case mode != 0 && (!ok || ep.Mode != mode):
+			t.Fatalf("NewestEpochShared = %+v, %v; want mode %d", ep, ok, mode)
+		}
+	}
+	mustSetEpoch(t, s, tag(1), base, store.EpochInvalid)
+	want([]store.Tag{tag(1)}, nil, base, store.EpochInvalid)
+	want(nil, []store.Tag{tag(1)}, base, 0)
+	mustSetEpoch(t, s, tag(1), base.Add(time.Minute), store.EpochSoft)
+	want(nil, []store.Tag{tag(1)}, base, store.EpochSoft)
+	mustSetEpoch(t, s, tag(2), base.Add(2*time.Minute), store.EpochHard)
+	want([]store.Tag{tag(3)}, []store.Tag{tag(1), tag(2)}, base, store.EpochHard)
+	want([]store.Tag{tag(3)}, []store.Tag{tag(1)}, base.Add(2*time.Minute), 0)
 }

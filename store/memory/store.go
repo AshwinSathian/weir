@@ -27,7 +27,7 @@ type Config struct {
 // exhausting memory (NFR-2).
 const MaxShards = 1 << 16
 
-// Store is the in-process store. It implements store.Store and store.Sizer.
+// Store is the in-process store. It implements store.Store, store.Sizer and store.SharedTagEpochs.
 type Store struct {
 	shards  []shard
 	mask    uint64
@@ -39,8 +39,9 @@ type Store struct {
 }
 
 var (
-	_ store.Store = (*Store)(nil)
-	_ store.Sizer = (*Store)(nil)
+	_ store.Store           = (*Store)(nil)
+	_ store.Sizer           = (*Store)(nil)
+	_ store.SharedTagEpochs = (*Store)(nil)
 )
 
 // New returns an empty Store sized by cfg, or an error for a negative
@@ -178,7 +179,17 @@ func (s *Store) NewestEpoch(_ context.Context, tags []store.Tag, since time.Time
 	if s.closed.Load() {
 		return store.Epoch{}, false, store.ErrUnavailable
 	}
-	ep, ok := s.ep.newestOf(tags, since)
+	ep, ok := s.ep.newestOf(tags, nil, since)
+	return ep, ok, nil
+}
+
+// NewestEpochShared is NewestEpoch over tags and shared, reading shared tags
+// in the soft and hard planes only (05 E-12).
+func (s *Store) NewestEpochShared(_ context.Context, tags, shared []store.Tag, since time.Time) (store.Epoch, bool, error) {
+	if s.closed.Load() {
+		return store.Epoch{}, false, store.ErrUnavailable
+	}
+	ep, ok := s.ep.newestOf(tags, shared, since)
 	return ep, ok, nil
 }
 

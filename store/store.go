@@ -66,7 +66,7 @@ type Entry struct {
 	LastModified        time.Time // zero when absent
 	FetchDuration       time.Duration
 	VaryNames           []string // canonical names this variant was keyed on; nil when no Vary
-	Tags                []Tag    // global, URI, groups
+	Tags                []Tag    // [global, URI, groups...] in this order; the engine splits on it (05 E-12)
 	Owner               Tag      // origin tag; opaque to stores, used for per-owner quotas (M14)
 
 	// KindVarySpec: VaryNames (shared field) plus Variants.
@@ -152,6 +152,18 @@ type Store interface {
 // whose tags intersect tags and returns how many it deleted (FR-PRG-8).
 type Scrubber interface {
 	Scrub(ctx context.Context, tags []Tag) (int, error)
+}
+
+// SharedTagEpochs is an optional Store capability: NewestEpochShared equals
+// NewestEpoch over tags and shared together, except that a tag in shared
+// never matches in EpochInvalid mode. The engine passes group tags there,
+// which it writes only soft and hard epochs to, so an invalid-plane match on
+// one is a sketch false positive that would hit every entry of the group at
+// once (05 E-12, T-29). One call, so a remote store keeps one round trip.
+// A wrapper that embeds only Store hides the capability and brings the
+// false positive back, so it must forward this method too.
+type SharedTagEpochs interface {
+	NewestEpochShared(ctx context.Context, tags, shared []Tag, since time.Time) (Epoch, bool, error)
 }
 
 // Sizer is an optional Store capability reporting current bytes and the

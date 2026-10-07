@@ -911,3 +911,21 @@ Entry template:
 - Review: no second agent ran on these changes; the decisions were attacked by this session.
 - Follow-ups: M10-08 added to docs/cards/10-m10.md and PLAN M10.9.
 - Context: high; start M10-08 in a fresh session.
+
+## 2026-10-07 · M10-08 · done
+- Branch / PR: claude/quirky-feynman-yni9ir / #55
+- Done: optional `store.SharedTagEpochs` (`NewestEpochShared`), memory store support in epochs.go, `storeGuard.newestEpoch` splits `Entry.Tags` after `[global, URI]` and passes groups as shared; falls back to `NewestEpoch`.
+- Tests: TestSharedTagsSkipInvalidPlane, TestInvalidationFloodLeavesGroupsServable (fails without the guard change), TestSharedTagsKeepURIInvalidation, storetest `SharedTagEpochs`. Race tests, vet, gofmt pass, trace 129/152; hit benchmark unchanged at 14 allocs/op. `make check` could not run lint here (golangci-lint built with Go 1.25, config targets 1.27).
+- Deviations: 04 §3 (tag order), 05 capability list, E-8 and new E-12, 06 T-28 and T-29.
+- Review: card reviewer, no must-fix. Nit fixed: URI invalidation with the capability present is now tested. Nit checked: allocations unchanged.
+- Follow-ups: run lint in CI. Branch is claude/quirky-feynman-yni9ir, not card/M10-08-...
+- Context: medium; size M was right.
+
+## 2026-10-07 · M10-08 · review-fixes
+- Branch / PR: claude/quirky-feynman-yni9ir / #55
+- Done: decided every open item from an independent adversarial review (STATUS "Decided 2026-10-07 (M10-08)"). Added `TestSharedTagsKeepURIInvalidationUnderFlood`, a tag-order comment in the Cache-Groups table test, wrapper note on `SharedTagEpochs`, `Entry.Tags` order on the type comment, docs/07 entries, P25-00 AC for `SharedTagEpochs`, stale STATUS note replaced.
+- Tests: race tests, vet, gofmt pass, trace 129/152. Lint still unrun locally; CI must be green.
+- Deviations: none beyond the original PR.
+- Review: adversarial agent, no must-fix; all findings (stale note, implicit order, docs/07, combined test, wrapper note) fixed or decided.
+- Follow-ups: none.
+- Context: low.

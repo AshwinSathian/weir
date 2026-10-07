@@ -2,6 +2,7 @@ package weir_test
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"io"
 	"log/slog"
@@ -1070,6 +1071,102 @@ func TestInvalidGroupInvalidationLoggedOnce(t *testing.T) {
 		}
 		if n := ev.count(weir.EvPurge.String() + "/group-invalid"); n != 3 {
 			t.Fatalf("EvPurge{group-invalid} = %d, want 3", n)
+		}
+	})
+}
+
+// sharedOnly answers the shared tags alone, so a test sees only what a group
+// tag does under a URI flood (T-29). Its plain NewestEpoch is the memory
+// store's, which false-positives on every tag once the plane is full.
+type sharedOnly struct{ *memory.Store }
+
+func (b sharedOnly) NewestEpochShared(ctx context.Context, _, shared []store.Tag, since time.Time) (store.Epoch, bool, error) {
+	return b.Store.NewestEpochShared(ctx, nil, shared, since)
+}
+
+// T-29, 05 E-12: a flood of URI invalidations that fills the invalid plane
+// must not make a group's entries read as invalidated. With the store's
+// SharedTagEpochs capability the entries are hits; without it the group tag's
+// false positive revalidates them, which is the old behavior.
+func TestInvalidationFloodLeavesGroupsServable(t *testing.T) {
+	for _, shared := range []bool{true, false} {
+		t.Run("capability="+strconv.FormatBool(shared), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				mem, err := memory.New(memory.Config{EpochSlots: 1 << 4})
+				if err != nil {
+					t.Fatal(err)
+				}
+				var st store.Store = struct{ store.Store }{mem} // hides the capability
+				if shared {
+					st = sharedOnly{mem}
+				}
+				o := testorigin.NewChecked(t, 64, 16)
+				o.Default(grouped(`"g"`, nil))
+				cfg := cacheCfg
+				cfg.Store = st
+				e := newEngine(t, cfg)
+				defer closeEngine(t, e)
+
+				serve(t, e, getReq("/a"), o)
+				time.Sleep(time.Second)
+				for i := range 200 {
+					serve(t, e, postReq("/flood"+strconv.Itoa(i)), o)
+				}
+				time.Sleep(time.Second)
+				resp, _ := serve(t, e, getReq("/a"), o)
+				if resp.Cache.Hit != shared {
+					t.Fatalf("hit = %v (%s), want %v", resp.Cache.Hit, resp.Header.Get("Cache-Status"), shared)
+				}
+			})
+		})
+	}
+}
+
+// T-29, 05 E-12: with the capability present, the global and URI tags are
+// still read in the invalid plane, so a POST invalidates its own URI.
+func TestSharedTagsKeepURIInvalidation(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		o := testorigin.NewChecked(t, 64, 16)
+		o.Default(grouped(`"g"`, nil))
+		e := newEngine(t, cacheCfg)
+		defer closeEngine(t, e)
+
+		serve(t, e, getReq("/a"), o)
+		time.Sleep(time.Second)
+		serve(t, e, postReq("/a"), o)
+		time.Sleep(time.Second)
+		if resp, _ := serve(t, e, getReq("/a"), o); resp.Cache.Hit {
+			t.Fatalf("hit after a POST to the same URI (%s), want a validation", resp.Header.Get("Cache-Status"))
+		}
+	})
+}
+
+// T-29, 05 E-12: with the invalid plane saturated by a flood, a POST to the
+// entry's own URI still revalidates it. Pins the split of Entry.Tags: the
+// URI tag stays plain while the group is shared.
+func TestSharedTagsKeepURIInvalidationUnderFlood(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		mem, err := memory.New(memory.Config{EpochSlots: 1 << 4})
+		if err != nil {
+			t.Fatal(err)
+		}
+		o := testorigin.NewChecked(t, 64, 16)
+		o.Default(grouped(`"g"`, nil))
+		cfg := cacheCfg
+		cfg.Store = mem
+		e := newEngine(t, cfg)
+		defer closeEngine(t, e)
+
+		serve(t, e, getReq("/a"), o)
+		serve(t, e, getReq("/b"), o)
+		time.Sleep(time.Second)
+		for i := range 200 {
+			serve(t, e, postReq("/flood"+strconv.Itoa(i)), o)
+		}
+		serve(t, e, postReq("/a"), o)
+		time.Sleep(time.Second)
+		if resp, _ := serve(t, e, getReq("/a"), o); resp.Cache.Hit {
+			t.Fatalf("/a was a hit after a POST to it (%s), want a validation", resp.Header.Get("Cache-Status"))
 		}
 	})
 }

@@ -1,7 +1,7 @@
 # Weir low-level design
 
 Status: v1.0
-Date: 2026-10-06
+Date: 2026-10-07
 Depends on: [01-technical-spec.md](01-technical-spec.md), [02-architecture.md](02-architecture.md), [03-hld.md](03-hld.md)
 
 This document is written for the person (or agent) implementing a milestone. It gives exact type definitions, algorithms, locking rules and pseudo-code. Code may differ in naming of unexported identifiers; exported names, behavior, bounds and locking rules may not change without updating this document in the same commit.
@@ -254,7 +254,7 @@ type Entry struct {
 	LastModified        time.Time // zero when absent
 	FetchDuration       time.Duration
 	VaryNames           []string  // canonical names this variant was keyed on; nil when no Vary
-	Tags                []Tag     // global, URI, groups
+	Tags                []Tag     // [global, URI, groups...] in this order; storeGuard splits on it (05 E-12)
 	Owner               Tag       // origin tag; opaque to stores, used for per-owner quotas (M14)
 
 	// KindVarySpec
