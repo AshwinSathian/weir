@@ -913,7 +913,7 @@ Entry template:
 - Context: high; start M10-08 in a fresh session.
 
 ## 2026-10-07 · M10-08 · done
-- Branch / PR: claude/quirky-feynman-yni9ir / pending
+- Branch / PR: claude/quirky-feynman-yni9ir / #55
 - Done: optional `store.SharedTagEpochs` (`NewestEpochShared`), memory store support in epochs.go, `storeGuard.newestEpoch` splits `Entry.Tags` after `[global, URI]` and passes groups as shared; falls back to `NewestEpoch`.
 - Tests: TestSharedTagsSkipInvalidPlane, TestInvalidationFloodLeavesGroupsServable (fails without the guard change), TestSharedTagsKeepURIInvalidation, storetest `SharedTagEpochs`. Race tests, vet, gofmt pass, trace 129/152; hit benchmark unchanged at 14 allocs/op. `make check` could not run lint here (golangci-lint built with Go 1.25, config targets 1.27).
 - Deviations: 04 §3 (tag order), 05 capability list, E-8 and new E-12, 06 T-28 and T-29.

@@ -5,7 +5,7 @@ Phase: 1
 Current card: none
 Card state: awaiting-merge
 Branch: claude/quirky-feynman-yni9ir
-PR: pending
+PR: #55 https://github.com/AshwinSathian/weir/pull/55
 Next card: M10-02
 
 ## Blockers
