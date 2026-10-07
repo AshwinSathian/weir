@@ -2,19 +2,30 @@
 
 Updated: 2026-10-07
 Phase: 1
-Current card: M10-03
+Current card: none
 Card state: awaiting-merge
-Branch: claude/gifted-meitner-19l6l6
-PR: #57 https://github.com/AshwinSathian/weir/pull/57
-Next card: M10-04
+Branch: claude/zealous-ritchie-wdpztv
+PR: #58 https://github.com/AshwinSathian/weir/pull/58
+Next card: M10-07
+
+## Waiting on Ashwin
+
+none
 
 ## Blockers
 
 none
 
-## Waiting on Ashwin
+## Decided 2026-10-07 (M10-04)
 
-none
+From the adversarial review of PR #58 (Ashwin delegated "take decisions on all items"). "Waiting on Ashwin" held three items:
+
+- The 18 failures first listed as unexplained are now settled. Kept as design, with reasons in docs/cache-tests-expected-failures.md: invalid `Age` ignored (RFC 9111 §5.1), qualified `no-cache` read as unqualified, exact Vary value keying, malformed `Transfer-Encoding` gives 502, no relay of 1xx (a Phase 1 non-goal, no card), the ETag retry (harness). Seven are real deviations and went to new card M10-09: lax `ParseDate`, whitespace around `=` in `max-age`, `If-Modified-Since` at whole seconds (suspected), response `Pragma` with heuristic freshness (cause unknown).
+- Branch protection: ci.yml now has an aggregator job named `check` that needs the matrix job, so a required check called `check` keeps working.
+- Nightly run: cannot be done from a session. Run workflow_dispatch once after merge; PLAN-weir.md M10.4 stays unticked until it is green.
+- Review fixes: fuzz listing fails on compile errors, services run in their own process group (no leaked origin), ports checked before start, the rerun intersects the two runs, ref mismatch warns, logs uploaded on failure, job timeout 30 min.
+- Counts corrected: 105 failures, 87 explained by decision or requirement before this round, 18 first unexplained; all 105 now carry a reason.
+- AC "each failure cites a decision ID" is met as: D-number where one exists, else a requirement ID, RFC section or card ID (13 rows have no D-number).
 
 ## Decided 2026-10-07 (M10-03)
 
