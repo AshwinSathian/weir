@@ -6,10 +6,14 @@ ifeq ($(GOLANGCI),)
 GOLANGCI := go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_VERSION)
 endif
 
-.PHONY: check fmt-check vet lint test test-short trace trace-strict fuzz-short bench vuln card next
+# Every module below the root. Each is also built alone (GOWORK=off) so none
+# leans on an unpublished sibling by accident (docs/02 §3.2).
+SUBMODULES := $(patsubst ./%/go.mod,%,$(shell find . -mindepth 2 -name go.mod -not -path './testdata/*' -not -path './.claude/*' -not -path './.git/*' | sort))
+
+.PHONY: check fmt-check vet lint test modules test-short trace trace-strict fuzz-short bench vuln card next
 
 ## check: everything a card must pass before handoff (CI runs the same)
-check: fmt-check vet lint test trace
+check: fmt-check vet lint test modules trace
 
 fmt-check:
 	@out="$$(gofmt -l .)"; if [ -n "$$out" ]; then echo "gofmt needed:"; echo "$$out"; exit 1; fi
@@ -22,6 +26,13 @@ lint:
 
 test:
 	go test -race -shuffle=on -count=1 ./...
+
+## modules: vet, lint and race-test each submodule alone, outside go.work
+modules:
+	@for m in $(SUBMODULES); do \
+	  echo "== $$m"; \
+	  (cd $$m && GOWORK=off go vet ./... && GOWORK=off $(GOLANGCI) run && GOWORK=off go test -race -shuffle=on -count=1 ./...) || exit 1; \
+	done
 
 ## test-short: fast loop while writing code
 test-short:
@@ -48,6 +59,10 @@ bench:
 
 vuln:
 	go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
+	@for m in $(SUBMODULES); do \
+	  echo "== $$m"; \
+	  (cd $$m && GOWORK=off go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...) || exit 1; \
+	done
 
 ## card ID=P0-02: print one task card; next: print the next open card
 card:

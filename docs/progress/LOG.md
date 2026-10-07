@@ -929,3 +929,29 @@ Entry template:
 - Review: adversarial agent, no must-fix; all findings (stale note, implicit order, docs/07, combined test, wrapper note) fixed or decided.
 - Follow-ups: none.
 - Context: low.
+
+## 2026-10-07 · M10-02 · in-progress (awaiting /handoff)
+- Branch / PR: claude/optimistic-davinci-9ac46r / none yet
+- Done: `observe/prom` module (client_golang v1.24.1, approved): `Observer` (counters, fetch histogram), `Collector` (gauges from `Engine.Stats`); `go.work`; Makefile `modules` target (vet, lint, race test per submodule with GOWORK=off) wired into `make check`; CI cache path.
+- Tests: prom_test.go (names and labels per 04 §9.3, lint, concurrency, unknown kinds). Race tests, vet, gofmt pass; root `TestNoThirdPartyImports` passes; trace 130/152. Lint unrun locally (golangci-lint built with Go 1.25/1.26, config targets 1.27).
+- Deviations: none to normative docs. `gateway_failure` = status 502, 503 or 504 (04 §9.3 does not define it); go.mod uses `replace => ../..` until the root is tagged.
+- Follow-ups: card review and card mark by /handoff; `make vuln` covers only the root module.
+- Context: low; size M was right.
+
+## 2026-10-07 · M10-02 · done
+- Branch / PR: claude/optimistic-davinci-9ac46r / (see STATUS)
+- Done: `observe/prom` complete as in the entry above, plus `TestExporterWithRealEngine` (real engine, synctest) and one sentence in 04 §9.3 defining the fetch `result` label.
+- Tests: all prom tests pass under -race with GOWORK=off; root race tests, vet, gofmt pass; trace 130/152. `make check` stops at lint (golangci-lint built with Go 1.25 here); CI must confirm.
+- Deviations: 04 §9.3 (result definition, clarification only).
+- Review: card-reviewer, no must-fix. Should-fix (real-engine test) done; doc nit done; vuln and fuzz loops for submodules deferred (no effect today).
+- Follow-ups: `make vuln` should cover submodules (add to M10-04 or a later card); drop the `replace` once the root is tagged.
+- Context: low; size M was right.
+
+## 2026-10-07 · M10-02 · review-fixes
+- Branch / PR: claude/optimistic-davinci-9ac46r / #56
+- Done: decided every item of an independent adversarial review (Ashwin delegated; "Waiting on Ashwin" was empty). Fixed: invalid-UTF-8 reasons scrubbed in `Observe` (client_golang panics on them and FR-OBS-2 forbids recovery); fetch buckets extended to 60 s; `make vuln` now also scans submodules; Makefile `find` skips `.claude` and `.git`; CI cache glob `**/go.sum`; docs/07 lists the new tests; 04 §9.3 corrected (`gateway_failure` is 502/503/504 only, 500 is the breaker's separate option) and states the caveats on `error`, purges and evictions; `doc.go` states one Observer and Collector per registry, lazy series, lazy half-open, unmapped events.
+- Tests: TestInvalidReasonDoesNotPanic, TestSeriesBoundedByVocabulary added; prom race tests, root tests, vet, gofmt pass, trace 130/152. Lint and govulncheck unrun locally (tool builds older than Go 1.27); CI must be green.
+- Deviations: 04 §9.3 and 07 (clarifications and test list).
+- Review: adversarial agent, no must-fix. Declined: dependabot (a new config the card does not ask for); a metric for `EvStoreBreaker` (04 §9.3 does not list one, so adding it is a spec change for Ashwin); pre-seeding labelled series (would hard-code vocabularies; documented instead).
+- Follow-ups: v0.1.0 exists on the root but predates `Stats` and the M10 events, so the `replace` stays until the next root tag.
+- Context: low.
