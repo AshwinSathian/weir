@@ -317,6 +317,8 @@ Real time, real scheduler, in-process origin with a capacity model (a semaphore 
 
 Goroutine count is sampled every second; the run fails if it does not return to baseline ±10 within 5 s after load stops.
 
+Notes on how `loadtest/` applies the table. Steady hits calibrates the saturated rate for 2 s, then paces the 64 goroutines to half of it by absolute deadlines (the achieved rate is printed and is lower, sleeps overshoot): with more goroutines than cores a closed loop measures run-queue wait, not the engine, and the p99 bound would depend on the core count. Synchronized expiry keeps `max-age=60` at any `WEIR_LOAD_SCALE`, because the 20% bound relies on jitter spreading the expiries over 10% of the lifetime. The flood comparison allows 20% or 50 µs, whichever is larger, because a p99 of tens of microseconds moves a histogram bucket (12.5%) on scheduler noise alone. The store-flap bound is four `Timeouts.Store` plus the slowest origin service time observed plus 100 ms. Goroutines are checked before and after `Close`. The brownout runs with `Timeouts.Origin` below the slowed service time, so the breaker has failures to count. `make load` runs the suite (about 5 minutes); `WEIR_LOAD_SCALE=0.1` shortens the other phases for a smoke run.
+
 ## 10. Benchmarks
 
 `BenchmarkServeHitSmall` (1 KiB body), `BenchmarkServeHitVary`, `BenchmarkServeMissCoalesced`, `BenchmarkKeyBuild`, `BenchmarkAcceptEncoding`, `BenchmarkMemoryStoreGetParallel`, `BenchmarkLimiterAcquireRelease`. Each milestone review includes `benchstat` output against the previous milestone. NFR-5 budgets apply from M10.

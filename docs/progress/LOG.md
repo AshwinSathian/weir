@@ -955,3 +955,20 @@ Entry template:
 - Review: adversarial agent, no must-fix. Declined: dependabot (a new config the card does not ask for); a metric for `EvStoreBreaker` (04 §9.3 does not list one, so adding it is a spec change for Ashwin); pre-seeding labelled series (would hard-code vocabularies; documented instead).
 - Follow-ups: v0.1.0 exists on the root but predates `Stats` and the M10 events, so the `replace` stays until the next root tag.
 - Context: low.
+
+## 2026-10-07 · M10-03 · done
+- Branch / PR: claude/gifted-meitner-19l6l6 / none yet
+- Done: `loadtest/` (tag `load`): capacity-model origin, log-linear histograms, goroutine/breaker/origin-rate sampler, the five 07 §9 scenarios; `make load` (about 5 minutes, `WEIR_LOAD_SCALE` for smoke runs); results in docs/benchmarks.md.
+- Tests: all five scenarios pass on a 4-core box, goroutine check before and after Close. Root race tests, vet (also with `-tags load`), gofmt pass; trace 130/152. Lint unrun locally (Go 1.25 build); CI must confirm.
+- Deviations: 07 §9 got a notes paragraph. Steady hits paces the load to half the saturated rate (Ashwin chose this when asked: 64 closed-loop goroutines on 4 cores measure run-queue wait, p99 3.1 ms). Synchronized expiry ignores the scale for `max-age`. Flood p99 tolerance has a 50 µs floor (reviewer finding, bucket noise).
+- Review: card-reviewer, no must-fix; five should-fix items applied (achieved rate reported, goroutines checked before Close, flap bound from observed origin time, breaker asserted from events, flood floor) plus nits.
+- Follow-ups: AC says "on the reference machine": rerun `make load` there and replace the table. The loadtest is not in CI (real time, 5 minutes); nightly belongs to M10-04/M10.3 workflow.
+- Context: moderate; size M was right.
+
+## 2026-10-07 · M10-03 · review-fixes
+- Branch / PR: claude/gifted-meitner-19l6l6 / #57
+- Done: decided every item of an independent adversarial review (no must-fix; Ashwin delegated). Fixed: median-window steady p99, wall-clock open-loop pacing with offered-rate and drop assertions, non-vacuous expiry assertions, requirement citations, Makefile duration, table rows. Declined with reasons: per-test goroutine baseline kept, seeded randomness, tighter flood floor and flap bound. See STATUS "Decided".
+- Tests: full `make load` passes (294 s); smoke run, vet with and without `-tags load`, gofmt pass. Lint unrun locally; CI must confirm.
+- Deviations: none beyond the 07 §9 notes already in the PR.
+- Follow-ups: rerun `make load` on the reference machine and replace the benchmarks table.
+- Context: low.

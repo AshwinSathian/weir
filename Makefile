@@ -10,7 +10,7 @@ endif
 # leans on an unpublished sibling by accident (docs/02 §3.2).
 SUBMODULES := $(patsubst ./%/go.mod,%,$(shell find . -mindepth 2 -name go.mod -not -path './testdata/*' -not -path './.claude/*' -not -path './.git/*' | sort))
 
-.PHONY: check fmt-check vet lint test modules test-short trace trace-strict fuzz-short bench vuln card next
+.PHONY: check fmt-check vet lint test modules test-short trace trace-strict fuzz-short bench load vuln card next
 
 ## check: everything a card must pass before handoff (CI runs the same)
 check: fmt-check vet lint test modules trace
@@ -56,6 +56,10 @@ fuzz-short:
 
 bench:
 	go test -run '^$$' -bench . -benchmem ./...
+
+## load: real-time load and adversarial scenarios (docs/07 §9, about 5 minutes); WEIR_LOAD_SCALE=0.1 for a smoke run
+load:
+	go test -tags load -count=1 -timeout 15m -v ./loadtest/
 
 vuln:
 	go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
