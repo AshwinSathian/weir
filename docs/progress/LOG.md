@@ -937,3 +937,12 @@ Entry template:
 - Deviations: none to normative docs. `gateway_failure` = status 502, 503 or 504 (04 §9.3 does not define it); go.mod uses `replace => ../..` until the root is tagged.
 - Follow-ups: card review and card mark by /handoff; `make vuln` covers only the root module.
 - Context: low; size M was right.
+
+## 2026-10-07 · M10-02 · done
+- Branch / PR: claude/optimistic-davinci-9ac46r / (see STATUS)
+- Done: `observe/prom` complete as in the entry above, plus `TestExporterWithRealEngine` (real engine, synctest) and one sentence in 04 §9.3 defining the fetch `result` label.
+- Tests: all prom tests pass under -race with GOWORK=off; root race tests, vet, gofmt pass; trace 130/152. `make check` stops at lint (golangci-lint built with Go 1.25 here); CI must confirm.
+- Deviations: 04 §9.3 (result definition, clarification only).
+- Review: card-reviewer, no must-fix. Should-fix (real-engine test) done; doc nit done; vuln and fuzz loops for submodules deferred (no effect today).
+- Follow-ups: `make vuln` should cover submodules (add to M10-04 or a later card); drop the `replace` once the root is tagged.
+- Context: low; size M was right.

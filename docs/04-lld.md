@@ -1186,6 +1186,8 @@ Reasons never contain request data. `Partition` is the only field derived from r
 | `weir_evictions_total` | counter | `queue` |
 | `weir_store_bytes` | gauge | |
 
+The fetch `result` label comes from the `EvFetchEnd` status: 0 is `error`, 502, 503 and 504 are `gateway_failure` (the statuses the breaker counts), anything else is `ok`.
+
 Gauges for in-flight and queue depth come from an optional `Stats()` method on the engine (`EngineStats{Inflight, Queued, BreakerState, StoreBytes}`), polled by the exporter's collector, rather than from events. `Stats` only reads: it emits no event and moves no state, so a collector may call it while holding the lock its `Observe` takes.
 
 ## 10. `weirhttp`
