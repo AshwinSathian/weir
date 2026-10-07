@@ -929,3 +929,11 @@ Entry template:
 - Review: adversarial agent, no must-fix; all findings (stale note, implicit order, docs/07, combined test, wrapper note) fixed or decided.
 - Follow-ups: none.
 - Context: low.
+
+## 2026-10-07 · M10-02 · in-progress (awaiting /handoff)
+- Branch / PR: claude/optimistic-davinci-9ac46r / none yet
+- Done: `observe/prom` module (client_golang v1.24.1, approved): `Observer` (counters, fetch histogram), `Collector` (gauges from `Engine.Stats`); `go.work`; Makefile `modules` target (vet, lint, race test per submodule with GOWORK=off) wired into `make check`; CI cache path.
+- Tests: prom_test.go (names and labels per 04 §9.3, lint, concurrency, unknown kinds). Race tests, vet, gofmt pass; root `TestNoThirdPartyImports` passes; trace 130/152. Lint unrun locally (golangci-lint built with Go 1.25/1.26, config targets 1.27).
+- Deviations: none to normative docs. `gateway_failure` = status 502, 503 or 504 (04 §9.3 does not define it); go.mod uses `replace => ../..` until the root is tagged.
+- Follow-ups: card review and card mark by /handoff; `make vuln` covers only the root module.
+- Context: low; size M was right.

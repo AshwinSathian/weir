@@ -17,7 +17,9 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-          cache-dependency-path: go.mod
+          cache-dependency-path: |
+            go.mod
+            observe/prom/go.sum
       - name: make check
         run: make check
       - name: govulncheck

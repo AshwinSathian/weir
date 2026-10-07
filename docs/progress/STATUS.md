@@ -2,10 +2,10 @@
 
 Updated: 2026-10-07
 Phase: 1
-Current card: none
-Card state: awaiting-merge
-Branch: claude/quirky-feynman-yni9ir
-PR: #55 https://github.com/AshwinSathian/weir/pull/55
+Current card: M10-02
+Card state: in-progress
+Branch: claude/optimistic-davinci-9ac46r
+PR: none yet (run /handoff)
 Next card: M10-02
 
 ## Blockers
