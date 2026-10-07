@@ -2,11 +2,11 @@
 
 Updated: 2026-10-07
 Phase: 1
-Current card: none
+Current card: M10-03
 Card state: awaiting-merge
-Branch: claude/optimistic-davinci-9ac46r
-PR: #56 https://github.com/AshwinSathian/weir/pull/56
-Next card: M10-03
+Branch: claude/gifted-meitner-19l6l6
+PR: none yet (not opened; Ashwin has not asked for one)
+Next card: M10-04
 
 ## Blockers
 
