@@ -253,3 +253,47 @@ func TestRetentionClamp(t *testing.T) {
 		}
 	})
 }
+
+// T-29, 05 E-8, E-12: a flood that raises every cell of the invalid plane
+// never makes a shared (group) tag read as invalidated, while a soft or hard
+// epoch written to that tag is still found. A tag in the plain list still
+// matches in the invalid plane, so URI invalidation keeps working.
+func TestSharedTagsSkipInvalidPlane(t *testing.T) {
+	s := newStore(t, Config{EpochSlots: 1 << 4})
+	var _ store.SharedTagEpochs = s
+	ctx := t.Context()
+	base := time.Now().Add(time.Minute)
+	for i := range 4096 { // every one of the 16 cells, many times over
+		if err := s.SetEpoch(ctx, numTag(uint64(i)+100), store.Epoch{At: base.Add(time.Minute), Mode: store.EpochInvalid}); err != nil { //nolint:gosec // i >= 0
+			t.Fatal(err)
+		}
+	}
+	uri, group := numTag(1), numTag(2)
+	if _, ok, _ := s.NewestEpoch(ctx, []store.Tag{uri, group}, base); !ok {
+		t.Fatal("setup: the flood did not saturate the invalid plane")
+	}
+	ep, ok, err := s.NewestEpochShared(ctx, nil, []store.Tag{group}, base)
+	if err != nil || ok {
+		t.Fatalf("shared tag under flood = %+v, %v, %v; want ok=false", ep, ok, err)
+	}
+	if ep, ok, _ = s.NewestEpochShared(ctx, []store.Tag{uri}, []store.Tag{group}, base); !ok || ep.Mode != store.EpochInvalid {
+		t.Fatalf("plain tag under flood = %+v, %v; want an invalid epoch", ep, ok)
+	}
+	for _, m := range []store.EpochMode{store.EpochSoft, store.EpochHard} {
+		at := base.Add(time.Duration(m) * 3 * time.Minute) // after the flood's epochs
+		if err := s.SetEpoch(ctx, group, store.Epoch{At: at, Mode: m}); err != nil {
+			t.Fatal(err)
+		}
+		ep, ok, err = s.NewestEpochShared(ctx, nil, []store.Tag{group}, at)
+		if err != nil || !ok || ep.Mode != m {
+			t.Fatalf("shared tag with a mode %d epoch = %+v, %v, %v", m, ep, ok, err)
+		}
+	}
+	if _, _, err := s.NewestEpochShared(ctx, nil, []store.Tag{group}, base); err != nil {
+		t.Fatal(err)
+	}
+	_ = s.Close()
+	if _, _, err := s.NewestEpochShared(ctx, nil, []store.Tag{group}, base); !errors.Is(err, store.ErrUnavailable) {
+		t.Fatalf("closed store: err = %v, want ErrUnavailable", err)
+	}
+}

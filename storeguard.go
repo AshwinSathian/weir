@@ -17,6 +17,10 @@ const (
 	storeBackoffCap   = 30 * time.Second
 )
 
+// entryOwnTags is how many leading Entry.Tags belong to one entry: global
+// and URI. buildEntry appends the group tags after them.
+const entryOwnTags = 2
+
 // errStoreTimeout is the cause set on a remote call's Timeouts.Store
 // deadline, so a deadline from the caller's context is not counted.
 var errStoreTimeout = errors.New("weir: store timeout")
@@ -26,6 +30,7 @@ var errStoreTimeout = errors.New("weir: store timeout")
 // store after 5 consecutive ErrUnavailable results (FR-STF-2).
 type storeGuard struct {
 	s       store.Store
+	shared  store.SharedTagEpochs // nil when the store lacks the capability
 	remote  bool
 	timeout time.Duration
 	obs     Observer
@@ -37,7 +42,8 @@ type storeGuard struct {
 }
 
 func newStoreGuard(s store.Store, timeout time.Duration, obs Observer) *storeGuard {
-	return &storeGuard{s: s, remote: s.Info().Remote, timeout: timeout, obs: obs, backoff: storeBackoffFirst}
+	sh, _ := s.(store.SharedTagEpochs)
+	return &storeGuard{s: s, shared: sh, remote: s.Info().Remote, timeout: timeout, obs: obs, backoff: storeBackoffFirst}
 }
 
 func (g *storeGuard) get(ctx context.Context, k store.Key) (*store.Entry, error) {
@@ -65,7 +71,15 @@ func (g *storeGuard) newestEpoch(ctx context.Context, tags []store.Tag, since ti
 		return store.Epoch{}, false, err
 	}
 	defer cancel()
-	ep, ok, err := g.s.NewestEpoch(ctx, tags, since)
+	var ep store.Epoch
+	var ok bool
+	if g.shared != nil && len(tags) > entryOwnTags {
+		// Entry.Tags is [global, URI, groups...] (04 §3): group tags are
+		// shared by many entries and never carry an invalid epoch (T-29).
+		ep, ok, err = g.shared.NewestEpochShared(ctx, tags[:entryOwnTags], tags[entryOwnTags:], since)
+	} else {
+		ep, ok, err = g.s.NewestEpoch(ctx, tags, since)
+	}
 	return ep, ok, g.exit(ctx, "epoch", err)
 }
 
