@@ -5,7 +5,7 @@ Phase: 1
 Current card: none
 Card state: awaiting-merge
 Branch: claude/optimistic-davinci-9ac46r
-PR: none yet (run /handoff)
+PR: #56 https://github.com/AshwinSathian/weir/pull/56
 Next card: M10-03
 
 ## Blockers
