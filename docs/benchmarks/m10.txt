@@ -1,0 +1,66 @@
+BenchmarkServeHitSmall-4        	  453637	      2715 ns/op	    1480 B/op	      14 allocs/op
+BenchmarkServeHitSmall-4        	  500497	      2480 ns/op	    1480 B/op	      14 allocs/op
+BenchmarkServeHitSmall-4        	  471194	      2687 ns/op	    1480 B/op	      14 allocs/op
+BenchmarkServeHitSmall-4        	  505466	      2795 ns/op	    1480 B/op	      14 allocs/op
+BenchmarkServeHitSmall-4        	  426734	      2625 ns/op	    1480 B/op	      14 allocs/op
+BenchmarkServeHitSmall-4        	  391483	      2617 ns/op	    1480 B/op	      14 allocs/op
+BenchmarkServeHitVary-4         	  510614	      3280 ns/op	    1496 B/op	      15 allocs/op
+BenchmarkServeHitVary-4         	  378255	      2958 ns/op	    1496 B/op	      15 allocs/op
+BenchmarkServeHitVary-4         	  411854	      3325 ns/op	    1496 B/op	      15 allocs/op
+BenchmarkServeHitVary-4         	  399435	      3004 ns/op	    1496 B/op	      15 allocs/op
+BenchmarkServeHitVary-4         	  352899	      3228 ns/op	    1496 B/op	      15 allocs/op
+BenchmarkServeHitVary-4         	  373356	      3162 ns/op	    1496 B/op	      15 allocs/op
+BenchmarkServeMissCoalesced-4   	   10000	    119248 ns/op	         1.004 origin-calls/op	   22614 B/op	     209 allocs/op
+BenchmarkServeMissCoalesced-4   	    9232	    122171 ns/op	         1.004 origin-calls/op	   22632 B/op	     209 allocs/op
+BenchmarkServeMissCoalesced-4   	   10000	    119926 ns/op	         1.003 origin-calls/op	   22613 B/op	     209 allocs/op
+BenchmarkServeMissCoalesced-4   	   10000	    123201 ns/op	         1.003 origin-calls/op	   22604 B/op	     209 allocs/op
+BenchmarkServeMissCoalesced-4   	    9381	    126404 ns/op	         1.004 origin-calls/op	   22623 B/op	     209 allocs/op
+BenchmarkServeMissCoalesced-4   	    9846	    119944 ns/op	         1.003 origin-calls/op	   22603 B/op	     209 allocs/op
+BenchmarkServeHitParallel/missrate-on-4         	  386558	      2749 ns/op	    1480 B/op	      14 allocs/op
+BenchmarkServeHitParallel/missrate-on-4         	  479638	      2500 ns/op	    1480 B/op	      14 allocs/op
+BenchmarkServeHitParallel/missrate-on-4         	  477195	      2440 ns/op	    1480 B/op	      14 allocs/op
+BenchmarkServeHitParallel/missrate-on-4         	  476667	      2968 ns/op	    1480 B/op	      14 allocs/op
+BenchmarkServeHitParallel/missrate-on-4         	  412950	      2625 ns/op	    1480 B/op	      14 allocs/op
+BenchmarkServeHitParallel/missrate-on-4         	  454658	      2572 ns/op	    1480 B/op	      14 allocs/op
+BenchmarkServeHitParallel/missrate-off-4        	 1042766	      1210 ns/op	    1480 B/op	      14 allocs/op
+BenchmarkServeHitParallel/missrate-off-4        	 1105432	       938.0 ns/op	    1480 B/op	      14 allocs/op
+BenchmarkServeHitParallel/missrate-off-4        	 1099747	      1101 ns/op	    1480 B/op	      14 allocs/op
+BenchmarkServeHitParallel/missrate-off-4        	  994522	      1171 ns/op	    1480 B/op	      14 allocs/op
+BenchmarkServeHitParallel/missrate-off-4        	 1030308	      1154 ns/op	    1480 B/op	      14 allocs/op
+BenchmarkServeHitParallel/missrate-off-4        	  998376	      1164 ns/op	    1480 B/op	      14 allocs/op
+BenchmarkKeyBuild-4         	  506445	      2321 ns/op	     536 B/op	       9 allocs/op
+BenchmarkKeyBuild-4         	  584948	      2339 ns/op	     536 B/op	       9 allocs/op
+BenchmarkKeyBuild-4         	  515952	      2405 ns/op	     536 B/op	       9 allocs/op
+BenchmarkKeyBuild-4         	  509143	      2339 ns/op	     536 B/op	       9 allocs/op
+BenchmarkKeyBuild-4         	  531711	      2101 ns/op	     536 B/op	       9 allocs/op
+BenchmarkKeyBuild-4         	  585840	      2117 ns/op	     536 B/op	       9 allocs/op
+BenchmarkAcceptEncoding-4   	 3375662	       334.5 ns/op	       0 B/op	       0 allocs/op
+BenchmarkAcceptEncoding-4   	 4475802	       322.4 ns/op	       0 B/op	       0 allocs/op
+BenchmarkAcceptEncoding-4   	 3297039	       336.1 ns/op	       0 B/op	       0 allocs/op
+BenchmarkAcceptEncoding-4   	 3374667	       324.8 ns/op	       0 B/op	       0 allocs/op
+BenchmarkAcceptEncoding-4   	 3659253	       351.6 ns/op	       0 B/op	       0 allocs/op
+BenchmarkAcceptEncoding-4   	 3842468	       317.9 ns/op	       0 B/op	       0 allocs/op
+BenchmarkMemoryStoreGetParallel-4   	20045838	        59.57 ns/op	       0 B/op	       0 allocs/op
+BenchmarkMemoryStoreGetParallel-4   	21964062	        58.83 ns/op	       0 B/op	       0 allocs/op
+BenchmarkMemoryStoreGetParallel-4   	21093034	        58.26 ns/op	       0 B/op	       0 allocs/op
+BenchmarkMemoryStoreGetParallel-4   	19468324	        56.46 ns/op	       0 B/op	       0 allocs/op
+BenchmarkMemoryStoreGetParallel-4   	18962652	        59.70 ns/op	       0 B/op	       0 allocs/op
+BenchmarkMemoryStoreGetParallel-4   	19434591	        56.00 ns/op	       0 B/op	       0 allocs/op
+BenchmarkLimiterAcquireRelease/uncontended-4         	 6051288	       182.2 ns/op	      24 B/op	       1 allocs/op
+BenchmarkLimiterAcquireRelease/uncontended-4         	 6359107	       171.0 ns/op	      24 B/op	       1 allocs/op
+BenchmarkLimiterAcquireRelease/uncontended-4         	 6204195	       197.0 ns/op	      24 B/op	       1 allocs/op
+BenchmarkLimiterAcquireRelease/uncontended-4         	 6714823	       173.8 ns/op	      24 B/op	       1 allocs/op
+BenchmarkLimiterAcquireRelease/uncontended-4         	 8135485	       166.7 ns/op	      24 B/op	       1 allocs/op
+BenchmarkLimiterAcquireRelease/uncontended-4         	 6677559	       178.4 ns/op	      24 B/op	       1 allocs/op
+BenchmarkLimiterAcquireRelease/full_queue-4          	  138732	     11049 ns/op	      24 B/op	       1 allocs/op
+BenchmarkLimiterAcquireRelease/full_queue-4          	  112036	     11184 ns/op	      24 B/op	       1 allocs/op
+BenchmarkLimiterAcquireRelease/full_queue-4          	  105390	     11208 ns/op	      24 B/op	       1 allocs/op
+BenchmarkLimiterAcquireRelease/full_queue-4          	  113006	     12059 ns/op	      24 B/op	       1 allocs/op
+BenchmarkLimiterAcquireRelease/full_queue-4          	  117178	     11875 ns/op	      24 B/op	       1 allocs/op
+BenchmarkLimiterAcquireRelease/full_queue-4          	  105216	      9921 ns/op	      24 B/op	       1 allocs/op
+BenchmarkObserveFlood-4   	 5137309	       247.2 ns/op	       0 B/op	       0 allocs/op
+BenchmarkObserveFlood-4   	 4768794	       212.4 ns/op	       0 B/op	       0 allocs/op
+BenchmarkObserveFlood-4   	 5156442	       235.5 ns/op	       0 B/op	       0 allocs/op
+BenchmarkObserveFlood-4   	 5199973	       270.2 ns/op	       0 B/op	       0 allocs/op
+BenchmarkObserveFlood-4   	 4314806	       253.2 ns/op	       0 B/op	       0 allocs/op
+BenchmarkObserveFlood-4   	 4763929	       249.8 ns/op	       0 B/op	       0 allocs/op

@@ -1031,3 +1031,20 @@ Entry template:
 - Deviations: none.
 - Follow-ups: M10-10 (optional).
 - Context: low.
+
+## 2026-10-08 · M10-05 · done
+- Branch / PR: claude/peaceful-wright-an4zuy / #61
+- Done: BenchmarkServeHitVary, BenchmarkServeMissCoalesced, BenchmarkServeHitParallel (tracker on/off); TestGCAt1MEntries in loadtest (load tag); docs/benchmarks.md with M1 to M10 benchstat (both rerun on one 4-core box) and GC cost at 1M entries (about 6.6% of busy CPU, under 10%, no layout card).
+- Tests: root, all-package race tests and observe/prom pass; go vet with the load tag passes. Lint unrun (Go 1.25 binary); CI must confirm.
+- Deviations: NFR-5 wording only (dropped "provisional" as the spec itself planned, numbers unchanged). Parallel tracker cost recorded only, decided by Ashwin.
+- Review: card-reviewer, no must-fix. Fixed: raw GC output stored, projection bias and noise stated, GiB figure and citation nits. 
+- Follow-ups: rerun on the reference machine; optional M10-10.
+- Context: medium; size S was right.
+
+## 2026-10-08 · M10-05 · review-fixes
+- Branch / PR: claude/peaceful-wright-an4zuy / #61
+- Done: adversarial review found the 6.6% GC share was inflated by load-generator CPU. `TestGCAt1MEntries` now adds a saturated stage; result 13.6% to 15.4% at 1M entries, over 10%, so cards M16-01 (prototype, decision) and M16-02 are added to docs/cards/11-phase1x.md and the test only reports. NFR-5 edit reverted to "provisional" (the reviewer was right that it needs approval). Coalesced benchmark no longer measures the timer floor; parallel benchmark resets the timer, offsets goroutines, checks hits. M1 pooled over two runs; M10 growth stated as 10 to 20%.
+- Tests: root and all-package race tests, vet with the load tag; full `TestGCAt1MEntries` run (198 s). Lint unrun.
+- Deviations: none (NFR-5 reverted).
+- Follow-ups: M16-01 (needs Ashwin's go-ahead, D36), reference-machine rerun, the lookup-to-Join second-flight window.
+- Context: medium.

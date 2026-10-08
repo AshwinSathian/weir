@@ -1,0 +1,52 @@
+                                    │ docs/benchmarks/m1-linux4.txt │        docs/benchmarks/m10.txt         │
+                                    │            sec/op             │    sec/op     vs base                  │
+ServeHitSmall-4                                        2.243µ ±  4%   2.656µ ±  7%  +18.44% (p=0.000 n=12+6)
+KeyBuild-4                                             2.066µ ±  6%   2.330µ ± 10%  +12.81% (p=0.004 n=12+6)
+AcceptEncoding-4                                       310.8n ± 15%   329.7n ±  7%        ~ (p=0.125 n=12+6)
+MemoryStoreGetParallel-4                               59.48n ±  4%   58.54n ±  4%        ~ (p=0.385 n=12+6)
+ServeHitVary-4                                                        3.195µ ±  7%
+ServeMissCoalesced-4                                                  121.1µ ±  4%
+ServeHitParallel/missrate-on-4                                        2.599µ ± 14%
+ServeHitParallel/missrate-off-4                                       1.159µ ± 19%
+LimiterAcquireRelease/uncontended-4                                   176.1n ± 12%
+LimiterAcquireRelease/full_queue-4                                    11.20µ ± 11%
+ObserveFlood-4                                                        248.5n ± 15%
+geomean                                                540.9n         1.468µ         +8.68%
+
+                                    │ docs/benchmarks/m1-linux4.txt │         docs/benchmarks/m10.txt         │
+                                    │             B/op              │     B/op      vs base                   │
+ServeHitSmall-4                                      1.445Ki ± 0%     1.445Ki ± 0%       ~ (p=1.000 n=12+6) ¹
+KeyBuild-4                                             536.0 ± 0%       536.0 ± 0%       ~ (p=1.000 n=12+6) ¹
+AcceptEncoding-4                                       0.000 ± 0%       0.000 ± 0%       ~ (p=1.000 n=12+6) ¹
+MemoryStoreGetParallel-4                               0.000 ± 0%       0.000 ± 0%       ~ (p=1.000 n=12+6) ¹
+ServeHitVary-4                                                        1.461Ki ± 0%
+ServeMissCoalesced-4                                                  22.08Ki ± 0%
+ServeHitParallel/missrate-on-4                                        1.445Ki ± 0%
+ServeHitParallel/missrate-off-4                                       1.445Ki ± 0%
+LimiterAcquireRelease/uncontended-4                                     24.00 ± 0%
+LimiterAcquireRelease/full_queue-4                                      24.00 ± 0%
+ObserveFlood-4                                                          0.000 ± 0%
+geomean                                                           ²                 +0.00%                  ²
+¹ all samples are equal
+² summaries must be >0 to compute geomean
+
+                                    │ docs/benchmarks/m1-linux4.txt │        docs/benchmarks/m10.txt        │
+                                    │           allocs/op           │ allocs/op   vs base                   │
+ServeHitSmall-4                                        14.00 ± 0%     14.00 ± 0%       ~ (p=1.000 n=12+6) ¹
+KeyBuild-4                                             9.000 ± 0%     9.000 ± 0%       ~ (p=1.000 n=12+6) ¹
+AcceptEncoding-4                                       0.000 ± 0%     0.000 ± 0%       ~ (p=1.000 n=12+6) ¹
+MemoryStoreGetParallel-4                               0.000 ± 0%     0.000 ± 0%       ~ (p=1.000 n=12+6) ¹
+ServeHitVary-4                                                        15.00 ± 0%
+ServeMissCoalesced-4                                                  209.0 ± 0%
+ServeHitParallel/missrate-on-4                                        14.00 ± 0%
+ServeHitParallel/missrate-off-4                                       14.00 ± 0%
+LimiterAcquireRelease/uncontended-4                                   1.000 ± 0%
+LimiterAcquireRelease/full_queue-4                                    1.000 ± 0%
+ObserveFlood-4                                                        0.000 ± 0%
+geomean                                                           ²               +0.00%                  ²
+¹ all samples are equal
+² summaries must be >0 to compute geomean
+
+                     │ docs/benchmarks/m10.txt │
+                     │     origin-calls/op     │
+ServeMissCoalesced-4                1.003 ± 0%

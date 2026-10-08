@@ -1,4 +1,4 @@
-# Phase 1.x cards: M11 to M15
+# Phase 1.x cards: M11 to M16
 
 ## Phase 1.x
 
@@ -58,3 +58,19 @@
 - Touch: purge.go, store/memory/scrub.go, tests
 - Tests: TestEagerHardPurgeDeletesAllPartitions, TestEagerSoftIsError, TestEagerUnsupportedStore
 - AC: `make check` passes
+
+### [ ] M16-01 Pointer-light layout: prototype and decision (D36)
+- Plan: M10.5b follow-up · Size: S · Depends on: M10-05
+- Read: 01 D36, NFR-5; 05 §3 (S3-FIFO), §4; store/memory/ (entry, shard); docs/benchmarks.md "M10 GC cost at 1M entries"
+- Touch: store/memory/ (throwaway prototype, not merged), docs/benchmarks.md, docs/02-architecture.md (D36 note)
+- Tests: `TestGCAt1MEntries` against the prototype (saturated GC share at 1M entries), `BenchmarkMemoryStoreGetParallel`
+- AC: the share with a first-cut layout (one pointer-free `[]byte` per entry holding header and body, pointer-free index) is recorded next to the 13.6% to 15.4% baseline; a recommendation is written (go to M16-02, or keep the heap layout and revise the 10% line); the user decides
+- Notes: ask the user first: D36 says the store stays on the Go heap, and the baseline is over the 10% line of PLAN M10.5b. The numbers were taken on a 4-core Xeon; rerun the baseline on the reference machine first if one is at hand.
+
+### [ ] M16-02 Pointer-light memory store layout
+- Plan: M10.5b follow-up · Size: M · Depends on: M16-01
+- Read: M16-01's recommendation; 05 §3, §4; store/memory/
+- Touch: store/memory/, docs/05-storage-interface-spec.md, loadtest/gc_test.go (gate), docs/benchmarks.md
+- Tests: the store conformance suite unchanged; `Get` and `Set` allocation benchmarks; `TestGCAt1MEntries` asserts a saturated GC share of at most 10% at 1M entries
+- AC: the share target holds on the box that measured 13.6% to 15.4%; `BenchmarkMemoryStoreGetParallel` does not regress over 20%; stored entries stay immutable (P4); `make check` passes
+- Notes: only if M16-01 recommends it and the user approves.

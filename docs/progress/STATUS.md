@@ -4,13 +4,14 @@ Updated: 2026-10-08
 Phase: 1
 Current card: none
 Card state: awaiting-merge
-Branch: claude/cool-edison-zzoboq
-PR: #60 https://github.com/AshwinSathian/weir/pull/60
-Next card: M10-05 (M10-10 is optional)
+Branch: claude/peaceful-wright-an4zuy
+PR: #61 https://github.com/AshwinSathian/weir/pull/61
+Next card: M10-06 (M10-10 is optional)
 
 ## Waiting on Ashwin
 
-none (the M10-09 question was decided 2026-10-08, see below)
+- M16-01/M16-02 (new, Phase 1.x): at 1M entries GC takes 13.6% to 15.4% of busy CPU under saturated hits (docs/benchmarks.md), over the 10% line. Approve starting the pointer-light layout prototype (M16-01, then M16-02)? It revisits D36.
+- NFR-5: left "provisional". Approve final wording after a rerun on the reference machine (M1 to M10 `ServeHitSmall` grew 10 to 20% on the Xeon, at the 20% gate; not profiled).
 
 ## Blockers
 
@@ -18,6 +19,9 @@ none
 
 ## Notes for the next session
 
+- M10-05: all numbers come from a 4-core Xeon; rerun the benchmarks and `make load` on the reference machine and replace the M10 tables in docs/benchmarks.md.
+- M10-05: parallel miss-rate tracker cost recorded only (decided 2026-10-08); no card for `TryLock` or per-shard counters.
+- M10-05: a follower can miss the store just before the leader stores, then join after the flight is gone and start a second flight (0.3 to 0.4% extra origin calls in the coalesced burst benchmark). Unfixed, no card; see docs/benchmarks.md.
 - golangci-lint cannot run in cloud sessions (built with Go 1.25); CI must confirm lint.
 - `pragma-response-no-cache-heuristic` is a Go `net/http` artifact (`fixPragmaCacheControl`), documented as by design.
 - Run the nightly workflow once after the M10-04 merge; PLAN M10.4 stays unticked until it is green.
