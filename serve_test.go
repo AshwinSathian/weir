@@ -1113,3 +1113,31 @@ func TestCVE202435296(t *testing.T) {
 		}
 	})
 }
+
+// FR-STO-13, FR-FWD-7, RFC 9110 §6.6.1: a response without a valid Date
+// leaves Serve with one on a miss, a pass-through and a stream, and the
+// hit later serves the same value the miss did.
+func TestForwardedResponseGetsDate(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		o := testorigin.NewChecked(t, 64, 16)
+		o.Default(cacheable("hello"))
+		o.Route("/bad", testorigin.Behavior{Header: http.Header{"Cache-Control": {"max-age=60"}, "Date": {"not a date"}}, Body: []byte("x")})
+		o.Route("/pass", testorigin.Behavior{Header: http.Header{"Cache-Control": {"private"}}, Body: []byte("p")})
+		o.Route("/stream", testorigin.Behavior{Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: []byte("data: 1\n\n")})
+		e := newEngine(t, cacheCfg)
+		defer closeEngine(t, e)
+
+		want := time.Now().UTC().Format(http.TimeFormat)
+		for _, path := range []string{"/a", "/bad", "/pass", "/stream"} {
+			resp, _ := serve(t, e, getReq(path), o)
+			if got := resp.Header.Get("Date"); got != want {
+				t.Errorf("%s: Date = %q, want %q", path, got, want)
+			}
+		}
+		time.Sleep(10 * time.Second)
+		resp, _ := serve(t, e, getReq("/a"), o)
+		if !resp.Cache.Hit || resp.Header.Get("Date") != want {
+			t.Fatalf("hit = %v Date = %q, want the miss's %q", resp.Cache.Hit, resp.Header.Get("Date"), want)
+		}
+	})
+}
