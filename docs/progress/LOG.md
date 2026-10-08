@@ -1023,3 +1023,11 @@ Entry template:
 - Review: card-reviewer, no must-fix; ANSIC zero-padded day nit fixed, doc row clarified.
 - Follow-ups: possible card to apply client preconditions after revalidation (needs FR-SRV-2 decision).
 - Context: medium; size S was right.
+
+## 2026-10-08 · M10-09 · review-fixes
+- Branch / PR: claude/cool-edison-zzoboq / #60
+- Done: adversarial review, no must-fix. `ParseDate` rejects RFC 850 fractional seconds and a misplaced asctime double space; tests added; decided the Waiting item (kept by design, optional card M10-10). Noted request `max-age =0` no longer forces revalidation, and that a loose `Last-Modified` falls to `DefaultTTL` when it is above 0.
+- Tests: httpcc and root race tests pass; FuzzHTTPDate 15 s clean. Lint unrun locally.
+- Deviations: none.
+- Follow-ups: M10-10 (optional).
+- Context: low.

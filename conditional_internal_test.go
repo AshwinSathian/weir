@@ -21,10 +21,14 @@ func TestClientIMSWholeSecond(t *testing.T) {
 	}{
 		{"Date with fraction, same second", store.Entry{Status: 200, Date: sec.Add(700 * time.Millisecond)}, sec, true},
 		{"Last-Modified with fraction, same second", store.Entry{Status: 200, LastModified: sec.Add(700 * time.Millisecond)}, sec, true},
+		{"If-None-Match ignores the date", store.Entry{Status: 200, ETag: `"a"`, Date: sec.Add(time.Hour)}, time.Time{}, false},
 		{"later second still modified", store.Entry{Status: 200, Date: sec.Add(time.Second)}, sec, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cc := &keys.ClientConditionals{IfModifiedSince: tc.ims}
+			if tc.ent.ETag != "" {
+				cc.IfNoneMatch = []string{`"b"`}
+			}
 			if got := clientNotModified(cc, &tc.ent); got != tc.want {
 				t.Errorf("clientNotModified = %v, want %v", got, tc.want)
 			}

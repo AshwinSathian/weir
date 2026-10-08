@@ -132,13 +132,14 @@ func ParseDate(s string) (time.Time, bool) {
 // counts as a time in the past (FR-FRS-2), so reading one loosely would
 // reuse a response the origin marked expired. The layouts with fixed-width
 // fields are checked by length; RFC 850 has variable weekday names, so its
-// day and hour positions are checked from the delimiters.
+// day and hour positions are checked from the delimiters, and the space
+// after the seconds rules out a fraction, which time.Parse also accepts.
 func fixedWidth(layout, s string) bool {
 	switch layout {
 	case http.TimeFormat:
 		return len(s) == len(http.TimeFormat)
 	case time.ANSIC: // asctime pads the day with a space, never a zero
-		return len(s) == len(time.ANSIC) && s[8] != '0'
+		return len(s) == len(time.ANSIC) && s[7] == ' ' && s[8] != '0' && '0' <= s[9] && s[9] <= '9' && s[10] == ' '
 	}
 	// RFC 850: "Sunday, 06-Nov-94 08:49:37 GMT"
 	if strings.Contains(s, "  ") {
@@ -146,7 +147,8 @@ func fixedWidth(layout, s string) bool {
 	}
 	comma := strings.IndexByte(s, ',')
 	colon := strings.IndexByte(s, ':')
-	return comma >= 0 && colon >= 3 && len(s) > comma+4 && s[comma+4] == '-' && s[colon-3] == ' '
+	return comma >= 0 && colon >= 3 && len(s) > comma+4 && s[comma+4] == '-' && s[colon-3] == ' ' &&
+		len(s) > colon+6 && s[colon+6] == ' '
 }
 
 func clampLifetime(d time.Duration) time.Duration { return min(max(d, 0), maxLifetime) }
