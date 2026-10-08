@@ -86,13 +86,15 @@ func TestTransientBodyMemoryBounded(t *testing.T) {
 					return
 				}
 				defer resp.Body.Close()
-				io.Copy(io.Discard, resp.Body)
+				if _, err := io.Copy(io.Discard, resp.Body); err != nil {
+					t.Errorf("read /k%d: %v", i, err)
+				}
 			})
 		}
 		wg.Wait()
 
-		if got, max := peak.Load(), int64(maxConc*(limit+1)); got > max {
-			t.Fatalf("peak buffered body bytes = %d, want at most %d", got, max)
+		if got, bound := peak.Load(), int64(maxConc*(limit+1)); got > bound {
+			t.Fatalf("peak buffered body bytes = %d, want at most %d", got, bound)
 		}
 		if got := peak.Load(); got <= limit {
 			t.Fatalf("peak buffered body bytes = %d: fetches never overlapped", got)
