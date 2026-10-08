@@ -5,7 +5,7 @@ Phase: 1
 Current card: none
 Card state: awaiting-merge
 Branch: claude/funny-bardeen-pjrvvk
-PR: none (not opened; Ashwin has not asked for one)
+PR: #62 https://github.com/AshwinSathian/weir/pull/62
 Next card: M10-10 (optional, needs Ashwin's go-ahead on the FR-SRV-2 wording); otherwise M16-01 once approved
 
 ## Waiting on Ashwin
