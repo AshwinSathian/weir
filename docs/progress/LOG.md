@@ -1006,3 +1006,11 @@ Entry template:
 - Review: card-reviewer, no must-fix; should-fix (valid Date case) and test-placement nit fixed. The 304 path is covered by the existing rfc9111 test.
 - Follow-ups: none.
 - Context: low; size S was right.
+
+## 2026-10-08 · M10-07 · review-fixes
+- Branch / PR: claude/optimistic-curie-2mn579 / #59
+- Done: adversarial review, no must-fix. Added TestRevalidation304WithoutDateStamps; removed three STATUS notes that still described the fixed gaps; FR-STO-13 notes the one-second precision of the stamp.
+- Tests: root race tests pass. Lint unrun locally; CI must confirm.
+- Deviations: none.
+- Follow-ups: none.
+- Context: low.

@@ -496,3 +496,30 @@ func TestStoredEntriesEncode(t *testing.T) {
 		}
 	})
 }
+
+// FR-STO-13, FR-SRV-3, RFC 9110 §6.6.1: a 304 without Date still leaves the
+// freshened response, and the hit after it, with one Date, set at receipt.
+func TestRevalidation304WithoutDateStamps(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		o := testorigin.NewChecked(t, 64, 16)
+		o.Default(testorigin.Behavior{Header: http.Header{"Cache-Control": {"max-age=60"}, "Etag": {`"1"`}}, Body: []byte("v1")})
+		e := newEngine(t, cacheCfg)
+		defer closeEngine(t, e)
+
+		serve(t, e, getReq("/a"), o)
+		time.Sleep(61 * time.Second)
+		o.Default(testorigin.Behavior{Func: func(*weir.Request) (*weir.Response, error) {
+			return respond(http.StatusNotModified, http.Header{"Cache-Control": {"max-age=60"}}, ""), nil
+		}})
+		want := time.Now().UTC().Format(http.TimeFormat)
+		resp, _ := serve(t, e, getReq("/a"), o)
+		if got := resp.Header.Get("Date"); got != want {
+			t.Fatalf("revalidated Date = %q, want %q", got, want)
+		}
+		time.Sleep(5 * time.Second)
+		resp, _ = serve(t, e, getReq("/a"), o)
+		if !resp.Cache.Hit || resp.Header.Get("Date") != want {
+			t.Fatalf("hit = %v Date = %q, want %q", resp.Cache.Hit, resp.Header.Get("Date"), want)
+		}
+	})
+}
