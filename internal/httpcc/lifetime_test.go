@@ -115,6 +115,7 @@ func TestParseDateRejectsLooseForms(t *testing.T) {
 		"Thursday,  18-Aug-50 02:01:18 GMT",
 		"Thu Aug 18 2:01:18 2050",
 		"Thu Aug  18 02:01:18 2050",
+		"Thu Aug 06 02:01:18 2050",
 	} {
 		if got, ok := ParseDate(s); ok {
 			t.Errorf("ParseDate(%q) = %v, want invalid", s, got)

@@ -4,17 +4,27 @@ Updated: 2026-10-08
 Phase: 1
 Current card: none
 Card state: awaiting-merge
-Branch: claude/optimistic-curie-2mn579
-PR: #59 https://github.com/AshwinSathian/weir/pull/59
-Next card: M10-09
+Branch: claude/cool-edison-zzoboq
+PR: pending
+Next card: M10-05
 
 ## Waiting on Ashwin
 
-none
+- M10-09 left two cache-tests ids failing that its AC listed: `conditional-lm-fresh-no-lm` (the test expects 304 for a stored `Date` later than the client's IMS, which RFC 9110 §13.1.3 answers with 200) and `conditional-lm-stale` (client preconditions are not applied after a revalidation; applying them would extend FR-SRV-2). Accept both as documented, or approve the FR-SRV-2 extension as a new card?
 
 ## Blockers
 
 none
+
+## Notes for the next session
+
+- golangci-lint cannot run in cloud sessions (built with Go 1.25); CI must confirm lint.
+- `pragma-response-no-cache-heuristic` is a Go `net/http` artifact (`fixPragmaCacheControl`), documented as by design.
+- Run the nightly workflow once after the M10-04 merge; PLAN M10.4 stays unticked until it is green.
+
+## Decided 2026-10-08 (M10-09)
+
+- `ParseDate` checks field widths by hand after `time.Parse`; `max-age =3600` and `max-age= 3600` are non-integers (request-side delta directives too); `If-Modified-Since` compares at whole seconds. The card's suspected cause for `conditional-lm-*` was wrong: see Waiting on Ashwin.
 
 ## Decided 2026-10-07 (M10-04)
 

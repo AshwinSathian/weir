@@ -137,8 +137,8 @@ func fixedWidth(layout, s string) bool {
 	switch layout {
 	case http.TimeFormat:
 		return len(s) == len(http.TimeFormat)
-	case time.ANSIC:
-		return len(s) == len(time.ANSIC)
+	case time.ANSIC: // asctime pads the day with a space, never a zero
+		return len(s) == len(time.ANSIC) && s[8] != '0'
 	}
 	// RFC 850: "Sunday, 06-Nov-94 08:49:37 GMT"
 	if strings.Contains(s, "  ") {
