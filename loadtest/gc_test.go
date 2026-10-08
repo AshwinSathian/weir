@@ -44,19 +44,31 @@ func readGC() gcSample {
 // gcResult is one phase of TestGCAt1MEntries.
 type gcResult struct {
 	heapMiB     uint64
+	liveMiB     uint64
 	hitRatio    float64
-	h           *hist
+	h           *hist // paced load with forced cycles
+	cycles      int   // forced cycles in the paced load
+	cadence     time.Duration
 	cpuPerCycle float64 // GC CPU seconds per cycle, measured over forced cycles under load
-	allocPerSec float64 // bytes allocated per second of load
-	busyCPU     float64 // non-idle CPU seconds per second of load
+
+	// Saturated, unpaced load with natural cycles only. The paced load's CPU
+	// per request is mostly the generator (sleeps, rand, path building), so
+	// it cannot say what share of a busy server GC takes.
+	satReqs     int64
+	satCycles   uint64  // natural cycles that ended in the window
+	satDirect   float64 // GC CPU over busy CPU as the runtime reported it
+	satAllocReq float64 // bytes allocated per request
+	satMutReq   float64 // non-GC CPU seconds per request
 	liveBytes   float64
 }
 
-// projectedShare is the GC share of busy CPU in steady state: with GOGC=100
-// a cycle starts each time the program allocates as much as the live heap.
-func (r gcResult) projectedShare() float64 {
-	cyclesPerSec := r.allocPerSec / r.liveBytes
-	return r.cpuPerCycle * cyclesPerSec / r.busyCPU
+// satProjected is the GC share of busy CPU for a server saturated with hits:
+// with GOGC=100 a cycle starts about every live-heap bytes allocated, each
+// costing cpuPerCycle. It uses the cost per request of the saturated phase,
+// whose cycles are too few in the window to give a direct figure.
+func (r gcResult) satProjected() float64 {
+	gcPerReq := r.cpuPerCycle * r.satAllocReq / r.liveBytes
+	return gcPerReq / (r.satMutReq + gcPerReq)
 }
 
 // gcPhase fills an engine with n keys of 1 KiB, then reads random keys at
@@ -94,15 +106,15 @@ func gcPhase(t *testing.T, n, rps int, d time.Duration) gcResult {
 	runtime.ReadMemStats(&ms0)
 
 	var c counters
-	start, before := time.Now(), readGC()
 	stop := make(chan struct{})
 	time.AfterFunc(d, func() { close(stop) })
+	cadence := min(5*time.Second, d/3)
 	var cycles int
 	var cycleCPU float64
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		tk := time.NewTicker(max(d/6, time.Second))
+		tk := time.NewTicker(cadence)
 		defer tk.Stop()
 		for {
 			select {
@@ -120,28 +132,49 @@ func gcPhase(t *testing.T, n, rps int, d time.Duration) gcResult {
 		serveOnce(e, org, pathN("k", r.IntN(n)), "", h, &c)
 	})
 	<-done
-	elapsed := time.Since(start).Seconds()
-	after := readGC()
 	runtime.ReadMemStats(&ms1)
+
+	// Saturated stage: no pacing, no forced cycles.
+	var sat counters
+	paths := make([]string, n) // built outside the window: the generator should cost little
+	for i := range paths {
+		paths[i] = pathN("k", i)
+	}
+	var ms2, ms3 runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&ms2)
+	cy0, sb := readCycles(), readGC()
+	stop = make(chan struct{})
+	time.AfterFunc(dur(60*time.Second, 8*time.Second), func() { close(stop) })
+	closedLoop(64, stop, func(r *rand.Rand, h *hist) { serveOnce(e, org, paths[r.IntN(n)], "", nil, &sat) })
+	sa := readGC()
+	cy1 := readCycles()
+	runtime.ReadMemStats(&ms3)
 	closeEngine(t, e)
 
-	// Busy CPU excludes the forced cycles' GC time so the projection does
-	// not count them twice.
-	busy := (after.total - before.total) - (after.idle - before.idle) - cycleCPU
+	reqs := sat.total.Load()
+	gc, busy := sa.gc-sb.gc, (sa.total-sb.total)-(sa.idle-sb.idle)
 	return gcResult{
-		heapMiB: ms0.HeapInuse >> 20, hitRatio: float64(c.hits.Load()) / float64(c.total.Load()), h: h,
-		cpuPerCycle: cycleCPU / float64(max(cycles, 1)),
-		allocPerSec: float64(ms1.TotalAlloc-ms0.TotalAlloc) / elapsed,
-		busyCPU:     busy / elapsed,
+		heapMiB: ms0.HeapInuse >> 20, liveMiB: ms0.HeapAlloc >> 20,
+		hitRatio: float64(c.hits.Load()) / float64(c.total.Load()), h: h,
+		cycles: cycles, cadence: cadence, cpuPerCycle: cycleCPU / float64(max(cycles, 1)),
+		satReqs: reqs, satCycles: cy1 - cy0, satDirect: gc / busy,
+		satAllocReq: float64(ms3.TotalAlloc-ms2.TotalAlloc) / float64(reqs),
+		satMutReq:   (busy - gc) / float64(reqs),
 		liveBytes:   float64(ms0.HeapAlloc),
 	}
 }
 
+func readCycles() uint64 {
+	s := []metrics.Sample{{Name: "/gc/cycles/total:gc-cycles"}}
+	metrics.Read(s)
+	return s[0].Value.Uint64()
+}
+
 // TestGCAt1MEntries measures the cost of keeping 1M entries on the Go heap
 // (D36, NFR-5, card M10-05): the GC share of CPU and the hit p99 at a fixed
-// request rate, next to the same load on a 10 000-entry store. Not a gate on
-// latency; the one assertion is the 10% GC budget that decides whether a
-// pointer-light layout card is needed. Machine-dependent: the reference
+// request rate, next to the same load on a 10 000-entry store. It asserts nothing: the
+// 10% GC line is a decision recorded in docs/benchmarks.md. Machine-dependent: the reference
 // machine's numbers are the ones docs/benchmarks.md keeps.
 func TestGCAt1MEntries(t *testing.T) {
 	n := 1_000_000
@@ -154,21 +187,31 @@ func TestGCAt1MEntries(t *testing.T) {
 	small := gcPhase(t, 10000, rps, d)
 	large := gcPhase(t, n, rps, d)
 	pair := func(f func(gcResult) string) string { return f(small) + " / " + f(large) }
+	f2 := func(v float64) string { return strconv.FormatFloat(v, 'f', 2, 64) }
 	table(t, "gc at scale",
 		row("entries (small / large)", "10000 / "+strconv.Itoa(n)),
-		row("offered rate", rps),
-		row("heap in use after fill", pair(func(r gcResult) string { return strconv.FormatUint(r.heapMiB, 10) + " MiB" })),
-		row("hit ratio", pair(func(r gcResult) string { return strconv.FormatFloat(r.hitRatio, 'f', 4, 64) })),
-		row("GC CPU per cycle", pair(func(r gcResult) string { return strconv.FormatFloat(r.cpuPerCycle*1000, 'f', 1, 64) + " ms" })),
-		row("alloc rate", pair(func(r gcResult) string { return strconv.FormatFloat(r.allocPerSec/(1<<20), 'f', 1, 64) + " MiB/s" })),
-		row("busy CPU (cores, excl. forced GC)", pair(func(r gcResult) string { return strconv.FormatFloat(r.busyCPU, 'f', 2, 64) })),
-		row("projected GC share of busy CPU", pair(func(r gcResult) string { return pct(r.projectedShare()) })),
-		row("p50", pair(func(r gcResult) string { return r.h.quantile(0.5).String() })),
-		row("p99 (forced cycle every ~5 s)", pair(func(r gcResult) string { return r.h.quantile(0.99).String() })),
-		row("max", pair(func(r gcResult) string { return r.h.max.String() })),
+		row("heap in use / live after fill", pair(func(r gcResult) string {
+			return strconv.FormatUint(r.heapMiB, 10) + " / " + strconv.FormatUint(r.liveMiB, 10) + " MiB"
+		})),
+		row("hit ratio (paced)", pair(func(r gcResult) string { return strconv.FormatFloat(r.hitRatio, 'f', 4, 64) })),
+		row("GC CPU per forced cycle", pair(func(r gcResult) string {
+			return f2(r.cpuPerCycle*1000) + " ms (" + strconv.Itoa(r.cycles) + " cycles, every " + r.cadence.String() + ")"
+		})),
+		row("paced "+strconv.Itoa(rps)+"/s p50", pair(func(r gcResult) string { return r.h.quantile(0.5).String() })),
+		row("paced p99 with forced cycles", pair(func(r gcResult) string { return r.h.quantile(0.99).String() })),
+		row("paced max", pair(func(r gcResult) string { return r.h.max.String() })),
+		row("saturated requests", pair(func(r gcResult) string { return strconv.FormatInt(r.satReqs, 10) })),
+		row("saturated alloc per request", pair(func(r gcResult) string { return f2(r.satAllocReq) + " B" })),
+		row("saturated non-GC CPU per request", pair(func(r gcResult) string { return f2(r.satMutReq*1e6) + " µs" })),
+		row("saturated natural cycles in window", pair(func(r gcResult) string { return strconv.FormatUint(r.satCycles, 10) })),
+		row("saturated GC share, runtime-reported", pair(func(r gcResult) string { return pct(r.satDirect) })),
+		row("saturated GC share, projected", pair(func(r gcResult) string { return pct(r.satProjected()) })),
 	)
-	if share := large.projectedShare(); share > 0.10 {
-		t.Errorf("projected GC share %s of busy CPU at %d entries, over the 10%% budget: add the pointer-light layout card to docs/cards/11-phase1x.md", pct(share), n)
+	// Reporting only. The 10% line decides whether a pointer-light layout card
+	// is needed (PLAN M10.5b); that decision is in docs/benchmarks.md, and a
+	// gate belongs here once such a layout exists.
+	if share := large.satProjected(); share > 0.10 {
+		t.Logf("saturated GC share %s is over the 10%% line: see docs/benchmarks.md and card M16-01", pct(share))
 	}
 }
 

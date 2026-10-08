@@ -1040,3 +1040,11 @@ Entry template:
 - Review: card-reviewer, no must-fix. Fixed: raw GC output stored, projection bias and noise stated, GiB figure and citation nits. 
 - Follow-ups: rerun on the reference machine; optional M10-10.
 - Context: medium; size S was right.
+
+## 2026-10-08 · M10-05 · review-fixes
+- Branch / PR: claude/peaceful-wright-an4zuy / #61
+- Done: adversarial review found the 6.6% GC share was inflated by load-generator CPU. `TestGCAt1MEntries` now adds a saturated stage; result 13.6% to 15.4% at 1M entries, over 10%, so card M16-01 is added to docs/cards/11-phase1x.md and the test only reports. NFR-5 edit reverted to "provisional" (the reviewer was right that it needs approval). Coalesced benchmark no longer measures the timer floor; parallel benchmark resets the timer, offsets goroutines, checks hits. M1 pooled over two runs; M10 growth stated as 10 to 20%.
+- Tests: root and all-package race tests, vet with the load tag; full `TestGCAt1MEntries` run (198 s). Lint unrun.
+- Deviations: none (NFR-5 reverted).
+- Follow-ups: M16-01 (needs Ashwin's go-ahead, D36), reference-machine rerun, the lookup-to-Join second-flight window.
+- Context: medium.

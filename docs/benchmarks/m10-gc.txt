@@ -1,16 +1,22 @@
 # TestGCAt1MEntries, scale 1, 4 CPU, go1.27.0, one run, 2026-10-08
 # go test -tags load -count=1 -run GCAt -v ./loadtest
-gc at scale (scale 1, 4 CPU, go1.27.0)
-  entries (small / large)            10000 / 1000000
-  offered rate                       20000
-  heap in use after fill             31 MiB / 2605 MiB
-  hit ratio                          1.0000 / 1.0000
-  GC CPU per cycle                   13.2 ms / 2444.5 ms
-  alloc rate                         31.8 MiB/s / 29.0 MiB/s
-  busy CPU (cores, excl. forced GC)  0.48 / 0.52
-  projected GC share of busy CPU     3.53% / 6.55%
-  p50                                6.144µs / 8.192µs
-  p99 (forced cycle every ~5 s)      53.248µs / 57.344µs
-  max                                6.906283ms / 6.480179ms
-# Reviewer rerun at WEIR_LOAD_SCALE=0.2 (6 s windows): per-cycle 12.7 ms / 2457 ms, projected share 4.07% / 2.88%,
-# busy CPU 0.88 cores, alloc rate 21 MiB/s on the large heap.
+
+        gc at scale (scale 1, 4 CPU, go1.27.0)
+          entries (small / large)            10000 / 1000000
+          heap in use / live after fill      31 / 24 MiB / 2601 / 2068 MiB
+          hit ratio (paced)                  1.0000 / 1.0000
+          GC CPU per forced cycle            12.99 ms (5 cycles, every 5s) / 2510.45 ms (5 cycles, every 5s)
+          paced 20000/s p50                  6.656µs / 8.192µs
+          paced p99 with forced cycles       53.248µs / 57.344µs
+          paced max                          5.402657ms / 9.358089ms
+          saturated requests                 25241654 / 18601900
+          saturated alloc per request        1656.07 B / 1664.08 B
+          saturated non-GC CPU per request   8.72 µs / 10.55 µs
+          saturated natural cycles in window 1575 / 12
+          saturated GC share, runtime-reported 7.27% / 13.63%
+          saturated GC share, projected      8.67% / 15.44%
+        
+saturated GC share 15.44% is over the 10% line: see docs/benchmarks.md and card M10-11
+--- PASS: TestGCAt1MEntries (197.71s)
+PASS
+ok  	github.com/AshwinSathian/weir/loadtest	197.923s

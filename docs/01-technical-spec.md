@@ -507,7 +507,7 @@ Evaluated in order after validation, bypass check, and store lookup.
 - NFR-2. No panics from any request, response, or configuration value that passes `New`. Enforced by fuzz targets for every parser.
 - NFR-3. Every in-memory structure has a stated bound: store bytes (configured capacity), flights (≤ `MaxConcurrent + MaxQueue`), limiter waiters (≤ `MaxQueue`), miss-rate counters (`TopK`), epochs (fixed-size sketch for soft and invalid epochs, 4 MiB by default, plus a capped exact table for hard purges, [05 §4.4](05-storage-interface-spec.md)), variants per primary key (`MaxVariants`).
 - NFR-4. Transient body memory is bounded by `MaxConcurrent × MaxObjectBytes` (64 MiB at defaults).
-- NFR-5. Hit path budget on the reference machine (Apple M-series, Go 1.27): `BenchmarkServeHitSmall` at most 4 µs/op and 16 allocs/op. Measured in M10 on a 4-core 2.1 GHz Xeon (slower than the reference machine): 2.4 µs/op and 14 allocs/op, so the budget stands (docs/benchmarks.md). A regression over 20% fails review.
+- NFR-5. Hit path budget on the reference machine (Apple M-series, Go 1.27): `BenchmarkServeHitSmall` at most 4 µs/op and 16 allocs/op. These numbers are provisional until the first measurement in M10; after that a regression over 20% fails review.
 - NFR-6. Zero third-party imports in the root module, checked in CI by `go list -deps`.
 - NFR-7. Public API documented with godoc on every exported identifier; `go vet` and `golangci-lint` clean.
 

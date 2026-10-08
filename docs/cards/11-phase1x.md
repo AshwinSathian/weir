@@ -1,4 +1,4 @@
-# Phase 1.x cards: M11 to M15
+# Phase 1.x cards: M11 to M16
 
 ## Phase 1.x
 
@@ -58,3 +58,11 @@
 - Touch: purge.go, store/memory/scrub.go, tests
 - Tests: TestEagerHardPurgeDeletesAllPartitions, TestEagerSoftIsError, TestEagerUnsupportedStore
 - AC: `make check` passes
+
+### [ ] M16-01 Pointer-light memory store layout (D36)
+- Plan: M10.5b follow-up · Size: L · Depends on: M10-05
+- Read: 01 D36, NFR-5; 05 §3 (S3-FIFO), §4; store/memory/ (entry, shard); docs/benchmarks.md "M10 GC cost at 1M entries"
+- Touch: store/memory/, docs/05-storage-interface-spec.md, docs/02-architecture.md (D36 note), loadtest/gc_test.go (gate), docs/benchmarks.md
+- Tests: the store conformance suite unchanged; a benchmark of `Get` and `Set` allocations; `TestGCAt1MEntries` gains an assertion that the saturated GC share at 1M entries is at most 10%
+- AC: saturated GC share of busy CPU at 1M entries is at most 10% on the box that measured 13.6% to 15.4% (docs/benchmarks.md); `BenchmarkMemoryStoreGetParallel` does not regress over 20%; stored entries stay immutable (P4); `make check` passes
+- Notes: ask the user first: D36 says the store stays on the Go heap, and a layout change (for example entries serialized into per-shard byte slabs with an offset index, so the collector scans few pointers) touches the store contract's allocation behavior. Measure whether a first cut (one []byte per entry holding header and body, a pointer-free index) is enough before a slab allocator.

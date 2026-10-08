@@ -1,14 +1,16 @@
 package weir_test
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"net/http"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/AshwinSathian/weir"
 	"github.com/AshwinSathian/weir/internal/testorigin"
@@ -100,18 +102,28 @@ func BenchmarkServeHitVary(b *testing.B) {
 }
 
 // BenchmarkServeMissCoalesced measures a cold key requested by eight
-// goroutines at once (07 §10, FR-COA-*): flight creation, joining, fan-out
-// of one origin response. The origin answers after a short real delay so
-// followers have time to join; "origin-calls/op" shows how many fetches the
-// eight requests cost (1 is perfect coalescing).
+// goroutines at once (07 §10, FR-COA-1, FR-COA-5): flight creation, joining,
+// fan-out of one origin response. The origin yields the processor a few
+// times instead of sleeping, so followers can join without a timer (a 100 µs
+// timer wakes after about 1 ms on Linux and would dominate ns/op).
+// "origin-calls/op" shows how many fetches the eight requests cost: a
+// follower that misses the store just before the leader stores and joins
+// just after the flight is gone starts a second flight, so it reads 1.001,
+// not exactly 1 (docs/benchmarks.md).
 func BenchmarkServeMissCoalesced(b *testing.B) {
 	const followers = 8
 	o := testorigin.NewChecked(b, 1<<20, 1<<20)
-	o.Default(testorigin.Behavior{
-		Header: http.Header{"Cache-Control": {"max-age=3600"}},
-		Body:   []byte(strings.Repeat("x", 1024)),
-		Delay:  100 * time.Microsecond,
-	})
+	body := []byte(strings.Repeat("x", 1024))
+	o.Default(testorigin.Behavior{Func: func(*weir.Request) (*weir.Response, error) {
+		for range 50 {
+			runtime.Gosched()
+		}
+		return &weir.Response{
+			StatusCode: 200,
+			Header:     http.Header{"Cache-Control": {"max-age=3600"}},
+			Body:       io.NopCloser(bytes.NewReader(body)),
+		}, nil
+	}})
 	e := benchEngine(b, cacheCfg)
 	ctx := b.Context()
 
@@ -168,8 +180,12 @@ func BenchmarkServeHitParallel(b *testing.B) {
 			}
 			ctx := b.Context()
 			b.ReportAllocs()
+			b.ResetTimer() // the warm-up above is not the measurement
+			var worker atomic.Int64
 			b.RunParallel(func(pb *testing.PB) {
-				var i int
+				// Each goroutine starts at its own offset so they do not
+				// walk the same keys, and so the same shards, in lockstep.
+				i := int(worker.Add(1)) * 97
 				for pb.Next() {
 					resp, err := e.Serve(ctx, reqs[i%n], o)
 					if err != nil {
@@ -181,6 +197,9 @@ func BenchmarkServeHitParallel(b *testing.B) {
 					i++
 				}
 			})
+			if o.TotalCalls() != n {
+				b.Fatalf("origin calls %d, want %d: not all hits", o.TotalCalls(), n)
+			}
 		})
 	}
 }

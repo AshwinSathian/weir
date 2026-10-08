@@ -321,7 +321,7 @@ Notes on how `loadtest/` applies the table. Steady hits calibrates the saturated
 
 ## 10. Benchmarks
 
-`BenchmarkServeHitSmall` (1 KiB body), `BenchmarkServeHitVary`, `BenchmarkServeMissCoalesced`, `BenchmarkKeyBuild`, `BenchmarkAcceptEncoding`, `BenchmarkMemoryStoreGetParallel`, `BenchmarkLimiterAcquireRelease`, plus `BenchmarkServeHitParallel` (miss-rate tracker on and off). Each milestone review includes `benchstat` output against the previous milestone. NFR-5 budgets apply from M10. GC cost at 1M entries (D36) is `TestGCAt1MEntries` in `loadtest/` (build tag `load`, `make load`); it reports the projected GC share of busy CPU and the hit p99, and fails above 10%.
+`BenchmarkServeHitSmall` (1 KiB body), `BenchmarkServeHitVary`, `BenchmarkServeMissCoalesced`, `BenchmarkKeyBuild`, `BenchmarkAcceptEncoding`, `BenchmarkMemoryStoreGetParallel`, `BenchmarkLimiterAcquireRelease`, plus `BenchmarkServeHitParallel` (miss-rate tracker on and off). Each milestone review includes `benchstat` output against the previous milestone. NFR-5 budgets apply from M10. GC cost at 1M entries (D36) is `TestGCAt1MEntries` in `loadtest/` (build tag `load`, `make load`); it reports GC CPU per cycle, the saturated GC share of busy CPU and the paced hit p99. It asserts nothing yet; the 10% line is a decision in docs/benchmarks.md, and card M16-01 turns it into a gate.
 
 ## 11. CI pipeline
 
