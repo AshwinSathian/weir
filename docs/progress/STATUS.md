@@ -4,14 +4,13 @@ Updated: 2026-10-08
 Phase: 1
 Current card: none
 Card state: awaiting-merge
-Branch: claude/peaceful-wright-an4zuy
-PR: #61 https://github.com/AshwinSathian/weir/pull/61
-Next card: M10-06 (M10-10 is optional)
+Branch: claude/funny-bardeen-pjrvvk
+PR: #62 https://github.com/AshwinSathian/weir/pull/62
+Next card: M10-10 (approved, last Phase 1 card before the release gate); then M16-01
 
 ## Waiting on Ashwin
 
-- M16-01/M16-02 (new, Phase 1.x): at 1M entries GC takes 13.6% to 15.4% of busy CPU under saturated hits (docs/benchmarks.md), over the 10% line. Approve starting the pointer-light layout prototype (M16-01, then M16-02)? It revisits D36.
-- NFR-5: left "provisional". Approve final wording after a rerun on the reference machine (M1 to M10 `ServeHitSmall` grew 10 to 20% on the Xeon, at the 20% gate; not profiled).
+none. Decided 2026-10-08, see below.
 
 ## Blockers
 
@@ -19,12 +18,26 @@ none
 
 ## Notes for the next session
 
+- M10-06: `make check` now runs `trace-strict`; FR-RNG, FR-TCC, FR-SNP and FR-FAIR are allowlisted in scripts/trace.sh. Drop each prefix from `later` in the PR that adds its first citing test.
+- M10-06: runbook states the 300 000 keys at 1 000 rps figure from the M8-02 notes; re-measure if the miss-rate tracker changes.
+
 - M10-05: all numbers come from a 4-core Xeon; rerun the benchmarks and `make load` on the reference machine and replace the M10 tables in docs/benchmarks.md.
 - M10-05: parallel miss-rate tracker cost recorded only (decided 2026-10-08); no card for `TryLock` or per-shard counters.
 - M10-05: a follower can miss the store just before the leader stores, then join after the flight is gone and start a second flight (0.3 to 0.4% extra origin calls in the coalesced burst benchmark). Unfixed, no card; see docs/benchmarks.md.
 - golangci-lint cannot run in cloud sessions (built with Go 1.25); CI must confirm lint.
 - `pragma-response-no-cache-heuristic` is a Go `net/http` artifact (`fixPragmaCacheControl`), documented as by design.
 - Run the nightly workflow once after the M10-04 merge; PLAN M10.4 stays unticked until it is green.
+
+## Decided 2026-10-08 (M10-06, review of PR #62)
+
+Ashwin delegated the Waiting items; an independent agent attacked the PR and the decisions.
+
+- M16-01 approved as a throwaway prototype, with changes: it also reports GC CPU per request (about 1.9 µs now) and the `ServeHitSmall` ns and allocs on the prototype, and measures `GOGC=200` and an allocation cut as cheaper alternatives. M16-02 is not pre-approved. D36 now records the measurement and that the layout changes only through M16-02. Against it: D36 chose the heap on purpose and decode-on-`Get` strains NFR-5. It wins because M16-01 is size S, merges nothing and ends in a recommendation.
+- NFR-5: the 16 allocs/op bound and the 20% rule apply on any machine now; the 4 µs ceiling stays provisional until six or more M-series runs at the M10 head are recorded and it is set to 1.5 times the median (docs/01 NFR-5, docs/benchmarks.md). Numbers unchanged.
+- M10-10 approved (last Phase 1 card), widened to every GET/HEAD 2xx built from a stored or just-stored entry. Confirm RFC 9110 §13.2 first (the reviewer's reading, from memory, is that evaluating preconditions is a MUST, which would make serving 200 non-compliant, not just wasteful).
+- NFR-4 corrected: the bound holds while fetches hold their slots; a live over-limit stream keeps up to `MaxObjectBytes + 1` of read-ahead after its slot is released (measured 49 164 bytes against 16 388 with 12 slow readers). Wording in docs/01 and the runbook now says so; no code change. Open: whether to cap those streams in code. No card; raise it if slow clients on large responses matter.
+- Review fixes: `Forward.Allow: ["Cookie"]` is rejected, not warned (README); `SetMode` reach is limited by `Freshness.Keep`; `HonorRevalidation` scope; limits row; `TrackingParams` caveat; stale docs/07 and README status text.
+- Left alone: CLAUDE.md line 60 still says "trace report" (project instructions; change it when you next edit that file). `doccomments_test.go` covers the root module only. The `"Cookie"` case in `warnForwarding` is dead code. trace.sh has no floor check for a zero-ID spec grep, and counts citations in comments anywhere in a test file; both low risk.
 
 ## Decided 2026-10-08 (M10-09, review of PR #60)
 

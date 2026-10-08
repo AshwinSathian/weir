@@ -332,7 +332,7 @@ On every push and pull request:
 3. `go test -race -shuffle=on -count=1 ./...` for every module, once with the workspace and once per module with `GOWORK=off`, on each supported Go release that is at or above the `go.mod` minimum (D42; only 1.27 until Go 1.28 ships).
 4. `go list -deps ./...` check for the root module: no import outside the standard library and the module itself (NFR-6).
 5. `govulncheck ./...`.
-6. `scripts/trace.sh` requirement coverage report (fails once Phase 1 is declared done).
+6. `scripts/trace.sh` requirement coverage report (`make check` runs it in strict mode; IDs of M11 and later cards are allowlisted until their cards land).
 7. Coverage report (`go test -coverprofile`); informational, target ≥ 85% of statements for `internal/*` and the root package.
 
 Nightly: fuzzing (§5), cache-tests (§8), load tests (§9).

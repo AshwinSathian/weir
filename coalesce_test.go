@@ -43,7 +43,7 @@ type served struct {
 	err  error
 }
 
-// FR-COA-1, FR-COA-2, T6.2: one flight serves every concurrent request for a
+// FR-COA-1, FR-COA-2, FR-LCY-3, T6.2: one flight serves every concurrent request for a
 // cold key.
 func TestCoalesceColdKey1000(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {

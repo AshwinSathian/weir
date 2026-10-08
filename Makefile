@@ -13,7 +13,7 @@ SUBMODULES := $(patsubst ./%/go.mod,%,$(shell find . -mindepth 2 -name go.mod -n
 .PHONY: check fmt-check vet lint test modules test-short trace trace-strict fuzz-short bench load cache-tests vuln card next
 
 ## check: everything a card must pass before handoff (CI runs the same)
-check: fmt-check vet lint test modules trace
+check: fmt-check vet lint test modules trace-strict
 
 fmt-check:
 	@out="$$(gofmt -l .)"; if [ -n "$$out" ]; then echo "gofmt needed:"; echo "$$out"; exit 1; fi
@@ -38,10 +38,11 @@ modules:
 test-short:
 	go test -count=1 ./...
 
-## trace: requirement IDs with no citing test (report only until TRACE_STRICT=1)
+## trace: requirement IDs with no citing test (report only)
 trace:
 	@scripts/trace.sh
 
+## trace-strict: the same, failing on an uncited ID up to M10
 trace-strict:
 	@TRACE_STRICT=1 scripts/trace.sh
 

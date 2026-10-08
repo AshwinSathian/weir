@@ -33,7 +33,7 @@ func TestNewEpochConfig(t *testing.T) {
 	}
 }
 
-// FR-PRG-4, NFR-3, T-23, T-29, E-7..E-9: a flood of distinct soft and invalid epochs
+// FR-PRG-4, NFR-3, INV-5, T-23, T-29, E-7..E-9: a flood of distinct soft and invalid epochs
 // allocates nothing, and no tag's lookup falls below its own epoch.
 func TestInvalidationFloodBounded(t *testing.T) {
 	s := newStore(t, Config{})

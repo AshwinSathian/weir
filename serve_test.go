@@ -212,7 +212,7 @@ func (s *countingStore) NewestEpoch(ctx context.Context, tags []store.Tag, since
 	return s.Store.NewestEpoch(ctx, tags, since)
 }
 
-// FR-VAL-1: a rejected request costs no store or origin call.
+// FR-VAL-1, FR-VAL-2: a rejected request costs no store or origin call.
 func TestInvalidRequestsCostNothing(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		m, err := memory.New(memory.Config{})

@@ -125,7 +125,7 @@ func FuzzCodecRoundTrip(f *testing.F) {
 	})
 }
 
-// 05 §6, NFR-2, T-21: Decode never panics, allocates in proportion to its
+// 05 §6, NFR-2, INV-6, T-21: Decode never panics, allocates in proportion to its
 // input, and whatever it accepts re-encodes to an equal entry.
 func FuzzDecodeEntry(f *testing.F) {
 	seed, err := Encode(genEntry([]byte("seed entry with some header and body bytes in it")))
