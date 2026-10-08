@@ -16,7 +16,7 @@
           saturated GC share, runtime-reported 7.27% / 13.63%
           saturated GC share, projected      8.67% / 15.44%
         
-saturated GC share 15.44% is over the 10% line: see docs/benchmarks.md and card M10-11
+saturated GC share 15.44% is over the 10% line: see docs/benchmarks.md and card M16-01
 --- PASS: TestGCAt1MEntries (197.71s)
 PASS
 ok  	github.com/AshwinSathian/weir/loadtest	197.923s

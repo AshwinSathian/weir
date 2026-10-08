@@ -20,7 +20,7 @@ Store the raw output next to the table when a milestone adds a row, so `benchsta
 | `BenchmarkKeyBuild` | `internal/keys` | `Classify` of a GET with a query, four request headers and a keyed cookie: validation, normalization, forwarded request, primary key |
 | `BenchmarkAcceptEncoding` | `internal/keys` | the Accept-Encoding bucket for a five-member value with qvalues |
 | `BenchmarkServeHitVary` | `weir` | a hit whose entry varies on one forwarded header: the variant lookup on top of `ServeHitSmall` |
-| `BenchmarkServeMissCoalesced` | `weir` | a cold key requested by 8 goroutines at once; the origin sleeps 100 µs so followers can join; reports `origin-calls/op` |
+| `BenchmarkServeMissCoalesced` | `weir` | a cold key requested by 8 goroutines at once; the origin yields the processor 50 times so followers can join, without a timer; reports `origin-calls/op` |
 | `BenchmarkServeHitParallel` | `weir` | `ServeHitSmall` from GOMAXPROCS goroutines over 1024 keys, miss-rate tracker on and off |
 | `BenchmarkLimiterAcquireRelease` | `internal/limiter` | uncontended Acquire/Release, and with a full queue |
 | `BenchmarkMemoryStoreGetParallel` | `store/memory` | `Get` from 12 goroutines over 1024 resident 1 KiB entries (16 shards) |
@@ -79,7 +79,7 @@ Benchmarks added after M1 (M10 only, same box):
 | `BenchmarkLimiterAcquireRelease/full_queue` | 11 200 | 24 | 1 |
 | `BenchmarkObserveFlood` (`internal/missrate`) | 249 | 0 | 0 |
 
-`ServeMissCoalesced` includes spawning 8 goroutines per operation, so it is a relative number. An earlier version slept 100 µs in the origin and measured the Linux timer floor (about 1 ms) instead of Weir. Origin calls per operation is slightly above 1 because a request can miss the store just before the leader stores, then join after the flight has been removed and start a second flight (lookup in `serve.go`, `Join` in `flight.go`). The cost is a second origin fetch for about 0.3% of cold keys under this burst, never a wrong response. FR-COA-1 speaks of concurrent requests sharing a flight and does not close this window; it is recorded here and not fixed (STATUS notes).
+`ServeMissCoalesced` includes spawning 8 goroutines per operation, so it is a relative number. An earlier version slept 100 µs in the origin and measured the Linux timer floor (about 1 ms) instead of Weir. Origin calls per operation is slightly above 1 because a request can miss the store just before the leader stores, then join after the flight has been removed and start a second flight (lookup in `serve.go`, `Join` in `flight.go`). The cost is a second origin fetch for 0.3 to 0.4% of cold keys under this burst, never a wrong response. FR-COA-1 speaks of concurrent requests sharing a flight and does not close this window; it is recorded here and not fixed (STATUS notes).
 
 ### NFR-5
 
@@ -108,6 +108,6 @@ D36 keeps the store on the Go heap until GC cost is measured. `TestGCAt1MEntries
 | GC share of busy CPU, runtime-reported | 7.3% | 13.6% |
 | GC share of busy CPU, projected | 8.7% | 15.4% |
 
-Result: at 1M entries GC takes 13.6% (reported over 12 cycles) to 15.4% (projected from the cost per cycle) of busy CPU under saturated hits, above the 10% line in PLAN M10.5b. A pointer-light layout card is therefore added (M16-01 in `docs/cards/11-phase1x.md`). D36 does not change by this PR: the card starts with the decision.
+Result: at 1M entries GC takes 13.6% (reported over 12 cycles, so roughly 12.5% to 14.7% with a cycle of lag at the window edges) to 15.4% (projected from the cost per cycle) of busy CPU under saturated hits, above the 10% line in PLAN M10.5b. A pointer-light layout card pair is therefore added (M16-01 prototype and decision, M16-02 implementation, in `docs/cards/11-phase1x.md`). D36 does not change by this PR: the card starts with the decision.
 
 The true share is higher than these figures. The non-GC CPU per request here is 8.7 to 10.6 µs, against 2.7 µs for a request in `BenchmarkServeHitSmall`; the rest is the harness (goroutine scheduling on 4 cores, random keys, `Request` construction), and a smaller denominator means a larger share. The figures are a lower bound for a server doing nothing but hits and a rough measure for one that also does other work. They also depend on entry size: about 2.1 KiB of live heap per entry here; smaller bodies carry more pointers per live byte. The GC CPU per cycle includes idle-priority workers on otherwise idle cores, which overstates the paced cost somewhat; the runtime-reported figure has no such correction and is 13.6%. Latency: the p99 with a forced cycle every 5 s is 57 µs against 53 µs for the small heap, so the cost shows up as CPU, not as a visible tail at this rate. Re-run on the reference machine and replace this table.

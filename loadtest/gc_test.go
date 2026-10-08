@@ -172,7 +172,7 @@ func readCycles() uint64 {
 }
 
 // TestGCAt1MEntries measures the cost of keeping 1M entries on the Go heap
-// (D36, NFR-5, card M10-05): the GC share of CPU and the hit p99 at a fixed
+// (D36, PLAN M10.5b, card M10-05): the GC share of CPU and the hit p99 at a fixed
 // request rate, next to the same load on a 10 000-entry store. It asserts nothing: the
 // 10% GC line is a decision recorded in docs/benchmarks.md. Machine-dependent: the reference
 // machine's numbers are the ones docs/benchmarks.md keeps.

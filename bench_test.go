@@ -108,8 +108,8 @@ func BenchmarkServeHitVary(b *testing.B) {
 // timer wakes after about 1 ms on Linux and would dominate ns/op).
 // "origin-calls/op" shows how many fetches the eight requests cost: a
 // follower that misses the store just before the leader stores and joins
-// just after the flight is gone starts a second flight, so it reads 1.001,
-// not exactly 1 (docs/benchmarks.md).
+// just after the flight is gone starts a second flight, so it reads 1.003 to
+// 1.004, not exactly 1 (docs/benchmarks.md).
 func BenchmarkServeMissCoalesced(b *testing.B) {
 	const followers = 8
 	o := testorigin.NewChecked(b, 1<<20, 1<<20)
