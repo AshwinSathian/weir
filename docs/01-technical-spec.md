@@ -1,7 +1,7 @@
 # Weir technical specification
 
 Status: v1.0, approved for Phase 0 and Phase 1 implementation
-Date: 2026-10-06
+Date: 2026-10-08
 Owner: Ashwin Sathian
 Module: `github.com/AshwinSathian/weir`
 Supersedes: the interface sketch in [00-design-doc.md §7.2](00-design-doc.md)
@@ -262,7 +262,7 @@ A response is stored only if all of the following hold. Each failed check increm
 - FR-STO-10. The `Cache-Groups` field, if present, parses as an RFC 9651 List of Strings with at most `Limits.MaxGroups` (32) members of at most `Limits.MaxGroupBytes` (128) bytes each. A response whose groups exceed these limits is not stored, because a purge could then miss it. This holds with `CacheGroups.Ignore` set too, so `Purge` by group works either way.
 - FR-STO-11. Stored headers exclude hop-by-hop fields, fields named in `Connection`, `Proxy-Authenticate`, `Proxy-Authentication-Info`, `Age` (recomputed on serve), and `Set-Cookie` (when stripped).
 - FR-STO-12. When a response is not storable and no stored response exists at the coalescing key (a marker must not displace a response that could still be revalidated or served under stale-if-error), Weir stores a hit-for-miss marker under the coalescing key (FR-COA-1) for `Coalesce.HitForMissTTL` (default 30 s). Requests that find a marker skip coalescing and go straight to the origin (still through the limiter). A later storable response replaces the marker. Markers are written only when the non-storability comes from the response under keyed inputs: never for a request that carried `Authorization` or a `no-store` request directive, never for a request that forwarded a `Forward.Allow` field, or a `Cache-Control` or `Pragma` field that `Key.Headers` does not name, and never under `ForwardAll`, because all of these reach the origin unkeyed and would let one client disable coalescing of a URL for everyone, renewably (T-31). `Cache-Control` and `Pragma` count whatever their value: they are forwarded as sent (FR-FWD-1), with no limit on length or bytes, so an origin or WAF that rejects one (431, 400) would otherwise answer on the shared key. Trace headers alone do not suppress markers, because their shape and byte set are restricted (FR-FWD-6). The cost: on those requests (a browser reload sends `Cache-Control: max-age=0` or `no-cache`, and operators who opt into unkeyed forwarding) an uncacheable URL gets no marker, so it coalesces and followers re-enter (FR-COA-5).
-- FR-STO-13. A response without a valid `Date` gets `Date` set to the time it was received before it is stored (RFC 9110 §6.6.1).
+- FR-STO-13. A response without a valid `Date` gets `Date` set to the time it was received before it is stored or forwarded (RFC 9110 §6.6.1). `fetch` sets it, so a miss, a pass-through, a stream and the later hit carry the same value. The stamp has one-second precision, so the stored `Date` can be up to a second before the receipt time.
 
 ### 5.5 Freshness and age (RFC 9111 §4.2)
 

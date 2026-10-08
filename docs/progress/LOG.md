@@ -997,3 +997,20 @@ Entry template:
 - Deviations: none.
 - Follow-ups: M10-09; run the nightly workflow once after merge.
 - Context: low.
+
+## 2026-10-08 · M10-07 · done
+- Branch / PR: claude/optimistic-curie-2mn579 / #59
+- Done: `stampDate` in fetch.go gives every forwarded or stored response a valid `Date` at receipt (miss, pass-through, stream, 304); `RequestFrom` maps an empty absolute-form path to `/`; FR-STO-13 says "stored or forwarded".
+- Tests: TestForwardedResponseGetsDate (also checks a valid origin Date is kept), TestAbsoluteFormEmptyPath; race tests pass on all packages. Lint unrun (golangci-lint built with Go 1.25).
+- Deviations: none beyond the FR-STO-13 wording.
+- Review: card-reviewer, no must-fix; should-fix (valid Date case) and test-placement nit fixed. The 304 path is covered by the existing rfc9111 test.
+- Follow-ups: none.
+- Context: low; size S was right.
+
+## 2026-10-08 · M10-07 · review-fixes
+- Branch / PR: claude/optimistic-curie-2mn579 / #59
+- Done: adversarial review, no must-fix. Added TestRevalidation304WithoutDateStamps; removed three STATUS notes that still described the fixed gaps; FR-STO-13 notes the one-second precision of the stamp.
+- Tests: root race tests pass. Lint unrun locally; CI must confirm.
+- Deviations: none.
+- Follow-ups: none.
+- Context: low.

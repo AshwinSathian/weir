@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/AshwinSathian/weir/internal/breaker"
+	"github.com/AshwinSathian/weir/internal/httpcc"
 	"github.com/AshwinSathian/weir/internal/keys"
 	"github.com/AshwinSathian/weir/internal/limiter"
 	"github.com/AshwinSathian/weir/store"
@@ -157,10 +158,12 @@ func (e *Engine) fetch(ctx context.Context, c *keys.Classified, origin Origin, c
 		cancel()
 		resp.Body = http.NoBody
 		res.respTime = time.Now()
+		stampDate(resp.Header, res.respTime)
 		return res
 	}
 	if !buffered || isEventStream(res.received().Header, e.cfg.Storable.StreamTypes) {
 		res.respTime = time.Now()
+		stampDate(resp.Header, res.respTime)
 		res.stream = buffered
 		if resp.Body == http.NoBody {
 			cancel() // nothing left to bound; keeps NoBody visible to adapters
@@ -173,6 +176,7 @@ func (e *Engine) fetch(ctx context.Context, c *keys.Classified, origin Origin, c
 	limit := e.cfg.Storable.MaxObjectBytes
 	body, rerr := io.ReadAll(io.LimitReader(resp.Body, limit+1))
 	res.respTime = time.Now()
+	stampDate(resp.Header, res.respTime)
 	if rerr != nil { // a truncated body is never stored or served
 		if ctx.Err() == nil { // a caller that left cut the body itself
 			emit(e.cfg.Observer, Event{Kind: EvNotStored, Time: res.respTime, Partition: c.Partition, Reason: "incomplete"})
@@ -397,4 +401,14 @@ func (e *Engine) timeoutFor(class limiter.Class) time.Duration {
 		return e.cfg.Timeouts.Origin
 	}
 	return e.cfg.Timeouts.Background
+}
+
+// stampDate gives h a Date when it has no valid one, set to the time the
+// response was received. Stored and forwarded copies then agree, and the
+// predicate is the one buildEntry uses (FR-STO-13, RFC 9110 §6.6.1). h is
+// the fetch's own clone, and the new value slice is not shared (P4).
+func stampDate(h http.Header, respTime time.Time) {
+	if _, ok := httpcc.ParseDate(h.Get("Date")); !ok {
+		h["Date"] = []string{respTime.UTC().Format(http.TimeFormat)}
+	}
 }

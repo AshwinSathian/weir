@@ -34,6 +34,11 @@ func RequestFrom(r *http.Request) *weir.Request {
 		if i := strings.IndexAny(rest, "/?#"); i >= 0 {
 			req.Path, req.RawQuery, _ = strings.Cut(rest[i:], "?")
 		}
+		// RFC 9110 §4.2.3: an empty http(s) path is "/". The key and the
+		// forwarded request must agree on it (INV-1).
+		if req.Path == "" {
+			req.Path = "/"
+		}
 	} else {
 		req.Path, req.RawQuery = r.URL.EscapedPath(), r.URL.RawQuery
 	}

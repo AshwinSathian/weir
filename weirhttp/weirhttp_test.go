@@ -353,6 +353,22 @@ func TestH2CUpgradeNotForwarded(t *testing.T) {
 	})
 }
 
+// FR-VAL-1, INV-1, RFC 9110 §4.2.3: an empty absolute-form path is "/";
+// the key and the forwarded request both read RequestFrom's Path.
+func TestAbsoluteFormEmptyPath(t *testing.T) {
+	for _, target := range []string{"http://example.com", "http://example.com?x=1", "https://example.com"} {
+		t.Run(target, func(t *testing.T) {
+			r, err := http.ReadRequest(bufio.NewReader(strings.NewReader("GET " + target + " HTTP/1.1\r\nHost: example.com\r\n\r\n")))
+			if err != nil {
+				t.Fatalf("ReadRequest: %v", err)
+			}
+			if req := weirhttp.RequestFrom(r); req.Path != "/" {
+				t.Fatalf("RequestFrom(%q).Path = %q, want /", target, req.Path)
+			}
+		})
+	}
+}
+
 // FR-VAL-1, INV-1, T-6: an absolute-form target keeps the raw path and
 // query bytes too. net/http leaves '#' in URL.Path and EscapedPath turns it
 // into "%23", which would serve "/a#x" as the literal "/a%23x" instead of
@@ -362,8 +378,8 @@ func TestRequestFromAbsoluteFormRaw(t *testing.T) {
 		{"http://example.com/a#x", "/a#x", ""},
 		{"http://example.com/a?q=1#f", "/a", "q=1#f"},
 		{"http://example.com/a%7e/%2F?b=%41", "/a%7e/%2F", "b=%41"},
-		{"http://example.com?q=1", "", "q=1"},
-		{"http://example.com", "", ""},
+		{"http://example.com?q=1", "/", "q=1"},
+		{"http://example.com", "/", ""},
 		{"https://example.com:8443/p", "/p", ""},
 	}
 	for _, tt := range tests {

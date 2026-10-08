@@ -1,12 +1,12 @@
 # Status
 
-Updated: 2026-10-07
+Updated: 2026-10-08
 Phase: 1
 Current card: none
 Card state: awaiting-merge
-Branch: claude/zealous-ritchie-wdpztv
-PR: #58 https://github.com/AshwinSathian/weir/pull/58
-Next card: M10-07
+Branch: claude/optimistic-curie-2mn579
+PR: #59 https://github.com/AshwinSathian/weir/pull/59
+Next card: M10-09
 
 ## Waiting on Ashwin
 
@@ -186,7 +186,6 @@ Decided, no change:
 
 Decided, owned by a card:
 
-- `Date` on forwarded responses and the empty absolute-form path: fix both, new card M10-07 (PLAN M10.8). RFC 9110 §6.6.1 is a MUST; §4.2.3 makes the empty path `/`.
 - `Forward.Allow` naming keyed or hop-by-hop fields: `New` rejects it, in M7-03 (card note).
 - Unowned events (`EvRequest`, `EvFetchStart`, `EvFetchEnd`, `EvNotStored` for over-size and 5xx): M10-01 (card note).
 - Go version matrix in CI (D42): M10-04 (card note).
@@ -321,7 +320,6 @@ The cards' Notes give the reasons and the options rejected. All three come befor
 
 - M1-18: `rfc9111_test.go` is a step table (`rfcRow`/`rfcStep`); rows tagged M5, M7 or M9 skip. Cards that land those milestones untag their rows (M5: must-revalidate 504, RFC 5861 SWR/SIE; M7: Vary variant; M9: Cache-Group-Invalidation). M11/M12 cards add rows here too.
 - M1-18: benchmarks live in the package they measure (`bench_test.go`, `internal/keys/bench_test.go`, `store/memory/bench_test.go`); baseline in `docs/benchmarks.md` with raw output in `docs/benchmarks/m1.txt`. `BenchmarkServeHitVary` and `BenchmarkServeMissCoalesced` (07 §10) have no owning card; add them to the M7 and M2 cards when those start. The 1 MiB Cookie benchmark and the hard-epoch prune / S3-FIFO walk measurements carried below were not done here.
-- Engine-level RFC 9110 §6.6.1 gap (pre-existing, found by the #29 adversarial review): a forwarded response whose origin sent no `Date` is returned by `Serve` without one, though the stored copy gets it (FR-STO-13) and hits carry it. weirhttp is compliant on the wire because net/http's server adds `Date`; any non-net/http adapter would not be. Card M10-07 fixes it.
 - CI tests only the `go.mod` Go version (`go-version-file`), but D42 says the two latest releases. M10-04 owns the matrix.
 - `rfc9111_test.go` mutation check (40 hand mutants of storable, conditional, serve, purge, entry, respond): all killed except the `Forwarded.Method != GET` storability guard, which the engine cannot reach (only GET/HEAD reach storability, both forwarded as GET).
 - M1-18 added `TestCVE202435296` (serve_test.go), listed in M1.5's AC but owned by no card. The bucket is not in `PrimaryKey` yet (M7), so today it proves forwarding collapses to `identity`; once M7 keys the bucket it also proves no key minting.
@@ -333,7 +331,7 @@ The cards' Notes give the reasons and the options rejected. All three come befor
 - M7 (variant keying): the `Accept-Encoding` bucket reaches the origin but is not in `PrimaryKey` (keyed only through Vary, M7-01). Until then a client choosing its bucket can plant a marker when the origin's storability differs by coding (for example `Vary: Accept-Encoding` only on gzip responses, refused as `vary-unsupported`). Bounded: 30 s, and the next storable response replaces it. M7 should key the bucket or treat it like `Unkeyed` for markers.
 - `validSMaxAge` uses `httpcc.ResponseDirectives.Unusable()` (the FR-FRS-2 predicate, shared with `Lifetime`).
 
-- weirhttp `RequestFrom` now cuts absolute-form targets from the raw bytes (M1-17c adversarial review: `EscapedPath` hid `#` as `%23`). An absolute-form target with an empty path (`GET http://example.com`) is still rejected as `path`; RFC 9110 §4.2.3 treats it as `/`. Card M10-07 makes the adapter send `/`.
+- weirhttp `RequestFrom` now cuts absolute-form targets from the raw bytes (M1-17c adversarial review: `EscapedPath` hid `#` as `%23`).
 - M1-17c: `keys.IsUpgrade` ignores an `Upgrade` whose only token is `h2c`; `Http2-Settings` is now in `hopByHop` (so also stripped from stored and served responses). `FuzzForwardEqualsKey` adds the h2c shape when the high bit of `sel` is set. `keyedCookies` no longer early-exits on large raw lines: it scans every line (cost header bytes times `len(Key.Cookies)`); M1-18 may want a benchmark with a 1 MiB Cookie header.
 - `cacheable` (serve.go) validates StaleSWR and NeedsValidation entries with validators via `fetch(..., prior)`; SWR still validates in the foreground (`ponytail:`, M5). Under M5, StaleSWR must be served before the `only-if-cached` and Range checks, which today reject or pass through stale SWR entries.
 - A Range request that no entry answers (miss or stale) goes through `pass` via `keys.Classified.AsRangePass()` with Range and If-Range (FR-SRV-5 updated). HEAD with Range goes forward as GET and the body is dropped (FR-FWD-4). M11-01 adds 206 from entries; FR-RNG-4's background fill hooks into that `pass` call.
