@@ -5,7 +5,7 @@ Phase: 1
 Current card: none
 Card state: awaiting-merge
 Branch: claude/cool-edison-zzoboq
-PR: pending
+PR: #60 https://github.com/AshwinSathian/weir/pull/60
 Next card: M10-05
 
 ## Waiting on Ashwin
