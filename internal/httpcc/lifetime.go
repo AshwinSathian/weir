@@ -117,11 +117,36 @@ func ParseDate(s string) (time.Time, bool) {
 		if layout == time.RFC850 && !strings.HasSuffix(s, " GMT") {
 			continue
 		}
+		if !fixedWidth(layout, s) {
+			continue
+		}
 		if t, err := time.Parse(layout, s); err == nil {
 			return t, true
 		}
 	}
 	return time.Time{}, false
+}
+
+// fixedWidth rejects what time.Parse accepts beyond the RFC 9110 §5.6.7
+// grammar: one-digit hours and days, and runs of spaces. An invalid date
+// counts as a time in the past (FR-FRS-2), so reading one loosely would
+// reuse a response the origin marked expired. The layouts with fixed-width
+// fields are checked by length; RFC 850 has variable weekday names, so its
+// day and hour positions are checked from the delimiters.
+func fixedWidth(layout, s string) bool {
+	switch layout {
+	case http.TimeFormat:
+		return len(s) == len(http.TimeFormat)
+	case time.ANSIC:
+		return len(s) == len(time.ANSIC)
+	}
+	// RFC 850: "Sunday, 06-Nov-94 08:49:37 GMT"
+	if strings.Contains(s, "  ") {
+		return false
+	}
+	comma := strings.IndexByte(s, ',')
+	colon := strings.IndexByte(s, ':')
+	return comma >= 0 && colon >= 3 && len(s) > comma+4 && s[comma+4] == '-' && s[colon-3] == ' '
 }
 
 func clampLifetime(d time.Duration) time.Duration { return min(max(d, 0), maxLifetime) }

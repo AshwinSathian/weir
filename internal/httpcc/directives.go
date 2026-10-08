@@ -151,7 +151,7 @@ func (s *Seconds) add(dv directive) (conflict bool) {
 // It rejects a missing argument, signs and non-digits, and clamps above
 // maxDelta (RFC 9111 §1.2.2) without overflowing.
 func parseDelta(dv directive) (int64, bool) {
-	if !dv.hasArg {
+	if !dv.hasArg || dv.spaced {
 		return 0, false
 	}
 	a := dv.arg
@@ -183,6 +183,7 @@ func parseDelta(dv directive) (int64, bool) {
 type directive struct {
 	name, arg string
 	hasArg    bool // an '=' was present
+	spaced    bool // whitespace surrounded the '=', which RFC 9111 §5.2 does not allow
 	loose     bool // read from the rescan of a line with an unclosed quote
 }
 
@@ -239,11 +240,15 @@ func directives(lines []string) iter.Seq[directive] {
 
 func emit(elem string, loose bool, yield func(directive) bool) bool {
 	name, arg, hasArg := strings.Cut(elem, "=")
+	// FR-FRS-2: "max-age =3600" is not delta-seconds, so it is read as invalid
+	// rather than trimmed into a lifetime. Whitespace between elements is
+	// still OWS and was trimmed by the split.
+	spaced := hasArg && (strings.TrimRight(name, " \t") != name || strings.TrimLeft(arg, " \t") != arg)
 	name = trimOWS(name)
 	if name == "" {
 		return true
 	}
-	return yield(directive{name: name, arg: trimOWS(arg), hasArg: hasArg, loose: loose})
+	return yield(directive{name: name, arg: trimOWS(arg), hasArg: hasArg, spaced: spaced, loose: loose})
 }
 
 func trimOWS(s string) string { return strings.Trim(s, " \t") }

@@ -103,6 +103,30 @@ func TestParseDateIgnoresHostZone(t *testing.T) {
 	}
 }
 
+func TestParseDateRejectsLooseForms(t *testing.T) {
+	// FR-FRS-2: an invalid date is a time in the past; time.Parse is laxer
+	// than RFC 9110 §5.6.7 about spaces and digit counts.
+	for _, s := range []string{
+		"Thu, 18  Aug  2050 02:01:18 GMT",
+		"Thu, 18 Aug 2050 2:01:18 GMT",
+		"Thu, 8 Aug 2050 02:01:18 GMT",
+		"Thursday, 18-Aug-50 2:01:18 GMT",
+		"Thursday, 8-Aug-50 02:01:18 GMT",
+		"Thursday,  18-Aug-50 02:01:18 GMT",
+		"Thu Aug 18 2:01:18 2050",
+		"Thu Aug  18 02:01:18 2050",
+	} {
+		if got, ok := ParseDate(s); ok {
+			t.Errorf("ParseDate(%q) = %v, want invalid", s, got)
+		}
+	}
+	for _, s := range []string{"Thu, 18 Aug 2050 02:01:18 GMT", "Thursday, 18-Aug-50 02:01:18 GMT", "Thu Aug 18 02:01:18 2050", "Sun Jul  5 08:00:00 2026"} {
+		if _, ok := ParseDate(s); !ok {
+			t.Errorf("ParseDate(%q) invalid, want valid", s)
+		}
+	}
+}
+
 func TestHeuristicLimits(t *testing.T) {
 	// FR-FRS-3, FR-STO-2 (302 and 307 never heuristic, D39)
 	cfg := testCfg
@@ -276,6 +300,7 @@ func FuzzHTTPDate(f *testing.F) {
 	// give a negative lifetime or age.
 	f.Add("0", httpDate(respTime), "0", "60")
 	f.Add("Sunday, 06-Nov-94 08:49:37 GMT", "Sun Nov  6 08:49:37 1994", "Sun, 06 Nov 1994 08:49:37 PST", `"5", 7`)
+	f.Add("Thu, 18  Aug  2050 02:01:18 GMT", "Thu, 18 Aug 2050 2:01:18 GMT", "Thursday, 8-Aug-50 2:01:18 GMT", "0")
 	f.Fuzz(func(t *testing.T, expires, date, lastMod, age string) {
 		if a := CorrectedInitialAge(age, respTime.Add(-time.Second), respTime); a < 0 {
 			t.Fatalf("negative age %v for Age=%q", a, age)
