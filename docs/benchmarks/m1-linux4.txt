@@ -1,0 +1,27 @@
+BenchmarkServeHitSmall-4   	  611304	      1979 ns/op	    1480 B/op	      14 allocs/op
+BenchmarkServeHitSmall-4   	  434974	      2307 ns/op	    1480 B/op	      14 allocs/op
+BenchmarkServeHitSmall-4   	  566790	      2128 ns/op	    1480 B/op	      14 allocs/op
+BenchmarkServeHitSmall-4   	  601590	      2279 ns/op	    1480 B/op	      14 allocs/op
+BenchmarkServeHitSmall-4   	  617119	      2244 ns/op	    1480 B/op	      14 allocs/op
+BenchmarkServeHitSmall-4   	  596104	      2327 ns/op	    1480 B/op	      14 allocs/op
+ok  	github.com/AshwinSathian/weir	7.588s
+BenchmarkKeyBuild-4         	  564055	      2077 ns/op	     536 B/op	       9 allocs/op
+BenchmarkKeyBuild-4         	  638000	      1908 ns/op	     536 B/op	       9 allocs/op
+BenchmarkKeyBuild-4         	  762511	      1938 ns/op	     536 B/op	       9 allocs/op
+BenchmarkKeyBuild-4         	  580778	      2012 ns/op	     536 B/op	       9 allocs/op
+BenchmarkKeyBuild-4         	  616593	      2054 ns/op	     536 B/op	       9 allocs/op
+BenchmarkKeyBuild-4         	  603394	      1913 ns/op	     536 B/op	       9 allocs/op
+BenchmarkAcceptEncoding-4   	 3706474	       299.4 ns/op	       0 B/op	       0 allocs/op
+BenchmarkAcceptEncoding-4   	 3881858	       310.7 ns/op	       0 B/op	       0 allocs/op
+BenchmarkAcceptEncoding-4   	 3519525	       310.9 ns/op	       0 B/op	       0 allocs/op
+BenchmarkAcceptEncoding-4   	 3608523	       356.7 ns/op	       0 B/op	       0 allocs/op
+BenchmarkAcceptEncoding-4   	 3787609	       314.9 ns/op	       0 B/op	       0 allocs/op
+BenchmarkAcceptEncoding-4   	 3827619	       292.9 ns/op	       0 B/op	       0 allocs/op
+ok  	github.com/AshwinSathian/weir/internal/keys	14.484s
+BenchmarkMemoryStoreGetParallel-4   	19079070	        59.50 ns/op	       0 B/op	       0 allocs/op
+BenchmarkMemoryStoreGetParallel-4   	19613296	        57.20 ns/op	       0 B/op	       0 allocs/op
+BenchmarkMemoryStoreGetParallel-4   	17550388	        59.67 ns/op	       0 B/op	       0 allocs/op
+BenchmarkMemoryStoreGetParallel-4   	17576700	        59.45 ns/op	       0 B/op	       0 allocs/op
+BenchmarkMemoryStoreGetParallel-4   	19409242	        58.57 ns/op	       0 B/op	       0 allocs/op
+BenchmarkMemoryStoreGetParallel-4   	18861472	        59.69 ns/op	       0 B/op	       0 allocs/op
+ok  	github.com/AshwinSathian/weir/store/memory	7.095s

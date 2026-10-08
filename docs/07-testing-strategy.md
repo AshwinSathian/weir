@@ -1,7 +1,7 @@
 # Weir testing strategy
 
 Status: v1.0
-Date: 2026-10-07
+Date: 2026-10-08
 Depends on: [01-technical-spec.md](01-technical-spec.md), [06-threat-model.md](06-threat-model.md)
 Seed name: `03-testing-strategy.md` (renumbered, see [docs/README.md](README.md))
 
@@ -321,7 +321,7 @@ Notes on how `loadtest/` applies the table. Steady hits calibrates the saturated
 
 ## 10. Benchmarks
 
-`BenchmarkServeHitSmall` (1 KiB body), `BenchmarkServeHitVary`, `BenchmarkServeMissCoalesced`, `BenchmarkKeyBuild`, `BenchmarkAcceptEncoding`, `BenchmarkMemoryStoreGetParallel`, `BenchmarkLimiterAcquireRelease`. Each milestone review includes `benchstat` output against the previous milestone. NFR-5 budgets apply from M10.
+`BenchmarkServeHitSmall` (1 KiB body), `BenchmarkServeHitVary`, `BenchmarkServeMissCoalesced`, `BenchmarkKeyBuild`, `BenchmarkAcceptEncoding`, `BenchmarkMemoryStoreGetParallel`, `BenchmarkLimiterAcquireRelease`, plus `BenchmarkServeHitParallel` (miss-rate tracker on and off). Each milestone review includes `benchstat` output against the previous milestone. NFR-5 budgets apply from M10. GC cost at 1M entries (D36) is `TestGCAt1MEntries` in `loadtest/` (build tag `load`, `make load`); it reports the projected GC share of busy CPU and the hit p99, and fails above 10%.
 
 ## 11. CI pipeline
 

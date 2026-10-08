@@ -1,0 +1,71 @@
+BenchmarkServeHitSmall-4        	  417178	      2448 ns/op	    1480 B/op	      14 allocs/op
+BenchmarkServeHitSmall-4        	  499628	      2439 ns/op	    1480 B/op	      14 allocs/op
+BenchmarkServeHitSmall-4        	  509985	      2329 ns/op	    1480 B/op	      14 allocs/op
+BenchmarkServeHitSmall-4        	  516999	      2403 ns/op	    1480 B/op	      14 allocs/op
+BenchmarkServeHitSmall-4        	  492624	      2607 ns/op	    1480 B/op	      14 allocs/op
+BenchmarkServeHitSmall-4        	  472782	      2623 ns/op	    1480 B/op	      14 allocs/op
+BenchmarkServeHitVary-4         	  421152	      3010 ns/op	    1496 B/op	      15 allocs/op
+BenchmarkServeHitVary-4         	  387052	      2992 ns/op	    1496 B/op	      15 allocs/op
+BenchmarkServeHitVary-4         	  349350	      2968 ns/op	    1496 B/op	      15 allocs/op
+BenchmarkServeHitVary-4         	  422834	      3099 ns/op	    1496 B/op	      15 allocs/op
+BenchmarkServeHitVary-4         	  386602	      3061 ns/op	    1496 B/op	      15 allocs/op
+BenchmarkServeHitVary-4         	  408069	      3152 ns/op	    1496 B/op	      15 allocs/op
+BenchmarkServeMissCoalesced-4   	    1249	   1010485 ns/op	         1.001 origin-calls/op	   23276 B/op	     215 allocs/op
+BenchmarkServeMissCoalesced-4   	    1120	    986417 ns/op	         1.000 origin-calls/op	   23209 B/op	     215 allocs/op
+BenchmarkServeMissCoalesced-4   	    1345	    988124 ns/op	         1.000 origin-calls/op	   23173 B/op	     215 allocs/op
+BenchmarkServeMissCoalesced-4   	    1136	    995157 ns/op	         1.000 origin-calls/op	   23191 B/op	     215 allocs/op
+BenchmarkServeMissCoalesced-4   	    1242	    987962 ns/op	         1.000 origin-calls/op	   23169 B/op	     215 allocs/op
+BenchmarkServeMissCoalesced-4   	    1350	    953347 ns/op	         1.001 origin-calls/op	   23163 B/op	     215 allocs/op
+BenchmarkServeHitParallel/missrate-on-4         	  398844	      2656 ns/op	    1513 B/op	      14 allocs/op
+BenchmarkServeHitParallel/missrate-on-4         	  432260	      2479 ns/op	    1510 B/op	      14 allocs/op
+BenchmarkServeHitParallel/missrate-on-4         	  486242	      2443 ns/op	    1507 B/op	      14 allocs/op
+BenchmarkServeHitParallel/missrate-on-4         	  350266	      2906 ns/op	    1517 B/op	      14 allocs/op
+BenchmarkServeHitParallel/missrate-on-4         	  414193	      2612 ns/op	    1511 B/op	      14 allocs/op
+BenchmarkServeHitParallel/missrate-on-4         	  428931	      2803 ns/op	    1510 B/op	      14 allocs/op
+BenchmarkServeHitParallel/missrate-off-4        	  938250	      1215 ns/op	    1494 B/op	      14 allocs/op
+BenchmarkServeHitParallel/missrate-off-4        	 1042352	      1002 ns/op	    1492 B/op	      14 allocs/op
+BenchmarkServeHitParallel/missrate-off-4        	 1071154	      1174 ns/op	    1492 B/op	      14 allocs/op
+BenchmarkServeHitParallel/missrate-off-4        	 1024351	      1097 ns/op	    1493 B/op	      14 allocs/op
+BenchmarkServeHitParallel/missrate-off-4        	  955207	      1142 ns/op	    1493 B/op	      14 allocs/op
+BenchmarkServeHitParallel/missrate-off-4        	 1111500	      1106 ns/op	    1492 B/op	      14 allocs/op
+ok  	github.com/AshwinSathian/weir	44.490s
+BenchmarkKeyBuild-4         	  473064	      2434 ns/op	     536 B/op	       9 allocs/op
+BenchmarkKeyBuild-4         	  531837	      2216 ns/op	     536 B/op	       9 allocs/op
+BenchmarkKeyBuild-4         	  564482	      2268 ns/op	     536 B/op	       9 allocs/op
+BenchmarkKeyBuild-4         	  543060	      2242 ns/op	     536 B/op	       9 allocs/op
+BenchmarkKeyBuild-4         	  518457	      2227 ns/op	     536 B/op	       9 allocs/op
+BenchmarkKeyBuild-4         	  464805	      2330 ns/op	     536 B/op	       9 allocs/op
+BenchmarkAcceptEncoding-4   	 3817902	       321.0 ns/op	       0 B/op	       0 allocs/op
+BenchmarkAcceptEncoding-4   	 3791853	       318.4 ns/op	       0 B/op	       0 allocs/op
+BenchmarkAcceptEncoding-4   	 3606626	       346.0 ns/op	       0 B/op	       0 allocs/op
+BenchmarkAcceptEncoding-4   	 3170428	       348.9 ns/op	       0 B/op	       0 allocs/op
+BenchmarkAcceptEncoding-4   	 3870576	       339.6 ns/op	       0 B/op	       0 allocs/op
+BenchmarkAcceptEncoding-4   	 3423298	       312.7 ns/op	       0 B/op	       0 allocs/op
+ok  	github.com/AshwinSathian/weir/internal/keys	14.261s
+BenchmarkMemoryStoreGetParallel-4   	19792444	        57.37 ns/op	       0 B/op	       0 allocs/op
+BenchmarkMemoryStoreGetParallel-4   	19965777	        56.66 ns/op	       0 B/op	       0 allocs/op
+BenchmarkMemoryStoreGetParallel-4   	19901708	        59.94 ns/op	       0 B/op	       0 allocs/op
+BenchmarkMemoryStoreGetParallel-4   	18246981	        60.38 ns/op	       0 B/op	       0 allocs/op
+BenchmarkMemoryStoreGetParallel-4   	19946472	        57.14 ns/op	       0 B/op	       0 allocs/op
+BenchmarkMemoryStoreGetParallel-4   	18814340	        61.77 ns/op	       0 B/op	       0 allocs/op
+ok  	github.com/AshwinSathian/weir/store/memory	7.316s
+BenchmarkLimiterAcquireRelease/uncontended-4         	 6821398	       163.2 ns/op	      24 B/op	       1 allocs/op
+BenchmarkLimiterAcquireRelease/uncontended-4         	 6804464	       160.5 ns/op	      24 B/op	       1 allocs/op
+BenchmarkLimiterAcquireRelease/uncontended-4         	 7268896	       173.2 ns/op	      24 B/op	       1 allocs/op
+BenchmarkLimiterAcquireRelease/uncontended-4         	 6545445	       156.2 ns/op	      24 B/op	       1 allocs/op
+BenchmarkLimiterAcquireRelease/uncontended-4         	 6583186	       168.0 ns/op	      24 B/op	       1 allocs/op
+BenchmarkLimiterAcquireRelease/uncontended-4         	 6875532	       174.0 ns/op	      24 B/op	       1 allocs/op
+BenchmarkLimiterAcquireRelease/full_queue-4          	   99411	     11490 ns/op	      24 B/op	       1 allocs/op
+BenchmarkLimiterAcquireRelease/full_queue-4          	  117602	     13195 ns/op	      24 B/op	       1 allocs/op
+BenchmarkLimiterAcquireRelease/full_queue-4          	  102864	     12118 ns/op	      24 B/op	       1 allocs/op
+BenchmarkLimiterAcquireRelease/full_queue-4          	  142694	      9364 ns/op	      24 B/op	       1 allocs/op
+BenchmarkLimiterAcquireRelease/full_queue-4          	  108040	     11794 ns/op	      24 B/op	       1 allocs/op
+BenchmarkLimiterAcquireRelease/full_queue-4          	  103249	     13020 ns/op	      24 B/op	       1 allocs/op
+ok  	github.com/AshwinSathian/weir/internal/limiter	15.986s
+BenchmarkObserveFlood-4   	 4747360	       261.7 ns/op	       0 B/op	       0 allocs/op
+BenchmarkObserveFlood-4   	 4266585	       255.0 ns/op	       0 B/op	       0 allocs/op
+BenchmarkObserveFlood-4   	 5019312	       249.0 ns/op	       0 B/op	       0 allocs/op
+BenchmarkObserveFlood-4   	 4799431	       240.1 ns/op	       0 B/op	       0 allocs/op
+BenchmarkObserveFlood-4   	 5039023	       235.7 ns/op	       0 B/op	       0 allocs/op
+BenchmarkObserveFlood-4   	 4984770	       240.2 ns/op	       0 B/op	       0 allocs/op
+ok  	github.com/AshwinSathian/weir/internal/missrate	7.127s

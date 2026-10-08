@@ -2,10 +2,10 @@
 
 Updated: 2026-10-08
 Phase: 1
-Current card: none
-Card state: awaiting-merge
-Branch: claude/cool-edison-zzoboq
-PR: #60 https://github.com/AshwinSathian/weir/pull/60
+Current card: M10-05
+Card state: in-progress
+Branch: claude/peaceful-wright-an4zuy
+PR: none
 Next card: M10-05 (M10-10 is optional)
 
 ## Waiting on Ashwin
