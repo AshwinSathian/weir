@@ -4,17 +4,34 @@ Updated: 2026-10-08
 Phase: 1
 Current card: none
 Card state: awaiting-merge
-Branch: claude/optimistic-curie-2mn579
-PR: #59 https://github.com/AshwinSathian/weir/pull/59
-Next card: M10-09
+Branch: claude/cool-edison-zzoboq
+PR: #60 https://github.com/AshwinSathian/weir/pull/60
+Next card: M10-05 (M10-10 is optional)
 
 ## Waiting on Ashwin
 
-none
+none (the M10-09 question was decided 2026-10-08, see below)
 
 ## Blockers
 
 none
+
+## Notes for the next session
+
+- golangci-lint cannot run in cloud sessions (built with Go 1.25); CI must confirm lint.
+- `pragma-response-no-cache-heuristic` is a Go `net/http` artifact (`fixPragmaCacheControl`), documented as by design.
+- Run the nightly workflow once after the M10-04 merge; PLAN M10.4 stays unticked until it is green.
+
+## Decided 2026-10-08 (M10-09, review of PR #60)
+
+Ashwin delegated the open question ("take decisions on all items"); an independent agent attacked it.
+
+- `conditional-lm-fresh-no-lm` and `conditional-lm-stale` stay by design. The first expects 304 for a `Date` later than the client's IMS, which RFC 9110 §13.1.3 answers with 200. The second is outside FR-SRV-2 as written ("on a hit"); serving 200 is compliant and safe. Not implemented in this PR: it changes a requirement, and doing it only after a 304 would be arbitrary (a cold miss and a follower also answer 200). Optional card M10-10 holds the coherent rule and its risks.
+- Review fixes: `ParseDate` also rejects fractional seconds in RFC 850 dates and a misplaced double space in asctime; tests added.
+- Behavior notes: request `max-age =0` is now invalid, so it no longer forces revalidation (request directives are advisory, D5). With `Freshness.DefaultTTL` above 0, a loose `Last-Modified` now counts as absent and gets the default TTL; with the default of 0 the entry is not stored.
+- Cache-test details for the two conditional ids were read off the suite's own run logs; the suite source is at the pinned ref in `scripts/cache-tests.sh`.
+
+- `ParseDate` checks field widths by hand after `time.Parse`; `max-age =3600` and `max-age= 3600` are non-integers (request-side delta directives too); `If-Modified-Since` compares at whole seconds. The card's suspected cause for `conditional-lm-*` was wrong: see Waiting on Ashwin.
 
 ## Decided 2026-10-07 (M10-04)
 

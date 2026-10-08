@@ -1014,3 +1014,20 @@ Entry template:
 - Deviations: none.
 - Follow-ups: none.
 - Context: low.
+
+## 2026-10-08 · M10-09 · done
+- Branch / PR: claude/cool-edison-zzoboq / #60
+- Done: `ParseDate` rejects one-digit hours and days and doubled spaces; whitespace around `=` in a delta-seconds directive is a non-integer; `If-Modified-Since` compares at whole seconds. Four cache-tests ids flip to pass (baseline 264/101).
+- Tests: TestParseDateRejectsLooseForms, TestMaxAgeWhitespaceIsNonInteger, TestClientIMSWholeSecond, fuzz seeds; race tests pass. Lint unrun (Go 1.25 binary).
+- Deviations: AC not fully met. `conditional-lm-fresh-no-lm`, `conditional-lm-stale` and `pragma-response-no-cache-heuristic` stay failing and are documented as by design (causes found: test expectation vs RFC 9110 §13.1.3; preconditions not applied after revalidation; Go's fixPragmaCacheControl). Question to Ashwin in STATUS.
+- Review: card-reviewer, no must-fix; ANSIC zero-padded day nit fixed, doc row clarified.
+- Follow-ups: possible card to apply client preconditions after revalidation (needs FR-SRV-2 decision).
+- Context: medium; size S was right.
+
+## 2026-10-08 · M10-09 · review-fixes
+- Branch / PR: claude/cool-edison-zzoboq / #60
+- Done: adversarial review, no must-fix. `ParseDate` rejects RFC 850 fractional seconds and a misplaced asctime double space; tests added; decided the Waiting item (kept by design, optional card M10-10). Noted request `max-age =0` no longer forces revalidation, and that a loose `Last-Modified` falls to `DefaultTTL` when it is above 0.
+- Tests: httpcc and root race tests pass; FuzzHTTPDate 15 s clean. Lint unrun locally.
+- Deviations: none.
+- Follow-ups: M10-10 (optional).
+- Context: low.

@@ -83,7 +83,7 @@ func TestParseResponseDirectives(t *testing.T) {
 		{"delta-seconds above the limit clamps", []string{"max-age=2147483649"}, ResponseDirectives{MaxAge: set(maxDelta)}},
 		{"huge delta-seconds clamps without overflow", []string{"max-age=99999999999999999999999999"},
 			ResponseDirectives{MaxAge: set(maxDelta)}},
-		{"whitespace around '=' is tolerated", []string{"max-age = 5"}, ResponseDirectives{MaxAge: set(5)}},
+		{"whitespace around '=' is a non-integer (FR-FRS-2)", []string{"max-age = 5"}, ResponseDirectives{MaxAge: Seconds{Set: true, Invalid: true}}},
 		{"leading zeros parse", []string{"max-age=0007"}, ResponseDirectives{MaxAge: set(7)}},
 		{"comma inside quotes does not split", []string{`private="a,no-store", public`},
 			ResponseDirectives{Private: true, Public: true}},
@@ -144,7 +144,24 @@ func TestParseRequestDirectives(t *testing.T) {
 	}
 }
 
+func TestMaxAgeWhitespaceIsNonInteger(t *testing.T) {
+	// FR-FRS-2: whitespace around '=' makes the argument non-delta-seconds;
+	// OWS around list commas stays legal.
+	for _, v := range []string{"max-age =3600", "max-age= 3600", "max-age = 3600", "s-maxage =60"} {
+		d := ParseResponse(header("Cache-Control", v))
+		if !d.Unusable() {
+			t.Errorf("%q: want unusable, got %+v", v, d)
+		}
+	}
+	d := ParseResponse(header("Cache-Control", "public ,  max-age=3600 , must-revalidate"))
+	if d.Unusable() || d.MaxAge.V != 3600 || !d.Public {
+		t.Errorf("list OWS must stay lenient: %+v", d)
+	}
+}
+
 func FuzzCacheControl(f *testing.F) {
+	f.Add("max-age =3600")
+	f.Add("max-age= 3600")
 	// FR-FRS-2, NFR-2: no panic and no negative or unclamped lifetime on any input.
 	f.Fuzz(func(t *testing.T, v string) {
 		h := header("Cache-Control", v)

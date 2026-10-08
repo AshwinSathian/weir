@@ -4,6 +4,7 @@ import (
 	"maps"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/AshwinSathian/weir/internal/keys"
 	"github.com/AshwinSathian/weir/store"
@@ -84,7 +85,9 @@ func clientNotModified(cc *keys.ClientConditionals, ent *store.Entry) bool {
 	if lm.IsZero() {
 		lm = ent.Date
 	}
-	return !lm.After(cc.IfModifiedSince)
+	// HTTP-dates have whole-second resolution; a Date taken from the
+	// receipt clock carries a fraction that would read as later.
+	return !lm.Truncate(time.Second).After(cc.IfModifiedSince)
 }
 
 // opaqueTag strips a weak prefix for weak comparison. A stored ETag that is
