@@ -15,7 +15,7 @@ For the person running Weir in front of an origin. It covers first deployment, t
 
 ## 2. What to watch
 
-Each response carries `Cache-Status: Weir; ...` (RFC 9211). `hit; ttl=N` is a fresh hit. `fwd=uri-miss` (no entry), `fwd=vary-miss` (entry exists, not for these `Vary` values), `fwd=stale`, `fwd=request` (the client asked), `fwd=method` and `fwd=bypass` say why the origin was asked. `; collapsed` marks a request that joined another's fetch. `detail=` names the stale reason: `stale-while-revalidate`, `stale-if-error`, `shed`, `circuit-open`, `coalesce-timeout`. The metric label `reason` uses short names for the first two: `swr` and `sie`.
+Each response carries `Cache-Status: Weir; ...` (RFC 9211). `hit; ttl=N` is a fresh hit. `fwd=uri-miss` (no entry), `fwd=vary-miss` (entry exists, not for these `Vary` values), `fwd=stale`, `fwd=request` (the client asked), `fwd=method` and `fwd=bypass` say why the origin was asked. `; collapsed` marks a request that joined another's fetch. `detail=negative` marks a negative-cache entry. A stale hit shows a negative `ttl=`. `detail=` names the stale reason: `stale-while-revalidate`, `stale-if-error`, `shed`, `circuit-open`, `coalesce-timeout`. The metric label `reason` uses short names for the first two: `swr` and `sie`.
 
 With `observe/prom` (a separate module):
 
@@ -49,7 +49,7 @@ Labelled series appear on their first event, so alert on `absent()` as well as `
 
 The breaker counts origin-health failures over a 10 s window (500 and 4xx are not failures unless `Breaker.CountStatus500`), opens at a 50% failure ratio of at least 20 outcomes, and stays open 5 s (±20%), doubling to 60 s on each consecutive reopen. Meanwhile entries inside their stale-if-error window are served with `detail=stale-if-error` or `circuit-open`; everything else gets 503.
 
-If entries have no stale-if-error window and you want to ride out the outage: `Engine.SetMode(weir.ModeStaleOnError, ttl)` serves any stored entry stale, up to 24 h old, except hard-purged, invalidated and `must-revalidate`, `proxy-revalidate`, `no-cache` or `s-maxage` ones. `ttl` is required, at most 24 h, and the mode reverts by itself. Modes are not persisted across restarts. Set it from an admin handler, not from request data.
+If entries have no stale-if-error window and you want to ride out the outage: `Engine.SetMode(weir.ModeStaleOnError, ttl)` serves any stored entry stale (up to 24 h past expiry, but see the retention note below), except hard-purged, invalidated and `must-revalidate`, `proxy-revalidate`, `no-cache` or `s-maxage` ones. `ttl` is required, at most 24 h, and the mode reverts by itself. Entries are kept only for their stale windows plus `Freshness.Keep` (5 min) after expiry, and only when they carry `ETag` or `Last-Modified`, so the practical reach is minutes unless you raised `Freshness.Keep` or `DefaultStaleIfError` before the incident. Modes are not persisted across restarts. Set it from an admin handler, not from request data.
 
 ### 4.2 The cache itself is suspect
 
@@ -68,14 +68,14 @@ A same-origin 2xx or 3xx response to an unsafe method (`POST`, `PUT`, `DELETE`) 
 
 The log line `weir: miss-rate anomaly` and `weir_miss_rate_anomalies_total` mean that one partition (origin plus path) had at least 500 misses in a 10 s window at a miss ratio of 0.9 or more. Causes, in order of how often they happen:
 
-1. A busy path whose responses are uncacheable (`private`, `no-store`) or always revalidated (`max-age=0`, `no-cache`). Every request is a miss by design. Route that path around Weir in your server (mount it beside the Weir handler, or call `next` from `Middleware` for it); `Bypass` handles cookies and headers, not paths. It is not an attack and the warning will not go away until you do.
+1. A busy path whose responses are uncacheable (`private`, `no-store`) or always revalidated (`max-age=0`, `no-cache`). Every request is a miss by design. Route that path around Weir in your server (mount it on the mux beside the Weir handler); `Bypass` handles cookies and headers, not paths. It is not an attack and the warning will not go away until you do.
 2. A cold path: a fresh deploy, a purge, a crawler walking many distinct URLs.
 3. Cache busting with unique query strings (T-11). The per-path cap (`Limiter.MaxPerPartition`, 16) already bounds the damage; the flood cannot fill the shared queue.
 
 `MissRate.Throttle` is off by default. Turn it on only after running without it and finding the warnings are cases 2 or 3. With it, an anomalous partition is capped at one origin fetch for the next window, for as long as it stays over both thresholds. Read the cost before you do (06 R-8):
 
 - A cold path with far more distinct keys than a single fetch at a time can fill in a window stays capped. Measured: 300 000 distinct keys at 1 000 requests a second were capped in all 30 windows of the run.
-- A client that sends max(500, 9 × the path's hits) distinct-query requests per window keeps that path capped for as long as it sends. In test, 60 requests a second let 390 of 1 200 legitimate misses through, against all 1 200 without `Throttle`.
+- A client that sends max(500, 9 × the path's hits) distinct-query requests per window keeps that path capped for as long as it sends. In a review experiment, 60 requests a second let 390 of 1 200 legitimate misses through, against all 1 200 without `Throttle` (not a repo test).
 - Sheds from a full global limiter count as misses, so a slow origin can get a busy, miss-heavy path capped in the next window.
 - An attacker who floods every other window is never throttled.
 
@@ -83,7 +83,7 @@ The log line `weir: miss-rate anomaly` and `weir_miss_rate_anomalies_total` mean
 
 ### 4.5 Memory
 
-`weir_store_bytes` should sit near the configured size once the cache is warm. If the process nears `GOMEMLIMIT`, look at `Storable.MaxObjectBytes` (1 MiB, headers included) and at large streamed bodies before you blame the cache: buffering for storage is bounded by `MaxConcurrent × MaxObjectBytes` (NFR-4, 64 MiB at defaults). Streams are not stored and cost memory only as the client reads them. The hit path's GC cost at 1M entries is in [benchmarks.md](benchmarks.md).
+`weir_store_bytes` should sit near the configured size once the cache is warm. If the process nears `GOMEMLIMIT`, look at `Storable.MaxObjectBytes` (1 MiB, headers included) and at large streamed bodies before you blame the cache: buffering for storage is bounded by `MaxConcurrent × MaxObjectBytes` (NFR-4, 64 MiB at defaults). A stream that exceeds `MaxObjectBytes` is not stored, but it holds up to `MaxObjectBytes + 1` bytes of read-ahead after its fetch slot is released, until the client reads it. Many slow clients on large responses therefore cost about one `MaxObjectBytes` each (1 MiB at defaults), beyond the bound above. The hit path's GC cost at 1M entries is in [benchmarks.md](benchmarks.md).
 
 ### 4.6 A remote store fails (Phase 2.5)
 

@@ -1057,3 +1057,11 @@ Entry template:
 - Review: card-reviewer, one must-fix (metric label `sie`, not `stale-if-error`), fixed with the soft-purge wording, R-6/R-7 rows, bypass-invalidation and 499 notes, hollow INV-5 citation removed.
 - Follow-ups: M10-10 (optional), M16-01 (needs approval).
 - Context: medium; size S was right.
+
+## 2026-10-08 · M10-06 · review-fixes
+- Branch / PR: claude/funny-bardeen-pjrvvk / #62
+- Done: adversarial review; fixed README and runbook errors, NFR-4 wording (stream read-ahead), D36 and NFR-5 wording, M16-01 approved with changes, M10-10 approved and widened. Waiting on Ashwin is empty.
+- Tests: root race test, trace-strict pass. Lint unrun.
+- Deviations: docs/01 D36, NFR-4, NFR-5 changed under Ashwin's delegation; docs/07 §11 item 6; cards M10-10, M16-01, M16-02 notes.
+- Follow-ups: M10-10, M16-01; optional cap on live over-limit streams (no card).
+- Context: medium.

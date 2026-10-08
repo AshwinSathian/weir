@@ -85,7 +85,7 @@ These were settled with the project owner on 2026-09-27 and are not reopened by 
 | D33 | Runtime incident modes via `Engine.SetMode` with a mandatory expiry (§14.7). |
 | D34 | Caddy adapter returns `caddyhttp.Error` so `handle_errors` applies. |
 | D35 | Default memory-store size derives from `GOMEMLIMIT` when set (§14.8). |
-| D36 | Store stays on the Go heap; GC cost measured in M10 before any layout change. |
+| D36 | Store stays on the Go heap. M10 measured 13.6% to 15.4% of busy CPU as GC at 1M entries under saturated hits (4-core Xeon, docs/benchmarks.md). M16-01 prototypes a pointer-light layout and compares it with cheaper levers (`GOGC`, fewer allocations per hit); the heap layout changes only if M16-02 is approved on those numbers. |
 | D37 | Vary overflow refuses new variants and reclaims slots of expired or evicted ones. |
 | D38 | Hit-for-miss TTL stays 30 s. |
 | D39 | 302 and 307 are storable by default, only with explicit freshness. |
@@ -506,8 +506,8 @@ Evaluated in order after validation, bypass check, and store lookup.
 - NFR-1. Correctness under `go test -race` for every package, always.
 - NFR-2. No panics from any request, response, or configuration value that passes `New`. Enforced by fuzz targets for every parser.
 - NFR-3. Every in-memory structure has a stated bound: store bytes (configured capacity), flights (≤ `MaxConcurrent + MaxQueue`), limiter waiters (≤ `MaxQueue`), miss-rate counters (`TopK`), epochs (fixed-size sketch for soft and invalid epochs, 4 MiB by default, plus a capped exact table for hard purges, [05 §4.4](05-storage-interface-spec.md)), variants per primary key (`MaxVariants`).
-- NFR-4. Transient body memory is bounded by `MaxConcurrent × MaxObjectBytes` (64 MiB at defaults).
-- NFR-5. Hit path budget on the reference machine (Apple M-series, Go 1.27): `BenchmarkServeHitSmall` at most 4 µs/op and 16 allocs/op. These numbers are provisional until the first measurement in M10; after that a regression over 20% fails review.
+- NFR-4. Transient body memory while fetches hold their limiter slots is bounded by `MaxConcurrent × (MaxObjectBytes + 1)` (64 MiB at defaults). A live stream whose body exceeds `MaxObjectBytes` keeps that read-ahead after its slot is released, until its client reads it, so it adds up to `MaxObjectBytes + 1` per such stream.
+- NFR-5. Hit path budget on the reference machine (Apple M-series, Go 1.27): `BenchmarkServeHitSmall` at most 4 µs/op and 16 allocs/op. The 16 allocs/op bound, and the rule that a regression over 20% against the previous recorded run on the same machine fails review, apply on any machine now. The 4 µs ceiling stays provisional until a run on the reference machine at the M10 head is recorded in docs/benchmarks.md; it is then set to 1.5 times that median.
 - NFR-6. Zero third-party imports in the root module, checked in CI by `go list -deps`.
 - NFR-7. Public API documented with godoc on every exported identifier; `go vet` and `golangci-lint` clean.
 

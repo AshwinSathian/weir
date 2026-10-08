@@ -11,7 +11,7 @@ import (
 	"testing"
 )
 
-// NFR-7: every exported identifier of the public packages has a doc comment
+// NFR-7: every exported identifier of the root module's public packages has a doc comment
 // that starts with its name. go vet and golangci-lint cleanliness is the CI
 // gate itself.
 func TestExportedIdentifiersDocumented(t *testing.T) {
@@ -25,7 +25,7 @@ func TestExportedIdentifiersDocumented(t *testing.T) {
 			case ".git", "testdata", "internal", "examples", "loadtest", "scripts", "docs", ".claude":
 				return fs.SkipDir
 			}
-			// Other modules (observe/prom, caddy, store/valkey) are checked by their own make check.
+			// Other modules (observe/prom, caddy, store/valkey) are not walked here.
 			if path != "." {
 				if _, err := os.Stat(filepath.Join(path, "go.mod")); err == nil {
 					return fs.SkipDir
