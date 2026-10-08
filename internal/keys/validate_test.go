@@ -150,7 +150,7 @@ func TestConnectRejected(t *testing.T) {
 }
 
 func TestNormalizeHost(t *testing.T) {
-	// FR-VAL-1, 04 §3.7: one spelling per authority, so key and forward agree.
+	// FR-VAL-1, FR-KEY-3, 04 §3.7: one spelling per authority, so key and forward agree.
 	tests := []struct {
 		scheme, in, want string
 		ok               bool
@@ -216,7 +216,7 @@ func TestValidateReturnsNormalizedHost(t *testing.T) {
 }
 
 func FuzzValidateRequest(f *testing.F) {
-	// FR-VAL-1, FR-VAL-4, NFR-2; T-6: no panic, and no accepted path or
+	// FR-VAL-1, FR-VAL-4, NFR-2, INV-6; T-6: no panic, and no accepted path or
 	// query with bytes outside 0x21-0x7E or a malformed escape.
 	f.Add("GET", "http", "example.com", "/a/../b", "x=1", "keep-alive, Upgrade", "websocket")
 	f.Fuzz(func(t *testing.T, method, scheme, host, path, query, conn, upgrade string) {

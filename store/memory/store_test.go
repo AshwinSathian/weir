@@ -137,7 +137,7 @@ func TestS3FIFOScanResistance(t *testing.T) {
 	}
 }
 
-// NFR-3, T6.11: after every Set, Bytes() <= MaxBytes, across inserts,
+// NFR-3, INV-5, T6.11: after every Set, Bytes() <= MaxBytes, across inserts,
 // in-place replacements with other sizes, promotions and deletes.
 func TestByteAccountingBound(t *testing.T) {
 	const maxBytes = 256 << 10

@@ -16,7 +16,7 @@ Read in this order the first time. After that, go straight to the one you need.
 | 09 | [research-notes](09-research-notes.md) | sources, verified facts, seed errata | living |
 | 10 | [experiments-spec](10-experiments-spec.md) | Phase 3 experiment dimensions: locked decisions E1–E7 | draft |
 
-The roadmap with milestones, tasks and acceptance criteria is [PLAN-weir.md](../PLAN-weir.md). Session-sized task cards are in [cards/](cards/README.md), and current progress in [progress/STATUS.md](progress/STATUS.md) with history in [progress/LOG.md](progress/LOG.md). Instructions for coding agents are in [CLAUDE.md](../CLAUDE.md).
+Operators start with the [runbook](runbook.md) (deployment checklist, signals and incident steps) and the [benchmarks](benchmarks.md). The roadmap with milestones, tasks and acceptance criteria is [PLAN-weir.md](../PLAN-weir.md). Session-sized task cards are in [cards/](cards/README.md), and current progress in [progress/STATUS.md](progress/STATUS.md) with history in [progress/LOG.md](progress/LOG.md). Instructions for coding agents are in [CLAUDE.md](../CLAUDE.md).
 
 ## Mapping from the seed's planned document names
 
