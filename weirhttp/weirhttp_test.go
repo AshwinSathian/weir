@@ -353,11 +353,8 @@ func TestH2CUpgradeNotForwarded(t *testing.T) {
 	})
 }
 
-// FR-VAL-1, INV-1, T-6: an absolute-form target keeps the raw path and
-// query bytes too. net/http leaves '#' in URL.Path and EscapedPath turns it
-// into "%23", which would serve "/a#x" as the literal "/a%23x" instead of
-// rejecting it like the origin-form target.
-// FR-VAL-1, RFC 9110 §4.2.3: an empty absolute-form path is "/".
+// FR-VAL-1, INV-1, RFC 9110 §4.2.3: an empty absolute-form path is "/";
+// the key and the forwarded request both read RequestFrom's Path.
 func TestAbsoluteFormEmptyPath(t *testing.T) {
 	for _, target := range []string{"http://example.com", "http://example.com?x=1", "https://example.com"} {
 		t.Run(target, func(t *testing.T) {
@@ -372,6 +369,10 @@ func TestAbsoluteFormEmptyPath(t *testing.T) {
 	}
 }
 
+// FR-VAL-1, INV-1, T-6: an absolute-form target keeps the raw path and
+// query bytes too. net/http leaves '#' in URL.Path and EscapedPath turns it
+// into "%23", which would serve "/a#x" as the literal "/a%23x" instead of
+// rejecting it like the origin-form target.
 func TestRequestFromAbsoluteFormRaw(t *testing.T) {
 	tests := []struct{ target, path, query string }{
 		{"http://example.com/a#x", "/a#x", ""},

@@ -1122,6 +1122,7 @@ func TestForwardedResponseGetsDate(t *testing.T) {
 		o := testorigin.NewChecked(t, 64, 16)
 		o.Default(cacheable("hello"))
 		o.Route("/bad", testorigin.Behavior{Header: http.Header{"Cache-Control": {"max-age=60"}, "Date": {"not a date"}}, Body: []byte("x")})
+		o.Route("/valid", testorigin.Behavior{Header: http.Header{"Cache-Control": {"max-age=60"}, "Date": {"Mon, 02 Jan 2006 15:04:05 GMT"}}, Body: []byte("v")})
 		o.Route("/pass", testorigin.Behavior{Header: http.Header{"Cache-Control": {"private"}}, Body: []byte("p")})
 		o.Route("/stream", testorigin.Behavior{Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: []byte("data: 1\n\n")})
 		e := newEngine(t, cacheCfg)
@@ -1133,6 +1134,10 @@ func TestForwardedResponseGetsDate(t *testing.T) {
 			if got := resp.Header.Get("Date"); got != want {
 				t.Errorf("%s: Date = %q, want %q", path, got, want)
 			}
+		}
+		// A valid origin Date is never overwritten.
+		if resp, _ := serve(t, e, getReq("/valid"), o); resp.Header.Get("Date") != "Mon, 02 Jan 2006 15:04:05 GMT" {
+			t.Errorf("/valid: Date = %q, want the origin's", resp.Header.Get("Date"))
 		}
 		time.Sleep(10 * time.Second)
 		resp, _ := serve(t, e, getReq("/a"), o)

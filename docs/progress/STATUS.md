@@ -1,12 +1,12 @@
 # Status
 
-Updated: 2026-10-07
+Updated: 2026-10-08
 Phase: 1
 Current card: none
 Card state: awaiting-merge
-Branch: claude/zealous-ritchie-wdpztv
-PR: #58 https://github.com/AshwinSathian/weir/pull/58
-Next card: M10-07
+Branch: claude/optimistic-curie-2mn579
+PR: none yet (not requested)
+Next card: M10-09
 
 ## Waiting on Ashwin
 
