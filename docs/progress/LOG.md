@@ -1033,7 +1033,7 @@ Entry template:
 - Context: low.
 
 ## 2026-10-08 · M10-05 · done
-- Branch / PR: claude/peaceful-wright-an4zuy / see STATUS
+- Branch / PR: claude/peaceful-wright-an4zuy / #61
 - Done: BenchmarkServeHitVary, BenchmarkServeMissCoalesced, BenchmarkServeHitParallel (tracker on/off); TestGCAt1MEntries in loadtest (load tag); docs/benchmarks.md with M1 to M10 benchstat (both rerun on one 4-core box) and GC cost at 1M entries (about 6.6% of busy CPU, under 10%, no layout card).
 - Tests: root, all-package race tests and observe/prom pass; go vet with the load tag passes. Lint unrun (Go 1.25 binary); CI must confirm.
 - Deviations: NFR-5 wording only (dropped "provisional" as the spec itself planned, numbers unchanged). Parallel tracker cost recorded only, decided by Ashwin.

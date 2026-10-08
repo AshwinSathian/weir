@@ -5,7 +5,7 @@ Phase: 1
 Current card: none
 Card state: awaiting-merge
 Branch: claude/peaceful-wright-an4zuy
-PR: none
+PR: #61 https://github.com/AshwinSathian/weir/pull/61
 Next card: M10-06 (M10-10 is optional)
 
 ## Waiting on Ashwin
