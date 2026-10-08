@@ -81,7 +81,7 @@ Benchmarks added after M1 (M10 only, same box):
 
 ### NFR-5
 
-`BenchmarkServeHitSmall` is 2.4 µs/op and 14 allocs/op on a slower machine than the reference, inside the budget of 4 µs and 16 allocs. NFR-5 keeps its numbers; only the word "provisional" is gone. Re-run on the reference machine and replace this section before relying on the headroom. The +8% and +14% since M1 are below the 20% review threshold; The cause of the `KeyBuild` growth was not investigated; allocations did not change.
+`BenchmarkServeHitSmall` is 2.4 µs/op and 14 allocs/op on a slower machine than the reference, inside the budget of 4 µs and 16 allocs. NFR-5 keeps its numbers; only the word "provisional" is gone. Re-run on the reference machine and replace this section before relying on the headroom. The +8% and +14% since M1 are below the 20% review threshold. The cause of the `KeyBuild` growth was not investigated; allocations did not change.
 
 ### Parallel hits and the miss-rate tracker
 
@@ -89,9 +89,9 @@ Benchmarks added after M1 (M10 only, same box):
 
 ## M10 GC cost at 1M entries (2026-10-08)
 
-D36 keeps the store on the Go heap until GC cost is measured. `TestGCAt1MEntries` (`make load`, `loadtest/gc_test.go`) fills a memory store with 10 000 and then 1 000 000 entries of 1 KiB, serves hits from 64 goroutines at 20 000 requests/s for 30 s and reports the result. Same box as above (4 vCPU Xeon, Go 1.27.0), one run, `GOGC` default.
+D36 keeps the store on the Go heap until GC cost is measured. `TestGCAt1MEntries` (`make load`, `loadtest/gc_test.go`) fills a memory store with 10 000 and then 1 000 000 entries of 1 KiB, serves hits from 64 goroutines at 20 000 requests/s for 30 s and reports the result. Same box as above (4 vCPU Xeon, Go 1.27.0), one run, `GOGC` default. Raw output: [benchmarks/m10-gc.txt](benchmarks/m10-gc.txt).
 
-The runtime updates its CPU class metrics only when a GC cycle ends, and at this rate a 2.6 GiB heap would take minutes to trigger one. So the test forces a cycle every 5 s under load, measures GC CPU per cycle, and projects the natural frequency (a cycle per live-heap bytes allocated) from the measured allocation rate. The forced cycles also put their effect into the p99, so the p99 below is worse than a natural one.
+The runtime updates its CPU class metrics only when a GC cycle ends, and at this rate a 2.5 GiB heap would take minutes to trigger one. So the test forces a cycle every 5 s under load, measures GC CPU per cycle, and projects the natural frequency (a cycle per live-heap bytes allocated) from the measured allocation rate. The forced cycles also put their effect into the p99, so the p99 below is worse than a natural one.
 
 | | 10 000 entries | 1 000 000 entries |
 |---|---:|---:|
@@ -104,4 +104,4 @@ The runtime updates its CPU class metrics only when a GC cycle ends, and at this
 | hit p99 (with a forced cycle every 5 s) | 53 µs | 57 µs |
 | slowest request | 6.9 ms | 6.5 ms |
 
-Result: 6.6% of busy CPU is below the 10% line in the card, so no pointer-light layout card is added to `docs/cards/11-phase1x.md` and D36 stands. The share is roughly independent of the request rate (allocation and busy CPU both scale with it). It is not independent of entry size: 1 KiB bodies carry about 2.6 KiB of heap per entry here (key, header map, struct, body), and smaller bodies mean more pointers per live byte, so a store of 1M tiny entries would cost more. The 10 000-entry column is the same load on a small heap, for scale. Re-run on the reference machine and replace this table.
+Result: 6.6% of busy CPU is below the 10% line in the card, so no pointer-light layout card is added to `docs/cards/11-phase1x.md` and D36 stands. The share is roughly independent of the request rate (allocation and busy CPU both scale with it). It is not independent of entry size: 1 KiB bodies carry about 2.6 KiB of heap per entry here (key, header map, struct, body), and smaller bodies mean more pointers per live byte, so a store of 1M tiny entries would cost more. The projection is an upper-bound style estimate: GC CPU includes idle-priority mark workers on otherwise idle cores, while the divisor is non-idle CPU, and the small column also leaves its natural cycles in the busy figure. The share is noisy: a second run at a tenth of the window length gave 2.9% for the large heap (busy CPU 0.88 cores, 21 MiB/s allocated), the first 6.6%; both are under 10%. The 10 000-entry column is the same load on a small heap, for scale. Re-run on the reference machine and replace this table.

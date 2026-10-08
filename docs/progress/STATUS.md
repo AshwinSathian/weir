@@ -2,11 +2,11 @@
 
 Updated: 2026-10-08
 Phase: 1
-Current card: M10-05
-Card state: in-progress
+Current card: none
+Card state: awaiting-merge
 Branch: claude/peaceful-wright-an4zuy
 PR: none
-Next card: M10-05 (M10-10 is optional)
+Next card: M10-06 (M10-10 is optional)
 
 ## Waiting on Ashwin
 
@@ -18,6 +18,9 @@ none
 
 ## Notes for the next session
 
+- M10-05: numbers come from a 4-core Xeon, not the reference machine; rerun the benchmarks and `make load` there and replace the M10 tables in docs/benchmarks.md.
+- M10-05: parallel miss-rate tracker cost recorded only (Ashwin, 2026-10-08); no card for `TryLock` or per-shard counters.
+- M10-05: the GC share is noisy (2.9% to 6.6% across two runs, both under 10%), so no Phase 1.x layout card.
 - golangci-lint cannot run in cloud sessions (built with Go 1.25); CI must confirm lint.
 - `pragma-response-no-cache-heuristic` is a Go `net/http` artifact (`fixPragmaCacheControl`), documented as by design.
 - Run the nightly workflow once after the M10-04 merge; PLAN M10.4 stays unticked until it is green.

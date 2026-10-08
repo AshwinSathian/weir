@@ -164,8 +164,8 @@ Refs: FR-OBS-*, NFR-*, seed §7.5.
 - [x] M10.2 `observe/prom` module (own `go.mod`, added to `go.work`). AC: metrics from [04 §9.3](docs/04-lld.md) exported; `testutil` checks in its tests; root module still has zero third-party imports.
 - [x] M10.3 Load tests ([07 §9](docs/07-testing-strategy.md)) and nightly workflow. AC: all scenarios pass on the reference machine; results in `docs/benchmarks.md`.
 - [ ] M10.4 Nightly fuzz and cache-tests jobs; `testdata/cache-tests-baseline.json`; `docs/cache-tests-expected-failures.md`. AC: both jobs green; every expected failure cites a decision ID.
-- [ ] M10.5 NFR-5 measured; spec updated if the provisional budget was wrong. AC: `docs/benchmarks.md` has before/after `benchstat` for M1 to M10.
-- [ ] M10.5b GC cost at 1M entries measured (D36). AC: `docs/benchmarks.md` reports GC CPU share and p99; if GC CPU exceeds 10% at 1M entries, a pointer-light layout task is added to Phase 1.x.
+- [x] M10.5 NFR-5 measured; spec updated if the provisional budget was wrong. AC: `docs/benchmarks.md` has before/after `benchstat` for M1 to M10.
+- [x] M10.5b GC cost at 1M entries measured (D36). AC: `docs/benchmarks.md` reports GC CPU share and p99; if GC CPU exceeds 10% at 1M entries, a pointer-light layout task is added to Phase 1.x.
 - [ ] M10.6 `TRACE_STRICT=1` in CI. AC: trace report empty.
 - [ ] M10.7 README usage guide: quick start with `weirhttp`, the strict-forwarding explanation, every opt-out that weakens a default (R-3). AC: README reviewed against [06 §5](docs/06-threat-model.md).
 - [x] M10.9 Group tags skip the invalid epoch plane ([05 E-8](docs/05-storage-interface-spec.md), T-29): optional `store.SharedTagEpochs` capability, memory store support. AC: `TestSharedTagsSkipInvalidPlane`, `TestInvalidationFloodLeavesGroupsServable` pass.

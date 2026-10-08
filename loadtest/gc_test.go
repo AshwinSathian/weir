@@ -61,7 +61,7 @@ func (r gcResult) projectedShare() float64 {
 
 // gcPhase fills an engine with n keys of 1 KiB, then reads random keys at
 // rps for d. The runtime updates its CPU class metrics only when a cycle
-// ends, and at 20 000 hits/s a 2.7 GiB heap needs minutes to trigger one,
+// ends, and at 20 000 hits/s a 2.5 GiB heap needs minutes to trigger one,
 // so the phase forces a cycle every few seconds under load: that measures
 // the cost per cycle (and puts the cycles' effect into the p99), and the
 // result projects the natural frequency from the allocation rate.
@@ -138,7 +138,7 @@ func gcPhase(t *testing.T, n, rps int, d time.Duration) gcResult {
 }
 
 // TestGCAt1MEntries measures the cost of keeping 1M entries on the Go heap
-// (D36, card M10-05): the GC share of CPU and the hit p99 at a fixed
+// (D36, NFR-5, card M10-05): the GC share of CPU and the hit p99 at a fixed
 // request rate, next to the same load on a 10 000-entry store. Not a gate on
 // latency; the one assertion is the 10% GC budget that decides whether a
 // pointer-light layout card is needed. Machine-dependent: the reference
