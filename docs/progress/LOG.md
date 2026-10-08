@@ -999,7 +999,7 @@ Entry template:
 - Context: low.
 
 ## 2026-10-08 · M10-07 · done
-- Branch / PR: claude/optimistic-curie-2mn579 / none (not requested)
+- Branch / PR: claude/optimistic-curie-2mn579 / #59
 - Done: `stampDate` in fetch.go gives every forwarded or stored response a valid `Date` at receipt (miss, pass-through, stream, 304); `RequestFrom` maps an empty absolute-form path to `/`; FR-STO-13 says "stored or forwarded".
 - Tests: TestForwardedResponseGetsDate (also checks a valid origin Date is kept), TestAbsoluteFormEmptyPath; race tests pass on all packages. Lint unrun (golangci-lint built with Go 1.25).
 - Deviations: none beyond the FR-STO-13 wording.

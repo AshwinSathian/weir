@@ -5,7 +5,7 @@ Phase: 1
 Current card: none
 Card state: awaiting-merge
 Branch: claude/optimistic-curie-2mn579
-PR: none yet (not requested)
+PR: #59 https://github.com/AshwinSathian/weir/pull/59
 Next card: M10-09
 
 ## Waiting on Ashwin
