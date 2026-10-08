@@ -166,8 +166,8 @@ Refs: FR-OBS-*, NFR-*, seed §7.5.
 - [ ] M10.4 Nightly fuzz and cache-tests jobs; `testdata/cache-tests-baseline.json`; `docs/cache-tests-expected-failures.md`. AC: both jobs green; every expected failure cites a decision ID.
 - [x] M10.5 NFR-5 measured; spec updated if the provisional budget was wrong. AC: `docs/benchmarks.md` has before/after `benchstat` for M1 to M10.
 - [x] M10.5b GC cost at 1M entries measured (D36). AC: `docs/benchmarks.md` reports GC CPU share and p99; if GC CPU exceeds 10% at 1M entries, a pointer-light layout task is added to Phase 1.x (done: M16-01, GC share 13.6% to 15.4%).
-- [ ] M10.6 `TRACE_STRICT=1` in CI. AC: trace report empty.
-- [ ] M10.7 README usage guide: quick start with `weirhttp`, the strict-forwarding explanation, every opt-out that weakens a default (R-3). AC: README reviewed against [06 §5](docs/06-threat-model.md).
+- [x] M10.6 `TRACE_STRICT=1` in CI. AC: trace report empty.
+- [x] M10.7 README usage guide: quick start with `weirhttp`, the strict-forwarding explanation, every opt-out that weakens a default (R-3). AC: README reviewed against [06 §5](docs/06-threat-model.md).
 - [x] M10.9 Group tags skip the invalid epoch plane ([05 E-8](docs/05-storage-interface-spec.md), T-29): optional `store.SharedTagEpochs` capability, memory store support. AC: `TestSharedTagsSkipInvalidPlane`, `TestInvalidationFloodLeavesGroupsServable` pass.
 - [x] M10.8 RFC 9110 gaps found in review: `Date` on forwarded responses (§6.6.1), empty absolute-form path as `/` (§4.2.3). AC: `TestForwardedResponseGetsDate`, `TestAbsoluteFormEmptyPath` pass.
 

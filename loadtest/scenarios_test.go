@@ -41,7 +41,7 @@ func (l *eventLog) count(kind, reason string) int {
 func pathN(prefix string, i int) string { return fmt.Sprintf("/%s/%d", prefix, i) }
 
 // TestSteadyHits: 64 goroutines over 10 000 hot keys for 60 s.
-// 07 §9; NFR-1 (hit path latency), INV-5.
+// 07 §9; NFR-1 (hit path latency).
 func TestSteadyHits(t *testing.T) {
 	const keys = 10000
 	base := baseline()

@@ -4,9 +4,9 @@ Updated: 2026-10-08
 Phase: 1
 Current card: none
 Card state: awaiting-merge
-Branch: claude/peaceful-wright-an4zuy
-PR: #61 https://github.com/AshwinSathian/weir/pull/61
-Next card: M10-06 (M10-10 is optional)
+Branch: claude/funny-bardeen-pjrvvk
+PR: none (not opened; Ashwin has not asked for one)
+Next card: M10-10 (optional, needs Ashwin's go-ahead on the FR-SRV-2 wording); otherwise M16-01 once approved
 
 ## Waiting on Ashwin
 
@@ -18,6 +18,9 @@ Next card: M10-06 (M10-10 is optional)
 none
 
 ## Notes for the next session
+
+- M10-06: `make check` now runs `trace-strict`; FR-RNG, FR-TCC, FR-SNP and FR-FAIR are allowlisted in scripts/trace.sh. Drop each prefix from `later` in the PR that adds its first citing test.
+- M10-06: runbook states the 300 000 keys at 1 000 rps figure from the M8-02 notes; re-measure if the miss-rate tracker changes.
 
 - M10-05: all numbers come from a 4-core Xeon; rerun the benchmarks and `make load` on the reference machine and replace the M10 tables in docs/benchmarks.md.
 - M10-05: parallel miss-rate tracker cost recorded only (decided 2026-10-08); no card for `TryLock` or per-shard counters.

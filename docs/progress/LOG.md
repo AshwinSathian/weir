@@ -1048,3 +1048,12 @@ Entry template:
 - Deviations: none (NFR-5 reverted).
 - Follow-ups: M16-01 (needs Ashwin's go-ahead, D36), reference-machine rerun, the lookup-to-Join second-flight window.
 - Context: medium.
+
+## 2026-10-08 · M10-06 · done
+- Branch / PR: claude/funny-bardeen-pjrvvk / none yet
+- Done: README quick start (weirhttp), strict-forwarding section and a table of every setting that takes a protection back (R-1, R-3, R-6 to R-8); docs/runbook.md (deployment, signals, incidents, MissRate.Throttle); `make check` runs trace-strict with an M11+ allowlist in scripts/trace.sh; 7 uncited IDs now cited.
+- Tests: TestTransientBodyMemoryBounded (NFR-4), TestExportedIdentifiersDocumented (NFR-7); citations FR-KEY-3, FR-VAL-2, FR-LCY-3, INV-5, INV-6 on existing tests. Root and all-package race tests pass, trace 136/136. Lint unrun (Go 1.25 binary); CI must confirm.
+- Deviations: docs/06 T-21 row lists the new test (date bumped).
+- Review: card-reviewer, one must-fix (metric label `sie`, not `stale-if-error`), fixed with the soft-purge wording, R-6/R-7 rows, bypass-invalidation and 499 notes, hollow INV-5 citation removed.
+- Follow-ups: M10-10 (optional), M16-01 (needs approval).
+- Context: medium; size S was right.

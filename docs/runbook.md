@@ -15,7 +15,7 @@ For the person running Weir in front of an origin. It covers first deployment, t
 
 ## 2. What to watch
 
-Each response carries `Cache-Status: Weir; ...` (RFC 9211). `hit; ttl=N` is a fresh hit. `fwd=uri-miss` (no entry), `fwd=vary-miss` (entry exists, not for these `Vary` values), `fwd=stale`, `fwd=request` (the client asked), `fwd=method` and `fwd=bypass` say why the origin was asked. `; collapsed` marks a request that joined another's fetch. `detail=` names the stale reason: `stale-while-revalidate`, `stale-if-error`, `shed`, `circuit-open`, `coalesce-timeout`.
+Each response carries `Cache-Status: Weir; ...` (RFC 9211). `hit; ttl=N` is a fresh hit. `fwd=uri-miss` (no entry), `fwd=vary-miss` (entry exists, not for these `Vary` values), `fwd=stale`, `fwd=request` (the client asked), `fwd=method` and `fwd=bypass` say why the origin was asked. `; collapsed` marks a request that joined another's fetch. `detail=` names the stale reason: `stale-while-revalidate`, `stale-if-error`, `shed`, `circuit-open`, `coalesce-timeout`. The metric label `reason` uses short names for the first two: `swr` and `sie`.
 
 With `observe/prom` (a separate module):
 
@@ -39,7 +39,7 @@ Labelled series appear on their first event, so alert on `absent()` as well as `
 
 - The breaker is open for more than a few minutes (`weir_breaker_state == 2`).
 - `weir_shed_total` is nonzero for more than a minute: the origin cannot keep up, or `MaxConcurrent` is set too low for it.
-- `weir_stale_served_total{reason="stale-if-error"}` or `circuit-open` is rising: you are serving through an outage.
+- `weir_stale_served_total{reason="sie"}` or `reason="circuit-open"` is rising: you are serving through an outage.
 - `weir_store_errors_total` is rising (remote stores only).
 - Hit ratio falls by half against the same hour last week.
 
@@ -53,13 +53,13 @@ If entries have no stale-if-error window and you want to ride out the outage: `E
 
 ### 4.2 The cache itself is suspect
 
-Wrong content is being served, or you changed the key configuration. `SetMode(weir.ModeBypass, ttl)` makes every request a pass-through (still through the limiter and breaker, nothing stored, existing entries untouched). Then purge (4.3) and leave bypass when it is clean. Check `weir_not_stored_total` and the origin's `Vary` and `Cache-Control` first: most wrong-content reports are an origin that varies on something Weir does not key (R-1, R-5, R-6).
+Wrong content is being served, or you changed the key configuration. `SetMode(weir.ModeBypass, ttl)` makes every request a pass-through (still through the limiter and breaker, nothing stored, existing entries untouched; an unsafe request that succeeds still invalidates its target as usual). Then purge (4.3) and leave bypass when it is clean. Check `weir_not_stored_total` and the origin's `Vary` and `Cache-Control` first: most wrong-content reports are an origin that varies on something Weir does not key (R-1, R-5, R-6).
 
 ### 4.3 Purging
 
 `Engine.Purge(ctx, weir.Purge{...})` takes `All`, `URLs` (absolute, rewritten like requests) and `Groups` (with `Origin`), in `PurgeSoft` (default) or `PurgeHard` mode.
 
-- Soft: matching entries become stale now and are revalidated with conditional requests. Use it for content changes. Clients keep getting answers, and a purge of thousands of keys does not become a stampede, because refreshes run at background priority below the foreground reserve.
+- Soft: matching entries become stale at the purge time (with the memory store it can land up to 1 s late) and are revalidated with conditional requests. Inside the entry's `stale-while-revalidate` window clients keep getting the stale copy while a background refresh runs; with no such window (the default) the next request revalidates in the foreground and waits. Either way a purge of thousands of keys is bounded by coalescing per key and the limiter, and background refreshes never use the foreground reserve. Use it for content changes.
 - Hard: matching entries are unusable at once, and clients wait for the origin. Use it for content that must not be served again (a leak, a takedown).
 
 A same-origin 2xx or 3xx response to an unsafe method (`POST`, `PUT`, `DELETE`) also invalidates its target URI and `Location` and `Content-Location` URIs. `Cache-Group-Invalidation` from the origin soft-purges groups unless `CacheGroups.Ignore` is set. Purge errors reach you; a store that refuses a hard purge at its cap is not an outage.
@@ -103,4 +103,5 @@ After 5 consecutive `ErrUnavailable` results the store breaker opens for 1 s, do
 | 501 | CONNECT or a protocol upgrade reached `weirhttp.Handler` (`Middleware` passes them on) |
 | 502 | origin error with no usable stale entry |
 | 503 | shed (with `Retry-After`), breaker open with no usable stale entry, or the engine closed |
+| 499 | the client went away; a log hint only, adapters write nothing |
 | 504 | origin timeout, `must-revalidate` entry that could not be validated, or `only-if-cached` with nothing stored |

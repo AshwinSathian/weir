@@ -51,10 +51,10 @@ func (b *gaugeBody) Close() error {
 }
 
 // NFR-4, T-21, INV-5: with MaxConcurrent fetches allowed and twelve cold
-// keys of exactly MaxObjectBytes arriving together, the bytes buffered for bodies at one moment never
-// pass MaxConcurrent x (MaxObjectBytes + 1), the read-ahead that detects an
-// oversized body. The peak must also exceed one fetch's worth, or the test
-// proves nothing about overlap.
+// keys of exactly MaxObjectBytes arriving together, the bytes buffered for
+// bodies at any one moment never pass MaxConcurrent x (MaxObjectBytes + 1),
+// the read-ahead that detects an oversized body. The peak must also exceed
+// one fetch's worth, or the test proves nothing about overlap.
 func TestTransientBodyMemoryBounded(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		const (

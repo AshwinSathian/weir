@@ -73,12 +73,19 @@ func checkFileDocs(t *testing.T, fset *token.FileSet, f *ast.File) {
 						bad(s.Pos(), s.Name.Name, firstDoc(s.Doc, d.Doc))
 					}
 				case *ast.ValueSpec:
-					// A grouped const or var block is documented by its group
-					// comment or by each exported name.
+					// A grouped block is documented by its group comment; a lone
+					// name needs a comment that starts with it.
 					for _, n := range s.Names {
-						if n.IsExported() && s.Doc == nil && d.Doc == nil {
-							t.Errorf("%s: exported %s has no doc comment", fset.Position(n.Pos()), n.Name)
+						if !n.IsExported() {
+							continue
 						}
+						if d.Lparen.IsValid() {
+							if s.Doc == nil && d.Doc == nil {
+								t.Errorf("%s: exported %s has no doc comment", fset.Position(n.Pos()), n.Name)
+							}
+							continue
+						}
+						bad(n.Pos(), n.Name, firstDoc(s.Doc, d.Doc))
 					}
 				}
 			}
