@@ -5,7 +5,7 @@ Phase: 1
 Current card: none
 Card state: awaiting-merge
 Branch: claude/beautiful-brown-di2exe
-PR: pending (GitHub tools unavailable in the session that built M12-01; open from the branch)
+PR: https://github.com/AshwinSathian/weir/pull/66
 Next card: M12-02 per `scripts/card.sh next`; M16-01 is approved too (Phase 1 release gate comes first, your call)
 
 ## Waiting on Ashwin

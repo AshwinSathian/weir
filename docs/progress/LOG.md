@@ -1123,7 +1123,7 @@ Entry template:
 - Context: low.
 
 ## 2026-10-09 · M12-01 · done
-- Branch / PR: claude/beautiful-brown-di2exe / not yet opened
+- Branch / PR: claude/beautiful-brown-di2exe / https://github.com/AshwinSathian/weir/pull/66
 - Done: `internal/sfv/dict.go` with `ParseDictionary(lines, maxMembers)`, `Dict`, `Item`, `Kind`; per-line parsing, parameters and inner lists validated and dropped, any error returns no members, repeats count against the limit.
 - Tests: TestParseDictionary (incl. RFC 9651 §3.2 examples), TestParseDictionaryBounds, FuzzSFDictionary with six seed files. Race tests, vet, gofmt and trace-strict pass; lint unrun (built with Go 1.25), CI must confirm.
 - Deviations: docs/04 §13.2 gained the Dict shape. No requirement touched.
