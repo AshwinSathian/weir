@@ -30,12 +30,14 @@ type Item struct {
 }
 
 // Dict maps member keys to values. A repeated key keeps its last value
-// (RFC 9651 §4.2.2); order is not kept because no caller needs it.
+// (RFC 9651 §4.2.2); order is not kept because no caller needs it. Callers
+// must check the lookup's ok: the zero Item is a valid Boolean false.
 type Dict map[string]Item
 
 // ParseDictionary parses the field lines of one field as an RFC 9651 §4.2.2
-// Dictionary (FR-TCC-1). Lines are joined with ", " as RFC 9110 §5.3 says, so
-// a String cannot span two lines. Parameters are checked and dropped. Any
+// Dictionary (FR-TCC-1). Each line is parsed on its own, with the result RFC
+// 9110 §5.3 gives for the lines joined by ", " except that a String cannot
+// span two lines. Parameters are checked and dropped. Any
 // error, or more than maxMembers members (repeats included), is ErrInvalid
 // and returns no members: RFC 9213 §2.1 ignores a field that does not parse,
 // and a half-read field could grant a lifetime the origin never meant (T-34).

@@ -1121,3 +1121,11 @@ Entry template:
 - Deviations: docs/01 FR-SRV-5, FR-RNG-4; docs/04 §13.1; docs/06 T-37; docs/07 row clarified, no requirement weakened. Reviewer's HEAD routing change (HEAD takes the normal miss path) not taken: it contradicts a tested M11-01 behavior; noted in STATUS.
 - Follow-ups: Vary and hard-purge fill tests; HEAD Range routing; failing-fill suppression if a profile shows it.
 - Context: low.
+
+## 2026-10-09 · M12-01 · done
+- Branch / PR: claude/beautiful-brown-di2exe / not yet opened
+- Done: `internal/sfv/dict.go` with `ParseDictionary(lines, maxMembers)`, `Dict`, `Item`, `Kind`; per-line parsing, parameters and inner lists validated and dropped, any error returns no members, repeats count against the limit.
+- Tests: TestParseDictionary (incl. RFC 9651 §3.2 examples), TestParseDictionaryBounds, FuzzSFDictionary with six seed files. Race tests, vet, gofmt and trace-strict pass; lint unrun (built with Go 1.25), CI must confirm.
+- Deviations: docs/04 §13.2 gained the Dict shape. No requirement touched.
+- Follow-ups: reviewer found no must-fix; RFC examples, zero-Item note and doc comment applied. Linear-time of the inner-list test is not asserted. M12-02 next.
+- Context: low; size S was right.
