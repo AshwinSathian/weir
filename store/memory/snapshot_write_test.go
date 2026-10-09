@@ -196,7 +196,7 @@ func TestSnapshotRespectsDeadline(t *testing.T) {
 				t.Fatal(err)
 			}
 			for i := uint64(1); i <= 10; i++ {
-				_ = s.Set(context.Background(), numKey(i), entry(10))
+				_ = s.Set(t.Context(), numKey(i), entry(10))
 			}
 			if err := s.CloseContext(ctx); !errors.Is(err, context.Canceled) {
 				t.Fatalf("CloseContext = %v, want context.Canceled", err)
@@ -204,7 +204,7 @@ func TestSnapshotRespectsDeadline(t *testing.T) {
 			if names := dirNames(t, dir); len(names) != 0 {
 				t.Fatalf("directory holds %v, want nothing", names)
 			}
-			if _, err := s.Get(context.Background(), numKey(1)); !errors.Is(err, store.ErrUnavailable) {
+			if _, err := s.Get(t.Context(), numKey(1)); !errors.Is(err, store.ErrUnavailable) {
 				t.Errorf("Get after close = %v, want ErrUnavailable", err)
 			}
 		})
@@ -377,7 +377,7 @@ func TestSnapshotConcurrentClose(t *testing.T) {
 	for g := range 4 {
 		wg.Go(func() {
 			if g%2 == 0 {
-				if err := s.Close(); err != nil {
+				if err := s.CloseContext(ctx); err != nil {
 					t.Errorf("Close: %v", err)
 				}
 				if _, err := os.Stat(path); err != nil {
