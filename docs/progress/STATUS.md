@@ -18,7 +18,7 @@ none
 
 ## Notes for the next session
 
-- M10-10: RFC 9110 §13.2 was not re-read this session (the earlier note asked for it); FR-SRV-2 still limits evaluation to stored 200 and GET/HEAD. Range requests skip the cache before `respond`, so 304-over-206 is untested. The `UPDATE=1 scripts/cache-tests.sh` baseline update is already applied (265 pass, 100 fail).
+- M10-10: RFC 9110 §13.2.1 makes evaluating preconditions on any 2xx a MUST, 9111 §4.3.2 a SHOULD for stored 200/206; FR-SRV-2 keeps stored 200 and GET/HEAD only (compliant, conservative; 203/204 and 206 are gaps, 206 comes with M11). A hit with Range and a matching `If-None-Match` answers 304 (tested); a miss with Range goes to the pass-through, which drops client preconditions (FR-FWD-1). Revisit that in the M11 card.
 
 - M10-06: `make check` now runs `trace-strict`; FR-RNG, FR-TCC, FR-SNP and FR-FAIR are allowlisted in scripts/trace.sh. Drop each prefix from `later` in the PR that adds its first citing test.
 - M10-06: runbook states the 300 000 keys at 1 000 rps figure from the M8-02 notes; re-measure if the miss-rate tracker changes.

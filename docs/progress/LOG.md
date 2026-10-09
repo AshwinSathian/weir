@@ -1081,3 +1081,11 @@ Entry template:
 - Deviations: none beyond the FR-SRV-2 widening already logged.
 - Follow-ups: RFC 9110 §13.2 text not re-checked; Range plus matching conditional untested (Range bypasses the cache). PLAN M10.4 stays unticked until the nightly run is green.
 - Context: low; size S was right.
+
+## 2026-10-09 · M10-10 · review-fixes
+- Branch / PR: claude/admiring-curie-sv9a2w / #63 https://github.com/AshwinSathian/weir/pull/63
+- Done: independent adversarial review of PR #63 (RFC text fetched, new tests run against a reverted serve.go: all four failed). Fixed: the creator's own 200 keeps a `Set-Cookie` when StripSetCookie dropped it from the stored entry (FR-STO-6); follower test now has a matching follower; discarded-304 test asserts the retry happened; accidental ETag edit in TestStoredEntriesEncode reverted; LLD Range wording corrected. Decisions: keep the stored-200 limit; no code for Range on a miss (pass-through drops preconditions, FR-FWD-1; M11 to revisit).
+- Tests: TestClientConditionalKeepsCreatorSetCookie, TestClientConditionalBeforeRangeOnHit, TestClientConditionalColdMissAndFollowers (4 clients). Root race tests and vet pass; lint and cache-tests script not re-run.
+- Deviations: none new.
+- Follow-ups: M11 card: Range plus precondition on a miss. 203/204 are not evaluated.
+- Context: low.

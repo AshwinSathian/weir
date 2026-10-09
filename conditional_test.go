@@ -475,7 +475,7 @@ func TestStoredEntriesEncode(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		o := testorigin.NewChecked(t, 64, 16)
 		o.Default(testorigin.Behavior{Func: func(*weir.Request) (*weir.Response, error) {
-			return respond(200, http.Header{"cache-control": {"max-age=60"}, "eTag": {`"text/a"`}, "x-odd": {"1"}, "vary": {"accept"}}, "v"), nil
+			return respond(200, http.Header{"cache-control": {"max-age=60"}, "eTag": {`"a"`}, "x-odd": {"1"}, "vary": {"accept"}}, "v"), nil
 		}})
 		e, st := newRecordingEngine(t)
 		defer closeEngine(t, e)
@@ -598,8 +598,8 @@ func TestClientConditionalUsesFinalEntry(t *testing.T) {
 		r := getReq("/a")
 		r.Header["If-None-Match"] = []string{`"2"`}
 		resp, body := serve(t, e, r, o)
-		if resp.StatusCode != http.StatusOK || body != "v3" {
-			t.Fatalf("client holding the discarded tag: %d %q, want 200 v3", resp.StatusCode, body)
+		if resp.StatusCode != http.StatusOK || body != "v3" || o.TotalCalls() != 3 {
+			t.Fatalf("client holding the discarded tag: %d %q after %d origin calls, want 200 v3 after the validation and its retry", resp.StatusCode, body, o.TotalCalls())
 		}
 		time.Sleep(61 * time.Second)
 		o.Default(testorigin.Behavior{Header: http.Header{"Cache-Control": {"max-age=60"}, "Etag": {`"3"`}}, Body: []byte("v3")})
@@ -661,7 +661,7 @@ func TestClientConditionalVariantsAndAuthorization(t *testing.T) {
 }
 
 // FR-SRV-2, FR-COA-1: a cold miss and each flight follower answer by their
-// own conditionals.
+// own conditionals. Two clients match, so at least one follower gets a 304.
 func TestClientConditionalColdMissAndFollowers(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		o := testorigin.NewChecked(t, 64, 16)
@@ -672,11 +672,19 @@ func TestClientConditionalColdMissAndFollowers(t *testing.T) {
 		e := newEngine(t, cacheCfg)
 		defer closeEngine(t, e)
 
-		match, other, plain := getReq("/c"), getReq("/c"), getReq("/c")
-		match.Header["If-None-Match"] = []string{`"1"`}
-		other.Header["If-None-Match"] = []string{`"2"`}
-		chs := []<-chan served{serveAsync(t.Context(), e, match, o), serveAsync(t.Context(), e, other, o), serveAsync(t.Context(), e, plain, o)}
-		want := []int{304, 200, 200}
+		mk := func(inm string) *weir.Request {
+			r := getReq("/c")
+			if inm != "" {
+				r.Header["If-None-Match"] = []string{inm}
+			}
+			return r
+		}
+		inms := []string{`"1"`, `"1"`, `"2"`, ""}
+		want := []int{304, 304, 200, 200}
+		chs := make([]<-chan served, len(inms))
+		for i, inm := range inms {
+			chs[i] = serveAsync(t.Context(), e, mk(inm), o)
+		}
 		collapsed := 0
 		for i, ch := range chs {
 			s := <-ch
@@ -690,8 +698,51 @@ func TestClientConditionalColdMissAndFollowers(t *testing.T) {
 				collapsed++
 			}
 		}
-		if n := o.TotalCalls(); n != 1 || collapsed != 2 {
-			t.Fatalf("origin calls %d, collapsed %d; want 1 and 2", n, collapsed)
+		if n := o.TotalCalls(); n != 1 || collapsed != 3 {
+			t.Fatalf("origin calls %d, collapsed %d; want 1 and 3", n, collapsed)
+		}
+	})
+}
+
+// FR-SRV-2, FR-STO-6: with StripSetCookie the stored entry has no cookie, but
+// the creator's own response keeps it, so it is not replaced by a 304.
+func TestClientConditionalKeepsCreatorSetCookie(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		o := testorigin.NewChecked(t, 64, 16)
+		o.Default(testorigin.Behavior{Header: http.Header{"Cache-Control": {"max-age=60"}, "Etag": {`"1"`}, "Set-Cookie": {"a=b"}}, Body: []byte("v1")})
+		cfg := cacheCfg
+		cfg.Storable.StripSetCookie = true
+		e := newEngine(t, cfg)
+		defer closeEngine(t, e)
+		r := getReq("/s")
+		r.Header["If-None-Match"] = []string{`"1"`}
+		resp, body := serve(t, e, r, o)
+		if resp.StatusCode != http.StatusOK || body != "v1" || resp.Header.Get("Set-Cookie") != "a=b" || !resp.Cache.Stored {
+			t.Fatalf("creator: %d %q cookie %q stored=%v, want its own 200 with the cookie", resp.StatusCode, body, resp.Header.Get("Set-Cookie"), resp.Cache.Stored)
+		}
+		r = getReq("/s")
+		r.Header["If-None-Match"] = []string{`"1"`}
+		if resp, _ = serve(t, e, r, o); resp.StatusCode != http.StatusNotModified || resp.Header.Get("Set-Cookie") != "" {
+			t.Fatalf("hit: %d cookie %q, want 304 without the cookie", resp.StatusCode, resp.Header.Get("Set-Cookie"))
+		}
+	})
+}
+
+// FR-SRV-2, RFC 9110 §13.2.2: If-None-Match is evaluated before Range, so a
+// matching precondition on a hit answers 304 even with a Range header. A
+// request without a usable entry goes to the Range pass-through (FR-FWD-1).
+func TestClientConditionalBeforeRangeOnHit(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		o := testorigin.NewChecked(t, 64, 16)
+		o.Default(testorigin.Behavior{Header: http.Header{"Cache-Control": {"max-age=60"}, "Etag": {`"1"`}}, Body: []byte("v1")})
+		e := newEngine(t, cacheCfg)
+		defer closeEngine(t, e)
+		serve(t, e, getReq("/r"), o)
+		r := getReq("/r")
+		r.Header.Set("Range", "bytes=0-0")
+		r.Header["If-None-Match"] = []string{`"1"`}
+		if resp, _ := serve(t, e, r, o); resp.StatusCode != http.StatusNotModified || !resp.Cache.Hit {
+			t.Fatalf("hit with Range and matching tag: %d hit=%v, want 304 from cache", resp.StatusCode, resp.Cache.Hit)
 		}
 	})
 }

@@ -300,7 +300,9 @@ func (e *Engine) respond(c *keys.Classified, fr *flightResult) *Response {
 	// FR-SRV-2: a response built from the entry just stored is judged
 	// against the client's own preconditions, like a hit. fr.entry is the
 	// final entry, never the discarded 304 of a strong-ETag mismatch.
-	if fr.entry != nil && clientNotModified(&c.ClientCond, fr.entry) {
+	// FR-STO-6: the creator's own response keeps a Set-Cookie the stored
+	// entry dropped, so that response is not replaced by the stored 304.
+	if fr.entry != nil && len(resp.Header["Set-Cookie"]) == 0 && clientNotModified(&c.ClientCond, fr.entry) {
 		closeBody(resp)
 		return e.fromEntry(c, fr.entry, time.Now(), fr.ci)
 	}
