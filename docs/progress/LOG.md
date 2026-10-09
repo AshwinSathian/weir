@@ -1065,3 +1065,27 @@ Entry template:
 - Deviations: docs/01 D36, NFR-4, NFR-5 changed under Ashwin's delegation; docs/07 §11 item 6; cards M10-10, M16-01, M16-02 notes.
 - Follow-ups: M10-10, M16-01; optional cap on live over-limit streams (no card).
 - Context: medium.
+
+## 2026-10-09 · M10-10 · blocked
+- Branch / PR: claude/admiring-curie-sv9a2w / none yet
+- Done: `respond` answers a matching client `If-None-Match` or `If-Modified-Since` with a 304 for any response built from a stored or just-stored entry (revalidated, cold miss, creator, followers), judged against the final entry. FR-SRV-2 widened in docs/01, LLD §6.10 note, `conditional-lm-stale` now passes (baseline 265/100).
+- Tests: TestClientConditionalAfterRevalidation, TestClientConditionalUsesFinalEntry, TestClientConditionalColdMissAndFollowers. Root race tests, vet, gofmt, trace-strict pass. Lint unrun (Go 1.25 binary); CI must confirm.
+- Deviations: docs/01 FR-SRV-2 wording and date (approved 2026-10-08 per the card); docs/04 note.
+- Follow-ups: `/handoff` not run (the Skill tool refuses it): needs card-reviewer pass, card mark, PR. docs/07 has no FR-SRV rows, so it is untouched.
+- Context: low; size S was right.
+
+## 2026-10-09 · M10-10 · done
+- Branch / PR: claude/admiring-curie-sv9a2w / #63 https://github.com/AshwinSathian/weir/pull/63
+- Done: reviewer pass on 49cbf53. Fixed the stale count in docs/cache-tests-expected-failures.md (265/100), moved the LLD sentence, and added tests for Vary variants and Authorization plus a discarded-304 case. Card marked done; supersedes the `blocked` entry above.
+- Tests: TestClientConditionalVariantsAndAuthorization, TestClientConditionalUsesFinalEntry (rewritten, discarded 304 names "2", final entry "3"). Root race tests, vet, trace-strict pass; lint unrun (Go 1.25 binary), CI must confirm.
+- Deviations: none beyond the FR-SRV-2 widening already logged.
+- Follow-ups: RFC 9110 §13.2 text not re-checked; Range plus matching conditional untested (Range bypasses the cache). PLAN M10.4 stays unticked until the nightly run is green.
+- Context: low; size S was right.
+
+## 2026-10-09 · M10-10 · review-fixes
+- Branch / PR: claude/admiring-curie-sv9a2w / #63 https://github.com/AshwinSathian/weir/pull/63
+- Done: independent adversarial review of PR #63 (RFC text fetched, new tests run against a reverted serve.go: all four failed). Fixed: the creator's own 200 keeps a `Set-Cookie` when StripSetCookie dropped it from the stored entry (FR-STO-6); follower test now has a matching follower; discarded-304 test asserts the retry happened; accidental ETag edit in TestStoredEntriesEncode reverted; LLD Range wording corrected. Decisions: keep the stored-200 limit; no code for Range on a miss (pass-through drops preconditions, FR-FWD-1; M11 to revisit).
+- Tests: TestClientConditionalKeepsCreatorSetCookie, TestClientConditionalBeforeRangeOnHit, TestClientConditionalColdMissAndFollowers (4 clients). Root race tests and vet pass; lint and cache-tests script not re-run.
+- Deviations: none new.
+- Follow-ups: M11 card: Range plus precondition on a miss. 203/204 are not evaluated.
+- Context: low.

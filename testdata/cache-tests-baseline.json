@@ -110,7 +110,7 @@
     "conditional-lm-fresh-earlier": "pass",
     "conditional-lm-fresh-no-lm": "fail",
     "conditional-lm-fresh-rfc850": "pass",
-    "conditional-lm-stale": "fail",
+    "conditional-lm-stale": "pass",
     "freshness-expires-32bit": "pass",
     "freshness-expires-age-fast-date": "pass",
     "freshness-expires-age-slow-date": "pass",

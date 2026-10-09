@@ -1,8 +1,8 @@
 # cache-tests expected failures
 
-Updated: 2026-10-08
+Updated: 2026-10-09
 
-Tests from [http-tests/cache-tests](https://github.com/http-tests/cache-tests) that `examples/weirproxy` fails, from the run recorded in `testdata/cache-tests-baseline.json` (suite commit `d644cf4`, 365 tests, 264 pass, 101 fail). The nightly job (docs/07 §8) fails only when a test that passed in the baseline fails now, so this list is documentation, not configuration. Update both files together with `UPDATE=1 scripts/cache-tests.sh`.
+Tests from [http-tests/cache-tests](https://github.com/http-tests/cache-tests) that `examples/weirproxy` fails, from the run recorded in `testdata/cache-tests-baseline.json` (suite commit `d644cf4`, 365 tests, 265 pass, 100 fail). The nightly job (docs/07 §8) fails only when a test that passed in the baseline fails now, so this list is documentation, not configuration. Update both files together with `UPDATE=1 scripts/cache-tests.sh`.
 
 The proxy runs with default Weir settings plus `-forward-allow Req-Num,Test-ID,Test-Name,Foo,Bar,Baz,Abc`. The first three are the suite's own bookkeeping headers; the others are request headers its Vary tests set. Without them strict forwarding (D4) hides the headers and the suite cannot run.
 
@@ -35,7 +35,6 @@ Passing everything means nothing (the suite's own words). Rows with a requiremen
 | `headers-store-Transfer-Encoding` | The suite sends an invalid `Transfer-Encoding` value and Go's HTTP client rejects the response, so Weir answers 502 for a malformed origin response | FR-FWD-7, `ErrOrigin` |
 | `304-etag-update-response-ETag` | The suite reports a retry (`↻`), which its authors say needs manual interpretation; nothing is asserted | none |
 | `conditional-lm-fresh-no-lm` | The suite sends `If-Modified-Since` 3000 s before the response's `Date` and the response has no `Last-Modified`. FR-SRV-2 compares the stored `Date`, which is 3000 s later than the client's `If-Modified-Since`, so the resource counts as modified and the answer is 200 (RFC 9110 §13.1.3). The test expects 304 | FR-SRV-2 |
-| `conditional-lm-stale` | The entry is stale, so Weir revalidates and serves the freshened response as a full 200. Client preconditions are evaluated on a hit only; applying them after a revalidation would extend FR-SRV-2 and needs a decision | FR-SRV-2, FR-SRV-3 |
 | `pragma-response-no-cache-heuristic` | Go's `net/http` client rewrites a response `Pragma: no-cache` without `Cache-Control` into `Cache-Control: no-cache` before Weir sees it (`fixPragmaCacheControl`), so the engine reads a real `no-cache` and validates. The error is on the safe side, and telling the two apart would mean parsing responses outside the standard library | FR-FRS-3, RFC 9111 §5.4 |
 
 ## Not built yet

@@ -523,3 +523,226 @@ func TestRevalidation304WithoutDateStamps(t *testing.T) {
 		}
 	})
 }
+
+// FR-SRV-2, FR-SRV-3, INV-1, T-8: client preconditions are evaluated on every
+// GET or HEAD response built from a stored or just-stored entry, not only on
+// a hit. The forward carries the stored validators and never the client's.
+func TestClientConditionalAfterRevalidation(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		hdr := http.Header{"Cache-Control": {"max-age=60"}, "Etag": {`"1"`}, "Last-Modified": {lastMod}, "Vary": {"Accept"}}
+		o := testorigin.NewChecked(t, 64, 16)
+		o.Default(testorigin.Behavior{Header: hdr, Body: []byte("v1")})
+		e := newEngine(t, cacheCfg)
+		defer closeEngine(t, e)
+
+		serve(t, e, getReq("/a"), o)
+		time.Sleep(61 * time.Second)
+		o.Default(testorigin.Behavior{Func: func(*weir.Request) (*weir.Response, error) {
+			return respond(http.StatusNotModified, http.Header{"Cache-Control": {"max-age=60"}}, ""), nil
+		}})
+
+		with := func(method string, h http.Header) *weir.Request {
+			r := getReq("/a")
+			r.Method = method
+			for k, v := range h {
+				r.Header[k] = v
+			}
+			return r
+		}
+		resp, body := serve(t, e, with("GET", http.Header{"If-None-Match": {`"1"`}}), o)
+		if resp.StatusCode != http.StatusNotModified || body != "" || resp.Header.Get("Age") == "" || resp.Header.Get("Cache-Status") == "" {
+			t.Fatalf("matching If-None-Match after 304: %d %q %v", resp.StatusCode, body, resp.Header)
+		}
+		if resp.Header.Get("Content-Type") != "" || resp.Header.Get("Etag") != `"1"` {
+			t.Fatalf("304 header set: %v", resp.Header)
+		}
+		last := o.Requests()[o.TotalCalls()-1].Header
+		if last.Get("If-None-Match") != `"1"` || last.Get("If-Modified-Since") != lastMod {
+			t.Fatalf("forward carries %v, want the stored validators", last)
+		}
+
+		time.Sleep(61 * time.Second)
+		resp, body = serve(t, e, with("GET", http.Header{"If-None-Match": {`"9"`}}), o)
+		if resp.StatusCode != http.StatusOK || body != "v1" {
+			t.Fatalf("non-matching client: %d %q, want 200 v1", resp.StatusCode, body)
+		}
+		if got := o.Requests()[o.TotalCalls()-1].Header.Get("If-None-Match"); got != `"1"` {
+			t.Fatalf("forward If-None-Match %q, want the stored tag", got)
+		}
+
+		time.Sleep(61 * time.Second)
+		resp, _ = serve(t, e, with("HEAD", http.Header{"If-Modified-Since": {lastMod}}), o)
+		if resp.StatusCode != http.StatusNotModified {
+			t.Fatalf("HEAD after 304: %d, want 304", resp.StatusCode)
+		}
+	})
+}
+
+// FR-SRV-2, FR-SRV-3: after a strong-ETag mismatch the retry's response is
+// the final entry; the client is judged against it, not the discarded 304.
+func TestClientConditionalUsesFinalEntry(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		o := testorigin.NewChecked(t, 64, 16)
+		o.Default(testorigin.Behavior{Header: http.Header{"Cache-Control": {"max-age=60"}, "Etag": {`"1"`}}, Body: []byte("v1")})
+		e := newEngine(t, cacheCfg)
+		defer closeEngine(t, e)
+		serve(t, e, getReq("/a"), o)
+		time.Sleep(61 * time.Second)
+		// The discarded 304 names "2", the retry's final entry "3".
+		o.Default(testorigin.Behavior{Func: func(r *weir.Request) (*weir.Response, error) {
+			if r.Header.Get("If-None-Match") != "" {
+				return respond(http.StatusNotModified, http.Header{"Etag": {`"2"`}}, ""), nil
+			}
+			return respond(http.StatusOK, http.Header{"Cache-Control": {"max-age=60"}, "Etag": {`"3"`}}, "v3"), nil
+		}})
+		r := getReq("/a")
+		r.Header["If-None-Match"] = []string{`"2"`}
+		resp, body := serve(t, e, r, o)
+		if resp.StatusCode != http.StatusOK || body != "v3" || o.TotalCalls() != 3 {
+			t.Fatalf("client holding the discarded tag: %d %q after %d origin calls, want 200 v3 after the validation and its retry", resp.StatusCode, body, o.TotalCalls())
+		}
+		time.Sleep(61 * time.Second)
+		o.Default(testorigin.Behavior{Header: http.Header{"Cache-Control": {"max-age=60"}, "Etag": {`"3"`}}, Body: []byte("v3")})
+		r = getReq("/a")
+		r.Header["If-None-Match"] = []string{`"3"`}
+		if resp, _ = serve(t, e, r, o); resp.StatusCode != http.StatusNotModified {
+			t.Fatalf("client holding the final tag: %d, want 304", resp.StatusCode)
+		}
+	})
+}
+
+// FR-SRV-2, FR-KEY-7, T-8: each Vary variant is judged against its own
+// stored entry, and an Authorization request whose public response was
+// stored gets the same treatment.
+func TestClientConditionalVariantsAndAuthorization(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		o := testorigin.NewChecked(t, 64, 16)
+		tag := func(r *weir.Request) string { return `"` + r.Header.Get("X-Tenant") + `"` }
+		o.Default(testorigin.Behavior{Func: func(r *weir.Request) (*weir.Response, error) {
+			if r.Header.Get("If-None-Match") == tag(r) {
+				return respond(http.StatusNotModified, http.Header{"Cache-Control": {"public, max-age=60"}}, ""), nil
+			}
+			return respond(http.StatusOK, http.Header{"Cache-Control": {"public, max-age=60"}, "Etag": {tag(r)}, "Vary": {"X-Tenant"}}, "for "+tag(r)), nil
+		}})
+		cfg := cacheCfg
+		cfg.Forward.Allow = []string{"X-Tenant"}
+		e := newEngine(t, cfg)
+		defer closeEngine(t, e)
+		req := func(accept, inm string, auth bool) *weir.Request {
+			r := getReq("/v")
+			r.Header.Set("X-Tenant", accept)
+			if inm != "" {
+				r.Header["If-None-Match"] = []string{inm}
+			}
+			if auth {
+				r.Header.Set("Authorization", "Bearer x")
+			}
+			return r
+		}
+		serve(t, e, req("ta", "", false), o)
+		serve(t, e, req("tb", "", true), o)
+		time.Sleep(61 * time.Second)
+		for _, tc := range []struct {
+			name string
+			r    *weir.Request
+			want int
+		}{
+			{"own variant tag", req("ta", `"ta"`, false), 304},
+			{"other variant tag", req("ta", `"tb"`, false), 200},
+			{"authorized, own tag", req("tb", `"tb"`, true), 304},
+			{"authorized, other tag", req("tb", `"ta"`, true), 200},
+		} {
+			time.Sleep(61 * time.Second) // every case revalidates
+			if resp, _ := serve(t, e, tc.r, o); resp.StatusCode != tc.want {
+				t.Errorf("%s: status %d (%+v) %v want %d", tc.name, resp.StatusCode, resp.Cache, resp.Header, tc.want)
+			}
+		}
+	})
+}
+
+// FR-SRV-2, FR-COA-1: a cold miss and each flight follower answer by their
+// own conditionals. Two clients match, so at least one follower gets a 304.
+func TestClientConditionalColdMissAndFollowers(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		o := testorigin.NewChecked(t, 64, 16)
+		b := cacheable("v1")
+		b.Header["Etag"] = []string{`"1"`}
+		b.Delay = 100 * time.Millisecond
+		o.Default(b)
+		e := newEngine(t, cacheCfg)
+		defer closeEngine(t, e)
+
+		mk := func(inm string) *weir.Request {
+			r := getReq("/c")
+			if inm != "" {
+				r.Header["If-None-Match"] = []string{inm}
+			}
+			return r
+		}
+		inms := []string{`"1"`, `"1"`, `"2"`, ""}
+		want := []int{304, 304, 200, 200}
+		chs := make([]<-chan served, len(inms))
+		for i, inm := range inms {
+			chs[i] = serveAsync(t.Context(), e, mk(inm), o)
+		}
+		collapsed := 0
+		for i, ch := range chs {
+			s := <-ch
+			if s.err != nil || s.resp.StatusCode != want[i] {
+				t.Fatalf("client %d: %v status %d, want %d", i, s.err, s.resp.StatusCode, want[i])
+			}
+			if (want[i] == 304) != (s.body == "") {
+				t.Fatalf("client %d: body %q", i, s.body)
+			}
+			if s.resp.Cache.Collapsed {
+				collapsed++
+			}
+		}
+		if n := o.TotalCalls(); n != 1 || collapsed != 3 {
+			t.Fatalf("origin calls %d, collapsed %d; want 1 and 3", n, collapsed)
+		}
+	})
+}
+
+// FR-SRV-2, FR-STO-6: with StripSetCookie the stored entry has no cookie, but
+// the creator's own response keeps it, so it is not replaced by a 304.
+func TestClientConditionalKeepsCreatorSetCookie(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		o := testorigin.NewChecked(t, 64, 16)
+		o.Default(testorigin.Behavior{Header: http.Header{"Cache-Control": {"max-age=60"}, "Etag": {`"1"`}, "Set-Cookie": {"a=b"}}, Body: []byte("v1")})
+		cfg := cacheCfg
+		cfg.Storable.StripSetCookie = true
+		e := newEngine(t, cfg)
+		defer closeEngine(t, e)
+		r := getReq("/s")
+		r.Header["If-None-Match"] = []string{`"1"`}
+		resp, body := serve(t, e, r, o)
+		if resp.StatusCode != http.StatusOK || body != "v1" || resp.Header.Get("Set-Cookie") != "a=b" || !resp.Cache.Stored {
+			t.Fatalf("creator: %d %q cookie %q stored=%v, want its own 200 with the cookie", resp.StatusCode, body, resp.Header.Get("Set-Cookie"), resp.Cache.Stored)
+		}
+		r = getReq("/s")
+		r.Header["If-None-Match"] = []string{`"1"`}
+		if resp, _ = serve(t, e, r, o); resp.StatusCode != http.StatusNotModified || resp.Header.Get("Set-Cookie") != "" {
+			t.Fatalf("hit: %d cookie %q, want 304 without the cookie", resp.StatusCode, resp.Header.Get("Set-Cookie"))
+		}
+	})
+}
+
+// FR-SRV-2, RFC 9110 §13.2.2: If-None-Match is evaluated before Range, so a
+// matching precondition on a hit answers 304 even with a Range header. A
+// request without a usable entry goes to the Range pass-through (FR-FWD-1).
+func TestClientConditionalBeforeRangeOnHit(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		o := testorigin.NewChecked(t, 64, 16)
+		o.Default(testorigin.Behavior{Header: http.Header{"Cache-Control": {"max-age=60"}, "Etag": {`"1"`}}, Body: []byte("v1")})
+		e := newEngine(t, cacheCfg)
+		defer closeEngine(t, e)
+		serve(t, e, getReq("/r"), o)
+		r := getReq("/r")
+		r.Header.Set("Range", "bytes=0-0")
+		r.Header["If-None-Match"] = []string{`"1"`}
+		if resp, _ := serve(t, e, r, o); resp.StatusCode != http.StatusNotModified || !resp.Cache.Hit {
+			t.Fatalf("hit with Range and matching tag: %d hit=%v, want 304 from cache", resp.StatusCode, resp.Cache.Hit)
+		}
+	})
+}
