@@ -68,7 +68,7 @@ func ParseResponse(h http.Header) ResponseDirectives {
 	// still keeps its restrictions. The tolerant Cache-Control scanner finds
 	// them even where the Dictionary parser gave up.
 	for _, name := range targetFields {
-		if len(h[name]) > 0 && !(ok && t.from == name) {
+		if len(h[name]) > 0 && (!ok || t.from != name) {
 			r := parseCacheControl(h[name])
 			cc.NoStore, cc.NoCache, cc.Private = cc.NoStore || r.NoStore, cc.NoCache || r.NoCache, cc.Private || r.Private
 		}
