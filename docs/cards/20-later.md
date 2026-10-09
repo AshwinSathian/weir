@@ -26,3 +26,13 @@ These phases start from draft specs. Each begins with one planning card that ver
 - Read: 10 whole; 06 T-35, T-36
 - Touch: docs/10-experiments-spec.md (v1.0), docs/cards/20-later.md
 - AC: open items in 10 §6 resolved with the user; cards written
+
+## Deferred
+
+### [ ] M16-02 Pointer-light memory store layout
+- Plan: M10.5b follow-up · Size: M · Depends on: M16-01
+- Read: M16-01's recommendation; 05 §3, §4; store/memory/
+- Touch: store/memory/, docs/05-storage-interface-spec.md, loadtest/gc_test.go (gate), docs/benchmarks.md
+- Tests: the store conformance suite unchanged; `Get` and `Set` allocation benchmarks; `TestGCAt1MEntries` asserts a saturated GC share of at most 10% at 1M entries
+- AC: the share target holds on the box that measured 13.6% to 15.4%; `BenchmarkMemoryStoreGetParallel` does not regress over 20%; stored entries stay immutable (P4); `make check` passes
+- Notes: deferred 2026-10-09. M16-01 recommended keeping the heap layout (prototype fails NFR-5 without a serve-from-encoded-bytes path). Reopen only if a deployment exceeds the D36 gate (2 µs of GC per request at 1M entries) or needs more than 1M entries, and then scope it as a design change first: the Tests and AC below assume the 10% share line, which D36 replaced with the µs gate.

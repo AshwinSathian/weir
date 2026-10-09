@@ -62,14 +62,33 @@ type gcResult struct {
 	liveBytes   float64
 }
 
-// satProjected is the GC share of busy CPU for a server saturated with hits:
-// with GOGC=100 a cycle starts about every live-heap bytes allocated, each
-// costing cpuPerCycle. It uses the cost per request of the saturated phase,
-// whose cycles are too few in the window to give a direct figure.
-func (r gcResult) satProjected() float64 {
-	gcPerReq := r.cpuPerCycle * r.satAllocReq / r.liveBytes
-	return gcPerReq / (r.satMutReq + gcPerReq)
+// gcPerReq is the GC CPU seconds each request costs a server saturated with
+// hits: a cycle starts about every live-heap bytes times GOGC/100 allocated,
+// and costs cpuPerCycle. It does not depend on the load generator, so it is
+// the figure D36 gates on; the share below depends on the denominator.
+func (r gcResult) gcPerReq() float64 {
+	return r.cpuPerCycle * r.satAllocReq / (r.liveBytes * float64(gogc()) / 100)
 }
+
+// satProjected is the GC share of busy CPU for the same server, with the
+// non-GC CPU per request measured in the saturated phase (generator included).
+func (r gcResult) satProjected() float64 {
+	g := r.gcPerReq()
+	return g / (r.satMutReq + g)
+}
+
+// gogc returns the GC percent in effect, so the projection holds under GOGC=200.
+func gogc() int {
+	s := []metrics.Sample{{Name: "/gc/gogc:percent"}}
+	metrics.Read(s)
+	return int(s[0].Value.Uint64())
+}
+
+// gcGateMicros is the D36 gate: GC CPU per request at 1M entries and 1 KiB
+// bodies with default GOGC (docs/benchmarks.md, M16-01). It is reported, not
+// asserted: the box and its denominator drift, and the number is re-based on
+// the reference machine.
+const gcGateMicros = 2.0
 
 // gcPhase fills an engine with n keys of 1 KiB, then reads random keys at
 // rps for d. The runtime updates its CPU class metrics only when a cycle
@@ -172,9 +191,9 @@ func readCycles() uint64 {
 }
 
 // TestGCAt1MEntries measures the cost of keeping 1M entries on the Go heap
-// (D36, PLAN M10.5b, card M10-05): the GC share of CPU and the hit p99 at a fixed
+// (D36, PLAN M10.5b, card M10-05): the GC cost per request, its share of CPU and the hit p99 at a fixed
 // request rate, next to the same load on a 10 000-entry store. It asserts nothing: the
-// 10% GC line is a decision recorded in docs/benchmarks.md. Machine-dependent: the reference
+// 2 µs per request gate is a decision recorded in D36 and docs/benchmarks.md. Machine-dependent: the reference
 // machine's numbers are the ones docs/benchmarks.md keeps.
 func TestGCAt1MEntries(t *testing.T) {
 	n := 1_000_000
@@ -205,13 +224,12 @@ func TestGCAt1MEntries(t *testing.T) {
 		row("saturated non-GC CPU per request", pair(func(r gcResult) string { return f2(r.satMutReq*1e6) + " µs" })),
 		row("saturated natural cycles in window", pair(func(r gcResult) string { return strconv.FormatUint(r.satCycles, 10) })),
 		row("saturated GC share, runtime-reported", pair(func(r gcResult) string { return pct(r.satDirect) })),
+		row("saturated GC µs per request", pair(func(r gcResult) string { return f2(r.gcPerReq()*1e6) + " µs" })),
 		row("saturated GC share, projected", pair(func(r gcResult) string { return pct(r.satProjected()) })),
 	)
-	// Reporting only. The 10% line decides whether a pointer-light layout card
-	// is needed (PLAN M10.5b); that decision is in docs/benchmarks.md, and a
-	// gate belongs here once such a layout exists.
-	if share := large.satProjected(); share > 0.10 {
-		t.Logf("saturated GC share %s is over the 10%% line: see docs/benchmarks.md and card M16-01", pct(share))
+	// Reporting only (D36, M16-01): the gate is GC µs per request, not the share.
+	if g := large.gcPerReq() * 1e6; g > gcGateMicros {
+		t.Logf("GC cost %.2f µs per request is over the %.1f µs gate: see docs/benchmarks.md (M16-01)", g, gcGateMicros)
 	}
 }
 

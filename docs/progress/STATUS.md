@@ -2,15 +2,19 @@
 
 Updated: 2026-10-09
 Phase: 1
-Current card: M16-01
-Card state: blocked
+Current card: none
+Card state: awaiting-merge
 Branch: claude/zen-rubin-hynjow
 PR: https://github.com/AshwinSathian/weir/pull/72
-Next card: M16-02 only if Ashwin approves it (see below)
+Next card: ]
 
 ## Waiting on Ashwin
 
-- M16-01 decision (D36). Prototype measured, numbers in docs/benchmarks.md "M16-01". Recommendation: keep the heap layout, skip M16-02 for now, replace the 10% GC-share line with a gate of at most 2 µs of GC per request at 1M entries (now 1.76 µs; `GOGC=200` gives 0.93). Reason: the pointer-free layout takes GC to 0.014 µs per request but, decoding on every hit, adds 12 allocs/op and 41% ns/op (NFR-5 fails); making it pass needs a serve-from-encoded-bytes path, which is a design change. Approve the recommendation, or approve M16-02 (rescoped)? Whichever you pick, D36 in 01 and the card marks are updated in the next session.
+none
+
+## Decided 2026-10-09 (M16-01)
+
+Ashwin delegated "take decisions on all items" on PR 72. Approved the recommendation: keep the heap layout; D36 now gates on GC µs per request (at most 2 µs at 1M entries, 1 KiB, default `GOGC`; now 1.76), reported by `TestGCAt1MEntries`, not asserted; `GOGC=200` is the documented lever. M16-02 deferred (moved to `docs/cards/20-later.md`, reopens as a design change if the gate is exceeded or more than 1M entries are needed). M16-01 marked done.
 
 ## Decided 2026-10-09 (M15-01)
 
