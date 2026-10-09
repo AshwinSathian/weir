@@ -1171,3 +1171,11 @@ Entry template:
 - Deviations: docs/01 FR-SNP-1 wording extended with the approved timeout and CloseContext (no behavior change).
 - Follow-ups: engine wiring and loader in M13-02. Waiting on Ashwin: none.
 - Context: low.
+
+## 2026-10-09 · M13-02 · in-progress (handoff pending)
+- Branch / PR: claude/cool-maxwell-y4bqri / none yet
+- Done: `memory.New` loads `SnapshotPath` (store/memory/snapshot_load.go): CRC/decode failures skipped and counted, expired dropped, MaxBytes respected in file order, hard epochs restored, global soft epoch at load, file removed (only when the magic matches). `Engine.Close` uses the store's `CloseContext` when it owns the store. `Set` and the loader share `put`.
+- Tests: TestSnapshotLoadRoundTrip, TestSnapshotLoadIsSoftStale, TestSnapshotHardEpochSurvives, TestSnapshotCorruptRecordsSkipped, TestSnapshotIncompleteIgnored, TestSnapshotLoadRespectsMaxBytes, TestSnapshotLoadHostileLength, FuzzSnapshotLoad. Race tests pass; lint unrun (container golangci-lint is Go 1.25).
+- Deviations: none. Load counts are unexported (`snapLoad`); a public accessor needs approval.
+- Follow-ups: `/handoff` not yet run (review, card mark, PR). The engine passes no `SnapshotPath` today; the card that adds the Config field must guard `New`'s failure path that calls `Store.Close()`.
+- Context: low; size M was right.

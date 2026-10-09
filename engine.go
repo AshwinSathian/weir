@@ -205,9 +205,18 @@ func (e *Engine) Close(ctx context.Context) error {
 	<-done
 	var storeErr error
 	if e.ownStore {
-		storeErr = e.sg.s.Close()
+		storeErr = closeStore(ctx, e.sg.s)
 	}
 	return errors.Join(graceErr, storeErr)
+}
+
+// closeStore closes s, bounding a snapshot write by the caller's grace period
+// when the store supports it (FR-SNP-1, LLD 13.3).
+func closeStore(ctx context.Context, s store.Store) error {
+	if c, ok := s.(interface{ CloseContext(context.Context) error }); ok {
+		return c.CloseContext(ctx)
+	}
+	return s.Close()
 }
 
 // normalizeResponse fills a nil Header or Body, which adapters rely on,
