@@ -126,7 +126,7 @@ type LimiterConfig struct {
 	MaxQueueWait      time.Duration // 0: 2s
 	MaxPerPartition   int           // 0: 16; clamped to MaxConcurrent
 	ReserveForeground int           // 0: MaxConcurrent/4, at least 1 when MaxConcurrent >= 2
-	MaxPerHost        int           // 0: off (M14)
+	MaxPerHost        int           // 0: off (FR-FAIR-1); caps in-flight fetches per normalized host, in each pool
 	MaxUpload         int           // D25; 0: MaxConcurrent/4, at least 1
 }
 

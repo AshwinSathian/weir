@@ -4,9 +4,9 @@ Updated: 2026-10-09
 Phase: 1
 Current card: none
 Card state: awaiting-merge
-Branch: claude/cool-maxwell-y4bqri
-PR: https://github.com/AshwinSathian/weir/pull/69
-Next card: M14-01 per `scripts/card.sh next` (check Depends on); M16-01 is approved too
+Branch: claude/peaceful-babbage-hrdup8
+PR: https://github.com/AshwinSathian/weir/pull/70
+Next card: M15-01 per `scripts/card.sh next`; M16-01 is approved too
 
 ## Waiting on Ashwin
 
@@ -14,9 +14,13 @@ none
 
 ## Blockers
 
-none. golangci-lint in this container is built with Go 1.25 and cannot load the Go 1.27 config, so lint is unrun for M13-01; CI must confirm before merge.
+none. golangci-lint in this container is built with Go 1.25 and cannot load the Go 1.27 config; run it with `GOTOOLCHAIN=go1.27.0 go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0 run`. CI must confirm.
 
 ## Notes for the next session
+
+- M14-01: `limiter.Acquire(ctx, class, part, host)`; `Classified.HostH` is the host hash; `LimiterConfig.MaxPerHost` feeds both pools. Waiters blocked by the host cap still share `MaxQueue` (ponytail in limiter.go, LLD 13.4, pinned by `TestHostFloodFillsSharedQueue`).
+- M14-01: `memory.Config.MaxBytesPerOwner` is per shard, 0 off, zero `Owner` exempt. The engine's default memory store does not set it; the Caddy adapter does (FR-FAIR-3).
+- Work for M14-01 happened on the session branch `claude/peaceful-babbage-hrdup8`, not `card/M14-01-*`.
 
 - M13-02: loader writes a global invalid epoch (not soft) at load, and a global hard epoch when a possible epoch record is lost or the file cannot be removed. `Engine.Close` falls back to `Store.Close()` when the grace ctx is spent; a failed `New` closes with a cancelled ctx (no snapshot). Load counts stay in unexported `Store.snapLoad` (decision: no public accessor yet; FR-SNP-2 says so). Queue placement is not restored on load (ponytail comment). M14-01 card notes the loader must honor quotas. Lint: run it locally with `GOTOOLCHAIN=go1.27.0 go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0 run` (the installed binary is Go 1.25 and cannot load the config).
 
@@ -46,6 +50,13 @@ none. golangci-lint in this container is built with Go 1.25 and cannot load the 
 - golangci-lint cannot run in cloud sessions (built with Go 1.25); CI must confirm lint.
 - `pragma-response-no-cache-heuristic` is a Go `net/http` artifact (`fixPragmaCacheControl`), documented as by design.
 - Run the nightly workflow once after the M10-04 merge; PLAN M10.4 stays unticked until it is green.
+
+## Decided 2026-10-09 (M14-01, review of PR #70)
+
+Ashwin delegated the Waiting item; an independent agent attacked the PR and both decisions.
+
+- FR-FAIR-2 scan window: 64 nodes from each queue tail (up to 128 in all), not 64 in total. A shared budget let a foreign small-queue tail hide an owner's entries in main, so the owner could never turn over its own quota, which FR-FAIR-2 rejects. FR-FAIR-2 and 05 §5.3 reworded to "from each queue tail"; cost stays constant under the shard lock.
+- Host-queue sharing: keep the ponytail, no per-host queued cap in M14-01. FR-FAIR-1 caps in-flight fetches only, other hosts find free global slots while the flooder is capped, and a per-host queue policy is a new requirement-level behavior. A test pins the ceiling so an upgrade has a target.
 
 ## Decided 2026-10-08 (M10-06, review of PR #62)
 

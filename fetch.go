@@ -78,7 +78,7 @@ func (e *Engine) fetch(ctx context.Context, c *keys.Classified, origin Origin, c
 	}
 	permit := held
 	if permit == nil {
-		if permit, err = e.limFor(c).Acquire(ctx, class, c.PartitionH); err != nil {
+		if permit, err = e.limFor(c).Acquire(ctx, class, c.PartitionH, c.HostH); err != nil {
 			e.cb.Cancel(probe)
 			return e.shed(c, class, err)
 		}

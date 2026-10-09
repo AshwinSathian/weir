@@ -99,14 +99,14 @@ func New(cfg Config) (*Engine, error) {
 	e := &Engine{cfg: c, kcfg: keysConfig(&c), sg: newStoreGuard(c.Store, c.Timeouts.Store, c.Observer), ownStore: own, cr: newCookieReport(&c), closeDone: make(chan struct{})}
 	l := &c.Limiter
 	e.lim = limiter.New(limiter.Config{
-		Max: l.MaxConcurrent, MaxQueue: l.MaxQueue, PerPartition: l.MaxPerPartition,
+		Max: l.MaxConcurrent, MaxQueue: l.MaxQueue, PerPartition: l.MaxPerPartition, PerHost: l.MaxPerHost,
 		Reserve: l.ReserveForeground, MaxWait: l.MaxQueueWait,
 	})
 	// Only foreground pass requests carry a body, so the upload pool has no
 	// reserve (04 §14).
 	e.upl = limiter.New(limiter.Config{
 		Max: l.MaxUpload, MaxQueue: l.MaxQueue, PerPartition: min(l.MaxPerPartition, l.MaxUpload),
-		MaxWait: l.MaxQueueWait,
+		PerHost: l.MaxPerHost, MaxWait: l.MaxQueueWait,
 	})
 	if b := &c.Breaker; !b.Disable {
 		e.cb = breaker.New(breaker.Config{

@@ -56,6 +56,7 @@ type Classified struct {
 	Origin     string // scheme://host[:port]
 	Partition  string // Origin + path, truncated to maxPartitionBytes
 	PartitionH uint64 // maphash of Partition, per-process seed
+	HostH      uint64 // maphash of the normalized host, per-process seed (FR-FAIR-1)
 	ReqCC      httpcc.RequestDirectives
 	ClientCond ClientConditionals
 	RangeValue string   // the Range value a hit may slice (FR-RNG-1); "" when absent or repeated
@@ -113,6 +114,7 @@ func Classify(r *Request, c *Config) (Classified, error) {
 		out.Partition = out.Partition[:maxPartitionBytes]
 	}
 	out.PartitionH = maphash.String(partitionSeed, out.Partition)
+	out.HostH = maphash.String(partitionSeed, host)
 	if !c.HonorRevalidation {
 		// FR-SRV-8, D5: only no-store and only-if-cached change behavior.
 		out.ReqCC = httpcc.RequestDirectives{NoStore: out.ReqCC.NoStore, OnlyIfCached: out.ReqCC.OnlyIfCached}

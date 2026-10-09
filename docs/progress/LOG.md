@@ -1195,3 +1195,19 @@ Entry template:
 - Deviations: FR-SNP-2/3, T-33, LLD 13.3 and docs/05 5.5 updated (invalid instead of soft; fail-closed; counters internal; admission order only). No public API added: the load-count accessor stays deferred.
 - Follow-ups: M14-01 note (loader honors quotas). Hot-first queue placement on load left as a ponytail.
 - Context: low.
+
+## 2026-10-09 · M14-01 · done
+- Branch / PR: claude/peaceful-babbage-hrdup8 / https://github.com/AshwinSathian/weir/pull/70
+- Done: per-host limiter cap (`limiter.Config.PerHost`, `Classified.HostH`, `Acquire` host argument, both pools); per-owner byte quota in the memory shard (`MaxBytesPerOwner`, own-entry eviction within a 64-node scan, decline otherwise); snapshot loader honors it without evicting.
+- Tests: TestPerHostLimiterCap, TestOwnerQuotaIsolatesTenants, TestSnapshotLoadHonorsOwnerQuota, TestEnginePerHostCap, TestClassifyHostHash. Race tests, vet, gofmt, trace pass; lint 0 issues via the Go 1.27 build of v2.14.0.
+- Deviations: LLD 13.4 updated (int map, Acquire signature, queue ceiling). FR-FAIR-2 scan wording left as is; question under "Waiting on Ashwin".
+- Follow-ups: review should-fix 1 recorded as a ponytail (per-host queue share); should-fix 2 is the question above.
+- Context: low; size M was right.
+
+## 2026-10-09 · M14-01 · review-fixes
+- Branch / PR: claude/peaceful-babbage-hrdup8 / https://github.com/AshwinSathian/weir/pull/70
+- Done: independent adversarial review. Must-fix: the 64-node victim scan shared one budget across both queues, so foreign small-queue nodes hid an owner's main-queue entries and starved its quota turnover; now 64 per queue (FR-FAIR-2 and 05 §5.3 reworded). Should-fix: `node.owner` is stored only when a quota is set; `MaxBytesPerOwner` doc says per shard. Host-queue sharing kept as a ponytail and pinned by a test.
+- Tests: limiter invariants now run with PerHost and random hosts; TestHostFloodFillsSharedQueue; main-queue victim behind a full foreign window; owner change on replace; size == quota; expired victim and OnEvict counts; TestEngineOwnerQuotaIsolatesHosts (Owner reaches the store). Race tests, vet, gofmt, trace pass; lint 0 issues via the Go 1.27 build.
+- Deviations: FR-FAIR-2 and 05 §5.3 wording only (per-queue window), decided by delegation. STATUS.md restored: the first handoff overwrote it and dropped the older Decided sections and notes.
+- Follow-ups: per-host queued cap if host floods shedding other hosts shows up in practice.
+- Context: low.

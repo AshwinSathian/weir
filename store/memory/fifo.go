@@ -21,6 +21,7 @@ type node struct {
 	size       int64
 	expires    time.Time     // e.Expires clamped by MaxRetention (E-11)
 	fp         uint64        // ghost fingerprint of key
+	owner      store.Tag     // e.Owner, kept for the quota account after e is gone
 	freq       atomic.Uint32 // 0..3
 	queue      uint8
 	prev, next *node

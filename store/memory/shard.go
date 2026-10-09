@@ -20,15 +20,101 @@ type shard struct {
 	bytes    int64
 	cap      int64
 	smallCap int64
+
+	// Per-owner quota (FR-FAIR-2). owners is nil when maxOwner is 0; else it
+	// holds only owners with bytes in this shard, so len <= len(m).
+	maxOwner int64
+	owners   map[store.Tag]int64
 }
 
-func newShard(capBytes int64) shard {
+// ownerScan bounds the nodes one over-quota Set walks at each queue tail
+// looking for its own owner's entries (FR-FAIR-2, 05 §5.3), so a flood
+// cannot make Set O(shard). The budget is per queue: a shared one let
+// foreign nodes at the small tail hide an owner's entries in main, and the
+// owner could then never turn over its own quota.
+const ownerScan = 64
+
+// ownerVictims is the most nodes one over-quota Set can evict: ownerScan
+// from each queue tail.
+const ownerVictims = 2 * ownerScan
+
+func newShard(capBytes, maxOwner int64) shard {
+	var owners map[store.Tag]int64
+	if maxOwner > 0 {
+		owners = map[store.Tag]int64{}
+	}
 	return shard{
 		m:        map[store.Key]*node{},
 		ghost:    ghost{set: map[uint64]uint32{}},
 		cap:      capBytes,
 		smallCap: capBytes / 10,
+		maxOwner: maxOwner,
+		owners:   owners,
 	}
+}
+
+// addOwner moves owner's byte account by delta. The zero Tag is "no owner"
+// and is never limited. Caller holds sh.mu.
+func (sh *shard) addOwner(owner store.Tag, delta int64) {
+	if sh.owners == nil || owner == (store.Tag{}) {
+		return
+	}
+	if v := sh.owners[owner] + delta; v > 0 {
+		sh.owners[owner] = v
+	} else {
+		delete(sh.owners, owner)
+	}
+}
+
+// fitOwner makes room under the owner's quota for a record of size that
+// replaces old (nil for a new key). It evicts only entries of the same
+// owner, found within ownerScan nodes of each queue tail, small first, and
+// does nothing unless that frees enough (T-32). With noEvict, as when a
+// snapshot loads, it never evicts. Caller holds sh.mu.
+func (sh *shard) fitOwner(old *node, owner store.Tag, size int64, noEvict bool, ev *evictions) bool {
+	if sh.owners == nil || owner == (store.Tag{}) {
+		return true
+	}
+	held := sh.owners[owner]
+	if old != nil && old.owner == owner {
+		held -= old.size
+	}
+	over := held + size - sh.maxOwner
+	if over <= 0 {
+		return true
+	}
+	if noEvict || size > sh.maxOwner {
+		return false
+	}
+	var victims [ownerVictims]*node
+	nv, freed := 0, int64(0)
+	for _, q := range [...]*fifo{&sh.small, &sh.main} {
+		scanned := 0
+		for n := q.tail; n != nil && scanned < ownerScan && freed < over; n = n.prev {
+			scanned++
+			if n != old && n.owner == owner {
+				victims[nv] = n
+				nv++
+				freed += n.size
+			}
+		}
+	}
+	if freed < over {
+		return false
+	}
+	now := time.Now()
+	for _, n := range victims[:nv] {
+		switch {
+		case n.expired(now):
+			ev.expired++
+		case n.queue == queueMain:
+			ev.main++
+		default:
+			ev.small++
+		}
+		sh.unlink(n)
+	}
+	return true
 }
 
 // get returns k's live entry. A hit takes only the read lock, so a hot key
@@ -78,14 +164,33 @@ func (sh *shard) set(k store.Key, e *store.Entry, size int64, expires time.Time,
 			return ev, false
 		}
 	}
+	if !sh.fitOwner(sh.m[k], e.Owner, size, noEvict, &ev) {
+		if !noEvict {
+			// Like an oversize record: leave the new record or nothing,
+			// never the older one (S-4).
+			if n := sh.m[k]; n != nil {
+				sh.unlink(n)
+			}
+		}
+		return ev, false
+	}
 	if n := sh.m[k]; n != nil {
 		// Replace in place, keeping queue and freq (05 §5.3).
 		q := sh.queue(n)
 		q.bytes += size - n.size
 		sh.bytes += size - n.size
+		sh.addOwner(n.owner, -n.size)
+		sh.addOwner(e.Owner, size)
 		n.e, n.size, n.expires = e, size, expires
+		if sh.owners != nil {
+			n.owner = e.Owner
+		}
 	} else {
 		n = &node{key: k, e: e, size: size, expires: expires, fp: fp}
+		if sh.owners != nil {
+			n.owner = e.Owner // kept only for the account; 32 bytes a node otherwise
+		}
+		sh.addOwner(e.Owner, size)
 		if sh.ghost.take(fp) {
 			n.queue = queueMain
 		}
@@ -155,6 +260,7 @@ func (sh *shard) unlink(n *node) {
 	sh.queue(n).remove(n)
 	delete(sh.m, n.key)
 	sh.bytes -= n.size
+	sh.addOwner(n.owner, -n.size)
 	if n.queue == queueMain {
 		sh.ghost.trim(sh.main.len)
 	}
