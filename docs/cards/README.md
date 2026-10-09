@@ -36,7 +36,7 @@ There are no L cards. A card that grows past M during the session is split (see 
 
 ## Status marks
 
-`### [ ]` open, `### [x]` done (set by `/handoff` through `scripts/card.sh done <ID>`). A split card keeps its ID for the finished part and gets a new card `<ID>b` inserted right after it for the remainder.
+`### [ ]` open, `### [x]` done, `### [~]` deferred (never picked by `next`; reopen by hand when its trigger fires) (set by `/handoff` through `scripts/card.sh done <ID>`). A split card keeps its ID for the finished part and gets a new card `<ID>b` inserted right after it for the remainder.
 
 ## Files
 

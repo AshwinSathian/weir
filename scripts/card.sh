@@ -2,6 +2,7 @@
 # Task-card helper. Cards live in docs/cards/*.md as level-3 headings:
 #   ### [ ] M1-04 Title      (open)
 #   ### [x] M1-04 Title      (done)
+#   ### [~] M16-02 Title     (deferred: never picked by `next`)
 # Usage: card.sh <ID> | next | list | done <ID>
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -10,7 +11,7 @@ files=$(ls docs/cards/[0-9]*.md 2>/dev/null | sort)
 
 print_card() { # $1 = ID
   awk -v id="$1" '
-    /^### \[[ x]\] / { h = $0; sub(/^### \[[ x]\] /, "", h); split(h, f, " "); show = (f[1] == id) }
+    /^### \[[ x~]\] / { h = $0; sub(/^### \[[ x~]\] /, "", h); split(h, f, " "); show = (f[1] == id) }
     /^## / && show { show = 0 }
     show { print }' $files
 }
@@ -21,7 +22,7 @@ case "${1:-}" in
     [ -n "$id" ] || { echo "all cards done"; exit 0; }
     print_card "$id" ;;
   list)
-    grep -hE '^### \[[ x]\] ' $files | sed -E 's/^### //' ;;
+    grep -hE '^### \[[ x~]\] ' $files | sed -E 's/^### //' ;;
   done)
     [ -n "${2:-}" ] || { echo "usage: card.sh done <ID>"; exit 1; }
     f=$(grep -lE "^### \[ \] $2 " $files || true)

@@ -81,7 +81,10 @@ func (r gcResult) satProjected() float64 {
 func gogc() int {
 	s := []metrics.Sample{{Name: "/gc/gogc:percent"}}
 	metrics.Read(s)
-	return int(s[0].Value.Uint64())
+	if v := int(s[0].Value.Uint64()); v > 0 && v < 1<<20 {
+		return v
+	}
+	return 100 // GOGC=off: the projection has no meaning, so fall back to the default
 }
 
 // gcGateMicros is the D36 gate: GC CPU per request at 1M entries and 1 KiB
@@ -228,7 +231,7 @@ func TestGCAt1MEntries(t *testing.T) {
 		row("saturated GC share, projected", pair(func(r gcResult) string { return pct(r.satProjected()) })),
 	)
 	// Reporting only (D36, M16-01): the gate is GC µs per request, not the share.
-	if g := large.gcPerReq() * 1e6; g > gcGateMicros {
+	if g := large.gcPerReq() * 1e6; n == 1_000_000 && g > gcGateMicros { // the gate is defined at 1M entries
 		t.Logf("GC cost %.2f µs per request is over the %.1f µs gate: see docs/benchmarks.md (M16-01)", g, gcGateMicros)
 	}
 }

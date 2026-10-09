@@ -1244,3 +1244,11 @@ Entry template:
 - Deviations: D36 (a decision) and the M16-02 card changed, both by Ashwin's delegation.
 - Follow-ups: reference-machine rerun to re-base the gate; allocation cut remains a projection.
 - Context: low.
+
+## 2026-10-09 · M16-01 · review-fixes
+- Branch / PR: claude/zen-rubin-hynjow / https://github.com/AshwinSathian/weir/pull/72
+- Done: adversarial review of the decision commit, no must-fix. Fixed: docs/07 and docs/02 stale lines; gate scope stated (per harness hit, `GOMEMLIMIT` unset); deferred cards use a `[~]` marker that `card.sh next` skips (README, script); M16-02 Tests/AC rewritten to the µs gate; `gogc()` guards GOGC=off; gate log only at 1M entries; AC notes the allocation cut as a projection.
+- Tests: vet (also with the load tag), gofmt, trace 146/146; `card.sh next/list/<ID>` checked by hand.
+- Deviations: scripts/card.sh and docs/cards/README.md gained the `[~]` marker.
+- Follow-ups: reference-machine rerun to re-base the gate.
+- Context: low.
