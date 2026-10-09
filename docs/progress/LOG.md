@@ -982,7 +982,7 @@ Entry template:
 - Context: medium; size S was a little small because of the failure triage.
 
 ## 2026-10-07 · M10-04 · done
-- Branch / PR: claude/zealous-ritchie-wdpztv / see STATUS
+- Branch / PR: claude/zealous-ritchie-wdpztv / https://github.com/AshwinSathian/weir/pull/69
 - Done: handoff of the work in the previous entry, plus review fixes: fuzz list no longer hides compile errors and fails on an empty matrix, script waits for origin and proxy and prints CLI errors, `npm ci` with fallback, weirproxy `splitList` test, `headers-store-Transfer-Encoding` moved to Unexplained, `conditional-etag-forward*` cites D4 only.
 - Tests: TestSplitList added; root race tests, gofmt, vet and trace (130/152) pass; the baseline run still reports no regressions. Lint unrun locally (Go 1.25 build); CI must confirm.
 - Deviations: none beyond the docs/07 §8 paragraph.
@@ -1181,7 +1181,7 @@ Entry template:
 - Context: low; size M was right.
 
 ## 2026-10-09 · M13-02 · done
-- Branch / PR: claude/cool-maxwell-y4bqri / see STATUS
+- Branch / PR: claude/cool-maxwell-y4bqri / https://github.com/AshwinSathian/weir/pull/69
 - Done: snapshot loader (store/memory/snapshot_load.go) and `Engine.Close` via `closeStore` (optional `CloseContext`). Review must-fix: a lost hard-epoch record (bad CRC, bad length, trailer count mismatch) loaded entries without the purge; now the loader writes a global hard epoch (fail closed). Also clamped future RequestTime to load time.
 - Tests: TestSnapshotLostRecordFailsClosed, TestSnapshotLoadClampsFutureRequestTime, TestCloseStorePrefersCloseContext, plus the loader tests from the earlier entry. Race tests, vet, gofmt, trace pass; lint unrun (Go 1.25 build).
 - Deviations: docs/04 §13.3 gained the loader failure mode paragraph (no requirement change). Card note "New must not write a snapshot on failed construction" not implemented: the engine passes no SnapshotPath today.

@@ -5,7 +5,7 @@ Phase: 1
 Current card: none
 Card state: awaiting-merge
 Branch: claude/cool-maxwell-y4bqri
-PR: none yet
+PR: https://github.com/AshwinSathian/weir/pull/69
 Next card: M14-01 per `scripts/card.sh next` (check Depends on); M16-01 is approved too
 
 ## Waiting on Ashwin
