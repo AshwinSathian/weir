@@ -2,6 +2,7 @@ package httpcc
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 )
 
@@ -184,4 +185,44 @@ func FuzzCacheControl(f *testing.F) {
 			}
 		}
 	})
+}
+
+// FR-TCC-2, FR-TCC-3, T-34; RFC 9213 §2.1.
+func TestParseResponseTargeted(t *testing.T) {
+	set := func(v int64) Seconds { return Seconds{V: v, Set: true} }
+	tests := []struct {
+		name string
+		h    http.Header
+		want ResponseDirectives
+	}{
+		{"targeted replaces Cache-Control freshness", http.Header{"Cache-Control": {"max-age=1"}, "Cdn-Cache-Control": {"max-age=9, public"}},
+			ResponseDirectives{MaxAge: set(9), Public: true, Targeted: true}},
+		{"Weir field outranks CDN field", http.Header{"Weir-Cache-Control": {"max-age=2"}, "Cdn-Cache-Control": {"max-age=9"}},
+			ResponseDirectives{MaxAge: set(2), Targeted: true}},
+		{"invalid Weir field falls to CDN field", http.Header{"Weir-Cache-Control": {"max-age=2.5"}, "Cdn-Cache-Control": {"max-age=9"}},
+			ResponseDirectives{MaxAge: set(9), Targeted: true}},
+		{"string max-age invalidates the field", http.Header{"Cache-Control": {"max-age=3"}, "Cdn-Cache-Control": {`max-age="9"`}},
+			ResponseDirectives{MaxAge: set(3)}},
+		{"private in Cache-Control is kept", http.Header{"Cache-Control": {"private"}, "Cdn-Cache-Control": {"max-age=9"}},
+			ResponseDirectives{MaxAge: set(9), Private: true, Targeted: true}},
+		{"private=?0 still counts", http.Header{"Cdn-Cache-Control": {"private=?0, max-age=9"}},
+			ResponseDirectives{MaxAge: set(9), Private: true, Targeted: true}},
+		{"public=?0 does not widen", http.Header{"Cdn-Cache-Control": {"public=?0"}},
+			ResponseDirectives{Targeted: true}},
+		{"must-understand needs Cache-Control's when it has no-store", http.Header{"Cache-Control": {"no-store"}, "Cdn-Cache-Control": {"must-understand"}},
+			ResponseDirectives{NoStore: true, Targeted: true}},
+		{"largest SFV integer clamps", http.Header{"Cdn-Cache-Control": {"max-age=999999999999999"}},
+			ResponseDirectives{MaxAge: set(maxDelta), Targeted: true}},
+		{"empty field is ignored", http.Header{"Cache-Control": {"max-age=3"}, "Cdn-Cache-Control": {""}},
+			ResponseDirectives{MaxAge: set(3)}},
+		{"too many members is ignored", http.Header{"Cdn-Cache-Control": {strings.Repeat("a, ", 70) + "max-age=9"}},
+			ResponseDirectives{}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ParseResponse(tt.h); got != tt.want {
+				t.Errorf("got %+v\nwant %+v", got, tt.want)
+			}
+		})
+	}
 }

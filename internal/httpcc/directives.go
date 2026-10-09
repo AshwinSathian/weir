@@ -4,6 +4,8 @@ import (
 	"iter"
 	"net/http"
 	"strings"
+
+	"github.com/AshwinSathian/weir/internal/sfv"
 )
 
 // maxDelta is the delta-seconds ceiling from RFC 9111 §1.2.2.
@@ -34,6 +36,9 @@ type ResponseDirectives struct {
 	// guesses only restrict; storing a response to an Authorization request
 	// needs a field without them (FR-STO-5, T-8).
 	Malformed bool
+	// Targeted reports that a valid Weir-Cache-Control or CDN-Cache-Control
+	// supplied the freshness directives, so Expires is ignored (FR-TCC-2).
+	Targeted bool
 }
 
 // Unusable reports an invalid or conflicting delta-seconds directive, which
@@ -50,13 +55,86 @@ type RequestDirectives struct {
 	MaxAge, MinFresh, MaxStale     Seconds
 }
 
-// ParseResponse parses every Cache-Control line of h. It never fails:
-// unknown directives are ignored (RFC 9111 §5.2.3) and malformed arguments
-// are recorded as Invalid.
+// ParseResponse parses the response directives of h: the first valid
+// targeted field, then Cache-Control (FR-TCC-1..3). It never fails: unknown
+// directives are ignored (RFC 9111 §5.2.3) and malformed arguments are
+// recorded as Invalid.
 func ParseResponse(h http.Header) ResponseDirectives {
+	cc := parseCacheControl(h["Cache-Control"])
+	t, ok := parseTargeted(h)
+	if !ok {
+		return cc
+	}
+	// FR-TCC-3, T-34: the targeted field decides freshness, but a restriction
+	// in Cache-Control still applies. A Malformed Cache-Control also keeps
+	// its effect on Authorization requests.
+	t.NoStore = t.NoStore || cc.NoStore
+	t.NoCache = t.NoCache || cc.NoCache
+	t.Private = t.Private || cc.Private
+	t.Malformed = t.Malformed || cc.Malformed
+	// must-understand lifts only the no-store of the field it came with.
+	t.MustUnderstand = t.MustUnderstand && (cc.MustUnderstand || !cc.NoStore)
+	return t
+}
+
+// targetFields is the RFC 9213 target list in priority order (D12, FR-TCC-1).
+// Names are in canonical header form.
+var targetFields = [...]string{"Weir-Cache-Control", "Cdn-Cache-Control"}
+
+// maxTargetMembers bounds a targeted field's members (NFR-3, T-21).
+const maxTargetMembers = 64
+
+// parseTargeted reads the first targeted field that is a valid Dictionary
+// with at least one member and no decimal, negative or non-integer
+// delta-seconds argument (FR-TCC-1; RFC 9213 §2.1 says not to coerce).
+func parseTargeted(h http.Header) (d ResponseDirectives, ok bool) {
+	for _, name := range targetFields {
+		dict, err := sfv.ParseDictionary(h[name], maxTargetMembers)
+		if err != nil || len(dict) == 0 {
+			continue
+		}
+		if d, ok = fromDict(dict); ok {
+			return d, true
+		}
+	}
+	return ResponseDirectives{}, false
+}
+
+func fromDict(dict sfv.Dict) (ResponseDirectives, bool) {
+	d := ResponseDirectives{Targeted: true}
+	for _, a := range [...]struct {
+		key string
+		dst *Seconds
+	}{{"max-age", &d.MaxAge}, {"s-maxage", &d.SMaxAge}, {"stale-while-revalidate", &d.SWR}, {"stale-if-error", &d.SIE}} {
+		it, found := dict[a.key]
+		if !found {
+			continue
+		}
+		if it.Kind != sfv.Integer || it.Int < 0 {
+			return ResponseDirectives{}, false
+		}
+		*a.dst = Seconds{V: min(it.Int, maxDelta), Set: true}
+	}
+	_, d.NoStore = dict["no-store"] // any value restricts (T-34)
+	_, d.NoCache = dict["no-cache"]
+	_, d.Private = dict["private"]
+	_, d.MustRevalidate = dict["must-revalidate"]
+	_, d.ProxyRevalidate = dict["proxy-revalidate"]
+	// Widening directives need an explicit true, like public in Cache-Control (T-8).
+	d.Public = isTrue(dict["public"]) && hasKey(dict, "public")
+	d.MustUnderstand = isTrue(dict["must-understand"]) && hasKey(dict, "must-understand")
+	return d, true
+}
+
+func hasKey(d sfv.Dict, k string) bool { _, ok := d[k]; return ok }
+
+func isTrue(it sfv.Item) bool { return it.Kind == sfv.Boolean && it.Bool }
+
+// parseCacheControl parses every Cache-Control line.
+func parseCacheControl(lines []string) ResponseDirectives {
 	var d ResponseDirectives
 	publicArg := false
-	for dv := range directives(h["Cache-Control"]) {
+	for dv := range directives(lines) {
 		name := dv.name
 		var dup bool
 		d.Malformed = d.Malformed || dv.loose

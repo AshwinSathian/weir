@@ -2,11 +2,11 @@
 
 Updated: 2026-10-09
 Phase: 1
-Current card: none
-Card state: awaiting-merge
-Branch: claude/beautiful-brown-di2exe
-PR: https://github.com/AshwinSathian/weir/pull/66
-Next card: M12-02 per `scripts/card.sh next`; M16-01 is approved too (Phase 1 release gate comes first, your call)
+Current card: M12-02
+Card state: in-progress
+Branch: claude/blissful-galileo-ynivsa
+PR: none yet; run `/handoff` (review, lint, card mark, PR)
+Next card: M12-03 per `scripts/card.sh next` after M12-02 merges; M16-01 is approved too
 
 ## Waiting on Ashwin
 

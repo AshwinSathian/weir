@@ -114,7 +114,7 @@ func validSMaxAge(cc *httpcc.ResponseDirectives) bool {
 
 // hasFreshness is FR-STO-8. 302 and 307 need explicit freshness (D39).
 func hasFreshness(d storeDecision, h http.Header, status int) bool {
-	explicit := d.cc.SMaxAge.Set || d.cc.MaxAge.Set || len(h["Expires"]) > 0
+	explicit := d.cc.SMaxAge.Set || d.cc.MaxAge.Set || len(h["Expires"]) > 0 && !d.cc.Targeted // FR-TCC-2
 	if status == http.StatusFound || status == http.StatusTemporaryRedirect {
 		return explicit
 	}

@@ -58,6 +58,12 @@ func (e *Engine) fromEntry(c *keys.Classified, ent *store.Entry, now time.Time, 
 // so the member goes into a new slice.
 func (e *Engine) finish(r *Response, ci CacheInfo) *Response {
 	r.Cache = ci
+	// FR-TCC-4: clients never see Weir-Cache-Control, but the stored copy
+	// keeps it. The header map may belong to an entry (P4), so clone first.
+	if _, ok := r.Header["Weir-Cache-Control"]; ok {
+		r.Header = maps.Clone(r.Header)
+		delete(r.Header, "Weir-Cache-Control")
+	}
 	if !e.cfg.NoCacheStatus {
 		old := r.Header["Cache-Status"]
 		r.Header["Cache-Status"] = append(old[:len(old):len(old)], cacheStatus(e.cfg.CacheStatus, ci))
