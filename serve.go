@@ -8,6 +8,8 @@ import (
 	"maps"
 	"net/http"
 	"slices"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/AshwinSathian/weir/internal/httpcc"
@@ -149,6 +151,55 @@ func (e *Engine) pass(ctx context.Context, c *keys.Classified, origin Origin, fw
 	return e.finish(res.resp, CacheInfo{Fwd: fwd, FwdStatus: res.resp.StatusCode}), nil
 }
 
+// rangeMiss passes a Range request through and, when the origin's 206 shows
+// a whole object the cache would store, starts one background fetch of it
+// (FR-RNG-4, 04 §13.1). The client never waits on that fetch (T-37).
+func (e *Engine) rangeMiss(ctx context.Context, c *keys.Classified, lk lookupResult, origin Origin) (*Response, error) {
+	resp, err := e.pass(ctx, c.AsRangePass(), origin, lk.fwd)
+	if err != nil {
+		return nil, err
+	}
+	// The same requests that never lead a flight (cacheable) never start a
+	// fill, and a hit-for-miss marker says the response is not shareable.
+	if lk.marker || c.Authorized || c.ReqCC.NoStore || !e.fillable(c, resp) {
+		return resp, nil
+	}
+	e.backgroundRefresh(ctx, c, lk, origin) // c's forwarded request has no Range (T-7)
+	return resp, nil
+}
+
+// fillable reports a 206 whose Content-Range declares a total within
+// MaxObjectBytes and that would pass storability if it were a 200 (T-37).
+func (e *Engine) fillable(c *keys.Classified, resp *Response) bool {
+	if resp.StatusCode != http.StatusPartialContent {
+		return false
+	}
+	total, ok := contentRangeTotal(resp.Header.Get("Content-Range"))
+	if !ok || total > e.cfg.Storable.MaxObjectBytes {
+		return false
+	}
+	as200 := &Response{StatusCode: http.StatusOK, Header: resp.Header}
+	return storability(&e.cfg, c, as200, nil, time.Now()).ok
+}
+
+// contentRangeTotal returns the complete length of a "bytes a-b/total"
+// Content-Range; "*" or anything malformed reports false.
+func contentRangeTotal(v string) (int64, bool) {
+	i := strings.LastIndexByte(v, '/')
+	if !strings.HasPrefix(v, "bytes ") || i < 0 {
+		return 0, false
+	}
+	digits := v[i+1:]
+	if digits == "" || digits[0] < '0' || digits[0] > '9' { // ParseInt would take a sign
+		return 0, false
+	}
+	n, err := strconv.ParseInt(digits, 10, 64)
+	if err != nil || n < 0 {
+		return 0, false
+	}
+	return n, true
+}
+
 // lookupResult is what the store holds for a request (04 §6.3).
 type lookupResult struct {
 	ck      store.Key    // the key the records below live under: Primary, or the variant key under a vary spec
@@ -234,7 +285,7 @@ func (e *Engine) cacheable(ctx context.Context, c *keys.Classified, origin Origi
 	// FR-SRV-5, T-37: a Range request no entry answers passes through, even
 	// with a stale entry: not stored, not coalesced, no marker.
 	if c.Range {
-		return e.pass(ctx, c.AsRangePass(), origin, lk.fwd)
+		return e.rangeMiss(ctx, c, lk, origin)
 	}
 	sp := &fetchSpec{c: c, lk: lk, prior: prior, found: found, purged: purged, reentered: prevCK != nil}
 	// FR-COA-8, FR-STO-12. A no-store request's response is never shared,

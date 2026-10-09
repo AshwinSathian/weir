@@ -16,7 +16,7 @@ fi
 
 # Phase 1.x requirements (spec §13, cards M11 to M15) get tests when their
 # cards land; drop a prefix from this list in the same PR that cites it.
-later='^(FR-RNG-4|FR-(TCC|SNP|FAIR)-[0-9]+)$'
+later='^FR-(TCC|SNP|FAIR)-[0-9]+$'
 ids=$(printf '%s\n' "$ids" | grep -Ev "$later" || true)
 
 missing=$(comm -23 <(printf '%s\n' "$ids") <(printf '%s\n' "$cited"))

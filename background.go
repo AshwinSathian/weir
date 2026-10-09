@@ -53,7 +53,7 @@ func (e *Engine) backgroundRefresh(ctx context.Context, c *keys.Classified, lk l
 	}
 	f.CreatorGone() // no requester claims an over-size stream; runFlight closes it
 	var prior *store.Entry
-	if hasValidators(lk.entry) {
+	if lk.entry != nil && hasValidators(lk.entry) { // nil: a Range miss fills a key with no entry (FR-RNG-4)
 		prior = lk.entry
 	}
 	sp := &fetchSpec{c: c, lk: lk, prior: prior, found: lk.entry, class: limiter.Background}
