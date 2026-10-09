@@ -101,6 +101,11 @@ func (s *Store) writeSnapshot(ctx context.Context) (err error) {
 	if err = os.Rename(f.Name(), s.snapPath); err != nil {
 		return fmt.Errorf("store: memory: snapshot: %w", err)
 	}
+	// Best effort: persist the rename itself. The file is already complete.
+	if d, derr := os.Open(filepath.Dir(s.snapPath)); derr == nil {
+		_ = d.Sync()
+		_ = d.Close()
+	}
 	return nil
 }
 
@@ -178,7 +183,8 @@ func (w *snapWriter) trailer() {
 	w.record(snapKindTrailer, binary.BigEndian.AppendUint64(nil, w.count))
 }
 
-// live reports whether writing may continue, latching ctx's error.
+// live reports whether writing may continue, latching ctx's error. The
+// deadline is checked per record, so one Flush or Sync is not interruptible.
 func (w *snapWriter) live() error {
 	if w.err == nil {
 		w.err = w.ctx.Err()

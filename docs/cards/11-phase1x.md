@@ -30,7 +30,7 @@
 - Tests: TestTargetedFieldPrecedence, TestTargetedFieldKeepsPrivate, TestWeirCacheControlStripped; RFC 9213 examples in rfc9111_test.go
 - AC: `make check` passes
 
-### [ ] M13-01 Snapshot writer
+### [x] M13-01 Snapshot writer
 - Plan: M13 · Size: M · Depends on: M12-02
 - Read: 01 §13.3 FR-SNP-1; 05 §5.5; 04 §13.3
 - Touch: store/memory/snapshot_write.go, tests

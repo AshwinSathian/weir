@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/AshwinSathian/weir/store"
@@ -229,4 +230,45 @@ func TestSnapshotOffAndConfig(t *testing.T) {
 	if _, err := New(Config{SnapshotTimeout: -1}); err == nil {
 		t.Error("New accepted a negative SnapshotTimeout")
 	}
+}
+
+// FR-SNP-1: Close applies SnapshotTimeout, and a snapshot it cuts off leaves
+// no file.
+func TestSnapshotCloseUsesTimeout(t *testing.T) {
+	dir := t.TempDir()
+	s, err := New(Config{SnapshotPath: filepath.Join(dir, "weir.snap"), SnapshotTimeout: time.Nanosecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(time.Millisecond)
+	if err := s.Close(); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Close = %v, want DeadlineExceeded", err)
+	}
+	if names := dirNames(t, dir); len(names) != 0 {
+		t.Fatalf("directory holds %v, want nothing", names)
+	}
+}
+
+// FR-SNP-1: a record that expired before Close is not written.
+func TestSnapshotSkipsExpired(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "weir.snap")
+		s, err := New(Config{SnapshotPath: path})
+		if err != nil {
+			t.Fatal(err)
+		}
+		short := &store.Entry{Kind: store.KindResponse, Status: 200, Expires: time.Now().Add(time.Minute)}
+		long := &store.Entry{Kind: store.KindResponse, Status: 200, Expires: time.Now().Add(time.Hour)}
+		_ = s.Set(context.Background(), numKey(1), short)
+		_ = s.Set(context.Background(), numKey(2), long)
+		time.Sleep(10 * time.Minute)
+		if err := s.Close(); err != nil {
+			t.Fatal(err)
+		}
+		recs := readSnapshot(t, path)
+		if len(recs) != 1 || store.Key(recs[0].payload[:32]) != numKey(2) {
+			t.Fatalf("snapshot holds %d records, want only the unexpired key", len(recs))
+		}
+	})
 }
