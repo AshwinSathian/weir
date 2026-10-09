@@ -49,7 +49,18 @@ example.com {
 }
 ```
 
-Every field is optional and defaults to the engine default. `Validate` calls `weir.New` on a copy of the config and reports its error, so invalid configs fail at `caddy validate` time.
+Every field is optional and defaults to the engine default, except `name`. `Provision` builds the engine with `weir.New`, so an invalid config fails at provisioning, which `caddy validate` also runs (Caddy calls `Validate` after `Provision`, `context.go:423`, so `Validate` only re-checks the adapter's own fields). A failed `weir.New` leaves nothing to close.
+
+Keys the cards implement (a card that needs another key adds it here in the same PR):
+
+| Key | Meaning |
+|---|---|
+| `name` | required; `[A-Za-z0-9._-]{1,64}`; used in the admin URL, as a metrics label and in the snapshot file name, so nothing else is accepted |
+| `max_bytes` | store size; unset means auto-sized (§7, Memory) |
+| `snapshot_dir` | optional directory; the snapshot file is `<snapshot_dir>/<name>.weir` (FR-SNP-1) |
+| `key`, `forward`, `bypass`, `limiter`, `stale` | blocks mirroring the `weir.Config` fields of the same names |
+
+Keys and blocks map through an adapter-side struct, not straight onto `weir.Config`, whose `Rand`, `Observer`, `Logger` and `Store` fields have no JSON form. The adapter sets those itself.
 
 ## 3. Engine lifetime across config reloads
 
@@ -62,8 +73,11 @@ Consequences, accepted:
 - A reload that changes the store size starts a new, empty store. That is rare and deliberate.
 - During the overlap window both the old and new engine have their own limiter, so origin concurrency can briefly reach twice `max_concurrent`. The old engine receives no new requests after the switch, so the overlap is bounded by its in-flight fetches.
 - In-flight flights do not transfer: a request arriving at the new engine for a key the old engine is fetching starts its own fetch. At most one duplicate fetch per key per reload.
-- Key-generation hash (OQ-C1, resolved): the adapter hashes the settings that change what an unchanged key means, namely `Forward.Mode`, `Forward.Allow` and `Storable.StripSetCookie`, and stores the hash beside the pooled store. When a reload changes it, the new engine writes one global soft epoch, so reachable entries revalidate (under SWR where the origin allows it) instead of serving content fetched under different forwarding rules. Settings that only change which key a request maps to (query rules, key headers and cookies, path normalization, experiments) are excluded: their old entries become unreachable and age out without a purge. Host lists, on-demand TLS domains and everything else a BYOD control plane changes on reload are excluded, so adding a domain never purges the cache.
-- `name` is required (OQ-C2, resolved). Two site blocks with the same `name` share a store on purpose; the same `name` with different store settings fails validation.
+- Key-generation hash (OQ-C1, amended by P2-00): the adapter hashes the settings that change what an unchanged key means, namely `Forward.Mode`, `Forward.Allow` and `Storable.StripSetCookie`, and stores the hash beside the pooled store. When a reload changes it, the new engine writes one global hard epoch. OQ-C1 first chose a soft epoch, but a soft-purged entry stays servable inside its SWR and stale-if-error windows (FR-PRG-2), so tightening forwarding (for example `ForwardAll` to a strict mode, where cookies reached the origin and personalized content may have been stored, R-3) would keep serving it. These edits are rare and security relevant, so the safe side (rule 12) is a cold flush. Entries the old engine stores during the overlap, after the epoch, are reachable again; that window is bounded by the old engine's in-flight and routed requests and is accepted. Sites that share a `name` must agree on the hash (next bullet). Settings that only change which key a request maps to (query rules, key headers and cookies, path normalization, experiments) are excluded: their old entries become unreachable and age out without a purge. Host lists, on-demand TLS domains and everything else a BYOD control plane changes on reload are excluded, so adding a domain never purges the cache.
+- `name` is required (OQ-C2, resolved). Two site blocks with the same `name` share a store on purpose. Within one config load they must agree on the store settings and on the key-generation hash, or the second `Provision` fails. The check is scoped to a load (a map from name to settings, keyed by that load's metrics registry pointer, dropped with the last handler of the load) because `Validate` takes no context and a resize reload legitimately has two settings for one name alive at once.
+- Store-level settings are fixed when the store is built: `max_bytes`, shard count, `snapshot_dir`, `MaxBytesPerOwner` and the eviction callback. The pool key is `name`, `max_bytes` as configured (zero means auto), the shard count and one boolean, "owner cap on" (FR-FAIR-3: more than one host or on-demand TLS). A site that goes from one host to two therefore starts a new store once, deliberately, so the fairness cap is never silently missing; further hosts change nothing. Auto-sized stores keep the size computed when they were built (§7, Memory).
+- Snapshots: the new store loads `<name>.weir` at `Provision`. A store that a newer store with the same `name` has superseded (a resize reload) skips its snapshot in `Destruct`, so the final writer is the live store at shutdown.
+- `Cleanup` can take up to the snapshot timeout twice (engine, then store, 5s each by default) inside Caddy's config-change path, so a reload that replaces a large store may wait about 10s for the old config to stop. The two closes may run in parallel; the card decides.
 
 ## 4. Origin implementation
 
@@ -94,12 +108,13 @@ One engine serves every host of a site (OQ-C3, resolved): the tenants share one 
 ## 5. Ordering with other handlers
 
 - `encode` (compression): if `encode` runs before `weir` (outer), Weir caches uncompressed bytes and `encode` compresses every response, including hits. Simple and CPU-bound. If `encode` runs after `weir` (inner, between Weir and `reverse_proxy`), Weir caches compressed variants keyed by the `Accept-Encoding` bucket. Default recommendation: let the origin compress and leave `encode` out of Weir-cached routes, or place it outside `weir` when the origin cannot. Documented with both examples.
-- `rate_limit` (third-party `caddy-ratelimit`): place before `weir` to answer residual risk R-2 (distinct-path floods).
+- `rate_limit` (third-party `caddy-ratelimit`): place before `weir` to answer residual risk R-2 (distinct-path floods). Its directive order and the placement are not verified against its source; the deployment guide checks them before shipping the advice.
 - `forward_auth` or other auth: must run before `weir`, and routes that need per-user responses should use `bypass` rules or rely on `Authorization` handling.
+- Directive order applies inside each block: a `reverse_proxy` inside `handle { }` or `route { }` needs `weir` in the same block. `intercept`, `templates` and `request_header` come before `weir` in the default order, which is the safe side for T-45.
 
 ## 6. Per-client headers added downstream (T-4)
 
-Weir forwards a sanitized request, but `reverse_proxy` then adds `X-Forwarded-For` with the client address. If the origin changes cacheable responses based on client address (geo pages), that is an unkeyed input. The adapter documentation must say this plainly and give two options: configure `reverse_proxy` with `header_up -X-Forwarded-For` on cached routes, or move the decision into a key dimension (Phase 3). The adapter logs a one-time warning at provision time when it detects `reverse_proxy` as the next handler and no `header_up -X-Forwarded-For` (best effort; the handler chain is not always introspectable).
+Weir forwards a sanitized request, but `reverse_proxy` then adds `X-Forwarded-For` with the client address. If the origin changes cacheable responses based on client address (geo pages), that is an unkeyed input. The adapter documentation must say this plainly and give two options: configure `reverse_proxy` with `header_up -X-Forwarded-For` on cached routes, or move the decision into a key dimension (Phase 3). The same rule covers Caddy placeholders on any later handler. The request context's replacer was built from the original client request, and `base.Clone(ctx)` keeps it, so `header_up X-Real-IP {remote_host}` or `header_up X-Foo {http.request.header.Cookie}` behind `weir` sends the original client's data to the origin on a cacheable route, including on background refreshes. The docs tell operators not to use per-client placeholders in handlers after `weir` on cached routes; threat T-45 and risk R-6 gain this case when 06 is next revised (a follow-up, not part of P2-00). The adapter logs a one-time warning at provision time when it detects `reverse_proxy` as the next handler and no `header_up -X-Forwarded-For` (best effort; the handler chain is not always introspectable).
 
 ## 7. Purge over HTTP
 
@@ -109,15 +124,19 @@ Purge is available only through the admin API (decision confirmed 2026-09-27). A
 - `GET /weir/<name>/stats` returning `EngineStats`.
 - `POST /weir/<name>/mode` with `{"mode": "stale-on-error"|"bypass"|"normal", "ttl": "30m"}` calling `SetMode` (D33).
 
-Registration (verified, §11): `admin.api.weir` is an `AdminRouter`. Caddy builds admin routers once, when the admin server starts, with that start's context, and keeps them across config reloads (`replaceLocalAdminServer` runs only when the admin settings changed). A route handler therefore cannot hold an engine. The adapter keeps a package-level registry from `name` to the live engine: `Provision` stores the new engine, and `Cleanup` removes the entry only if it still points at the engine being cleaned up, so a reload overlap (§3) never leaves the registry empty or pointing at a closed engine. A request for an unknown `name` gets 404. Routes are POST for state changes, so Caddy's admin origin and host enforcement apply to them.
+Registration (verified, §11): `admin.api.weir` is an `AdminRouter`. Caddy replaces the admin server on every config load: `provisionContext` calls `replaceLocalAdminServer`, which builds and provisions every `admin.api` module again with the new load's context before the apps (including `weir`) are provisioned. A router therefore cannot hold an engine, because the engines of its own load do not exist yet. The adapter keeps a package-level registry from `name` to the set of live engines with that name. `Provision` adds its engine; `Cleanup` removes that engine by identity. A failed load (a later module fails, Caddy cancels the half-built config and runs `Cleanup`) therefore removes only its own engine and leaves the serving one registered. A request for a `name` with no live engine gets 404.
 
-Memory: stores without `max_bytes` share 40% of `GOMEMLIMIT` evenly (FR-MEM-1). The `caddy` binary sets the memory limit from the cgroup or system memory at startup (`cmd/main.go`, `memlimit.Set`), so `debug.SetMemoryLimit(-1)` is normally finite under Caddy; a custom main that skips it falls to the 256 MiB branch of FR-MEM-1 with its warning. Request bodies: the adapter docs require `request_body { max_size ... }` and server `timeouts { read_body ... }` on Weir routes (FR-LIM-7).
+Semantics for several live engines under one `name` (shared store, or a reload overlap): `purge` goes through any one engine, because epochs live in the shared store; `mode` is applied to every live engine of the name, so the old and new engine of an overlap agree; `stats` returns a JSON array with one `EngineStats` per live engine. An engine mid-cleanup answers `ErrClosed`, which the admin handlers map to 503.
+
+Bounds (rule 5, NFR-3): the request body is capped with `http.MaxBytesReader` at 1 MiB, a purge may carry at most 1000 URLs and 100 groups, and anything over is a 413 or 400 before any epoch is written. Caddy's admin origin and host enforcement applies to every method, so the GET endpoint is covered as well.
+
+Memory: stores without `max_bytes` share 40% of `GOMEMLIMIT` evenly (FR-MEM-1). The share is computed from the sites in the config load that builds the store and is fixed for that store's life, because the store interface has no resize and a size in the pool key would flush every auto-sized store whenever a site is added. A reload that adds an auto-sized site can therefore push the total above 40% until the next restart; `Provision` logs a warning when the sum of live auto-sized stores exceeds it, and operators with several sites or a BYOD control plane set `max_bytes` explicitly (T-43 residual, stated in the deployment guide). The `caddy` binary sets the memory limit from the cgroup or system memory at startup (`cmd/main.go`, `memlimit.Set`), so `debug.SetMemoryLimit(-1)` is normally finite under Caddy; a custom main that skips it falls to the 256 MiB branch of FR-MEM-1 with its warning. Request bodies: the adapter docs require `request_body { max_size ... }` and server `timeouts { read_body ... }` on Weir routes (FR-LIM-7).
 
 No purge endpoint is exposed on site listeners. Operators who need remote purges expose Caddy's admin API with its own access controls (T-26).
 
 ## 8. Observability
 
-The adapter implements `weir.Observer` by incrementing metrics registered on Caddy's Prometheus registry (Caddy exposes `/metrics` through its `metrics` handler and admin endpoint), using the metric names in [04-lld.md §9.3](04-lld.md) with an added `name` label for the engine. Caddy creates a new Prometheus registry for every config load (`Context.GetMetricsRegistry`, pedantic mode, so a duplicate registration is an error). The adapter therefore keeps one collector set per registry, created by the first `Provision` of a load and shared by every `weir` handler in that load (looked up by registry pointer, guarded by a mutex, dropped in `Cleanup` when the last user of that registry goes). Counters restart at zero on reload; Prometheus treats that as a counter reset. Collectors are never attached to a pooled store, which outlives the registry. `Logger` is `ctx.Slogger()`, which Caddy's `caddy.Context` provides (present in v2.11.7), so no zap-to-slog bridge is needed.
+The adapter implements `weir.Observer` by incrementing metrics registered on Caddy's Prometheus registry (Caddy exposes `/metrics` through its `metrics` handler and admin endpoint), using the metric names in [04-lld.md §9.3](04-lld.md) with an added `name` label for the engine. Caddy creates a new Prometheus registry for every config load (`Context.GetMetricsRegistry`, pedantic mode, so a duplicate registration is an error). The adapter therefore keeps one collector set per registry, created by the first `Provision` of a load and shared by every `weir` handler in that load (looked up by registry pointer, guarded by a mutex, dropped in `Cleanup` when the last user of that registry goes). Counters restart at zero on reload; Prometheus treats that as a counter reset. The set of registries is bounded by the number of live loads (one or two, three if a failed load has not cleaned up yet). Collectors are not attached to a pooled store, which outlives the registry. The one value a store feeds is its eviction counter (`memory.Config.OnEvict`, fixed at construction): the pooled value owns an atomic pointer to the current sink, and each `Provision` repoints it at the new load's collector, so evictions never write to a dead registry. P2-06 decides whether to wrap `observe/prom` with a `name` label (`prometheus.WrapRegistererWith`) or hand-roll the collectors; either way the `caddy` module declares the dependency in its own `go.mod`. `Logger` is `ctx.Slogger()`, which Caddy's `caddy.Context` provides (present in v2.11.7), so no zap-to-slog bridge is needed.
 
 ## 9. Tests
 
@@ -131,7 +150,7 @@ The adapter implements `weir.Observer` by incrementing metrics registered on Cad
 - OQ-C2: `name` is required (§3).
 - OQ-C3: one engine per site with per-host fairness caps (§4b).
 
-Closed by P2-00: every Caddy API named here was re-verified against v2.11.7 (§11). Three findings changed the text: admin routes outlive config loads (§7), the metrics registry is per load (§8), and Caddy's upgrade detector cannot be reused (§4 step 0).
+Closed by P2-00: every Caddy API named here was re-verified against v2.11.7 (§11). Findings that changed the text: admin routers are rebuilt on every load before the apps, so a registry of live engines is needed (§7); the metrics registry is per load (§8); Caddy's upgrade detection cannot be reused (§4 step 0); store-level settings, memory sizing and the snapshot owner are fixed per store (§3, §7); per-client placeholders are an unkeyed input (§6). Decision amended by P2-00 on Ashwin's delegation: OQ-C1's key-generation change writes a hard epoch, not a soft one (§3).
 
 ## 11. Verified Caddy APIs (v2.11.7)
 
@@ -140,7 +159,7 @@ Checked against the source at tag `v2.11.7` (commit 72dd0fb) on 2026-10-09. Path
 | API or behavior | Location | Note |
 |---|---|---|
 | `caddy.Module` | `modules.go:54` | `CaddyModule() ModuleInfo` |
-| `caddy.Provisioner`, `Validator`, `CleanerUpper` | `modules.go:296`, `:305`, `:315` | `Cleanup()` and `Validate()` take no context |
+| `caddy.Provisioner`, `Validator`, `CleanerUpper` | `modules.go:296`, `:305`, `:315` | `Cleanup()` and `Validate()` take no context; `Validate` runs after `Provision`, and a failed load runs `Cleanup` on the half-built modules (`context.go:423` to `:447`, `caddy.go:505`) |
 | `caddy.Context.Slogger()` | `context.go:612` | slog logger for the most recent module in the context |
 | `caddy.Context.GetMetricsRegistry()` | `context.go:115` | registry is per config load, pedantic (`context.go:73`) |
 | `caddy.UsagePool.LoadOrNew`, `Delete`, `Constructor`, `Destructor` | `usagepool.go:77`, `:171`, `:216`, `:220` | `Delete` runs `Destruct` outside the lock; a surplus `Delete` is a no-op or steals another instance's reference |
@@ -152,8 +171,8 @@ Checked against the source at tag `v2.11.7` (commit 72dd0fb) on 2026-10-09. Path
 | `caddyhttp.MiddlewareHandler` | `modules/caddyhttp/caddyhttp.go:90` | `ServeHTTP(w, r, next Handler) error` |
 | `caddyhttp.Error`, `HandlerError` | `modules/caddyhttp/errors.go:32`, `:56` | `Error` keeps an existing `HandlerError` and fills missing fields |
 | error path | `modules/caddyhttp/server.go:735` to `:785`, `:1162` | `handle_errors` chain and the plain `WriteHeader` branch both use the request's `ResponseWriter`; `WithError` sets `{http.error.*}` placeholders |
-| `caddy.AdminRouter`, `AdminRoute` | `admin.go:774`, `:779` | routers built in `newAdminHandler` (`:222`, loop at `:277`) with the admin start's context |
-| admin server replacement | `caddy.go:566`, `admin.go:375` | runs only when the admin config changed, not on every reload |
+| `caddy.AdminRouter`, `AdminRoute` | `admin.go:774`, `:779` | routers built in `newAdminHandler` (`:222`, loop at `:277`) with the load's context |
+| admin server replacement | `caddy.go:565`, `admin.go:375` | `provisionContext` replaces the admin server on every load, before the apps are provisioned; routers are re-provisioned each time (`admin.go:277`) |
 | existing admin module as a pattern | `modules/caddyhttp/reverseproxy/admin.go:45` | ID `admin.api.reverse_proxy` |
 | `request_body` `max_size` | `modules/caddyhttp/requestbody/requestbody.go:35`, `:69` | wraps the body in `http.MaxBytesReader` |
 | server `timeouts { read_body }` | `caddyconfig/httpcaddyfile/serveroptions.go:133` to `:146` | |

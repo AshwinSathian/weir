@@ -29,9 +29,21 @@ From the adversarial review of PR #71 (Ashwin delegated "take decisions on all i
 
 none. golangci-lint in this container is built with Go 1.25 and cannot load the Go 1.27 config; run it with `GOTOOLCHAIN=go1.27.0 go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0 run`. CI must confirm.
 
+## Decided 2026-10-09 (P2-00, review of PR 73)
+
+Ashwin delegated "take decisions on all items"; "Waiting on Ashwin" was empty. An independent agent attacked the PR. Decisions, all written into 08:
+
+- Admin routers are rebuilt on every load (my earlier claim that they survive reloads was wrong). The registry stays but holds a set of live engines per name, removed by identity, so a failed load keeps the serving engine reachable. `mode` applies to all live engines of a name, `stats` returns an array, `purge` goes through any one. Admin bodies are bounded (1 MiB, 1000 URLs, 100 groups).
+- Same `name` with different settings fails `Provision` within one load only; across loads (resize reload) it is allowed.
+- Store-level settings are fixed at build. Pool key adds an "owner cap on" boolean: one host to two starts a new store once, so the FR-FAIR-3 cap is never silently missing. Auto-sized stores keep their size; no cross-load 40% guarantee (store has no resize), warning plus explicit `max_bytes` advice.
+- OQ-C1 amended: a key-generation hash change writes a hard epoch, not soft (soft entries stay servable in SWR and stale-if-error windows, FR-PRG-2). This changes a decision from 2026-09-27; PLAN 2.2 reworded.
+- Per-client placeholders (`{remote_host}` and header placeholders) on handlers after `weir` are an unkeyed input like X-Forwarded-For; 08 §6 and P2-03/P2-07 cover it. Follow-up: add to 06 T-45/R-6 at its next revision.
+- Snapshots: the superseded store skips its snapshot; `name` is restricted to `[A-Za-z0-9._-]{1,64}`; config keys table added to 08 §2.
+- Cards: P2-01 split into P2-01, P2-01b (Caddyfile), P2-01c (xcaddy CI); `TestRetryAfterSurvivesHandleErrors` moved to P2-03b (needs caddytest).
+
 ## Notes for the next session
 
-- P2-00: 08 is v1.0 (Caddy v2.11.7, §11). P2-01 must prove `internal/keys.IsUpgrade` imports from the `caddy` module; if not, stop and ask (fallback is an exported `weirhttp.IsUpgrade`, public API). Admin routes need a package-level engine registry; metrics collectors are per registry. Cards P2-01b and P2-03b were added to fit size M.
+- P2-00: 08 is v1.0 (Caddy v2.11.7, §11). P2-01 must prove `internal/keys.IsUpgrade` imports from the `caddy` module; if not, stop and ask (fallback is an exported `weirhttp.IsUpgrade`, public API). Admin routes need a package-level engine registry; metrics collectors are per registry. Cards P2-01b, P2-01c and P2-03b were added to fit size M.
 
 - M15-01: `store/memory/scrub.go` holds `Scrub`; `hasTag` is O(entry tags x purge tags) under the shard lock (ponytail in the file, upgrade path named). `Engine.scrub` in purge.go reports the deleted count as `EvPurge{hard}` `Status`. Work happened on the session branch `claude/serene-volta-d9nvnj`, not `card/M15-01-*`.
 

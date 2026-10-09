@@ -12,7 +12,7 @@ Read in this order the first time. After that, go straight to the one you need.
 | 05 | [storage-interface-spec](05-storage-interface-spec.md) | `store.Store` contract, epochs, memory store (S3-FIFO), codec, Valkey on paper, conformance suite | normative |
 | 06 | [threat-model](06-threat-model.md) | threats T-1–T-44, invariants INV-1–INV-7, security review checklist | normative |
 | 07 | [testing-strategy](07-testing-strategy.md) | test levels, harness, per-failure-mode tests with pass criteria, CI, definition of done | normative |
-| 08 | [caddy-adapter-spec](08-caddy-adapter-spec.md) | Phase 2 adapter | draft |
+| 08 | [caddy-adapter-spec](08-caddy-adapter-spec.md) | Phase 2 adapter | normative (v1.0) |
 | 09 | [research-notes](09-research-notes.md) | sources, verified facts, seed errata | living |
 | 10 | [experiments-spec](10-experiments-spec.md) | Phase 3 experiment dimensions: locked decisions E1–E7 | draft |
 

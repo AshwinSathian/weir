@@ -1261,3 +1261,11 @@ Entry template:
 - Review: card-reviewer, no must-fix. Fixed: UsagePool `Delete` wording and a `TestCleanupDeletesOnce` test on P2-02, P2-01 and P2-03 pre-split to fit size M, line cites, XFF fact restored in 09.
 - Follow-ups: P2-01 must prove the `internal/keys` import compiles; fallback is an exported `weirhttp.IsUpgrade` (public API, ask first).
 - Context: low; size S was right.
+
+## 2026-10-09 · P2-00 · review-fixes
+- Branch / PR: card/P2-00-caddy-spec (remote branch claude/zen-shannon-l879he) / https://github.com/AshwinSathian/weir/pull/73
+- Done: adversarial review of PR 73 (agent), no decision was waiting on Ashwin. Must-fix applied: admin routers are rebuilt every load (false claim removed), registry as a per-name set removed by identity, per-load name/settings check, store-level settings and pool key, memory sizing per load. Should-fix applied: metrics eviction sink, placeholder unkeyed input, config key table and name charset, admin bounds, hard epoch for key-generation hash, P2-01 split, docs/README status. Nits: close time, per-block order, rate_limit unverified.
+- Tests: docs only; trace 146/146, gofmt clean; lint unrun here, CI must confirm.
+- Deviations: OQ-C1 amended (hard epoch instead of soft) by Ashwin's delegation; PLAN 2.2 reworded to match.
+- Follow-ups: 06 T-45/R-6 gain the placeholder case at the next revision.
+- Context: low.
