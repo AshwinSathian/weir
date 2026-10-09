@@ -1,16 +1,16 @@
 # Status
 
-Updated: 2026-10-08
+Updated: 2026-10-09
 Phase: 1
-Current card: none
-Card state: awaiting-merge
-Branch: claude/funny-bardeen-pjrvvk
-PR: #62 https://github.com/AshwinSathian/weir/pull/62
+Current card: M10-10 Client preconditions after revalidation
+Card state: blocked
+Branch: claude/admiring-curie-sv9a2w
+PR: none yet (#62 merged)
 Next card: M10-10 (approved, last Phase 1 card before the release gate); then M16-01
 
 ## Waiting on Ashwin
 
-none. Decided 2026-10-08, see below.
+Run `/handoff` for M10-10 (reviewer pass, card mark, PR). The code and docs are committed on claude/admiring-curie-sv9a2w.
 
 ## Blockers
 

@@ -523,3 +523,125 @@ func TestRevalidation304WithoutDateStamps(t *testing.T) {
 		}
 	})
 }
+
+// FR-SRV-2, FR-SRV-3, INV-1, T-8: client preconditions are evaluated on every
+// GET or HEAD response built from a stored or just-stored entry, not only on
+// a hit. The forward carries the stored validators and never the client's.
+func TestClientConditionalAfterRevalidation(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		hdr := http.Header{"Cache-Control": {"max-age=60"}, "Etag": {`"1"`}, "Last-Modified": {lastMod}, "Vary": {"Accept"}}
+		o := testorigin.NewChecked(t, 64, 16)
+		o.Default(testorigin.Behavior{Header: hdr, Body: []byte("v1")})
+		e := newEngine(t, cacheCfg)
+		defer closeEngine(t, e)
+
+		serve(t, e, getReq("/a"), o)
+		time.Sleep(61 * time.Second)
+		o.Default(testorigin.Behavior{Func: func(*weir.Request) (*weir.Response, error) {
+			return respond(http.StatusNotModified, http.Header{"Cache-Control": {"max-age=60"}}, ""), nil
+		}})
+
+		with := func(method string, h http.Header) *weir.Request {
+			r := getReq("/a")
+			r.Method = method
+			for k, v := range h {
+				r.Header[k] = v
+			}
+			return r
+		}
+		resp, body := serve(t, e, with("GET", http.Header{"If-None-Match": {`"1"`}}), o)
+		if resp.StatusCode != http.StatusNotModified || body != "" || resp.Header.Get("Age") == "" || resp.Header.Get("Cache-Status") == "" {
+			t.Fatalf("matching If-None-Match after 304: %d %q %v", resp.StatusCode, body, resp.Header)
+		}
+		if resp.Header.Get("Content-Type") != "" || resp.Header.Get("Etag") != `"1"` {
+			t.Fatalf("304 header set: %v", resp.Header)
+		}
+		last := o.Requests()[o.TotalCalls()-1].Header
+		if last.Get("If-None-Match") != `"1"` || last.Get("If-Modified-Since") != lastMod {
+			t.Fatalf("forward carries %v, want the stored validators", last)
+		}
+
+		time.Sleep(61 * time.Second)
+		resp, body = serve(t, e, with("GET", http.Header{"If-None-Match": {`"9"`}}), o)
+		if resp.StatusCode != http.StatusOK || body != "v1" {
+			t.Fatalf("non-matching client: %d %q, want 200 v1", resp.StatusCode, body)
+		}
+		if got := o.Requests()[o.TotalCalls()-1].Header.Get("If-None-Match"); got != `"1"` {
+			t.Fatalf("forward If-None-Match %q, want the stored tag", got)
+		}
+
+		time.Sleep(61 * time.Second)
+		resp, _ = serve(t, e, with("HEAD", http.Header{"If-Modified-Since": {lastMod}}), o)
+		if resp.StatusCode != http.StatusNotModified {
+			t.Fatalf("HEAD after 304: %d, want 304", resp.StatusCode)
+		}
+	})
+}
+
+// FR-SRV-2, FR-SRV-3: after a strong-ETag mismatch the retry's response is
+// the final entry; the client is judged against it, not the discarded 304.
+func TestClientConditionalUsesFinalEntry(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		o := testorigin.NewChecked(t, 64, 16)
+		o.Default(testorigin.Behavior{Header: http.Header{"Cache-Control": {"max-age=60"}, "Etag": {`"1"`}}, Body: []byte("v1")})
+		e := newEngine(t, cacheCfg)
+		defer closeEngine(t, e)
+		serve(t, e, getReq("/a"), o)
+		time.Sleep(61 * time.Second)
+		o.Default(testorigin.Behavior{Func: func(r *weir.Request) (*weir.Response, error) {
+			if r.Header.Get("If-None-Match") != "" {
+				return respond(http.StatusNotModified, http.Header{"Etag": {`"2"`}}, ""), nil
+			}
+			return respond(http.StatusOK, http.Header{"Cache-Control": {"max-age=60"}, "Etag": {`"2"`}}, "v2"), nil
+		}})
+		r := getReq("/a")
+		r.Header["If-None-Match"] = []string{`"1"`}
+		resp, body := serve(t, e, r, o)
+		if resp.StatusCode != http.StatusOK || body != "v2" {
+			t.Fatalf("client holding the old tag: %d %q, want 200 v2", resp.StatusCode, body)
+		}
+		time.Sleep(61 * time.Second)
+		o.Default(testorigin.Behavior{Header: http.Header{"Cache-Control": {"max-age=60"}, "Etag": {`"2"`}}, Body: []byte("v2")})
+		r = getReq("/a")
+		r.Header["If-None-Match"] = []string{`"2"`}
+		if resp, _ = serve(t, e, r, o); resp.StatusCode != http.StatusNotModified {
+			t.Fatalf("client holding the new tag: %d, want 304", resp.StatusCode)
+		}
+	})
+}
+
+// FR-SRV-2, FR-COA-1: a cold miss and each flight follower answer by their
+// own conditionals.
+func TestClientConditionalColdMissAndFollowers(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		o := testorigin.NewChecked(t, 64, 16)
+		b := cacheable("v1")
+		b.Header["Etag"] = []string{`"1"`}
+		b.Delay = 100 * time.Millisecond
+		o.Default(b)
+		e := newEngine(t, cacheCfg)
+		defer closeEngine(t, e)
+
+		match, other, plain := getReq("/c"), getReq("/c"), getReq("/c")
+		match.Header["If-None-Match"] = []string{`"1"`}
+		other.Header["If-None-Match"] = []string{`"2"`}
+		chs := []<-chan served{serveAsync(t.Context(), e, match, o), serveAsync(t.Context(), e, other, o), serveAsync(t.Context(), e, plain, o)}
+		want := []int{304, 200, 200}
+		collapsed := 0
+		for i, ch := range chs {
+			s := <-ch
+			if s.err != nil || s.resp.StatusCode != want[i] {
+				t.Fatalf("client %d: %v status %d, want %d", i, s.err, s.resp.StatusCode, want[i])
+			}
+			if (want[i] == 304) != (s.body == "") {
+				t.Fatalf("client %d: body %q", i, s.body)
+			}
+			if s.resp.Cache.Collapsed {
+				collapsed++
+			}
+		}
+		if n := o.TotalCalls(); n != 1 || collapsed != 2 {
+			t.Fatalf("origin calls %d, collapsed %d; want 1 and 2", n, collapsed)
+		}
+	})
+}
