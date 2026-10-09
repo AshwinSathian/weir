@@ -275,3 +275,74 @@ func FuzzSnapshotLoad(f *testing.F) {
 		}
 	})
 }
+
+func globalHard(t *testing.T, s *Store, since time.Time) bool {
+	t.Helper()
+	ep, ok, err := s.NewestEpoch(context.Background(), []store.Tag{store.TagGlobal()}, since)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ok && ep.Mode == store.EpochHard
+}
+
+// FR-SNP-2, T-33: when a record that may have held a purge's hard epoch is
+// lost, the loader fails closed with a global hard epoch; a clean load does
+// not.
+func TestSnapshotLostRecordFailsClosed(t *testing.T) {
+	past := time.Now().Add(-time.Hour)
+	tests := []struct {
+		name     string
+		mutate   func(t *testing.T, f *snapFile)
+		wantHard bool
+	}{
+		{"clean load stays soft", func(*testing.T, *snapFile) {}, false},
+		{"epoch with a bad CRC", func(_ *testing.T, f *snapFile) {
+			f.epoch(store.Tag{7}, time.Now())
+			f.b[len(f.b)-1] ^= 0xFF
+		}, true},
+		{"epoch with a wrong length", func(_ *testing.T, f *snapFile) {
+			f.b = append(f.b, frame(snapKindEpoch, []byte("short"))...)
+			f.count++
+		}, true},
+		{"record longer than the object limit", func(_ *testing.T, f *snapFile) {
+			f.b = append(f.b, snapKindEntry)
+			f.b = binary.AppendUvarint(f.b, 1<<40)
+		}, true},
+		{"trailer counts more records than the file holds", func(_ *testing.T, f *snapFile) {
+			f.count++
+		}, true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "weir.snap")
+			f := newSnapFile()
+			f.entry(t, numKey(1), liveEntry("x"))
+			tc.mutate(t, f)
+			f.write(t, path)
+			s := loadFrom(t, path, Config{})
+			if got := globalHard(t, s, past); got != tc.wantHard {
+				t.Errorf("global hard epoch = %v, want %v", got, tc.wantHard)
+			}
+		})
+	}
+}
+
+// T-33: a request time in the future (hand-edited file) is clamped, so the
+// load-time soft epoch still covers the entry.
+func TestSnapshotLoadClampsFutureRequestTime(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "weir.snap")
+	f := newSnapFile()
+	e := liveEntry("x")
+	e.RequestTime = time.Now().Add(time.Hour)
+	f.entry(t, numKey(1), e)
+	f.write(t, path)
+	s := loadFrom(t, path, Config{})
+	got, err := s.Get(context.Background(), numKey(1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ep, ok, _ := s.NewestEpoch(context.Background(), []store.Tag{store.TagGlobal()}, got.RequestTime)
+	if !ok || ep.Mode != store.EpochSoft {
+		t.Errorf("epoch since the entry's request time = %+v, %v; want the load-time soft epoch", ep, ok)
+	}
+}

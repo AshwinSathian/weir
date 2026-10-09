@@ -37,7 +37,7 @@
 - Tests: TestSnapshotRespectsDeadline, write half of TestSnapshotRoundTrip
 - AC: temp file mode 0600, fsync, atomic rename, trailer; `make check` passes
 
-### [ ] M13-02 Snapshot loader
+### [x] M13-02 Snapshot loader
 - Plan: M13 · Size: M · Depends on: M13-01
 - Read: 01 FR-SNP-2, FR-SNP-3; 05 §5.5; 06 T-33
 - Touch: store/memory/snapshot_load.go, tests

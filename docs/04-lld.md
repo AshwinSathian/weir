@@ -1257,6 +1257,8 @@ FR-RNG-4's background fill: in `rangeMiss` (`serve.go`, which wraps `pass()`) fo
 
 Writer runs inside `memory.Store.Close(ctx)`: `os.CreateTemp(dir, ".weir-snap-*")`, `Chmod(0600)`, buffered writer, per-shard read lock while copying node pointers (entries are immutable so encoding happens outside the lock), trailer, `Sync`, `Rename`. Loader in `memory.New`: open, verify magic and trailer first (seek to end), then stream records. `memory.Store.Close()` bounds the write by `Config.SnapshotTimeout` (default 5s); the optional `CloseContext(ctx)` takes the caller's context instead, and the engine's `Close` is to use it when the store has it, so the adapter's shutdown grace period bounds snapshot time (engine wiring lands with the loader card; until then `Close()` and `SnapshotTimeout` bound it). `store.Store` keeps `Close() error`.
 
+Loader failure mode (T-33): the writer puts hard epochs last, so a record that may have been one (bad CRC, unknown kind, bad length, rejected epoch, or fewer records than the trailer counts) makes the loader write a global hard epoch at load time, and nothing loaded can be served stale. A clean load writes only the global soft epoch. Request times after load time are clamped to it.
+
 ### 13.4 Per-host fairness (M14)
 
 Limiter: `byHost map[uint64]int32` alongside `byPart`; `canRun` adds `byHost[host] < MaxPerHost` when enabled. The host hash is computed once in `Classify` from the normalized host. Memory store: see [05 §5.3](05-storage-interface-spec.md) quota paragraph.
