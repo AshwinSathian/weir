@@ -111,11 +111,11 @@ func trailerCount(f *os.File, size int64) (uint64, bool) {
 // the stream ended before a clean end of file.
 func (s *Store) readRecords(lr *io.LimitedReader) error {
 	r := bufio.NewReader(lr)
-	maxRec := uint64(s.MaxObjectBytes()) + uint64(snapKeyLen) + 1<<10 // headroom for codec framing
+	maxRec := uint64(s.MaxObjectBytes()) + uint64(snapKeyLen) + 1<<10 //nolint:gosec // MaxObjectBytes is positive; 1 KiB headroom for codec framing
 	for {
 		kind, err := r.ReadByte()
 		if err != nil {
-			if err == io.EOF {
+			if errors.Is(err, io.EOF) {
 				return nil
 			}
 			return err
