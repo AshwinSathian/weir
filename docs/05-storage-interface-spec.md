@@ -190,7 +190,7 @@ Why this shape: entries requested once (the signature of a query-string busting 
 
 Per-owner quota (M14): each shard keeps `map[store.Tag]int64` of bytes per owner; entries are removed from it when their node is unlinked, so its size is bounded by the owners present in the shard. The over-quota path in FR-FAIR-2 scans at most 64 nodes from each queue tail (128 in all) and never touches another owner's nodes.
 
-Scrub (M15): for each shard in turn, take the write lock, walk every node, unlink response records whose `Tags` intersect the given tags, release. Worst case O(entries) total, but never more than one shard's worth of work under one lock.
+Scrub (M15): for each shard in turn, take the write lock, walk every node, unlink response records whose `Tags` intersect the given tags, release. Worst case O(entries) total, but never more than one shard's worth of work under one lock. Matching is by exact tag, not the epoch sketch, and only response records are removed (vary specs, markers and negative records carry no tags). The context is checked between shards: on cancellation Scrub returns the count so far with `ErrUnavailable`. Scrub does not compare request times with the epoch, so it can also delete a response stored fresh after the purge, and it cannot stop a flight from storing one afterwards; the epoch, not the scan, is what makes entries unreachable.
 
 ### 5.4 Epoch table
 

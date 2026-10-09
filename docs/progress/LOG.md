@@ -1219,3 +1219,11 @@ Entry template:
 - Deviations: LLD purge section reworded (no store scrubs yet is no longer true). No requirement changed.
 - Follow-ups: review should-fix on `hasTag` cost with very large URL lists left as a ponytail; engine test scrubs by `All` only, URI and group tags are covered at store level.
 - Context: low; size S was right.
+
+## 2026-10-09 · M15-01 · review-fixes
+- Branch / PR: claude/serene-volta-d9nvnj / https://github.com/AshwinSathian/weir/pull/71
+- Done: adversarial review (no must-fix). Scrub failures no longer count toward the breaker; EvStoreError `scrub` and `Status` on hard documented; scrub/request-time and part-way-failure behavior documented (LLD 13.5, 05 §5.3, `Scrubber` doc).
+- Tests: TestEagerPurgeByURLAndGroup, TestEagerScrubFailuresDoNotOpenBreaker, TestStoreGuardScrubFailureNotCounted (fails if the failure is counted), TestScrubConcurrentWithWrites. Race tests, vet, gofmt, trace pass; lint 0 issues via the Go 1.27 build.
+- Deviations: none beyond docs wording; no public signature changed.
+- Follow-ups: none.
+- Context: low.

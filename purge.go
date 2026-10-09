@@ -99,7 +99,8 @@ func (e *Engine) sameOriginTag(c *keys.Classified, base *url.URL, ref string) (s
 // one longer than Limits.MaxGroupBytes or with a byte outside 0x20 to 0x7E
 // (FR-STO-10). A store error stops the call and is returned: epochs
 // already written stay, EvPurge is still emitted for them, and repeating
-// the call is safe. The memory store refuses a hard purge of a new URL or
+// the call is safe; with Eager, the tags written before the failure are not
+// scrubbed. The memory store refuses a hard purge of a new URL or
 // group past its MaxHardEpochs with an error matching store.ErrUnavailable
 // (05 E-6); purge with All instead. Such a refusal does not count toward
 // the store breaker.
