@@ -125,8 +125,8 @@ D36 asks whether a pointer-light layout earns its cost. The prototype (`benchmar
 | allocation per request | 1 728 B | 1 728 B | 3 776 B | 3 776 B |
 | non-GC CPU per request | 12.6 µs | 12.5 µs | 12.2 µs | 13.0 µs |
 | natural cycles in the window | 11 | 5 | 50 | 23 |
-| **GC µs per request** (cycle CPU × alloc ÷ live ÷ GOGC/100) | 1.76 | 0.93 | 0.014 | 0.005 |
-| GC share, projected (denominator: the harness's non-GC CPU) | 12.3% | 6.9% | 0.11% | 0.04% |
+| **GC µs per request** (cycle CPU × alloc ÷ live ÷ GOGC/100) | 1.76 | 0.93 | 0.014 | 0.007 |
+| GC share, projected (denominator: the harness's non-GC CPU) | 12.3% | 6.9% | 0.11% | 0.06% |
 | GC share, runtime-reported (few cycles, noisy) | 11.5% | 6.2% | 0.50% | 0.25% |
 
 The two projected shares in the `GOGC=200` columns use the corrected formula (the test's own `satProjected` assumes `GOGC=100` and prints 12.89% and 0.11% there). An allocation cut on the heap layout was not implemented; by the same formula GC µs per request is linear in allocation per request, so halving 1 728 B gives about 0.88 µs (6.5%), and `GOGC=200` with the cut about 0.44 µs. These two are projections.
@@ -142,7 +142,7 @@ What it says:
 
 - The layout removes the GC problem: 2.2 s per cycle becomes 5 ms, and the live heap is 33% smaller (no map, node, header or slice objects). The cost per request goes from 1.76 µs to 0.014 µs.
 - It breaks the hit-path budget as built. Decoding on every `Get` copies the body and rebuilds the header map: +12 allocs/op (26, over the 16 bound of NFR-5), +41% ns/op (over the 20% rule), and 2.2x the bytes allocated per request. A layout that passes needs a hit path that serves headers and body from the encoded bytes without building an `Entry`. That changes how the engine reads entries (P4, the `store.Entry` contract in 05 §1), which is a design decision and a public-interface question for the store, not a layout detail.
-- Cheaper levers get most of the way for the cost of memory. `GOGC=200` halves GC µs per request (1.76 to 0.93) for roughly another 2 GiB of heap headroom at this size, and needs no code. Allocation cuts help linearly. Neither reaches 0.
+- Cheaper levers get most of the way for the cost of memory. `GOGC=200` halves GC µs per request (1.76 to 0.93) for about one more live-heap size (2.1 GiB here) of headroom, and needs no code. Allocation cuts help linearly. Neither reaches 0.
 - The share depends on its denominator. At 1.76 µs of GC per request, a server whose hit costs 12.6 µs (this harness) sees 12.3%, one whose hit costs 30 µs (net/http, TLS) about 5.5%. GC µs per request does not move with that, so it is the better gate.
 
-Recommendation (for Ashwin to decide): keep the heap layout and do not start M16-02 now. Replace the 10% share line with a gate on GC µs per request at 1M entries and 1 KiB bodies, at most 2 µs with default `GOGC` (now 1.76), and document `GOGC=200` as the operator lever. Revisit M16-02 if a deployment measures above the gate or needs more than 1M entries, and if so scope it as a design change first (a serve-from-encoded-bytes path), since the layout alone fails NFR-5. Reference-machine rerun still pending for both this and the M10 table.
+Recommendation (for Ashwin to decide): keep the heap layout and do not start M16-02 now. Replace the 10% share line with a gate on GC µs per request at 1M entries and 1 KiB bodies, at most 2 µs with default `GOGC` (now 1.76; the margin is thin and the baseline drifted 15.4% to 12.3% between two runs on this box, so re-base the number on the reference-machine rerun), and document `GOGC=200` as the operator lever. Revisit M16-02 if a deployment measures above the gate or needs more than 1M entries, and if so scope it as a design change first (a serve-from-encoded-bytes path), since the layout alone fails NFR-5. Reference-machine rerun still pending for both this and the M10 table.
