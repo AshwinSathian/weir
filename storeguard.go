@@ -110,6 +110,18 @@ func (g *storeGuard) purgeEpoch(ctx context.Context, t store.Tag, ep store.Epoch
 	return g.exit(ctx, "set-epoch", nil)
 }
 
+// scrub runs the store's Scrubber under the same breaker and deadline as
+// every other store call. The caller has checked that s implements it.
+func (g *storeGuard) scrub(ctx context.Context, sc store.Scrubber, tags []store.Tag) (int, error) {
+	ctx, cancel, err := g.enter(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer cancel()
+	n, err := sc.Scrub(ctx, tags)
+	return n, g.exit(ctx, "scrub", err)
+}
+
 func noCancel() {}
 
 // enter refuses the call while the breaker is open and adds the remote

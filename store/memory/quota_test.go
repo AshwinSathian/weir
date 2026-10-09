@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -267,4 +268,55 @@ func TestOwnerQuotaAccounting(t *testing.T) {
 			t.Fatalf("a live small victim counted %d, want 1", small)
 		}
 	})
+}
+
+// FR-PRG-8: Scrub deletes response records by exact tag, in every shard,
+// and leaves other records and kinds alone. 05 S-2: a closed store and a
+// cancelled context are ErrUnavailable.
+func TestScrub(t *testing.T) {
+	a, b := store.Tag{1}, store.Tag{2}
+	tagged := func(kind store.Kind, tags ...store.Tag) *store.Entry {
+		e := entry(10)
+		e.Kind, e.Tags = kind, tags
+		return e
+	}
+	s := newStore(t, Config{MaxBytes: 1 << 20, Shards: 4})
+	for i := uint64(1); i <= 20; i++ {
+		_ = s.Set(t.Context(), numKey(i), tagged(store.KindResponse, store.TagGlobal(), a))
+	}
+	_ = s.Set(t.Context(), numKey(100), tagged(store.KindResponse, store.TagGlobal(), b))
+	_ = s.Set(t.Context(), numKey(101), tagged(store.KindVarySpec, a))
+	_ = s.Set(t.Context(), numKey(102), tagged(store.KindResponse))
+
+	if n, err := s.Scrub(t.Context(), nil); n != 0 || err != nil {
+		t.Fatalf("Scrub(nil) = %d, %v; want 0, nil", n, err)
+	}
+	if n, err := s.Scrub(t.Context(), []store.Tag{a}); n != 20 || err != nil {
+		t.Fatalf("Scrub(a) = %d, %v; want 20, nil", n, err)
+	}
+	for i := uint64(1); i <= 20; i++ {
+		if present(t.Context(), s, numKey(i)) {
+			t.Fatalf("record %d with tag a survived", i)
+		}
+	}
+	for _, k := range []uint64{100, 101, 102} {
+		if !present(t.Context(), s, numKey(k)) {
+			t.Fatalf("record %d was scrubbed but does not match", k)
+		}
+	}
+	if n, _ := s.Scrub(t.Context(), []store.Tag{store.TagGlobal()}); n != 1 {
+		t.Fatalf("Scrub(global) = %d, want the one remaining response with it", n)
+	}
+	if got := s.Bytes(); got != tagged(store.KindVarySpec, a).Size()+tagged(store.KindResponse).Size() {
+		t.Fatalf("Bytes = %d after scrub: byte account not released", got)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if _, err := s.Scrub(ctx, []store.Tag{a}); !errors.Is(err, store.ErrUnavailable) {
+		t.Fatalf("Scrub with cancelled ctx = %v, want ErrUnavailable", err)
+	}
+	_ = s.Close()
+	if _, err := s.Scrub(t.Context(), []store.Tag{a}); !errors.Is(err, store.ErrUnavailable) {
+		t.Fatalf("Scrub after Close = %v, want ErrUnavailable", err)
+	}
 }

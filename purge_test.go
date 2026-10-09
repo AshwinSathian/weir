@@ -667,8 +667,7 @@ func TestPurgeRejectsInvalidInput(t *testing.T) {
 // FR-PRG-1: a group purge with a valid origin is accepted
 // (TestGroupsScopedByOrigin shows it reaches entries). FR-LCY-2: Purge on a closed engine is ErrClosed.
 // 05 E-6: a hard purge past the store's cap reports the store's error, and
-// the epochs written before it stay and are reported (04 §9.2). FR-PRG-8: an
-// eager hard purge writes its epoch and returns ErrEagerUnsupported.
+// the epochs written before it stay and are reported (04 §9.2).
 func TestPurgeGroupsAndStoreErrors(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		st, err := memory.New(memory.Config{MaxHardEpochs: 1})
@@ -695,10 +694,6 @@ func TestPurgeGroupsAndStoreErrors(t *testing.T) {
 		if want := []string{"soft", "hard"}; !slices.Equal(obs.rs, want) {
 			t.Fatalf("EvPurge reasons = %v, want %v (the group purge, then the half-written hard purge)", obs.rs, want)
 		}
-		err = e.Purge(t.Context(), weir.Purge{Mode: weir.PurgeHard, Eager: true, URLs: []string{"https://example.com/a"}})
-		if !errors.Is(err, weir.ErrEagerUnsupported) {
-			t.Fatalf("eager hard purge = %v, want ErrEagerUnsupported", err)
-		}
 		time.Sleep(2 * time.Second)
 		if resp, _ := serve(t, e, getReq("/a"), o); resp.Cache.Hit {
 			t.Fatalf("/a is a hit: the epoch written before the failure was lost")
@@ -710,6 +705,114 @@ func TestPurgeGroupsAndStoreErrors(t *testing.T) {
 		closeEngine(t, e)
 		if err := e.Purge(t.Context(), weir.Purge{All: true}); !errors.Is(err, weir.ErrClosed) {
 			t.Fatalf("Purge after Close = %v, want ErrClosed", err)
+		}
+	})
+}
+
+// noScrub hides the memory store's Scrubber: embedding the interface only
+// forwards Store's methods.
+type noScrub struct{ store.Store }
+
+// scrubCounts records the Status of every EvPurge event.
+type scrubCounts struct {
+	mu sync.Mutex
+	ns []int
+}
+
+func (o *scrubCounts) Observe(ev weir.Event) {
+	if ev.Kind == weir.EvPurge {
+		o.mu.Lock()
+		o.ns = append(o.ns, ev.Status)
+		o.mu.Unlock()
+	}
+}
+
+// FR-PRG-8, T-10: an eager hard purge by All deletes every stored response,
+// every Vary variant included, now; the records are gone from the store, not
+// only unreachable, and EvPurge carries how many.
+func TestEagerHardPurgeDeletesAllPartitions(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		st, err := memory.New(memory.Config{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		o := testorigin.NewChecked(t, 64, 16)
+		h := purgeable("v").Header
+		h.Set("Vary", "Accept-Language")
+		o.Default(testorigin.Behavior{Header: h, Body: []byte("v")})
+		obs := &scrubCounts{}
+		cfg := cacheCfg
+		cfg.Store, cfg.Observer = st, obs
+		cfg.Forward.Allow = []string{"Accept-Language"} // else the variants collapse
+		e := newEngine(t, cfg)
+		defer closeEngine(t, e)
+
+		for _, lang := range []string{"en", "fr"} {
+			r := getReq("/a")
+			r.Header.Set("Accept-Language", lang)
+			serve(t, e, r, o)
+		}
+		serve(t, e, getReq("/b"), o)
+		before := st.Bytes()
+		time.Sleep(time.Second)
+		mustPurge(t, e, weir.Purge{Mode: weir.PurgeHard, Eager: true, All: true})
+		if after := st.Bytes(); after >= before/2 {
+			t.Fatalf("store holds %d of %d bytes after an eager purge: responses were not deleted", after, before)
+		}
+		if want := []int{3}; !slices.Equal(obs.ns, want) {
+			t.Fatalf("EvPurge Status = %v, want %v (two variants of /a and /b)", obs.ns, want)
+		}
+		if resp, _ := serve(t, e, getReq("/b"), o); resp.Cache.Hit {
+			t.Fatal("/b is a hit after a hard purge")
+		}
+	})
+}
+
+// FR-PRG-8: Eager with PurgeSoft is invalid input and changes nothing.
+func TestEagerSoftIsError(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		obs := &scrubCounts{}
+		cfg := cacheCfg
+		cfg.Observer = obs
+		e := newEngine(t, cfg)
+		defer closeEngine(t, e)
+		err := e.Purge(t.Context(), weir.Purge{Mode: weir.PurgeSoft, Eager: true, All: true})
+		if _, ok := errors.AsType[*weir.RequestError](err); !ok || !errors.Is(err, weir.ErrInvalidRequest) {
+			t.Fatalf("eager soft purge = %v, want an invalid-request error", err)
+		}
+		if len(obs.ns) != 0 {
+			t.Fatalf("rejected purge emitted %d events", len(obs.ns))
+		}
+	})
+}
+
+// FR-PRG-8: a store without Scrubber gets its epochs written, then
+// ErrEagerUnsupported; the entry is unreachable though not deleted.
+func TestEagerUnsupportedStore(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		mem, err := memory.New(memory.Config{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		o := testorigin.NewChecked(t, 64, 16)
+		o.Default(purgeable("v"))
+		obs := &scrubCounts{}
+		cfg := cacheCfg
+		cfg.Store, cfg.Observer = noScrub{mem}, obs
+		e := newEngine(t, cfg)
+		defer closeEngine(t, e)
+
+		serve(t, e, getReq("/a"), o)
+		time.Sleep(time.Second)
+		err = e.Purge(t.Context(), weir.Purge{Mode: weir.PurgeHard, Eager: true, All: true})
+		if !errors.Is(err, weir.ErrEagerUnsupported) {
+			t.Fatalf("eager hard purge = %v, want ErrEagerUnsupported", err)
+		}
+		if want := []int{0}; !slices.Equal(obs.ns, want) {
+			t.Fatalf("EvPurge Status = %v, want %v: the epochs were written and reported", obs.ns, want)
+		}
+		if resp, _ := serve(t, e, getReq("/a"), o); resp.Cache.Hit {
+			t.Fatal("/a is a hit: the epoch was not written before ErrEagerUnsupported")
 		}
 	})
 }
