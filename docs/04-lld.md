@@ -1251,7 +1251,7 @@ FR-RNG-4's background fill: in `rangeMiss` (`serve.go`, which wraps `pass()`) fo
 
 ### 13.2 Targeted fields (M12)
 
-`internal/sfv.ParseDictionary(lines []string, maxMembers int) (Dict, error)` covering RFC 9651 §4.2.2 (tokens, integers, decimals, strings, booleans, parameters ignored). `httpcc.ParseResponse` gains an input: the ordered target list. It returns directives from the first valid targeted field, then ORs in `private`, `no-store`, `no-cache` from `Cache-Control` (FR-TCC-3). Integer values that are decimals or negative make the field invalid (RFC 9213 §2.1 says not to coerce). `fromEntry` deletes `Weir-Cache-Control` from the cloned header map.
+`internal/sfv.ParseDictionary(lines []string, maxMembers int) (Dict, error)` covering RFC 9651 §4.2.2 (tokens, integers, decimals, strings, booleans, parameters ignored). `Dict` maps a key to an `Item{Kind, Bool, Int, Dec, Str}`; kinds are Boolean, Integer, Decimal, String, Token and Other (byte sequences, dates, display strings and inner lists, validated and not kept), so the caller can reject a decimal where an integer is required. A repeated key keeps its last value; lines are parsed one by one, so a String cannot span two; more than `maxMembers` members (repeats included) is `ErrInvalid` and returns no members. `httpcc.ParseResponse` gains an input: the ordered target list. It returns directives from the first valid targeted field, then ORs in `private`, `no-store`, `no-cache` from `Cache-Control` (FR-TCC-3). Integer values that are decimals or negative make the field invalid (RFC 9213 §2.1 says not to coerce). `fromEntry` deletes `Weir-Cache-Control` from the cloned header map.
 
 ### 13.3 Snapshot (M13)
 

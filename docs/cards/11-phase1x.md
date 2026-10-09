@@ -16,7 +16,7 @@
 - Tests: TestRangeMissBackgroundFillBounded
 - AC: `make check` passes
 
-### [ ] M12-01 Structured-field dictionary parser
+### [x] M12-01 Structured-field dictionary parser
 - Plan: M12 · Size: S · Depends on: M11-02
 - Read: 04 §13.2 (parser sentence); RFC 9651 §4.2.2
 - Touch: internal/sfv/dict.go, dict_test.go, testdata/fuzz/FuzzSFDictionary/
