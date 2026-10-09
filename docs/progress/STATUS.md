@@ -6,7 +6,7 @@ Current card: none
 Card state: awaiting-merge
 Branch: claude/zen-rubin-hynjow
 PR: https://github.com/AshwinSathian/weir/pull/72
-Next card: ]
+Next card: P2-00 (Finalize the Caddy adapter spec)
 
 ## Waiting on Ashwin
 
