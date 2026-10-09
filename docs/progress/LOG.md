@@ -1275,5 +1275,5 @@ Entry template:
 - Done: `caddy/` module (`weircaddy`): `http.handlers.weir` with strict JSON config, required `name` charset check, `ByteSize` parsing, mapping to `weir.Config`, Provision/Validate/Cleanup (idempotent), interface guards, pass-through ServeHTTP. `go.work` includes `./caddy`; root `go.mod` still has no `require`. docs/08 §2 key table lists every block key.
 - Tests: `TestConfigFromJSON`, `TestProvisionReportsBadConfig`, `TestInternalKeysImport`. `make check` passes with the pinned golangci-lint run under Go 1.27; trace 146/146.
 - Deviations: none from normative text; five keys added beyond the 08 example, recorded in the 08 table. `max_bytes`/`snapshot_dir` parsed but applied by P2-02. `internal/keys.IsUpgrade` imports across modules, so no `weirhttp.IsUpgrade` fallback.
-- Review: card-reviewer, findings below if any were fixed.
+- Review: card-reviewer, no must-fix. Fixed: invalid T-45 citation dropped, exact int parsing for byte sizes (no exponent or hex forms), 08 says P2-02 owns `snapshot_dir` validation. Open: Cleanup clears `h.engine` without a lock, revisit in P2-03 when serving reads it.
 - Context: low; size M was right.

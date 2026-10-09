@@ -62,6 +62,17 @@ func parseByteSize(s string) (int64, error) {
 			break
 		}
 	}
+	// Whole numbers go through ParseInt so values above 2^53 stay exact;
+	// only fractions and scaled values use floats. Exponent and hex forms
+	// are not sizes.
+	if mult == 1 {
+		if n, err := strconv.ParseInt(s, 10, 64); err == nil && n >= 0 {
+			return n, nil
+		}
+	}
+	if strings.ContainsAny(s, "ex") {
+		return 0, errors.New("weir: invalid byte size")
+	}
 	f, err := strconv.ParseFloat(s, 64)
 	if err != nil || math.IsNaN(f) || f < 0 {
 		return 0, errors.New("weir: invalid byte size")

@@ -64,7 +64,7 @@ Keys the cards implement (a card that needs another key adds it here in the same
 | `limiter` | `max_concurrent`, `max_queue`, `max_queue_wait`, `max_per_partition` |
 | `stale` | `while_revalidate`, `if_error` (operator defaults, off unless set; D6) |
 
-`max_bytes` takes a number of bytes or a string such as `512MiB` (P2-01 parses it; the store pool of P2-02 applies it). Unknown keys fail the load, because Caddy decodes module config strictly.
+`max_bytes` takes a number of bytes or a string such as `512MiB` (P2-01 parses it; P2-02 applies it, and also owns validating `snapshot_dir`). Unknown keys fail the load, because Caddy decodes module config strictly.
 
 Keys and blocks map through an adapter-side struct, not straight onto `weir.Config`, whose `Rand`, `Observer`, `Logger` and `Store` fields have no JSON form. The adapter sets those itself.
 
