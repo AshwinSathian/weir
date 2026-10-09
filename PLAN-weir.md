@@ -185,8 +185,8 @@ Refs: [01 §13](docs/01-technical-spec.md), decisions D11, D12, D15, D16, D18.
 
 ### Phase 2: Caddy adapter (~3 weeks)
 
-- [ ] 2.1 Re-verify [08](docs/08-caddy-adapter-spec.md) against the current Caddy release; mark 08 v1.0. AC: every Caddy API named in 08 exists at the pinned version.
-- [ ] 2.2 Module, Caddyfile parsing (required `name`), store pool, key-generation hash with global soft purge on change, per-host fairness defaults for multi-host sites, `nextOrigin`. AC: `caddytest` scenarios for T6.2, T6.6, T6.12 pass; reload test (100 warm keys survive a limiter change; a `forward.allow` change makes them revalidate; adding a host changes nothing); `xcaddy build` in CI.
+- [x] 2.1 Re-verify [08](docs/08-caddy-adapter-spec.md) against the current Caddy release; mark 08 v1.0. AC: every Caddy API named in 08 exists at the pinned version.
+- [ ] 2.2 Module, Caddyfile parsing (required `name`), store pool, key-generation hash with global hard purge on change (amended by P2-00), per-host fairness defaults for multi-host sites, `nextOrigin`. AC: `caddytest` scenarios for T6.2, T6.6, T6.12 pass; reload test (100 warm keys survive a limiter change; a `forward.allow` change makes them misses; adding a host to a site that is already multi-host changes nothing); `xcaddy build` in CI.
 - [ ] 2.3 Admin API purge (with `eager`), mode switch (`SetMode`) and stats; errors returned as `caddyhttp.Error` (D34), upgrades routed around, memory budget split (FR-MEM-1). AC: `TestRetryAfterSurvivesHandleErrors`, `TestMemorySizingSplit` pass; Prometheus metrics on Caddy's registry. AC: purge via admin endpoint changes the next `Cache-Status` to `fwd=stale`.
 - [ ] 2.4 Single-node deployment guide for the BYOD instance (T-38), including snapshot path and shutdown grace period. AC: guide in `docs/runbook.md`.
 
