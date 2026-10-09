@@ -1075,7 +1075,7 @@ Entry template:
 - Context: low; size S was right.
 
 ## 2026-10-09 · M10-10 · done
-- Branch / PR: claude/admiring-curie-sv9a2w / PR_URL
+- Branch / PR: claude/admiring-curie-sv9a2w / #63 https://github.com/AshwinSathian/weir/pull/63
 - Done: reviewer pass on 49cbf53. Fixed the stale count in docs/cache-tests-expected-failures.md (265/100), moved the LLD sentence, and added tests for Vary variants and Authorization plus a discarded-304 case. Card marked done; supersedes the `blocked` entry above.
 - Tests: TestClientConditionalVariantsAndAuthorization, TestClientConditionalUsesFinalEntry (rewritten, discarded 304 names "2", final entry "3"). Root race tests, vet, trace-strict pass; lint unrun (Go 1.25 binary), CI must confirm.
 - Deviations: none beyond the FR-SRV-2 widening already logged.
