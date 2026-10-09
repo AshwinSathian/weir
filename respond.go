@@ -6,6 +6,7 @@ import (
 	"maps"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/AshwinSathian/weir/internal/httpcc"
@@ -29,11 +30,27 @@ func (e *Engine) fromEntry(c *keys.Classified, ent *store.Entry, now time.Time, 
 		h = http.Header{}
 	}
 	h["Age"] = age
-	var body io.ReadCloser = http.NoBody
-	if !c.Head && len(ent.Body) > 0 {
-		body = io.NopCloser(bytes.NewReader(ent.Body))
+	data, status := ent.Body, ent.Status
+	// FR-RNG-1..3, T-37. HEAD ignores Range; If-Range is judged first.
+	if c.Range && !c.Head && ent.Status == http.StatusOK && !acceptRangesNone(ent.Header) && (!c.HasIfRange || httpcc.IfRangeApplies(c.IfRange, ent)) {
+		start, end, kind := httpcc.ParseRange(c.RangeValue, int64(len(ent.Body)))
+		switch kind {
+		case httpcc.RangeOK:
+			data, status = ent.Body[start:end+1], http.StatusPartialContent
+			h["Content-Range"] = []string{"bytes " + strconv.FormatInt(start, 10) + "-" + strconv.FormatInt(end, 10) + "/" + strconv.Itoa(len(ent.Body))}
+			h["Content-Length"] = []string{strconv.Itoa(len(data))}
+		case httpcc.RangeUnsatisfiable:
+			h = notModifiedHeader(ent.Header)
+			h["Age"] = age
+			h["Content-Range"] = []string{"bytes */" + strconv.Itoa(len(ent.Body))}
+			return e.finish(&Response{StatusCode: http.StatusRequestedRangeNotSatisfiable, Header: h, Body: http.NoBody}, ci)
+		}
 	}
-	return e.finish(&Response{StatusCode: ent.Status, Header: h, Body: body}, ci)
+	var body io.ReadCloser = http.NoBody
+	if !c.Head && len(data) > 0 {
+		body = io.NopCloser(bytes.NewReader(data))
+	}
+	return e.finish(&Response{StatusCode: status, Header: h, Body: body}, ci)
 }
 
 // finish sets ci and appends the Cache-Status member after any the origin
@@ -46,4 +63,16 @@ func (e *Engine) finish(r *Response, ci CacheInfo) *Response {
 		r.Header["Cache-Status"] = append(old[:len(old):len(old)], cacheStatus(e.cfg.CacheStatus, ci))
 	}
 	return r
+}
+
+// acceptRangesNone reports whether the origin disclaimed range support on the
+// stored response (RFC 9110 §14.3). Weir then ignores Range rather than
+// contradict the header it serves with the 206 (RFC 9110 §14.2 allows it).
+func acceptRangesNone(h http.Header) bool {
+	for _, v := range h["Accept-Ranges"] {
+		if strings.EqualFold(strings.TrimSpace(v), "none") {
+			return true
+		}
+	}
+	return false
 }

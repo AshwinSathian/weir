@@ -440,7 +440,7 @@ func TestHeadFromGetEntry(t *testing.T) {
 
 // FR-SRV-5, T-7: a Range request with no usable entry passes through with
 // its Range field; the origin's error is neither stored nor turned into a
-// marker, and a Range request on a fresh entry gets the full 200.
+// marker, and a Range request on a fresh entry is sliced from it (FR-RNG-2).
 func TestRangeGarbageNotPoisoning(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		o := testorigin.NewChecked(t, 64, 16)
@@ -466,7 +466,7 @@ func TestRangeGarbageNotPoisoning(t *testing.T) {
 			t.Fatalf("plain request after range: %q %+v, want a normal miss", body, resp.Cache)
 		}
 		resp, body = serve(t, e, withHeader(getReq("/a"), "Range", "bytes=0-1"), o)
-		if resp.StatusCode != http.StatusOK || body != "full" || !resp.Cache.Hit {
+		if resp.StatusCode != http.StatusPartialContent || body != "fu" || !resp.Cache.Hit { // FR-RNG-2
 			t.Fatalf("range on fresh entry: %d %q hit=%v", resp.StatusCode, body, resp.Cache.Hit)
 		}
 		if n := o.Calls("/a"); n != 2 {

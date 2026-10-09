@@ -2,7 +2,7 @@
 
 ## Phase 1.x
 
-### [ ] M11-01 Single-range responses from cache
+### [x] M11-01 Single-range responses from cache
 - Plan: M11 · Size: M · Depends on: M10-06
 - Read: 01 §13.1 FR-RNG-1..3, FR-RNG-5; 04 §13.1 (first paragraph)
 - Touch: internal/httpcc/range.go, respond.go, tests, testdata/fuzz/FuzzRange/

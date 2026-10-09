@@ -4,9 +4,9 @@ Updated: 2026-10-09
 Phase: 1
 Current card: none
 Card state: awaiting-merge
-Branch: claude/admiring-curie-sv9a2w
-PR: #63 https://github.com/AshwinSathian/weir/pull/63
-Next card: M11-01 per `scripts/card.sh next`; M16-01 is approved too (Phase 1 release gate comes first, your call)
+Branch: claude/busy-ramanujan-mhd5kg
+PR: #64 https://github.com/AshwinSathian/weir/pull/64
+Next card: M11-02 per `scripts/card.sh next`; M16-01 is approved too (Phase 1 release gate comes first, your call)
 
 ## Waiting on Ashwin
 
@@ -18,7 +18,13 @@ none
 
 ## Notes for the next session
 
-- M10-10: RFC 9110 §13.2.1 makes evaluating preconditions on any 2xx a MUST, 9111 §4.3.2 a SHOULD for stored 200/206; FR-SRV-2 keeps stored 200 and GET/HEAD only (compliant, conservative; 203/204 and 206 are gaps, 206 comes with M11). A hit with Range and a matching `If-None-Match` answers 304 (tested); a miss with Range goes to the pass-through, which drops client preconditions (FR-FWD-1). Revisit that in the M11 card.
+- M11-01: Range on a stored 200 (hit, SWR) is sliced in `fromEntry` (respond.go); the client's 304 check runs first. A stored `Accept-Ranges: none` makes Weir ignore Range (full 200). FR-SRV-5 and FR-RNG-1 in docs/01 say so.
+- M11-01: `docs/cache-tests-expected-failures.md` still lists the three `partial-store-complete-reuse-partial*` rows as not built, and the baseline is unchanged. Run `UPDATE=1 make cache-tests` (needs node and network) after merge, drop the row, refresh `testdata/cache-tests-baseline.json`.
+- M11-02: drop `FR-RNG-4` from the `later` allowlist in scripts/trace.sh in the PR that adds its first citing test. docs/06 maps T-37 only to FR-RNG-4, so cite T-37 there only.
+- M11-01: the M10-10 Range-plus-precondition-on-a-miss question is still open for M11-02 (pass-through drops preconditions, FR-FWD-1; 206 from cache now evaluates them as a hit).
+- `ParseRange` accepts whitespace before `=` (`bytes =0-1`); lenient, harmless on a hit.
+
+- M10-10: RFC 9110 §13.2.1 makes evaluating preconditions on any 2xx a MUST, 9111 §4.3.2 a SHOULD for stored 200/206; FR-SRV-2 keeps stored 200 and GET/HEAD only (compliant, conservative; 203/204 are gaps; a 206 built from cache is not stored, so M11-01 serves it after the 304 check). A hit with Range and a matching `If-None-Match` answers 304 (tested); a miss with Range goes to the pass-through, which drops client preconditions (FR-FWD-1). Revisit that in the M11 card.
 
 - M10-06: `make check` now runs `trace-strict`; FR-RNG, FR-TCC, FR-SNP and FR-FAIR are allowlisted in scripts/trace.sh. Drop each prefix from `later` in the PR that adds its first citing test.
 - M10-06: runbook states the 300 000 keys at 1 000 rps figure from the M8-02 notes; re-measure if the miss-rate tracker changes.
