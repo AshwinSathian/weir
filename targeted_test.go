@@ -74,6 +74,18 @@ func TestTargetedFieldKeepsPrivate(t *testing.T) {
 		notStored("max-age=100", "max-age=100, no-store"),
 		notStored("max-age=100", "max-age=100, private=?0"),
 		notStored("no-store", "max-age=100, must-understand"),
+		{name: "Weir-Cache-Control keeps Cache-Control private", steps: []rfcStep{
+			{origin: bh(200, "a", "Cache-Control", "private", "Weir-Cache-Control", "max-age=100"), calls: 1},
+			{calls: 2},
+		}},
+		{name: "Weir-Cache-Control keeps Cache-Control no-cache", steps: []rfcStep{
+			{origin: bh(200, "a", "Cache-Control", "no-cache", "Weir-Cache-Control", "max-age=100"), calls: 1},
+			{calls: 2},
+		}},
+		{name: "must-understand in both fields lifts no-store", steps: []rfcStep{
+			{origin: bh(200, "a", "Cache-Control", "no-store, must-understand", "Cdn-Cache-Control", "max-age=100, must-understand"), calls: 1},
+			{calls: 1, body: "a"},
+		}},
 	})
 }
 
@@ -88,6 +100,24 @@ func TestWeirCacheControlStripped(t *testing.T) {
 		}},
 		{name: "an unstored response also omits it", steps: []rfcStep{
 			{origin: bh(200, "a", "Weir-Cache-Control", "no-store"), calls: 1, resp: []string{"Weir-Cache-Control", ""}},
+		}},
+	})
+}
+
+// FR-TCC-2, FR-TCC-4, T-8, T-34: a 304 from the origin replaces the stored
+// targeted field, so freshness follows it; a targeted public is explicit
+// freshness for an Authorization request, like public in Cache-Control.
+func TestTargetedFieldRevalidationAndAuthorization(t *testing.T) {
+	runRows(t, []rfcRow{
+		{name: "origin 304 with a new Weir-Cache-Control extends freshness", steps: []rfcStep{
+			{origin: bh(200, "a", "Weir-Cache-Control", "max-age=10", "Etag", `"v"`), calls: 1},
+			{after: 11 * time.Second, origin: bh(304, "", "Weir-Cache-Control", "max-age=100", "Etag", `"v"`), calls: 2, body: "a",
+				resp: []string{"Weir-Cache-Control", ""}},
+			{after: 50 * time.Second, calls: 2, body: "a"},
+		}},
+		{name: "Authorization request with Cdn-Cache-Control public is stored", steps: []rfcStep{
+			{origin: bh(200, "a", "Cdn-Cache-Control", "public, max-age=100"), hdr: []string{"Authorization", "Bearer x"}, calls: 1},
+			{hdr: []string{"Authorization", "Bearer x"}, calls: 1, body: "a"},
 		}},
 	})
 }

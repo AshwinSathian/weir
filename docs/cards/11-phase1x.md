@@ -23,7 +23,7 @@
 - Tests: FuzzSFDictionary, RFC 9651 dictionary examples
 - AC: `make check` passes
 
-### [ ] M12-02 Targeted cache-control precedence
+### [x] M12-02 Targeted cache-control precedence
 - Plan: M12 · Size: S · Depends on: M12-01
 - Read: 01 §13.2; 04 §13.2; 06 T-34
 - Touch: internal/httpcc/directives.go, respond.go, tests

@@ -2,11 +2,11 @@
 
 Updated: 2026-10-09
 Phase: 1
-Current card: M12-02
-Card state: in-progress
+Current card: none
+Card state: awaiting-merge
 Branch: claude/blissful-galileo-ynivsa
-PR: none yet; run `/handoff` (review, lint, card mark, PR)
-Next card: M12-03 per `scripts/card.sh next` after M12-02 merges; M16-01 is approved too
+PR: PENDING
+Next card: M13-01 per `scripts/card.sh next`; M16-01 is approved too (Phase 1 release gate comes first, your call)
 
 ## Waiting on Ashwin
 
@@ -14,9 +14,12 @@ none
 
 ## Blockers
 
-none
+none. golangci-lint in this container is built with Go 1.25 and cannot load the Go 1.27 config, so lint is unrun for M12-02; CI must confirm.
 
 ## Notes for the next session
+
+- M12-02: targeted fields live in `httpcc.ParseResponse` (`Targeted` flag; `Lifetime` and `hasFreshness` skip Expires). Header keys must be canonical (`Cdn-Cache-Control`). `finish` strips Weir-Cache-Control by cloning the map. Target list is a package constant (D12), signature unchanged.
+- After M12-02 merges: run `UPDATE=1 make cache-tests` (node, network), drop the cdn-* row in `docs/cache-tests-expected-failures.md`, refresh `testdata/cache-tests-baseline.json`.
 
 - M12-01: `sfv.ParseDictionary` returns `Dict` of `Item{Kind, Bool, Int, Dec, Str}`; the zero Item is a valid Boolean false, so check the lookup's ok. M12-02 must reject Decimal or negative Integer for `max-age`-style directives itself (FR-TCC, docs/04 §13.2). Drop `TCC` from `later` in scripts/trace.sh in M12-02 (FR-TCC-2..5 are uncited until then, so dropping it earlier fails trace-strict). Pass a small `maxMembers` (64). Reject any Kind but Integer for `max-age`-style directives. Decided: `private`, `no-store` and `no-cache` count when present whatever their value (`private=?0` still counts), the safe side of FR-TCC-3 "found".
 

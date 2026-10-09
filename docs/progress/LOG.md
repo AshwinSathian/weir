@@ -1138,10 +1138,11 @@ Entry template:
 - Follow-ups: M12-02 notes in STATUS (maxMembers, Kind checks, presence of `private` wins).
 - Context: low.
 
-## 2026-10-09 · M12-02 · blocked
+## 2026-10-09 · M12-02 · done
 - Branch / PR: claude/blissful-galileo-ynivsa / none yet
 - Done: targeted fields in `httpcc.ParseResponse` (Weir- then CDN-Cache-Control, `Targeted` flag makes Expires ignored), stricter private/no-store/no-cache from Cache-Control, `finish` strips Weir-Cache-Control on every response path; LLD 13.2 updated; TCC dropped from trace.sh `later`.
 - Tests: TestTargetedFieldPrecedence, TestTargetedFieldKeepsPrivate, TestWeirCacheControlStripped, TestParseResponseTargeted, two RFC 9213 rows. Race tests, vet, gofmt, trace-strict pass; lint unrun (built with Go 1.25).
 - Deviations: ParseResponse keeps its signature (target list is an internal constant, D12); must-understand rule for targeted fields added to LLD 13.2.
-- Follow-ups: needs `/handoff` (card-reviewer, lint, card mark, PR). After merge run `UPDATE=1 make cache-tests` and drop the cdn-* rows in docs/cache-tests-expected-failures.md.
+- Review: card-reviewer found no must-fix. Applied: 64-member bound and canonical-key note in LLD 13.2, rows for Weir-field private/no-cache, must-understand in both fields, origin 304 freshness, Authorization + public; parenthesized storable.go. Left open: none.
+- Follow-ups: lint unrun here, CI must confirm. After merge run `UPDATE=1 make cache-tests` and drop the cdn-* rows in docs/cache-tests-expected-failures.md.
 - Context: low; size S was right.
