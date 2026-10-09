@@ -1284,3 +1284,10 @@ Entry template:
 - Tests: added cases in TestConfigFromJSON and TestProvisionReportsBadConfig; `make check` passes with the pinned lint under Go 1.27.
 - Deviations: 08 §2 `name` rule gained "no leading dot" (delegated decision, recorded in STATUS).
 - Follow-ups: xcaddy resolution of the root module (P2-01c), `Cleanup` vs `ServeHTTP` on `h.engine` (P2-03).
+
+## 2026-10-09 · P2-01 · review-fixes
+- Branch / PR: card/P2-01-module-skeleton / https://github.com/AshwinSathian/weir/pull/74
+- Done: CI `make vuln` failed on caddy/: Caddy v2.11.7 pulls golang.org/x/net v0.59.0, which has 5 reachable advisories (HTTP/2, fixed in v0.60.0). Bumped x/net to v0.60.0 in caddy/go.mod and go.sum.
+- Tests: caddy builds and tests pass with and without the workspace; govulncheck cannot reach vuln.go.dev from the container (403), CI must confirm.
+- Deviations: none.
+- Follow-ups: P2-01c CI should keep `make vuln` on caddy/; later Caddy bumps may need the same x/net floor.
