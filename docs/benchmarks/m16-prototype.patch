@@ -1,0 +1,195 @@
+diff --git a/bench_test.go b/bench_test.go
+index b90628e..aec65bc 100644
+--- a/bench_test.go
++++ b/bench_test.go
+@@ -3,8 +3,10 @@ package weir_test
+ import (
+ 	"bytes"
+ 	"context"
++	"github.com/AshwinSathian/weir/store/memory"
+ 	"io"
+ 	"net/http"
++	"os"
+ 	"runtime"
+ 	"strconv"
+ 	"strings"
+@@ -21,7 +23,15 @@ import (
+ func BenchmarkServeHitSmall(b *testing.B) {
+ 	o := testorigin.NewChecked(b, 64, 16)
+ 	o.Default(testorigin.Behavior{Header: http.Header{"Cache-Control": {"max-age=3600"}}, Body: []byte(strings.Repeat("x", 1024))})
+-	e, err := weir.New(cacheCfg)
++	cfg := cacheCfg
++	if os.Getenv("WEIR_STORE") == "proto" {
++		ps, err := memory.NewProto(memory.Config{})
++		if err != nil {
++			b.Fatal(err)
++		}
++		cfg.Store = ps
++	}
++	e, err := weir.New(cfg)
+ 	if err != nil {
+ 		b.Fatal(err)
+ 	}
+diff --git a/loadtest/gc_test.go b/loadtest/gc_test.go
+index 4df52df..b3897e0 100644
+--- a/loadtest/gc_test.go
++++ b/loadtest/gc_test.go
+@@ -18,6 +18,7 @@ import (
+ 	"time"
+ 
+ 	"github.com/AshwinSathian/weir"
++	"github.com/AshwinSathian/weir/store"
+ 	"github.com/AshwinSathian/weir/store/memory"
+ )
+ 
+@@ -79,7 +80,13 @@ func (r gcResult) satProjected() float64 {
+ // result projects the natural frequency from the allocation rate.
+ func gcPhase(t *testing.T, n, rps int, d time.Duration) gcResult {
+ 	t.Helper()
+-	st, err := memory.New(memory.Config{MaxBytes: 8 << 30})
++	var st store.Store
++	var err error
++	if os.Getenv("WEIR_GC_STORE") == "proto" {
++		st, err = memory.NewProto(memory.Config{MaxBytes: 8 << 30})
++	} else {
++		st, err = memory.New(memory.Config{MaxBytes: 8 << 30})
++	}
+ 	if err != nil {
+ 		t.Fatal(err)
+ 	}
+diff --git a/store/memory/bench_test.go b/store/memory/bench_test.go
+index 1afbcdf..9bbbc8e 100644
+--- a/store/memory/bench_test.go
++++ b/store/memory/bench_test.go
+@@ -1,14 +1,23 @@
+ package memory
+ 
+ import (
++	"os"
+ 	"testing"
++
++	"github.com/AshwinSathian/weir/store"
+ )
+ 
+ // BenchmarkMemoryStoreGetParallel measures concurrent Gets over 1024
+ // resident 1 KiB entries (07 §10, 05 §3): shard locking and the S3-FIFO hit
+ // bit under contention.
+ func BenchmarkMemoryStoreGetParallel(b *testing.B) {
+-	s, err := New(Config{})
++	var s store.Store
++	var err error
++	if os.Getenv("WEIR_STORE") == "proto" {
++		s, err = NewProto(Config{})
++	} else {
++		s, err = New(Config{})
++	}
+ 	if err != nil {
+ 		b.Fatal(err)
+ 	}
+diff --git a/store/memory/proto.go b/store/memory/proto.go
+new file mode 100644
+index 0000000..719670d
+--- /dev/null
++++ b/store/memory/proto.go
+@@ -0,0 +1,101 @@
++package memory
++
++// M16-01 throwaway prototype (D36): one pointer-free encoded record per
++// entry in 1 MiB arena chunks, pointer-free index. No eviction, no epochs
++// beyond the stock ones, no reclamation: it only measures GC cost and hit
++// path cost of the layout. Not merged.
++
++import (
++	"context"
++	"hash/maphash"
++	"sync"
++	"time"
++
++	"github.com/AshwinSathian/weir/store"
++)
++
++const protoChunk = 1 << 20
++
++type protoSlot struct {
++	chunk, off, n uint32
++	expires       int64
++}
++
++type protoShard struct {
++	mu     sync.RWMutex
++	m      map[store.Key]protoSlot // key and value hold no pointers: buckets are noscan
++	chunks [][]byte                // a few hundred headers per shard
++	used   int
++}
++
++// Proto is the prototype store. Same contract as Store for Get, Set, Delete.
++type Proto struct {
++	*Store // epochs, Info, Close, Bytes
++	ps     []protoShard
++	seed   maphash.Seed
++	mask   uint64
++}
++
++// NewProto returns a prototype store with the stock epoch machinery.
++func NewProto(cfg Config) (*Proto, error) {
++	s, err := New(cfg)
++	if err != nil {
++		return nil, err
++	}
++	p := &Proto{Store: s, ps: make([]protoShard, len(s.shards)), seed: maphash.MakeSeed(), mask: s.mask}
++	for i := range p.ps {
++		p.ps[i].m = map[store.Key]protoSlot{}
++	}
++	return p, nil
++}
++
++func (p *Proto) shard(k store.Key) *protoShard {
++	return &p.ps[maphash.Comparable(p.seed, k)&p.mask]
++}
++
++// Get decodes the record on every hit (the cost of the layout).
++func (p *Proto) Get(_ context.Context, k store.Key) (*store.Entry, error) {
++	sh := p.shard(k)
++	sh.mu.RLock()
++	sl, ok := sh.m[k]
++	if !ok || time.Now().UnixNano() >= sl.expires {
++		sh.mu.RUnlock()
++		return nil, store.ErrNotFound
++	}
++	b := sh.chunks[sl.chunk][sl.off : sl.off+sl.n : sl.off+sl.n]
++	sh.mu.RUnlock() // chunks are append-only and never freed: b stays valid
++	e, err := store.Decode(b, 1<<30)
++	if err != nil {
++		return nil, store.ErrNotFound
++	}
++	return e, nil
++}
++
++// Set appends the encoded record to the shard's current chunk.
++func (p *Proto) Set(_ context.Context, k store.Key, e *store.Entry) error {
++	b, err := store.Encode(e)
++	if err != nil || len(b) > protoChunk {
++		return nil
++	}
++	sh := p.shard(k)
++	sh.mu.Lock()
++	defer sh.mu.Unlock()
++	if len(sh.chunks) == 0 || sh.used+len(b) > protoChunk {
++		sh.chunks = append(sh.chunks, make([]byte, protoChunk))
++		sh.used = 0
++	}
++	c := len(sh.chunks) - 1
++	copy(sh.chunks[c][sh.used:], b)
++	sh.m[k] = protoSlot{uint32(c), uint32(sh.used), uint32(len(b)), e.Expires.UnixNano()}
++	sh.used += len(b)
++	return nil
++}
++
++// Delete drops the index slot; the bytes are leaked in the prototype.
++func (p *Proto) Delete(_ context.Context, k store.Key) error {
++	sh := p.shard(k)
++	sh.mu.Lock()
++	delete(sh.m, k)
++	sh.mu.Unlock()
++	return nil
++}

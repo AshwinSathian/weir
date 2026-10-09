@@ -1,7 +1,7 @@
 # Weir architecture
 
 Status: v1.0
-Date: 2026-10-06
+Date: 2026-10-09
 Depends on: [01-technical-spec.md](01-technical-spec.md)
 
 This document fixes the structure: what the parts are, which way dependencies point, who owns which state, and why each major choice was made. Request-level behavior is in [03-hld.md](03-hld.md). Exact types are in [04-lld.md](04-lld.md).
@@ -217,6 +217,8 @@ Decision: S3-FIFO (Yang et al., SOSP 2023) per shard, with capacities in bytes: 
 Alternatives: sharded LRU (no scan resistance); W-TinyLFU as in Caffeine and otter v2 (better hit ratio on some traces, but a count-min sketch, a window LRU and a segmented LRU per shard, which is more code to get right for a first version); depending on otter (rejected by D2 and D3).
 
 Consequences: one-hit wonders never leave the small queue, so a busting flood can churn at most 10% of the cache. Known weakness: objects accessed exactly twice with the second access after they left the small queue are missed (acknowledged in the paper). Revisit with trace data after Phase 1.
+
+Note (D36, 2026-10-09): the store stays on the Go heap. M16-01 prototyped a pointer-free layout (one encoded record per entry, pointer-free index). It cut GC from 1.76 µs to 0.014 µs per request at 1M entries but, decoding on every hit, failed NFR-5 (+41% ns/op, 14 to 26 allocs/op), so a layout change would also need a serve-from-encoded-bytes path. `GOGC=200` halves the GC cost without code. Numbers and the recommendation: [benchmarks.md](benchmarks.md). The decision on M16-02 is Ashwin's.
 
 ### ADR-7 Failure-ratio breaker counting gateway failures only
 

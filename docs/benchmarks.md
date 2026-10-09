@@ -1,6 +1,6 @@
 # Weir benchmarks
 
-Updated: 2026-10-08
+Updated: 2026-10-09
 
 Benchmark results per milestone, so each milestone review can compare against the previous one with `benchstat` ([07 §10](07-testing-strategy.md)). NFR-5 budgets apply from M10; until then these numbers are a baseline, not a gate.
 
@@ -113,3 +113,36 @@ Result: at 1M entries GC takes 13.6% (reported over 12 cycles, so roughly 12.5% 
 The true share is higher than these figures. The non-GC CPU per request here is 8.7 to 10.6 µs, against 2.7 µs for a request in `BenchmarkServeHitSmall`; the rest is the harness (goroutine scheduling on 4 cores, random keys, `Request` construction), and a smaller denominator means a larger share. The figures are a lower bound for a server doing nothing but hits and a rough measure for one that also does other work. They also depend on entry size: about 2.1 KiB of live heap per entry here; smaller bodies carry more pointers per live byte. The GC CPU per cycle includes idle-priority workers on otherwise idle cores, which overstates the paced cost somewhat; the runtime-reported figure has no such correction and is 13.6%. Latency: the p99 with a forced cycle every 5 s is 57 µs against 53 µs for the small heap, so the cost shows up as CPU, not as a visible tail at this rate. Re-run on the reference machine and replace this table.
 
 The share depends on the denominator. GC cost per request is about cycle CPU × allocation per request ÷ (live heap × GOGC/100), here roughly 1.9 µs at 1M entries, and it does not depend on offered load. M16-01 reports this figure beside the share. A load generator, `net/http` or TLS in the denominator lowers the share without changing the cost.
+
+## M16-01 pointer-light layout prototype (2026-10-09)
+
+D36 asks whether a pointer-light layout earns its cost. The prototype (`benchmarks/m16-prototype.patch`, not merged) keeps one `store.Encode` record per entry in 1 MiB pointer-free arena chunks and a pointer-free index (`map[Key]{chunk, off, len, expires}`); `Get` decodes on every hit, so the engine and `store.Entry` are unchanged. It has no eviction or reclamation, so it measures the GC and hit-path cost of the layout and nothing about churn. Same box as M10 (4 vCPU Xeon, Go 1.27.0), `TestGCAt1MEntries` with 1 KiB bodies, 1M entries, one run per column; the heap column is a rerun of the M10 baseline, because the box drifts (12.3% now against 15.4% then). Raw output: [benchmarks/m16-gc.txt](benchmarks/m16-gc.txt), [benchmarks/m16-bench.txt](benchmarks/m16-bench.txt).
+
+| 1M entries, saturated hits | heap, GOGC=100 | heap, GOGC=200 | prototype, GOGC=100 | prototype, GOGC=200 |
+|---|---:|---:|---:|---:|
+| live heap after fill | 2 099 MiB | 2 098 MiB | 1 394 MiB | 1 395 MiB |
+| GC CPU per forced cycle | 2 247 ms | 2 362 ms | 5.3 ms | 5.7 ms |
+| allocation per request | 1 728 B | 1 728 B | 3 776 B | 3 776 B |
+| non-GC CPU per request | 12.6 µs | 12.5 µs | 12.2 µs | 13.0 µs |
+| natural cycles in the window | 11 | 5 | 50 | 23 |
+| **GC µs per request** (cycle CPU × alloc ÷ live ÷ GOGC/100) | 1.76 | 0.93 | 0.014 | 0.005 |
+| GC share, projected (denominator: the harness's non-GC CPU) | 12.3% | 6.9% | 0.11% | 0.04% |
+| GC share, runtime-reported (few cycles, noisy) | 11.5% | 6.2% | 0.50% | 0.25% |
+
+The two projected shares in the `GOGC=200` columns use the corrected formula (the test's own `satProjected` assumes `GOGC=100` and prints 12.89% and 0.11% there). An allocation cut on the heap layout was not implemented; by the same formula GC µs per request is linear in allocation per request, so halving 1 728 B gives about 0.88 µs (6.5%), and `GOGC=200` with the cut about 0.44 µs. These two are projections.
+
+Hit path, `benchstat` of 12 samples each (two interleaved batches of 6), same box, which is slower than at M10 (`ServeHitSmall` 4.6 µs here against 2.7 µs then, so compare only within this table):
+
+| Benchmark | heap | prototype | change | allocs/op |
+|---|---:|---:|---:|---:|
+| `BenchmarkServeHitSmall` | 4.59 µs | 6.50 µs | +41.5% (p<0.001) | 14 → 26 |
+| `BenchmarkMemoryStoreGetParallel` | 54.6 ns | 349.9 ns | +541% | 0 → 2 (1.4 KiB) |
+
+What it says:
+
+- The layout removes the GC problem: 2.2 s per cycle becomes 5 ms, and the live heap is 33% smaller (no map, node, header or slice objects). The cost per request goes from 1.76 µs to 0.014 µs.
+- It breaks the hit-path budget as built. Decoding on every `Get` copies the body and rebuilds the header map: +12 allocs/op (26, over the 16 bound of NFR-5), +41% ns/op (over the 20% rule), and 2.2x the bytes allocated per request. A layout that passes needs a hit path that serves headers and body from the encoded bytes without building an `Entry`. That changes how the engine reads entries (P4, the `store.Entry` contract in 05 §1), which is a design decision and a public-interface question for the store, not a layout detail.
+- Cheaper levers get most of the way for the cost of memory. `GOGC=200` halves GC µs per request (1.76 to 0.93) for roughly another 2 GiB of heap headroom at this size, and needs no code. Allocation cuts help linearly. Neither reaches 0.
+- The share depends on its denominator. At 1.76 µs of GC per request, a server whose hit costs 12.6 µs (this harness) sees 12.3%, one whose hit costs 30 µs (net/http, TLS) about 5.5%. GC µs per request does not move with that, so it is the better gate.
+
+Recommendation (for Ashwin to decide): keep the heap layout and do not start M16-02 now. Replace the 10% share line with a gate on GC µs per request at 1M entries and 1 KiB bodies, at most 2 µs with default `GOGC` (now 1.76), and document `GOGC=200` as the operator lever. Revisit M16-02 if a deployment measures above the gate or needs more than 1M entries, and if so scope it as a design change first (a serve-from-encoded-bytes path), since the layout alone fails NFR-5. Reference-machine rerun still pending for both this and the M10 table.

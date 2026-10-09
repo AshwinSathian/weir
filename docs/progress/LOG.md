@@ -1227,3 +1227,11 @@ Entry template:
 - Deviations: none beyond docs wording; no public signature changed.
 - Follow-ups: none.
 - Context: low.
+
+## 2026-10-09 · M16-01 · blocked
+- Branch / PR: claude/zen-rubin-hynjow / none yet
+- Done: throwaway pointer-free prototype (one encoded record per entry in 1 MiB chunks, pointer-free index), saved as docs/benchmarks/m16-prototype.patch and not applied; GC at 1M entries measured for heap and prototype at GOGC 100 and 200; hit path measured with benchstat; docs/benchmarks.md section and a D36 note in docs/02 written.
+- Tests: `TestGCAt1MEntries` x4, `BenchmarkServeHitSmall` and `BenchmarkMemoryStoreGetParallel` x12 samples each. No code merged, so `make check` is not affected; docs only.
+- Deviations: none. D36 in 01 is unchanged and the card is not marked done, because the AC says the user decides.
+- Follow-ups: Ashwin's decision (STATUS, Waiting on Ashwin). The allocation-cut alternative is a projection, not a measurement. Reference-machine rerun still pending.
+- Context: medium; size S was right apart from the 15 minutes of benchmark runs.
