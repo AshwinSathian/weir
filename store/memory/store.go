@@ -47,6 +47,7 @@ type Store struct {
 	snapDone    bool       // the snapshot was written; guarded by closeMu
 	snapPath    string
 	snapTimeout time.Duration
+	snapLoad    snapLoadStats // set once by New, then read-only
 }
 
 var (
@@ -98,6 +99,9 @@ func New(cfg Config) (*Store, error) {
 	for i := range s.shards {
 		s.shards[i] = newShard(cfg.MaxBytes / int64(cfg.Shards))
 	}
+	if s.snapPath != "" {
+		s.loadSnapshot()
+	}
 	return s, nil
 }
 
@@ -128,6 +132,22 @@ func (s *Store) Set(_ context.Context, k store.Key, e *store.Entry) error {
 	if s.closed.Load() {
 		return store.ErrUnavailable
 	}
+	s.put(k, e, false)
+	return nil
+}
+
+type putResult int
+
+const (
+	putStored putResult = iota
+	putExpired
+	putDeclined // too large, or (when loading) no room left
+)
+
+// put is Set's body. With loading set, a record that does not fit the
+// shard's byte budget is declined instead of evicting an earlier record, so
+// a snapshot loads in file order up to MaxBytes (FR-SNP-3).
+func (s *Store) put(k store.Key, e *store.Entry, loading bool) putResult {
 	sh := &s.shards[s.shardIndex(k)]
 	size := e.Size()
 	now := time.Now()
@@ -148,15 +168,18 @@ func (s *Store) Set(_ context.Context, k store.Key, e *store.Entry) error {
 		expires = limit
 	}
 	if !now.Before(expires) {
-		return nil
+		return putExpired
 	}
 	if size > sh.smallCap {
 		// Declined. Drop the record it would have replaced, so Set leaves
 		// the new record or nothing, never an older one.
 		sh.delete(k)
-		return nil
+		return putDeclined
 	}
-	ev := sh.set(k, e, size, expires, maphash.Comparable(s.fpSeed, k))
+	ev, ok := sh.set(k, e, size, expires, maphash.Comparable(s.fpSeed, k), loading)
+	if !ok {
+		return putDeclined
+	}
 	if s.onEvict != nil {
 		for _, c := range []struct {
 			q string
@@ -167,7 +190,7 @@ func (s *Store) Set(_ context.Context, k store.Key, e *store.Entry) error {
 			}
 		}
 	}
-	return nil
+	return putStored
 }
 
 // Delete removes the record at k, if any.

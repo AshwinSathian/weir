@@ -206,7 +206,7 @@ hard-epoch payload: 32-byte tag + int64 at
 trailer: record 0xFF with the record count; a file without a valid trailer is incomplete and ignored
 ```
 
-Writer order: main-queue records (head to tail), then small-queue records, then hard epochs, then trailer. Loader behavior is FR-SNP-2 and FR-SNP-3.
+Writer order: main-queue records (head to tail), then small-queue records, then hard epochs, then trailer. Loader behavior is FR-SNP-2 and FR-SNP-3; its failure modes are in docs/04 §13.3.
 
 ## 6. Entry encoding (`store/codec.go`)
 

@@ -4,9 +4,9 @@ Updated: 2026-10-09
 Phase: 1
 Current card: none
 Card state: awaiting-merge
-Branch: claude/amazing-bohr-2fi9ve
-PR: https://github.com/AshwinSathian/weir/pull/68
-Next card: M13-02 per `scripts/card.sh next`; M16-01 is approved too (Phase 1 release gate comes first, your call)
+Branch: claude/cool-maxwell-y4bqri
+PR: https://github.com/AshwinSathian/weir/pull/69
+Next card: M14-01 per `scripts/card.sh next` (check Depends on); M16-01 is approved too
 
 ## Waiting on Ashwin
 
@@ -17,6 +17,8 @@ none
 none. golangci-lint in this container is built with Go 1.25 and cannot load the Go 1.27 config, so lint is unrun for M13-01; CI must confirm before merge.
 
 ## Notes for the next session
+
+- M13-02: loader writes a global invalid epoch (not soft) at load, and a global hard epoch when a possible epoch record is lost or the file cannot be removed. `Engine.Close` falls back to `Store.Close()` when the grace ctx is spent; a failed `New` closes with a cancelled ctx (no snapshot). Load counts stay in unexported `Store.snapLoad` (decision: no public accessor yet; FR-SNP-2 says so). Queue placement is not restored on load (ponytail comment). M14-01 card notes the loader must honor quotas. Lint: run it locally with `GOTOOLCHAIN=go1.27.0 go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0 run` (the installed binary is Go 1.25 and cannot load the config).
 
 - M13-01: `memory.Store.CloseContext(ctx)` writes the snapshot; `Close()` wraps it with `Config.SnapshotTimeout` (5s). `store.Store` still has `Close() error`. The engine does not call `CloseContext` yet: M13-02 or a follow-up must wire `Engine.Close` via an optional interface so the adapter grace period bounds it (LLD 13.3 says so). The header's base wall time is written but unread. Hard-epoch records hold tag + UnixNano; writer emits main-queue records, then small, then epochs, then trailer 0xFF with the count. `snapRecord` parsing in snapshot_write_test.go can seed the loader tests.
 - Lint unrun for M13-01 (container golangci-lint is Go 1.25); CI must confirm.

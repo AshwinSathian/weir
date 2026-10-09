@@ -63,11 +63,21 @@ func (sh *shard) get(k store.Key) (*store.Entry, bool) {
 }
 
 // set stores e at k (size already checked against smallCap) and evicts
-// until the shard is within its byte budget.
-func (sh *shard) set(k store.Key, e *store.Entry, size int64, expires time.Time, fp uint64) evictions {
+// until the shard is within its byte budget. With noEvict, a record that
+// would exceed the budget is refused (ok false) and nothing changes.
+func (sh *shard) set(k store.Key, e *store.Entry, size int64, expires time.Time, fp uint64, noEvict bool) (ev evictions, ok bool) {
 	now := time.Now()
 	sh.mu.Lock()
 	defer sh.mu.Unlock()
+	if noEvict {
+		grow := size
+		if n := sh.m[k]; n != nil {
+			grow -= n.size
+		}
+		if sh.bytes+grow > sh.cap {
+			return ev, false
+		}
+	}
 	if n := sh.m[k]; n != nil {
 		// Replace in place, keeping queue and freq (05 §5.3).
 		q := sh.queue(n)
@@ -83,7 +93,6 @@ func (sh *shard) set(k store.Key, e *store.Entry, size int64, expires time.Time,
 		sh.queue(n).push(n)
 		sh.bytes += size
 	}
-	var ev evictions
 	for sh.bytes > sh.cap {
 		if sh.small.bytes > sh.smallCap || sh.main.len == 0 {
 			sh.evictSmall(now, &ev)
@@ -91,7 +100,7 @@ func (sh *shard) set(k store.Key, e *store.Entry, size int64, expires time.Time,
 			sh.evictMain(now, &ev)
 		}
 	}
-	return ev
+	return ev, true
 }
 
 // evictSmall handles the small queue's tail: expired records drop, records

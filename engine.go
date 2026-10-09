@@ -86,7 +86,12 @@ func New(cfg Config) (*Engine, error) {
 	}
 	if sz, ok := c.Store.(store.Sizer); ok && c.Storable.MaxObjectBytes > sz.MaxObjectBytes() {
 		if own {
-			_ = c.Store.Close()
+			// A cancelled context makes CloseContext skip the snapshot, so a
+			// failed construction cannot replace a good snapshot with an
+			// empty store's.
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			_ = closeStore(ctx, c.Store)
 		}
 		return nil, invalid("Storable.MaxObjectBytes", fmt.Sprintf("above the store's limit of %d", sz.MaxObjectBytes()))
 	}
@@ -205,9 +210,25 @@ func (e *Engine) Close(ctx context.Context) error {
 	<-done
 	var storeErr error
 	if e.ownStore {
-		storeErr = e.sg.s.Close()
+		if ctx.Err() != nil {
+			// The drain used the whole grace period. Skipping the snapshot
+			// would lose the cache, so the store gets its own bounded budget
+			// (SnapshotTimeout) instead of a spent context.
+			storeErr = e.sg.s.Close()
+		} else {
+			storeErr = closeStore(ctx, e.sg.s)
+		}
 	}
 	return errors.Join(graceErr, storeErr)
+}
+
+// closeStore closes s, bounding a snapshot write by the caller's grace period
+// when the store supports it (FR-SNP-1, LLD 13.3).
+func closeStore(ctx context.Context, s store.Store) error {
+	if c, ok := s.(interface{ CloseContext(context.Context) error }); ok {
+		return c.CloseContext(ctx)
+	}
+	return s.Close()
 }
 
 // normalizeResponse fills a nil Header or Body, which adapters rely on,

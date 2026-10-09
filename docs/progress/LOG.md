@@ -1171,3 +1171,27 @@ Entry template:
 - Deviations: docs/01 FR-SNP-1 wording extended with the approved timeout and CloseContext (no behavior change).
 - Follow-ups: engine wiring and loader in M13-02. Waiting on Ashwin: none.
 - Context: low.
+
+## 2026-10-09 · M13-02 · in-progress (handoff pending)
+- Branch / PR: claude/cool-maxwell-y4bqri / none yet
+- Done: `memory.New` loads `SnapshotPath` (store/memory/snapshot_load.go): CRC/decode failures skipped and counted, expired dropped, MaxBytes respected in file order, hard epochs restored, global soft epoch at load, file removed (only when the magic matches). `Engine.Close` uses the store's `CloseContext` when it owns the store. `Set` and the loader share `put`.
+- Tests: TestSnapshotLoadRoundTrip, TestSnapshotLoadIsSoftStale, TestSnapshotHardEpochSurvives, TestSnapshotCorruptRecordsSkipped, TestSnapshotIncompleteIgnored, TestSnapshotLoadRespectsMaxBytes, TestSnapshotLoadHostileLength, FuzzSnapshotLoad. Race tests pass; lint unrun (container golangci-lint is Go 1.25).
+- Deviations: none. Load counts are unexported (`snapLoad`); a public accessor needs approval.
+- Follow-ups: `/handoff` not yet run (review, card mark, PR). The engine passes no `SnapshotPath` today; the card that adds the Config field must guard `New`'s failure path that calls `Store.Close()`.
+- Context: low; size M was right.
+
+## 2026-10-09 · M13-02 · done
+- Branch / PR: claude/cool-maxwell-y4bqri / https://github.com/AshwinSathian/weir/pull/69
+- Done: snapshot loader (store/memory/snapshot_load.go) and `Engine.Close` via `closeStore` (optional `CloseContext`). Review must-fix: a lost hard-epoch record (bad CRC, bad length, trailer count mismatch) loaded entries without the purge; now the loader writes a global hard epoch (fail closed). Also clamped future RequestTime to load time.
+- Tests: TestSnapshotLostRecordFailsClosed, TestSnapshotLoadClampsFutureRequestTime, TestCloseStorePrefersCloseContext, plus the loader tests from the earlier entry. Race tests, vet, gofmt, trace pass; lint unrun (Go 1.25 build).
+- Deviations: docs/04 §13.3 gained the loader failure mode paragraph (no requirement change). Card note "New must not write a snapshot on failed construction" not implemented: the engine passes no SnapshotPath today.
+- Follow-ups: whichever card adds the Config field for SnapshotPath must replace `_ = c.Store.Close()` on the MaxObjectBytes failure path in engine.go with a non-snapshotting close. Public accessor for load counts needs approval.
+- Context: low; size M was right.
+
+## 2026-10-09 · M13-02 · review-fixes
+- Branch / PR: claude/cool-maxwell-y4bqri / https://github.com/AshwinSathian/weir/pull/69
+- Done: independent adversarial review. Must-fix: loader wrote a soft epoch, so an entry invalidated before restart came back servable stale (FR-STL-5); now a global invalid epoch. Should-fix: failed `os.Remove` of the snapshot now fails closed; `Engine.Close` falls back to `Store.Close()` when the grace ctx is spent; failed `New` closes with a cancelled ctx (card note met); record length capped by bytes left; rejected epochs count as skipped. Reverted an unrelated edit to an older LOG entry.
+- Tests: TestSnapshotLoadLengthBeyondFile, TestSnapshotRemoveFailureFailsClosed (skipped as root), TestCloseStoreWithCancelledContextWritesNoSnapshot; soft-stale tests now assert invalid. Race tests, vet, gofmt pass; lint unrun.
+- Deviations: FR-SNP-2/3, T-33, LLD 13.3 and docs/05 5.5 updated (invalid instead of soft; fail-closed; counters internal; admission order only). No public API added: the load-count accessor stays deferred.
+- Follow-ups: M14-01 note (loader honors quotas). Hot-first queue placement on load left as a ponytail.
+- Context: low.
