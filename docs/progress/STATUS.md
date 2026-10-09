@@ -5,7 +5,7 @@ Phase: 1
 Current card: none
 Card state: awaiting-merge
 Branch: claude/serene-volta-d9nvnj
-PR: pending
+PR: https://github.com/AshwinSathian/weir/pull/71
 Next card: M16-01 per `scripts/card.sh next` (approved as a throwaway prototype)
 
 ## Waiting on Ashwin
