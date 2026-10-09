@@ -1252,3 +1252,11 @@ Entry template:
 - Deviations: scripts/card.sh and docs/cards/README.md gained the `[~]` marker.
 - Follow-ups: reference-machine rerun to re-base the gate.
 - Context: low.
+
+## 2026-10-09 · P2-00 · review-fixes
+- Branch / PR: card/P2-00-caddy-spec (pushed to claude/zen-shannon-l879he) / none yet
+- Done: docs/08 is v1.0, verified against Caddy v2.11.7 with a file:line table (§11); Phase 2 cards P2-01 to P2-07 written in docs/cards/20-later.md; docs/09 Caddy facts refreshed.
+- Tests: docs only. gofmt, vet and trace 146/146 pass; `make check` stops at lint (container golangci-lint is Go 1.25), CI must confirm.
+- Deviations: none from normative requirements. New findings written into 08: admin routes outlive reloads (engine registry), metrics registry is per config load, Caddy's upgrade detector is unusable (adapter uses `internal/keys.IsUpgrade`).
+- Follow-ups: card-reviewer and card mark (`[x]`) are left to `/handoff`, which the user must run. P2-01 must prove the `internal/keys` import compiles; fallback is an exported `weirhttp.IsUpgrade` (public API, ask first).
+- Context: low; size S was right.

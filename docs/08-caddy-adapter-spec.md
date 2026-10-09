@@ -1,10 +1,10 @@
-# Weir Caddy adapter specification (draft)
+# Weir Caddy adapter specification
 
-Status: draft v0.95. Phase 2. The seed says this document is "written once Phase 1 is stable"; this draft captures the constraints already known so Phase 1 does not paint Phase 2 into a corner. It is finalized at the start of Phase 2 against the Caddy version current then.
-Date: 2026-09-27
+Status: v1.0. Phase 2. Finalized by P2-00 against the Caddy release current at the start of Phase 2; every Caddy API named here is checked with file and line in §11.
+Date: 2026-10-09
 Depends on: [01-technical-spec.md](01-technical-spec.md), [04-lld.md §10](04-lld.md)
 Seed name: `04-caddy-adapter-spec.md` (renumbered, see [docs/README.md](README.md))
-Verified against: Caddy v2.11.4 (released 2026-06-03, `go 1.25.1` in its `go.mod`). Weir requires Go 1.27, so `xcaddy` builds that include it need a Go 1.27 toolchain; Go's toolchain directive downloads it automatically when `GOTOOLCHAIN=auto`.
+Verified against: Caddy v2.11.7 (released 2026-10-03, `go 1.26.0` in its `go.mod`). Weir requires Go 1.27, so `xcaddy` builds that include it need a Go 1.27 toolchain; Go's toolchain directive downloads it automatically when `GOTOOLCHAIN=auto`.
 
 ## 1. Shape
 
@@ -12,7 +12,7 @@ Verified against: Caddy v2.11.4 (released 2026-06-03, `go 1.25.1` in its `go.mod
 - Built into Caddy with `xcaddy build --with github.com/AshwinSathian/weir/caddy`.
 - Module ID: `http.handlers.weir`. Caddyfile directive: `weir`.
 - Implements `caddy.Module`, `caddy.Provisioner`, `caddy.Validator`, `caddy.CleanerUpper`, `caddyhttp.MiddlewareHandler`, `caddyfile.Unmarshaler`, with interface guards.
-- Registered with `httpcaddyfile.RegisterHandlerDirective("weir", parse)` and `httpcaddyfile.RegisterDirectiveOrder("weir", httpcaddyfile.Before, "reverse_proxy")` so the directive works without a global `order` option. `RegisterDirectiveOrder` is marked EXPERIMENTAL in Caddy's source; if it changes, the fallback is documenting `order weir before reverse_proxy` in the global options block.
+- Registered with `httpcaddyfile.RegisterHandlerDirective("weir", parse)` and `httpcaddyfile.RegisterDirectiveOrder("weir", httpcaddyfile.Before, "reverse_proxy")` so the directive works without a global `order` option. `RegisterDirectiveOrder` is marked EXPERIMENTAL in Caddy's source; if it changes, the fallback is documenting `order weir before reverse_proxy` in the global options block. In Caddy's default order `encode` comes before `reverse_proxy` (§11), so `weir` lands between them: `encode` is outer by default, the first case in §5.
 
 ## 2. Configuration surface
 
@@ -55,7 +55,7 @@ Every field is optional and defaults to the engine default. `Validate` calls `we
 
 Caddy starts new module instances before stopping old ones on every config change ("multiple loaded instances of your module may overlap", Caddy's extending guide). A naive adapter would build a fresh engine and store on every reload, which is a full cold flush (seed T6.4) every time the config changes. For the BYOD custom-domain project that shares the Caddy instance, config changes can be frequent.
 
-Rule: the expensive state is the store, so the store is what survives reloads. The adapter keeps memory stores in a package-level `caddy.UsagePool` keyed by `name` plus the store settings (`max_bytes`, shard count). `Provision` calls `LoadOrNew` on that pool and builds a new `weir.Engine` around the shared store (engines are cheap: a limiter, a breaker and some maps). `Cleanup` closes the old engine, which does not close a store it did not create, and calls `Delete` on the pool, which closes the store only when the last user releases it.
+Rule: the expensive state is the store, so the store is what survives reloads. The adapter keeps memory stores in a package-level `caddy.UsagePool` keyed by `name` plus the store settings (`max_bytes`, shard count). `Provision` calls `LoadOrNew` on that pool and builds a new `weir.Engine` around the shared store (engines are cheap: a limiter, a breaker and some maps). `Cleanup` closes the old engine, which does not close a store it did not create, and calls `Delete` on the pool, which closes the store only when the last user releases it. The pooled value must implement `caddy.Destructor` (`Destruct() error`, the constructor returns one); `Delete` calls it outside the pool lock, so a snapshot written by `Store.Close` does not block other `LoadOrNew` calls. `Cleanup` and `Destruct` take no context (modules.go, usagepool.go), so they bound the close with the store's `SnapshotTimeout` (5s by default) and the engine close with the same duration. `Delete` panics if called more often than the key was loaded, so `Provision` records success and `Cleanup` deletes only after one.
 
 Consequences, accepted:
 
@@ -69,11 +69,11 @@ Consequences, accepted:
 
 `ServeHTTP(w, r, next)`:
 
-0. If the request is `CONNECT` or a protocol upgrade (FR-UPG-1), call `next.ServeHTTP(w, r)` and return; WebSockets never touch the engine.
+0. If the request is `CONNECT` or a protocol upgrade (FR-UPG-1), call `next.ServeHTTP(w, r)` and return; WebSockets never touch the engine. Caddy's own detector (`upgradeType` in `reverseproxy.go`) is unexported and ignores `CONNECT`, so the adapter uses `internal/keys.IsUpgrade`, the function `weirhttp.Middleware` uses. Go's `internal` rule is path-based, so `github.com/AshwinSathian/weir/caddy` may import it although it is a separate module; the module skeleton card (P2-01) proves it compiles.
 1. `req := weirhttp.RequestFrom(r)`.
 2. `origin := nextOrigin{next: next, base: r}`.
 3. `resp, err := engine.Serve(r.Context(), req, origin)`.
-4. On error: set `Retry-After` from `weir.RetryAfter` on `w`, then return `caddyhttp.Error(weir.StatusCode(err), err)` so the operator's `handle_errors` routes apply (D34). Verified in v2.11.4 source: the error path writes the status on the same `ResponseWriter`, so headers set before returning survive.
+4. On error: set `Retry-After` from `weir.RetryAfter` on `w`, then return `caddyhttp.Error(weir.StatusCode(err), err)` so the operator's `handle_errors` routes apply (D34). Verified in v2.11.7 source (§11): the error path writes the status on the same `ResponseWriter`, so headers set before returning survive.
 5. Otherwise write `resp` with `weirhttp.WriteResponse` and return nil.
 
 `nextOrigin.Fetch(ctx, fwd)` clones `base` with `base.Clone(ctx)`, replaces method, URL path and raw query, headers and body with the forwarded request's, and calls `next.ServeHTTP` with a response writer that streams into an `io.Pipe` (the `weirhttp.HandlerOrigin` shape). It returns as soon as the downstream handler writes headers.
@@ -109,13 +109,15 @@ Purge is available only through the admin API (decision confirmed 2026-09-27). A
 - `GET /weir/<name>/stats` returning `EngineStats`.
 - `POST /weir/<name>/mode` with `{"mode": "stale-on-error"|"bypass"|"normal", "ttl": "30m"}` calling `SetMode` (D33).
 
-Memory: stores without `max_bytes` share 40% of `GOMEMLIMIT` evenly (FR-MEM-1). Request bodies: the adapter docs require `request_body { max_size ... }` and server `timeouts { read_body ... }` on Weir routes (FR-LIM-7).
+Registration (verified, §11): `admin.api.weir` is an `AdminRouter`. Caddy builds admin routers once, when the admin server starts, with that start's context, and keeps them across config reloads (`replaceLocalAdminServer` runs only when the admin settings changed). A route handler therefore cannot hold an engine. The adapter keeps a package-level registry from `name` to the live engine: `Provision` stores the new engine, and `Cleanup` removes the entry only if it still points at the engine being cleaned up, so a reload overlap (§3) never leaves the registry empty or pointing at a closed engine. A request for an unknown `name` gets 404. Routes are POST for state changes, so Caddy's admin origin and host enforcement apply to them.
+
+Memory: stores without `max_bytes` share 40% of `GOMEMLIMIT` evenly (FR-MEM-1). The `caddy` binary sets the memory limit from the cgroup or system memory at startup (`cmd/main.go`, `memlimit.Set`), so `debug.SetMemoryLimit(-1)` is normally finite under Caddy; a custom main that skips it falls to the 256 MiB branch of FR-MEM-1 with its warning. Request bodies: the adapter docs require `request_body { max_size ... }` and server `timeouts { read_body ... }` on Weir routes (FR-LIM-7).
 
 No purge endpoint is exposed on site listeners. Operators who need remote purges expose Caddy's admin API with its own access controls (T-26).
 
 ## 8. Observability
 
-The adapter implements `weir.Observer` by incrementing metrics registered on Caddy's Prometheus registry (Caddy exposes `/metrics` through its `metrics` handler and admin endpoint), using the metric names in [04-lld.md §9.3](04-lld.md) with an added `name` label for the engine. `Logger` is `ctx.Slogger()`, which Caddy's `caddy.Context` provides (present in v2.11.4), so no zap-to-slog bridge is needed.
+The adapter implements `weir.Observer` by incrementing metrics registered on Caddy's Prometheus registry (Caddy exposes `/metrics` through its `metrics` handler and admin endpoint), using the metric names in [04-lld.md §9.3](04-lld.md) with an added `name` label for the engine. Caddy creates a new Prometheus registry for every config load (`Context.GetMetricsRegistry`, pedantic mode, so a duplicate registration is an error). The adapter therefore keeps one collector set per registry, created by the first `Provision` of a load and shared by every `weir` handler in that load (looked up by registry pointer, guarded by a mutex, dropped in `Cleanup` when the last user of that registry goes). Counters restart at zero on reload; Prometheus treats that as a counter reset. Collectors are never attached to a pooled store, which outlives the registry. `Logger` is `ctx.Slogger()`, which Caddy's `caddy.Context` provides (present in v2.11.7), so no zap-to-slog bridge is needed.
 
 ## 9. Tests
 
@@ -129,4 +131,34 @@ The adapter implements `weir.Observer` by incrementing metrics registered on Cad
 - OQ-C2: `name` is required (§3).
 - OQ-C3: one engine per site with per-host fairness caps (§4b).
 
-Remaining for Phase 2 kickoff: re-verify every Caddy API named here against the then-current release.
+Closed by P2-00: every Caddy API named here was re-verified against v2.11.7 (§11). Three findings changed the text: admin routes outlive config loads (§7), the metrics registry is per load (§8), and Caddy's upgrade detector cannot be reused (§4 step 0).
+
+## 11. Verified Caddy APIs (v2.11.7)
+
+Checked against the source at tag `v2.11.7` (commit 72dd0fb) on 2026-10-09. Paths are relative to the Caddy repository; lines are at that tag. The adapter's CI builds with `xcaddy` (§9), so drift after this tag shows up as a build failure, and the next re-verification updates this table.
+
+| API or behavior | Location | Note |
+|---|---|---|
+| `caddy.Module` | `modules.go:54` | `CaddyModule() ModuleInfo` |
+| `caddy.Provisioner`, `Validator`, `CleanerUpper` | `modules.go:296`, `:305`, `:315` | `Cleanup()` and `Validate()` take no context |
+| `caddy.Context.Slogger()` | `context.go:612` | slog logger for the most recent module in the context |
+| `caddy.Context.GetMetricsRegistry()` | `context.go:115` | registry is per config load, pedantic (`context.go:73`) |
+| `caddy.UsagePool.LoadOrNew`, `Delete`, `Constructor`, `Destructor` | `usagepool.go:77`, `:171`, `:216`, `:220` | `Delete` runs `Destruct` outside the lock; panics on negative refs |
+| `caddy.Duration`, `caddy.ParseDuration` | `caddy.go:866`, `:888` | the latter accepts a `d` (days) unit |
+| `httpcaddyfile.RegisterHandlerDirective` | `caddyconfig/httpcaddyfile/directives.go:135` | |
+| `httpcaddyfile.RegisterDirectiveOrder` | `directives.go:168` | still marked EXPERIMENTAL (`:167`); `Before` is `:644` |
+| default directive order | `directives.go:47` | `request_body` (`:62`) < `encode` (`:78`) < `reverse_proxy` (`:95`) |
+| `caddyfile.Unmarshaler` | `caddyconfig/caddyfile/adapter.go:106` | |
+| `caddyhttp.MiddlewareHandler` | `modules/caddyhttp/caddyhttp.go:90` | `ServeHTTP(w, r, next Handler) error` |
+| `caddyhttp.Error`, `HandlerError` | `modules/caddyhttp/errors.go:32`, `:56` | `Error` keeps an existing `HandlerError` and fills missing fields |
+| error path | `modules/caddyhttp/server.go:735` to `:772`, `:1162` | `handle_errors` chain and the plain `WriteHeader` branch both use the request's `ResponseWriter`; `WithError` sets `{http.error.*}` placeholders |
+| `caddy.AdminRouter`, `AdminRoute` | `admin.go:774`, `:779` | routers built in `newAdminHandler` (`:222`, loop at `:277`) with the admin start's context |
+| admin server replacement | `caddy.go:566`, `admin.go:375` | runs only when the admin config changed, not on every reload |
+| existing admin module as a pattern | `modules/caddyhttp/reverseproxy/admin.go:45` | ID `admin.api.reverse_proxy` |
+| `request_body` `max_size` | `modules/caddyhttp/requestbody/requestbody.go:35`, `:69` | wraps the body in `http.MaxBytesReader` |
+| server `timeouts { read_body }` | `caddyconfig/httpcaddyfile/serveroptions.go:133` to `:146` | |
+| `reverse_proxy` upgrade detection | `modules/caddyhttp/reverseproxy/reverseproxy.go:1647` | `upgradeType`, unexported; no `CONNECT` check |
+| `reverse_proxy` `X-Forwarded-For` | `reverseproxy.go:939` to `:993` | removed from untrusted clients, then set to the client address; operators can strip it with `header_up -X-Forwarded-For` |
+| `encode` and `Vary` | `modules/caddyhttp/encode/encode.go:522` | adds `Vary: Accept-Encoding` when it compresses |
+| memory limit at startup | `cmd/main.go:483` | `memlimit.Set` from cgroup or system memory |
+| `caddytest.NewTester`, `InitServer` | `caddytest/caddytest.go:68`, `:118` | |

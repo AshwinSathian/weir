@@ -1,6 +1,6 @@
 # Phase 2, 2.5 and 3 entry cards
 
-These phases start from draft specs. Each begins with one planning card that verifies the spec against current upstream code, asks the user any new questions, and writes that phase's implementation cards into this file (replacing the placeholder list). Implementation cards are not pre-written here because they would be planned against APIs that may change.
+These phases start from draft specs. Each begins with one planning card that verifies the spec against current upstream code, asks the user any new questions, and writes that phase's implementation cards into this file (replacing the placeholder list). Phase 2 cards were written by P2-00 against Caddy v2.11.7; the Phase 2.5 and 3 cards are written by their planning cards.
 
 ## Phase 2: Caddy adapter
 
@@ -9,6 +9,61 @@ These phases start from draft specs. Each begins with one planning card that ver
 - Read: 08 whole; 10 §2 (E7 affects the adapter's response path later); Caddy source at the latest release tag
 - Touch: docs/08-caddy-adapter-spec.md (v1.0), docs/cards/20-later.md (Phase 2 cards), docs/09-research-notes.md (verified facts)
 - AC: every Caddy API named in 08 checked at the pinned release with file and line; 08 marked v1.0; Phase 2 split into S/M cards (expected: module skeleton and Caddyfile, store pool and key-generation hash, nextOrigin and upgrades, errors and memory split, admin API purge/mode/stats, metrics, deployment guide)
+- Notes: 08 is v1.0 against Caddy v2.11.7 (§11 has file and line for each API). Cards P2-01 to P2-07 below replace the placeholder; the plan items 2.2 to 2.4 are split across them.
+
+### [ ] P2-01 Module skeleton, Caddyfile and engine build
+- Plan: 2.2 · Size: M · Depends on: P2-00
+- Read: 08 §1, §2, §9, §11; 01 FR-LCY-2; 04 §10; `caddy/` does not exist yet
+- Touch: caddy/go.mod (new, requires caddy v2.11.7 and the root module with a `replace` for local work), caddy/module.go, caddy/caddyfile.go, caddy/config.go, caddy/module_test.go, go.work (add `./caddy`), Makefile and .github/workflows/ci.yml (add the module to the `GOWORK=off` loop; xcaddy build job)
+- Tests: `TestCaddyfileParse` (table: every key in the 08 §2 example, unknown key, missing `name`), `TestValidateRejectsBadConfig`, `TestDirectiveOrder` (adapted Caddyfile puts `weir` before `reverse_proxy`), `TestInternalKeysImport` (compiles `keys.IsUpgrade` from the adapter module)
+- AC: `http.handlers.weir` loads from JSON and Caddyfile; `name` is required; `Validate` reports `weir.New` errors; interface guards present; each module builds with `GOWORK=off`; `xcaddy build` job added; the root module still has no `require` block
+- Out of scope: the store pool (P2-02), serving (P2-03)
+- Notes: go.work exists since M10-02; extend it. If `internal/keys` cannot be imported from the adapter module, stop and ask: the fallback is an exported `weirhttp.IsUpgrade`, a public API change.
+
+### [ ] P2-02 Store pool and key-generation hash
+- Plan: 2.2 · Size: M · Depends on: P2-01
+- Read: 08 §3, §4b; 01 FR-FAIR-3, FR-SNP-1; 04 §5.2 (purge epochs)
+- Touch: caddy/pool.go, caddy/keygen.go, caddy/pool_test.go, caddy/keygen_test.go
+- Tests: `TestPoolSharesStoreAcrossReload`, `TestPoolSettingsMismatchFailsValidation`, `TestPoolDestructsOnLastRelease`, `TestKeyGenHashChangeWritesSoftEpoch`, `TestKeyGenHashIgnoresHostAndKeyRules`, `TestMultiHostEnablesFairnessCaps`
+- AC: a reload with an unchanged key-generation hash keeps entries as hits; a changed `Forward.Mode`, `Forward.Allow` or `Storable.StripSetCookie` makes them revalidate; changing query rules, key headers, hosts or on-demand TLS domains changes nothing; same `name` with different store settings fails `Validate`; the pooled value implements `caddy.Destructor` and closes within `SnapshotTimeout`; `MaxPerHost` and `MaxBytesPerOwner` default to 25% for multi-host sites
+- Out of scope: serving requests (P2-03)
+
+### [ ] P2-03 nextOrigin, errors and upgrades
+- Plan: 2.2, 2.3 · Size: M · Depends on: P2-02
+- Read: 08 §4, §5, §6; 01 FR-UPG-1, FR-COA-9; 04 §10; 07 T6.2, T6.6, T6.12
+- Touch: caddy/serve.go, caddy/origin.go, caddy/serve_test.go, caddy/e2e_test.go
+- Tests: `TestUpgradeAndConnectBypassEngine`, `TestNextOriginUsesDetachedContext`, `TestRetryAfterSurvivesHandleErrors`, `TestErrorsReturnHandlerError`, `TestForwardedForWarning`, `caddytest` scenarios for T6.2, T6.6 and T6.12, `TestReloadKeepsWarmKeys` (100 keys survive a limiter change)
+- AC: all listed tests pass; `Fetch` after the request finished never touches the original `ResponseWriter`; the one-time `X-Forwarded-For` warning appears for `reverse_proxy` without `header_up -X-Forwarded-For`; `Origin.Fetch` is still called only in `(*Engine).fetch`
+- Notes: size M is tight. If the caddytest scenarios overrun, split them into P2-03b.
+
+### [ ] P2-04 Memory budget split and memory sizing
+- Plan: 2.3 · Size: S · Depends on: P2-02
+- Read: 08 §3, §7 (Memory); 01 FR-MEM-1; 06 T-43
+- Touch: caddy/memory.go, caddy/memory_test.go
+- Tests: `TestMemorySizingSplit` (several stores without `max_bytes` share 40% of the limit evenly; stores with `max_bytes` are excluded; an unset limit uses the FR-MEM-1 fallback and warns once)
+- AC: the sum of auto-sized stores never exceeds 40% of `debug.SetMemoryLimit(-1)`; the share is recomputed when a site joins or leaves the pool without emptying existing stores
+- Notes: resizing a live memory store is not in the store interface. If sharing cannot be recomputed on reload without a flush, stop and ask (it would be a change to 05).
+
+### [ ] P2-05 Admin API: purge, mode, stats
+- Plan: 2.3 · Size: M · Depends on: P2-03
+- Read: 08 §7, §11 (admin rows); 01 FR-PRG, D33; 06 T-26
+- Touch: caddy/admin.go, caddy/registry.go, caddy/admin_test.go
+- Tests: `TestAdminPurgeChangesCacheStatus` (purge via admin makes the next `Cache-Status` `fwd=stale`), `TestAdminEagerPurgeReportsScrubbed`, `TestAdminModeSwitch`, `TestAdminStats`, `TestAdminUnknownNameIs404`, `TestRegistryAcrossReloadOverlap`
+- AC: routes `POST /weir/<name>/purge`, `GET /weir/<name>/stats`, `POST /weir/<name>/mode` exist under `admin.api.weir`; the registry never points at a cleaned-up engine; no purge route is added to site listeners
+- Out of scope: remote admin access control (documented in P2-07)
+
+### [ ] P2-06 Prometheus metrics on Caddy's registry
+- Plan: 2.3 · Size: S · Depends on: P2-03
+- Read: 08 §8; 04 §9.3; context.go `GetMetricsRegistry` at v2.11.7
+- Touch: caddy/metrics.go, caddy/metrics_test.go
+- Tests: `TestMetricsRegisteredOncePerRegistry` (two handlers in one load do not collide), `TestMetricsNamesAndNameLabel`, `TestMetricsSurviveReload` (new registry gets fresh collectors, no panic)
+- AC: metric names match 04 §9.3 plus a `name` label; a pedantic registry accepts them; no collector is attached to a pooled store
+
+### [ ] P2-07 Single-node deployment guide
+- Plan: 2.4 · Size: S · Depends on: P2-05, P2-06
+- Read: 08 §4a, §4b, §5, §6, §7; 06 T-38, T-45, R-6; docs/runbook.md
+- Touch: docs/runbook.md
+- AC: guide covers one node per cache (D17), snapshot path and shutdown grace period, `encode` placement with both examples, `request_body max_size` and `read_body` timeouts, `rate_limit` before `weir`, auth handlers before `weir` (T-45), `header_up -X-Forwarded-For`, admin API exposure and purge examples, memory sizing
 
 ## Phase 2.5: Valkey store
 - Notes: 06 T-45 and R-6: the adapter spec must say where `weir` sits relative to authentication and variable-setting handlers, and the deployment guide repeats it.

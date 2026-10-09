@@ -2,11 +2,11 @@
 
 Updated: 2026-10-09
 Phase: 1
-Current card: none
-Card state: awaiting-merge
-Branch: claude/zen-rubin-hynjow
-PR: https://github.com/AshwinSathian/weir/pull/72
-Next card: P2-00 (Finalize the Caddy adapter spec)
+Current card: P2-00
+Card state: in-progress
+Branch: card/P2-00-caddy-spec
+PR: none yet
+Next card: P2-01 (Module skeleton, Caddyfile and engine build)
 
 ## Waiting on Ashwin
 
