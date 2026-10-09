@@ -404,6 +404,16 @@ var rfcRows = []rfcRow{
 		{after: 900 * time.Second, origin: bh(404, "nf"), status: 404, body: "nf", calls: 2},
 	}},
 
+	// RFC 9213 targeted fields: FR-TCC-1..4.
+	{sec: "9213 §2.1", name: "CDN-Cache-Control max-age=3600 beats Cache-Control max-age=600", steps: []rfcStep{
+		{origin: bh(200, "a", "Cache-Control", "max-age=600", "Cdn-Cache-Control", "max-age=3600"), calls: 1},
+		{after: 3000 * time.Second, calls: 1, body: "a"},
+	}},
+	{sec: "9213 §2.1", name: "CDN-Cache-Control no-store with Cache-Control max-age is not stored", steps: []rfcStep{
+		{origin: bh(200, "a", "Cache-Control", "max-age=600", "Cdn-Cache-Control", "no-store"), calls: 1},
+		{calls: 2},
+	}},
+
 	// RFC 9211 Cache-Status: FR-SRV-9.
 	{sec: "9211 §2", name: "hit carries ttl, revalidation carries fwd-status 304", steps: []rfcStep{
 		{origin: bh(200, "a", "Cache-Control", "max-age=60", "ETag", `"v1"`), calls: 1, cacheStatus: "Weir; fwd=uri-miss; fwd-status=200; stored"},

@@ -38,7 +38,7 @@ func Lifetime(d ResponseDirectives, h http.Header, status int, respTime time.Tim
 	if !ok {
 		date = respTime
 	}
-	if exp := h["Expires"]; len(exp) > 0 {
+	if exp := h["Expires"]; len(exp) > 0 && !d.Targeted { // FR-TCC-2
 		// RFC 9111 §4.2.1 permits treating repeated Expires as stale.
 		e, ok := ParseDate(exp[0])
 		if !ok || len(exp) > 1 {
