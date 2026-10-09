@@ -1091,7 +1091,7 @@ Entry template:
 - Context: low.
 
 ## 2026-10-09 · M11-01 · done
-- Branch / PR: claude/busy-ramanujan-mhd5kg / pending
+- Branch / PR: claude/busy-ramanujan-mhd5kg / #64 https://github.com/AshwinSathian/weir/pull/64
 - Done: `httpcc.ParseRange` and `IfRangeApplies` (internal/httpcc/range.go); `fromEntry` answers a single satisfiable range on a stored 200 with a 206 slice, an unsatisfiable one with 416, everything else with the full 200; `Classified` gains `RangeValue`, `HasIfRange`, `IfRange`.
 - Tests: TestRangeSingleFromCache, TestRangeUnsatisfiable416, TestRangeMultiOrInvalidGets200, TestIfRangeStrongOnly, TestRangeOnSWREntry, TestRangeAfterClientConditional, TestRangeOnNonOKEntryNotSliced, TestParseRange, FuzzRange. Race tests, vet, gofmt and trace-strict pass; lint unrun (Go 1.25 binary), CI must confirm.
 - Deviations: FR-SRV-5 in docs/01 said a hit always gets the full 200; reworded to point at FR-RNG-1..3. TestRangeGarbageNotPoisoning now expects 206 on a fresh entry. trace.sh allowlist narrowed to FR-RNG-4.

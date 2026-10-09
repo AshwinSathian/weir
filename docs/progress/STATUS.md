@@ -5,7 +5,7 @@ Phase: 1
 Current card: none
 Card state: awaiting-merge
 Branch: claude/busy-ramanujan-mhd5kg
-PR: pending
+PR: #64 https://github.com/AshwinSathian/weir/pull/64
 Next card: M11-02 per `scripts/card.sh next`; M16-01 is approved too (Phase 1 release gate comes first, your call)
 
 ## Waiting on Ashwin
