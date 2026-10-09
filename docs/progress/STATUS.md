@@ -2,11 +2,11 @@
 
 Updated: 2026-10-09
 Phase: 1
-Current card: P2-01 (Module skeleton and JSON config)
-Card state: in-progress
+Current card: none
+Card state: awaiting-merge
 Branch: card/P2-01-module-skeleton
 PR: none
-Next card: P2-01 (Module skeleton and Caddyfile)
+Next card: P2-01b (Caddyfile parsing and directive order)
 
 ## Waiting on Ashwin
 
@@ -42,6 +42,10 @@ Ashwin delegated "take decisions on all items"; "Waiting on Ashwin" was empty. A
 - Cards: P2-01 split into P2-01, P2-01b (Caddyfile), P2-01c (xcaddy CI); `TestRetryAfterSurvivesHandleErrors` moved to P2-03b (needs caddytest).
 
 ## Notes for the next session
+
+- P2-01: Go package in `caddy/` is named `weircaddy`. `Handler.weirConfig()` maps adapter settings to `weir.Config`; `Provision` builds the engine with `weir.New` (default store). `max_bytes` and `snapshot_dir` are parsed and validated but not applied: P2-02 builds the pooled store and must pass it as `Config.Store`. `ServeHTTP` is a pass-through until P2-03.
+- P2-01: `decodeStrict` in caddy/config.go mirrors Caddy's strict module decoding; P2-01b's Caddyfile `UnmarshalCaddyfile` must fill the same `Handler` fields and reject unknown subdirectives. Added keys beyond the 08 example (documented in the 08 §2 table): `query_keep`, `normalize_path`, `bypass.headers`, `max_queue`, `while_revalidate`.
+- P2-01: lint for submodules ran with `GOTOOLCHAIN=go1.27.0 make check GOLANGCI="go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0"`; this passes in the container.
 
 - P2-00: 08 is v1.0 (Caddy v2.11.7, §11). P2-01 must prove `internal/keys.IsUpgrade` imports from the `caddy` module; if not, stop and ask (fallback is an exported `weirhttp.IsUpgrade`, public API). Admin routes need a package-level engine registry; metrics collectors are per registry. Cards P2-01b, P2-01c and P2-03b were added to fit size M.
 
