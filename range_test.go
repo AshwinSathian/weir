@@ -6,7 +6,9 @@ import (
 	"strings"
 	"testing"
 	"testing/synctest"
+	"time"
 
+	"github.com/AshwinSathian/weir"
 	"github.com/AshwinSathian/weir/internal/testorigin"
 )
 
@@ -21,7 +23,7 @@ func rangeOrigin(t *testing.T, h http.Header, body string) *testorigin.Origin {
 	return o
 }
 
-// FR-RNG-1, FR-RNG-2, FR-RNG-5, T-37
+// FR-RNG-1, FR-RNG-2, FR-RNG-5
 func TestRangeSingleFromCache(t *testing.T) {
 	tests := []struct {
 		name, rng, body, contentRange string
@@ -137,7 +139,7 @@ func TestRangeMultiOrInvalidGets200(t *testing.T) {
 	})
 }
 
-// FR-RNG-1, T-37: only a strong validator lets the range apply.
+// FR-RNG-1: only a strong validator lets the range apply.
 func TestIfRangeStrongOnly(t *testing.T) {
 	lm := "Fri, 01 Jan 1999 00:00:00 GMT" // older than the response Date (synctest starts in 2000)
 	tests := []struct {
@@ -177,4 +179,48 @@ func TestIfRangeStrongOnly(t *testing.T) {
 			})
 		})
 	}
+}
+
+// FR-RNG-1: an entry servable under SWR is sliced too, while it revalidates in the background.
+func TestRangeOnSWREntry(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		o := rangeOrigin(t, http.Header{"Cache-Control": {"max-age=10, stale-while-revalidate=30"}}, "0123456789")
+		e := newEngine(t, cacheCfg)
+		defer closeEngine(t, e)
+		serve(t, e, getReq("/a"), o)
+		time.Sleep(20 * time.Second)
+		resp, body := serve(t, e, withHeader(getReq("/a"), "Range", "bytes=1-2"), o)
+		if resp.StatusCode != http.StatusPartialContent || body != "12" || resp.Cache.Stale != weir.StaleWhileRevalidate {
+			t.Fatalf("got %d %q stale=%v, want 206 \"12\" under SWR", resp.StatusCode, body, resp.Cache.Stale)
+		}
+	})
+}
+
+// FR-SRV-2, RFC 9110 §13.2.2: a matching If-None-Match is judged before Range.
+func TestRangeAfterClientConditional(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		o := rangeOrigin(t, http.Header{"Etag": {`"v1"`}}, "0123456789")
+		e := newEngine(t, cacheCfg)
+		defer closeEngine(t, e)
+		serve(t, e, getReq("/a"), o)
+		resp, _ := serve(t, e, withHeader(withHeader(getReq("/a"), "Range", "bytes=1-2"), "If-None-Match", `"v1"`), o)
+		if resp.StatusCode != http.StatusNotModified {
+			t.Fatalf("got %d, want 304", resp.StatusCode)
+		}
+	})
+}
+
+// FR-RNG-1: only a stored 200 is sliced.
+func TestRangeOnNonOKEntryNotSliced(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		o := testorigin.NewChecked(t, 64, 16)
+		o.Default(testorigin.Behavior{Status: http.StatusMovedPermanently, Header: http.Header{"Cache-Control": {"max-age=60"}, "Location": {"/b"}}, Body: []byte("0123456789")})
+		e := newEngine(t, cacheCfg)
+		defer closeEngine(t, e)
+		serve(t, e, getReq("/a"), o)
+		resp, body := serve(t, e, withHeader(getReq("/a"), "Range", "bytes=1-2"), o)
+		if resp.StatusCode != http.StatusMovedPermanently || body != "0123456789" || resp.Header.Get("Content-Range") != "" {
+			t.Fatalf("got %d %q Content-Range=%q", resp.StatusCode, body, resp.Header.Get("Content-Range"))
+		}
+	})
 }

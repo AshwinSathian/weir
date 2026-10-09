@@ -8,7 +8,7 @@ import (
 	"github.com/AshwinSathian/weir/store"
 )
 
-// FR-RNG-2, FR-RNG-3, T-37
+// FR-RNG-2, FR-RNG-3
 func TestParseRange(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -51,7 +51,7 @@ func TestParseRange(t *testing.T) {
 	}
 }
 
-// FR-RNG-1, T-37
+// FR-RNG-1
 func TestIfRangeStrongOnly(t *testing.T) {
 	date := time.Date(2026, 1, 2, 12, 0, 0, 0, time.UTC)
 	lm := date.Add(-time.Hour)
@@ -70,6 +70,8 @@ func TestIfRangeStrongOnly(t *testing.T) {
 		{"date equal to a strong last-modified", httpDate(lm), store.Entry{LastModified: lm, Date: date}, true},
 		{"date that differs", httpDate(lm.Add(time.Second)), store.Entry{LastModified: lm, Date: date}, false},
 		{"last-modified within a second of date is weak", httpDate(date), store.Entry{LastModified: date, Date: date.Add(500 * time.Millisecond)}, false},
+		{"last-modified exactly one second before date is strong", httpDate(date.Add(-time.Second)), store.Entry{LastModified: date.Add(-time.Second), Date: date}, true},
+		{"last-modified 999ms before date is weak", httpDate(date), store.Entry{LastModified: date.Add(-999 * time.Millisecond).Truncate(time.Second), Date: date}, false},
 		{"no stored last-modified", httpDate(lm), store.Entry{Date: date}, false},
 		{"not a date or tag", "tomorrow", store.Entry{LastModified: lm, Date: date}, false},
 	}
@@ -82,7 +84,7 @@ func TestIfRangeStrongOnly(t *testing.T) {
 	}
 }
 
-// NFR-2, T-37: no input panics; RangeOK stays inside the representation.
+// NFR-2: no input panics; RangeOK stays inside the representation.
 func FuzzRange(f *testing.F) {
 	for _, s := range []string{"bytes=0-4", "bytes=-3", "bytes=5-", "bytes=0-1,3-4", "bytes=-0", "bytes=99999999999999999999-", "items=1-2", "bytes=", "", "bytes=5-2", " bytes = 1 - 2 "} {
 		f.Add(s, int64(10))
