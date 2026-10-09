@@ -37,18 +37,23 @@ type Dict map[string]Item
 // ParseDictionary parses the field lines of one field as an RFC 9651 §4.2.2
 // Dictionary (FR-TCC-1). Each line is parsed on its own, with the result RFC
 // 9110 §5.3 gives for the lines joined by ", " except that a String cannot
-// span two lines. Parameters are checked and dropped. Any
-// error, or more than maxMembers members (repeats included), is ErrInvalid
-// and returns no members: RFC 9213 §2.1 ignores a field that does not parse,
+// span two lines. Parameters are checked and dropped. Any error, or more than maxMembers
+// members (repeats included), is ErrInvalid and returns no members: RFC 9213 §2.1 ignores a field that does not parse,
 // and a half-read field could grant a lifetime the origin never meant (T-34).
 // The work is linear in the input and the result is bounded by maxMembers
 // (T-21, NFR-3).
 func ParseDictionary(lines []string, maxMembers int) (Dict, error) {
 	d := Dict{}
 	n := 0
-	for _, s := range lines {
-		// Leading and trailing SP are discarded (RFC 9651 §4.2).
-		if s = strings.Trim(s, " "); s == "" {
+	for i, s := range lines {
+		// Only SP is skipped ahead of the whole field (RFC 9651 §4.2); a
+		// later line follows a comma, where OWS is allowed.
+		if i == 0 {
+			s = strings.TrimLeft(s, " ")
+		} else {
+			s = strings.TrimLeft(s, " \t")
+		}
+		if s = strings.TrimRight(s, " "); s == "" {
 			if len(lines) == 1 {
 				return d, nil
 			}

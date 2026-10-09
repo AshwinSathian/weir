@@ -18,7 +18,7 @@ none
 
 ## Notes for the next session
 
-- M12-01: `sfv.ParseDictionary` returns `Dict` of `Item{Kind, Bool, Int, Dec, Str}`; the zero Item is a valid Boolean false, so check the lookup's ok. M12-02 must reject Decimal or negative Integer for `max-age`-style directives itself (FR-TCC, docs/04 §13.2). Drop `TCC` from `later` in scripts/trace.sh in M12-02.
+- M12-01: `sfv.ParseDictionary` returns `Dict` of `Item{Kind, Bool, Int, Dec, Str}`; the zero Item is a valid Boolean false, so check the lookup's ok. M12-02 must reject Decimal or negative Integer for `max-age`-style directives itself (FR-TCC, docs/04 §13.2). Drop `TCC` from `later` in scripts/trace.sh in M12-02 (FR-TCC-2..5 are uncited until then, so dropping it earlier fails trace-strict). Pass a small `maxMembers` (64). Reject any Kind but Integer for `max-age`-style directives. Decided: `private`, `no-store` and `no-cache` count when present whatever their value (`private=?0` still counts), the safe side of FR-TCC-3 "found".
 
 - M11-01: Range on a stored 200 (hit, SWR) is sliced in `fromEntry` (respond.go); the client's 304 check runs first. A stored `Accept-Ranges: none` makes Weir ignore Range (full 200). FR-SRV-5 and FR-RNG-1 in docs/01 say so.
 - M11-01: `docs/cache-tests-expected-failures.md` still lists the three `partial-store-complete-reuse-partial*` rows as not built, and the baseline is unchanged. Run `UPDATE=1 make cache-tests` (needs node and network) after merge, drop the row, refresh `testdata/cache-tests-baseline.json`.

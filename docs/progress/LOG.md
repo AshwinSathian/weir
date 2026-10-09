@@ -1129,3 +1129,11 @@ Entry template:
 - Deviations: docs/04 §13.2 gained the Dict shape. No requirement touched.
 - Follow-ups: reviewer found no must-fix; RFC examples, zero-Item note and doc comment applied. Linear-time of the inner-list test is not asserted. M12-02 next.
 - Context: low; size S was right.
+
+## 2026-10-09 · M12-01 · review-fixes
+- Branch / PR: claude/beautiful-brown-di2exe / https://github.com/AshwinSathian/weir/pull/66
+- Done: adversarial review, no must-fix. Fixed: a later field line may start with a tab (agrees with `ParseStringList`); fuzz target now checks the key grammar and SP-wrapping equivalence.
+- Tests: "later line may start with a tab", extended FuzzSFDictionary. Race tests, vet, gofmt, trace-strict pass; lint unrun.
+- Deviations: scripts/trace.sh keeps `TCC` in `later` (FR-TCC-2..5 still uncited; drop in M12-02). Linear-time stays untested; measured about 78 ms for 4 MB.
+- Follow-ups: M12-02 notes in STATUS (maxMembers, Kind checks, presence of `private` wins).
+- Context: low.

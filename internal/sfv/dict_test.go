@@ -23,6 +23,8 @@ func TestParseDictionary(t *testing.T) {
 			lines: []string{"a=(1 2), b=3, c=4;aa=bb, d=(5 6);valid"},
 			want: Dict{"a": {Kind: Other}, "b": {Kind: Integer, Int: 3}, "c": {Kind: Integer, Int: 4},
 				"d": {Kind: Other}}},
+		{name: "later line may start with a tab", lines: []string{"a=1", "\tb=2"},
+			want: Dict{"a": {Kind: Integer, Int: 1}, "b": {Kind: Integer, Int: 2}}},
 		{name: "leading tab is not skipped", lines: []string{"\ta=1"}, bad: true},
 		{name: "cache-control style integers and bare key", lines: []string{"max-age=3600, private"},
 			want: Dict{"max-age": {Kind: Integer, Int: 3600}, "private": {Kind: Boolean, Bool: true}}},
@@ -123,7 +125,8 @@ func FuzzSFDictionary(f *testing.F) {
 		f.Add(s, uint8(8))
 	}
 	f.Fuzz(func(t *testing.T, in string, maxMembers uint8) {
-		got, err := ParseDictionary(strings.Split(in, "\n"), int(maxMembers))
+		lines := strings.Split(in, "\n")
+		got, err := ParseDictionary(lines, int(maxMembers))
 		if err != nil {
 			if !errors.Is(err, ErrInvalid) || got != nil {
 				t.Fatalf("got %v, %v", got, err)
@@ -132,6 +135,18 @@ func FuzzSFDictionary(f *testing.F) {
 		}
 		if got == nil || len(got) > int(maxMembers) {
 			t.Fatalf("%d members, limit %d", len(got), maxMembers)
+		}
+		for k := range got {
+			if n := keyLen(k); n == 0 || n != len(k) {
+				t.Fatalf("key %q does not match the key grammar", k)
+			}
+		}
+		// A single line parses the same with SP around it.
+		if len(lines) == 1 {
+			wrapped, err := ParseDictionary([]string{"  " + lines[0] + "  "}, int(maxMembers))
+			if err != nil || len(wrapped) != len(got) {
+				t.Fatalf("wrapped in SP: %v, %v; plain %v", wrapped, err, got)
+			}
 		}
 	})
 }
