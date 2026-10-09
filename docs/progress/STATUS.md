@@ -2,11 +2,11 @@
 
 Updated: 2026-10-09
 Phase: 1
-Current card: P2-00
-Card state: in-progress
+Current card: none
+Card state: awaiting-merge
 Branch: card/P2-00-caddy-spec
 PR: none yet
-Next card: P2-01 (Module skeleton, Caddyfile and engine build)
+Next card: P2-01 (Module skeleton and Caddyfile)
 
 ## Waiting on Ashwin
 
@@ -30,6 +30,8 @@ From the adversarial review of PR #71 (Ashwin delegated "take decisions on all i
 none. golangci-lint in this container is built with Go 1.25 and cannot load the Go 1.27 config; run it with `GOTOOLCHAIN=go1.27.0 go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0 run`. CI must confirm.
 
 ## Notes for the next session
+
+- P2-00: 08 is v1.0 (Caddy v2.11.7, §11). P2-01 must prove `internal/keys.IsUpgrade` imports from the `caddy` module; if not, stop and ask (fallback is an exported `weirhttp.IsUpgrade`, public API). Admin routes need a package-level engine registry; metrics collectors are per registry. Cards P2-01b and P2-03b were added to fit size M.
 
 - M15-01: `store/memory/scrub.go` holds `Scrub`; `hasTag` is O(entry tags x purge tags) under the shard lock (ponytail in the file, upgrade path named). `Engine.scrub` in purge.go reports the deleted count as `EvPurge{hard}` `Status`. Work happened on the session branch `claude/serene-volta-d9nvnj`, not `card/M15-01-*`.
 

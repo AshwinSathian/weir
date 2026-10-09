@@ -4,37 +4,49 @@ These phases start from draft specs. Each begins with one planning card that ver
 
 ## Phase 2: Caddy adapter
 
-### [ ] P2-00 Finalize the Caddy adapter spec and write its cards
+### [x] P2-00 Finalize the Caddy adapter spec and write its cards
 - Plan: 2.1 · Size: S · Depends on: M15-01
 - Read: 08 whole; 10 §2 (E7 affects the adapter's response path later); Caddy source at the latest release tag
 - Touch: docs/08-caddy-adapter-spec.md (v1.0), docs/cards/20-later.md (Phase 2 cards), docs/09-research-notes.md (verified facts)
 - AC: every Caddy API named in 08 checked at the pinned release with file and line; 08 marked v1.0; Phase 2 split into S/M cards (expected: module skeleton and Caddyfile, store pool and key-generation hash, nextOrigin and upgrades, errors and memory split, admin API purge/mode/stats, metrics, deployment guide)
-- Notes: 08 is v1.0 against Caddy v2.11.7 (§11 has file and line for each API). Cards P2-01 to P2-07 below replace the placeholder; the plan items 2.2 to 2.4 are split across them.
+- Notes: 08 is v1.0 against Caddy v2.11.7 (§11 has file and line for each API). Cards P2-01 to P2-07 (with P2-01b and P2-03b) below replace the placeholder; the plan items 2.2 to 2.4 are split across them.
 
-### [ ] P2-01 Module skeleton, Caddyfile and engine build
+### [ ] P2-01 Module skeleton and Caddyfile
 - Plan: 2.2 · Size: M · Depends on: P2-00
-- Read: 08 §1, §2, §9, §11; 01 FR-LCY-2; 04 §10; `caddy/` does not exist yet
-- Touch: caddy/go.mod (new, requires caddy v2.11.7 and the root module with a `replace` for local work), caddy/module.go, caddy/caddyfile.go, caddy/config.go, caddy/module_test.go, go.work (add `./caddy`), Makefile and .github/workflows/ci.yml (add the module to the `GOWORK=off` loop; xcaddy build job)
+- Read: 08 §1, §2, §11; 01 FR-LCY-2; 04 §10
+- Touch: caddy/go.mod (new, requires caddy v2.11.7 and the root module), caddy/module.go, caddy/config.go (JSON config and Caddyfile parsing), caddy/module_test.go, go.work (add `./caddy`)
 - Tests: `TestCaddyfileParse` (table: every key in the 08 §2 example, unknown key, missing `name`), `TestValidateRejectsBadConfig`, `TestDirectiveOrder` (adapted Caddyfile puts `weir` before `reverse_proxy`), `TestInternalKeysImport` (compiles `keys.IsUpgrade` from the adapter module)
-- AC: `http.handlers.weir` loads from JSON and Caddyfile; `name` is required; `Validate` reports `weir.New` errors; interface guards present; each module builds with `GOWORK=off`; `xcaddy build` job added; the root module still has no `require` block
-- Out of scope: the store pool (P2-02), serving (P2-03)
+- AC: `http.handlers.weir` loads from JSON and Caddyfile; `name` is required; `Validate` reports `weir.New` errors; interface guards present; the module builds with `GOWORK=off`; the root module still has no `require` block
+- Out of scope: the store pool (P2-02), serving (P2-03), CI plumbing (P2-01b)
 - Notes: go.work exists since M10-02; extend it. If `internal/keys` cannot be imported from the adapter module, stop and ask: the fallback is an exported `weirhttp.IsUpgrade`, a public API change.
+
+### [ ] P2-01b CI for the Caddy module
+- Plan: 2.2 · Size: S · Depends on: P2-01
+- Read: 08 §9; Makefile; .github/workflows/ci.yml
+- Touch: Makefile, .github/workflows/ci.yml
+- AC: `make check` and CI run the `caddy` module with `GOWORK=off`; a CI job runs `xcaddy build --with github.com/AshwinSathian/weir/caddy=./caddy` and starts the binary with a minimal Caddyfile
 
 ### [ ] P2-02 Store pool and key-generation hash
 - Plan: 2.2 · Size: M · Depends on: P2-01
 - Read: 08 §3, §4b; 01 FR-FAIR-3, FR-SNP-1; 04 §5.2 (purge epochs)
 - Touch: caddy/pool.go, caddy/keygen.go, caddy/pool_test.go, caddy/keygen_test.go
-- Tests: `TestPoolSharesStoreAcrossReload`, `TestPoolSettingsMismatchFailsValidation`, `TestPoolDestructsOnLastRelease`, `TestKeyGenHashChangeWritesSoftEpoch`, `TestKeyGenHashIgnoresHostAndKeyRules`, `TestMultiHostEnablesFairnessCaps`
+- Tests: `TestCleanupDeletesOnce` (Cleanup called twice releases one reference), `TestPoolSharesStoreAcrossReload`, `TestPoolSettingsMismatchFailsValidation`, `TestPoolDestructsOnLastRelease`, `TestKeyGenHashChangeWritesSoftEpoch`, `TestKeyGenHashIgnoresHostAndKeyRules`, `TestMultiHostEnablesFairnessCaps`
 - AC: a reload with an unchanged key-generation hash keeps entries as hits; a changed `Forward.Mode`, `Forward.Allow` or `Storable.StripSetCookie` makes them revalidate; changing query rules, key headers, hosts or on-demand TLS domains changes nothing; same `name` with different store settings fails `Validate`; the pooled value implements `caddy.Destructor` and closes within `SnapshotTimeout`; `MaxPerHost` and `MaxBytesPerOwner` default to 25% for multi-host sites
 - Out of scope: serving requests (P2-03)
 
 ### [ ] P2-03 nextOrigin, errors and upgrades
 - Plan: 2.2, 2.3 · Size: M · Depends on: P2-02
-- Read: 08 §4, §5, §6; 01 FR-UPG-1, FR-COA-9; 04 §10; 07 T6.2, T6.6, T6.12
-- Touch: caddy/serve.go, caddy/origin.go, caddy/serve_test.go, caddy/e2e_test.go
-- Tests: `TestUpgradeAndConnectBypassEngine`, `TestNextOriginUsesDetachedContext`, `TestRetryAfterSurvivesHandleErrors`, `TestErrorsReturnHandlerError`, `TestForwardedForWarning`, `caddytest` scenarios for T6.2, T6.6 and T6.12, `TestReloadKeepsWarmKeys` (100 keys survive a limiter change)
+- Read: 08 §4, §5, §6; 01 FR-UPG-1, FR-COA-9; 04 §10
+- Touch: caddy/serve.go, caddy/origin.go, caddy/serve_test.go
+- Tests: `TestUpgradeAndConnectBypassEngine`, `TestNextOriginUsesDetachedContext`, `TestRetryAfterSurvivesHandleErrors`, `TestErrorsReturnHandlerError`, `TestForwardedForWarning`
 - AC: all listed tests pass; `Fetch` after the request finished never touches the original `ResponseWriter`; the one-time `X-Forwarded-For` warning appears for `reverse_proxy` without `header_up -X-Forwarded-For`; `Origin.Fetch` is still called only in `(*Engine).fetch`
-- Notes: size M is tight. If the caddytest scenarios overrun, split them into P2-03b.
+
+### [ ] P2-03b End-to-end scenarios under caddytest
+- Plan: 2.2 · Size: S · Depends on: P2-03, P2-01b
+- Read: 07 T6.2, T6.6, T6.12; 08 §9
+- Touch: caddy/e2e_test.go
+- Tests: `caddytest` scenarios for T6.2, T6.6 and T6.12; `TestReloadKeepsWarmKeys` (100 keys survive a limiter change; a `forward.allow` change makes them revalidate; adding a host changes nothing)
+- AC: all pass under the race detector
 
 ### [ ] P2-04 Memory budget split and memory sizing
 - Plan: 2.3 · Size: S · Depends on: P2-02

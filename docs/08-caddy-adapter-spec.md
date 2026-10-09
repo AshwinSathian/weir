@@ -55,7 +55,7 @@ Every field is optional and defaults to the engine default. `Validate` calls `we
 
 Caddy starts new module instances before stopping old ones on every config change ("multiple loaded instances of your module may overlap", Caddy's extending guide). A naive adapter would build a fresh engine and store on every reload, which is a full cold flush (seed T6.4) every time the config changes. For the BYOD custom-domain project that shares the Caddy instance, config changes can be frequent.
 
-Rule: the expensive state is the store, so the store is what survives reloads. The adapter keeps memory stores in a package-level `caddy.UsagePool` keyed by `name` plus the store settings (`max_bytes`, shard count). `Provision` calls `LoadOrNew` on that pool and builds a new `weir.Engine` around the shared store (engines are cheap: a limiter, a breaker and some maps). `Cleanup` closes the old engine, which does not close a store it did not create, and calls `Delete` on the pool, which closes the store only when the last user releases it. The pooled value must implement `caddy.Destructor` (`Destruct() error`, the constructor returns one); `Delete` calls it outside the pool lock, so a snapshot written by `Store.Close` does not block other `LoadOrNew` calls. `Cleanup` and `Destruct` take no context (modules.go, usagepool.go), so they bound the close with the store's `SnapshotTimeout` (5s by default) and the engine close with the same duration. `Delete` panics if called more often than the key was loaded, so `Provision` records success and `Cleanup` deletes only after one.
+Rule: the expensive state is the store, so the store is what survives reloads. The adapter keeps memory stores in a package-level `caddy.UsagePool` keyed by `name` plus the store settings (`max_bytes`, shard count). `Provision` calls `LoadOrNew` on that pool and builds a new `weir.Engine` around the shared store (engines are cheap: a limiter, a breaker and some maps). `Cleanup` closes the old engine, which does not close a store it did not create, and calls `Delete` on the pool, which closes the store only when the last user releases it. The pooled value must implement `caddy.Destructor` (`Destruct() error`, the constructor returns one); `Delete` calls it outside the pool lock, so a snapshot written by `Store.Close` does not block other `LoadOrNew` calls. `Cleanup` and `Destruct` take no context (modules.go, usagepool.go), so they bound the close with the store's `SnapshotTimeout` (5s by default) and the engine close with the same duration. An extra `Delete` is a silent no-op after full release, and while another instance still holds a reference it takes that instance's reference, which can close the store under a live engine during a reload overlap. `Cleanup` therefore deletes exactly once, and only after a successful `LoadOrNew`.
 
 Consequences, accepted:
 
@@ -143,7 +143,7 @@ Checked against the source at tag `v2.11.7` (commit 72dd0fb) on 2026-10-09. Path
 | `caddy.Provisioner`, `Validator`, `CleanerUpper` | `modules.go:296`, `:305`, `:315` | `Cleanup()` and `Validate()` take no context |
 | `caddy.Context.Slogger()` | `context.go:612` | slog logger for the most recent module in the context |
 | `caddy.Context.GetMetricsRegistry()` | `context.go:115` | registry is per config load, pedantic (`context.go:73`) |
-| `caddy.UsagePool.LoadOrNew`, `Delete`, `Constructor`, `Destructor` | `usagepool.go:77`, `:171`, `:216`, `:220` | `Delete` runs `Destruct` outside the lock; panics on negative refs |
+| `caddy.UsagePool.LoadOrNew`, `Delete`, `Constructor`, `Destructor` | `usagepool.go:77`, `:171`, `:216`, `:220` | `Delete` runs `Destruct` outside the lock; a surplus `Delete` is a no-op or steals another instance's reference |
 | `caddy.Duration`, `caddy.ParseDuration` | `caddy.go:866`, `:888` | the latter accepts a `d` (days) unit |
 | `httpcaddyfile.RegisterHandlerDirective` | `caddyconfig/httpcaddyfile/directives.go:135` | |
 | `httpcaddyfile.RegisterDirectiveOrder` | `directives.go:168` | still marked EXPERIMENTAL (`:167`); `Before` is `:644` |
@@ -151,7 +151,7 @@ Checked against the source at tag `v2.11.7` (commit 72dd0fb) on 2026-10-09. Path
 | `caddyfile.Unmarshaler` | `caddyconfig/caddyfile/adapter.go:106` | |
 | `caddyhttp.MiddlewareHandler` | `modules/caddyhttp/caddyhttp.go:90` | `ServeHTTP(w, r, next Handler) error` |
 | `caddyhttp.Error`, `HandlerError` | `modules/caddyhttp/errors.go:32`, `:56` | `Error` keeps an existing `HandlerError` and fills missing fields |
-| error path | `modules/caddyhttp/server.go:735` to `:772`, `:1162` | `handle_errors` chain and the plain `WriteHeader` branch both use the request's `ResponseWriter`; `WithError` sets `{http.error.*}` placeholders |
+| error path | `modules/caddyhttp/server.go:735` to `:785`, `:1162` | `handle_errors` chain and the plain `WriteHeader` branch both use the request's `ResponseWriter`; `WithError` sets `{http.error.*}` placeholders |
 | `caddy.AdminRouter`, `AdminRoute` | `admin.go:774`, `:779` | routers built in `newAdminHandler` (`:222`, loop at `:277`) with the admin start's context |
 | admin server replacement | `caddy.go:566`, `admin.go:375` | runs only when the admin config changed, not on every reload |
 | existing admin module as a pattern | `modules/caddyhttp/reverseproxy/admin.go:45` | ID `admin.api.reverse_proxy` |
@@ -160,5 +160,5 @@ Checked against the source at tag `v2.11.7` (commit 72dd0fb) on 2026-10-09. Path
 | `reverse_proxy` upgrade detection | `modules/caddyhttp/reverseproxy/reverseproxy.go:1647` | `upgradeType`, unexported; no `CONNECT` check |
 | `reverse_proxy` `X-Forwarded-For` | `reverseproxy.go:939` to `:993` | removed from untrusted clients, then set to the client address; operators can strip it with `header_up -X-Forwarded-For` |
 | `encode` and `Vary` | `modules/caddyhttp/encode/encode.go:522` | adds `Vary: Accept-Encoding` when it compresses |
-| memory limit at startup | `cmd/main.go:483` | `memlimit.Set` from cgroup or system memory |
+| memory limit at startup | `cmd/main.go:484` | `memlimit.Set` from cgroup or system memory |
 | `caddytest.NewTester`, `InitServer` | `caddytest/caddytest.go:68`, `:118` | |
