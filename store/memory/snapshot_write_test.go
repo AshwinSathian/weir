@@ -184,9 +184,9 @@ func (c *ctxAfter) Err() error {
 // FR-SNP-1: an incomplete snapshot is discarded, never renamed; no temp file
 // is left behind.
 func TestSnapshotRespectsDeadline(t *testing.T) {
-	for name, ctx := range map[string]context.Context{
-		"expired before the first record": canceled(),
-		"expires midway":                  &ctxAfter{context.Background(), 3},
+	for name, cut := range map[string]func() context.Context{
+		"expired before the first record": canceled,
+		"expires midway":                  func() context.Context { return &ctxAfter{context.Background(), 3} },
 	} {
 		t.Run(name, func(t *testing.T) {
 			dir := t.TempDir()
@@ -196,15 +196,15 @@ func TestSnapshotRespectsDeadline(t *testing.T) {
 				t.Fatal(err)
 			}
 			for i := uint64(1); i <= 10; i++ {
-				_ = s.Set(t.Context(), numKey(i), entry(10))
+				_ = s.Set(context.Background(), numKey(i), entry(10))
 			}
-			if err := s.CloseContext(ctx); !errors.Is(err, context.Canceled) {
+			if err := s.CloseContext(cut()); !errors.Is(err, context.Canceled) {
 				t.Fatalf("CloseContext = %v, want context.Canceled", err)
 			}
 			if names := dirNames(t, dir); len(names) != 0 {
 				t.Fatalf("directory holds %v, want nothing", names)
 			}
-			if _, err := s.Get(t.Context(), numKey(1)); !errors.Is(err, store.ErrUnavailable) {
+			if _, err := s.Get(context.Background(), numKey(1)); !errors.Is(err, store.ErrUnavailable) {
 				t.Errorf("Get after close = %v, want ErrUnavailable", err)
 			}
 		})
