@@ -80,7 +80,8 @@ func parseLine(d Dict, s string, maxMembers int, n *int) bool {
 		}
 		key := s[:k]
 		s = s[k:]
-		item, ok := Item{Kind: Boolean, Bool: true}, true
+		item := Item{Kind: Boolean, Bool: true}
+		var ok bool
 		if s != "" && s[0] == '=' {
 			item, s, ok = parseValue(s[1:])
 		} else {
