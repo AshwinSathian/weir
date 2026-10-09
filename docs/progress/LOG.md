@@ -1097,3 +1097,11 @@ Entry template:
 - Deviations: FR-SRV-5 in docs/01 said a hit always gets the full 200; reworded to point at FR-RNG-1..3. TestRangeGarbageNotPoisoning now expects 206 on a fresh entry. trace.sh allowlist narrowed to FR-RNG-4.
 - Follow-ups: M11-02 (background fill). Reviewer found no must-fix; its test-gap suggestions were added.
 - Context: low; size M was right.
+
+## 2026-10-09 · M11-01 · review-fixes
+- Branch / PR: claude/busy-ramanujan-mhd5kg / #64 https://github.com/AshwinSathian/weir/pull/64
+- Done: adversarial review of PR #64. Must-fix: the handoff had overwritten STATUS.md and dropped every "Decided" section; restored from main, only the header and notes changed. Decided: a stored `Accept-Ranges: none` makes Weir ignore Range (full 200), since serving a 206 next to that header contradicts the origin; FR-RNG-1 and docs/04 say so. Docs: docs/04 `Classified` fields, `fromEntry` 206/416 and §13.1 416; docs/07 rows match the tests. The earlier LOG line "Reviewer found no must-fix" referred to the first reviewer only.
+- Tests: TestRangeIgnoredWhenAcceptRangesNone. Race tests, vet, gofmt, trace-strict pass; lint unrun.
+- Deviations: FR-RNG-1 gained the Accept-Ranges clause (narrows to the safe side, decided under Ashwin's delegation).
+- Follow-ups: cache-tests rows and baseline need `UPDATE=1 make cache-tests` (node and network); recorded in STATUS. Weir adds no `Accept-Ranges: bytes` to 206/416 (advisory).
+- Context: low.

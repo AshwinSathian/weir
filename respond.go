@@ -6,6 +6,7 @@ import (
 	"maps"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/AshwinSathian/weir/internal/httpcc"
@@ -31,7 +32,7 @@ func (e *Engine) fromEntry(c *keys.Classified, ent *store.Entry, now time.Time, 
 	h["Age"] = age
 	data, status := ent.Body, ent.Status
 	// FR-RNG-1..3, T-37. HEAD ignores Range; If-Range is judged first.
-	if c.Range && !c.Head && ent.Status == http.StatusOK && (!c.HasIfRange || httpcc.IfRangeApplies(c.IfRange, ent)) {
+	if c.Range && !c.Head && ent.Status == http.StatusOK && !acceptRangesNone(ent.Header) && (!c.HasIfRange || httpcc.IfRangeApplies(c.IfRange, ent)) {
 		start, end, kind := httpcc.ParseRange(c.RangeValue, int64(len(ent.Body)))
 		switch kind {
 		case httpcc.RangeOK:
@@ -62,4 +63,16 @@ func (e *Engine) finish(r *Response, ci CacheInfo) *Response {
 		r.Header["Cache-Status"] = append(old[:len(old):len(old)], cacheStatus(e.cfg.CacheStatus, ci))
 	}
 	return r
+}
+
+// acceptRangesNone reports whether the origin disclaimed range support on the
+// stored response (RFC 9110 §14.3). Weir then ignores Range rather than
+// contradict the header it serves with the 206 (RFC 9110 §14.2 allows it).
+func acceptRangesNone(h http.Header) bool {
+	for _, v := range h["Accept-Ranges"] {
+		if strings.EqualFold(strings.TrimSpace(v), "none") {
+			return true
+		}
+	}
+	return false
 }

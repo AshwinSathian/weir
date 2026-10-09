@@ -1,7 +1,7 @@
 # Weir testing strategy
 
 Status: v1.0
-Date: 2026-10-08
+Date: 2026-10-09
 Depends on: [01-technical-spec.md](01-technical-spec.md), [06-threat-model.md](06-threat-model.md)
 Seed name: `03-testing-strategy.md` (renumbered, see [docs/README.md](README.md))
 
@@ -254,9 +254,9 @@ Named in [06-threat-model.md](06-threat-model.md), [01-technical-spec.md](01-tec
 
 | Test | Asserts |
 |---|---|
-| `TestRangeSingleFromCache` (engine) | `bytes=0-99`, `bytes=100-`, `bytes=-50` on a stored 1 000-byte entry return 206 with correct bytes and `Content-Range`; no origin call |
-| `TestRangeUnsatisfiable416` (engine) | `bytes=5000-` on a 1 000-byte entry returns 416 with `Content-Range: bytes */1000` |
-| `TestRangeMultiOrInvalidGets200` (engine) | `bytes=0-1,5-6`, `bytes=cow`, `items=0-1` return the full 200 |
+| `TestRangeSingleFromCache` (engine) | `bytes=2-5`, `bytes=7-`, `bytes=-4`, `bytes=8-99` on a stored 10-byte entry return 206 with correct bytes and `Content-Range`; no origin call |
+| `TestRangeUnsatisfiable416` (engine) | `bytes=10-`, `bytes=50-60`, `bytes=-0` on a 10-byte entry return 416 with `Content-Range: bytes */10` |
+| `TestRangeMultiOrInvalidGets200` (engine) | `bytes=0-1,4-5`, `bytes=5-2`, `bytes=a-b`, `items=0-1`, repeated Range lines return the full 200; `Accept-Ranges: none` on the stored entry does too |
 | `TestIfRangeStrongOnly` (engine) | weak ETag or a non-strong date in `If-Range` yields the full 200 |
 | `TestRangeMissBackgroundFillBounded` (engine) | 1 000 range requests across 1 000 cold URLs: origin in-flight stays within the background limit; exactly one fill per URL whose 206 total is within `MaxObjectBytes`; none for larger totals |
 | `FuzzRange` (property) | no panic; `RangeOK` results always satisfy `0 <= start <= end < size` |

@@ -224,3 +224,17 @@ func TestRangeOnNonOKEntryNotSliced(t *testing.T) {
 		}
 	})
 }
+
+// FR-RNG-1: an origin that said Accept-Ranges: none is not contradicted.
+func TestRangeIgnoredWhenAcceptRangesNone(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		o := rangeOrigin(t, http.Header{"Accept-Ranges": {"none"}}, "0123456789")
+		e := newEngine(t, cacheCfg)
+		defer closeEngine(t, e)
+		serve(t, e, getReq("/a"), o)
+		resp, body := serve(t, e, withHeader(getReq("/a"), "Range", "bytes=1-2"), o)
+		if resp.StatusCode != http.StatusOK || body != "0123456789" || resp.Header.Get("Content-Range") != "" || !resp.Cache.Hit {
+			t.Fatalf("got %d %q Content-Range=%q hit=%v, want the full 200 hit", resp.StatusCode, body, resp.Header.Get("Content-Range"), resp.Cache.Hit)
+		}
+	})
+}

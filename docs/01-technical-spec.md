@@ -566,7 +566,7 @@ Open: none that block any milestone before Phase 3.
 
 ### 13.1 Single-range responses (M11, D11)
 
-- FR-RNG-1. For a `GET` with `Range` whose stored entry is fresh or servable under SWR and has status 200, Weir evaluates `If-Range` first (RFC 9110 §13.1.5: only a strong `ETag` match, or a `Last-Modified` date that is a strong validator, lets the range apply; otherwise the full 200 is sent).
+- FR-RNG-1. For a `GET` with `Range` whose stored entry is fresh or servable under SWR and has status 200, Weir ignores `Range` when the stored response says `Accept-Ranges: none` (RFC 9110 §14.3; the full 200 is sent), and otherwise evaluates `If-Range` first (RFC 9110 §13.1.5: only a strong `ETag` match, or a `Last-Modified` date that is a strong validator, lets the range apply; otherwise the full 200 is sent).
 - FR-RNG-2. A single `bytes` range (`a-b`, `a-`, `-n`) that is satisfiable is answered with 206, `Content-Range: bytes a-b/len`, and a body sliced from the stored bytes without copying. The range applies to the stored representation bytes (after any content coding).
 - FR-RNG-3. An unsatisfiable single range yields 416 with `Content-Range: bytes */len`. Invalid specifiers, unknown units, and requests with more than one range get the full 200 (RFC 9110 §14.2 permits ignoring Range). `HEAD` ignores `Range`.
 - FR-RNG-4. A range request with no usable entry is passed through as in FR-SRV-5. If the origin answers 206 with `Content-Range: bytes a-b/total`, `total <= Storable.MaxObjectBytes`, and the 206 would pass every storability rule except its status, Weir starts one background full-object fetch for the key (coalesced, background class) so later range requests are served from cache. Range requests never trigger foreground full fetches (T-37).
