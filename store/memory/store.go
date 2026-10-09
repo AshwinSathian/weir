@@ -17,7 +17,12 @@ type Config struct {
 	Shards        int           // 0: 16; a power of two, at most MaxShards
 	MaxRetention  time.Duration // 0: 24h; caps every record's lifetime (E-11)
 	MaxHardEpochs int           // 0: 10000 (E-6)
-	EpochSlots    int           // 0: 1 << 19; a power of two, at most MaxEpochSlots (E-7)
+	// SnapshotPath, when set, makes Close write a snapshot there (FR-SNP-1).
+	SnapshotPath string
+	// SnapshotTimeout bounds the snapshot written by Close; CloseContext uses
+	// its own context instead. 0: 5s.
+	SnapshotTimeout time.Duration
+	EpochSlots      int // 0: 1 << 19; a power of two, at most MaxEpochSlots (E-7)
 	// OnEvict, when set, receives per-Set eviction counts by queue: "small",
 	// "main" or "expired". It runs after the shard lock is released.
 	OnEvict func(queue string, n int)
@@ -36,6 +41,9 @@ type Store struct {
 	onEvict func(string, int)
 	ep      *epochs
 	closed  atomic.Bool
+
+	snapPath    string
+	snapTimeout time.Duration
 }
 
 var (
@@ -62,8 +70,11 @@ func New(cfg Config) (*Store, error) {
 	if cfg.EpochSlots == 0 {
 		cfg.EpochSlots = 1 << 19
 	}
-	if cfg.MaxBytes < 0 || cfg.MaxRetention < 0 || cfg.MaxHardEpochs < 0 {
-		return nil, errors.New("store: memory: negative MaxBytes, MaxRetention or MaxHardEpochs")
+	if cfg.SnapshotTimeout == 0 {
+		cfg.SnapshotTimeout = defaultSnapshotTimeout
+	}
+	if cfg.MaxBytes < 0 || cfg.MaxRetention < 0 || cfg.MaxHardEpochs < 0 || cfg.SnapshotTimeout < 0 {
+		return nil, errors.New("store: memory: negative MaxBytes, MaxRetention, MaxHardEpochs or SnapshotTimeout")
 	}
 	if !powerOfTwo(cfg.Shards, MaxShards) {
 		return nil, errors.New("store: memory: Shards is not a power of two up to MaxShards")
@@ -72,12 +83,14 @@ func New(cfg Config) (*Store, error) {
 		return nil, errors.New("store: memory: EpochSlots is not a power of two up to MaxEpochSlots")
 	}
 	s := &Store{
-		shards:  make([]shard, cfg.Shards),
-		mask:    uint64(cfg.Shards - 1), //nolint:gosec // Shards is a positive power of two
-		seed:    maphash.MakeSeed(),
-		fpSeed:  maphash.MakeSeed(),
-		onEvict: cfg.OnEvict,
-		ep:      newEpochs(cfg.EpochSlots, cfg.MaxHardEpochs, cfg.MaxRetention),
+		shards:      make([]shard, cfg.Shards),
+		mask:        uint64(cfg.Shards - 1), //nolint:gosec // Shards is a positive power of two
+		seed:        maphash.MakeSeed(),
+		fpSeed:      maphash.MakeSeed(),
+		onEvict:     cfg.OnEvict,
+		snapPath:    cfg.SnapshotPath,
+		snapTimeout: cfg.SnapshotTimeout,
+		ep:          newEpochs(cfg.EpochSlots, cfg.MaxHardEpochs, cfg.MaxRetention),
 	}
 	for i := range s.shards {
 		s.shards[i] = newShard(cfg.MaxBytes / int64(cfg.Shards))
@@ -195,12 +208,6 @@ func (s *Store) NewestEpochShared(_ context.Context, tags, shared []store.Tag, s
 
 // Info names the store; it is not remote.
 func (s *Store) Info() store.Info { return store.Info{Name: "memory"} }
-
-// Close marks the store closed. It is idempotent.
-func (s *Store) Close() error {
-	s.closed.Store(true)
-	return nil
-}
 
 // Bytes returns the bytes currently accounted across all shards.
 func (s *Store) Bytes() int64 {
