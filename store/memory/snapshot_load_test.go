@@ -108,7 +108,9 @@ func TestSnapshotLoadRoundTrip(t *testing.T) {
 }
 
 // FR-SNP-2, T-33: every loaded entry is stale as of the restart, so a purge
-// issued while the node was down cannot be undone by the snapshot.
+// issued while the node was down cannot be undone by the snapshot. The epoch
+// is invalid, not soft: the writer does not persist invalid epochs, so a
+// loaded entry must never be served stale (FR-STL-5).
 func TestSnapshotLoadIsSoftStale(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "weir.snap")
 	f := newSnapFile()
@@ -122,8 +124,8 @@ func TestSnapshotLoadIsSoftStale(t *testing.T) {
 		t.Fatal(err)
 	}
 	ep, ok, err := s.NewestEpoch(ctx, []store.Tag{store.TagGlobal()}, e.RequestTime)
-	if err != nil || !ok || ep.Mode != store.EpochSoft || ep.At.Before(e.RequestTime) {
-		t.Fatalf("global epoch = %+v, %v, %v; want soft at or after the entry's request time", ep, ok, err)
+	if err != nil || !ok || ep.Mode != store.EpochInvalid || ep.At.Before(e.RequestTime) {
+		t.Fatalf("global epoch = %+v, %v, %v; want invalid at or after the entry's request time", ep, ok, err)
 	}
 }
 
@@ -295,7 +297,7 @@ func TestSnapshotLostRecordFailsClosed(t *testing.T) {
 		mutate   func(t *testing.T, f *snapFile)
 		wantHard bool
 	}{
-		{"clean load stays soft", func(*testing.T, *snapFile) {}, false},
+		{"clean load stays invalid, not hard", func(*testing.T, *snapFile) {}, false},
 		{"epoch with a bad CRC", func(_ *testing.T, f *snapFile) {
 			f.epoch(store.Tag{7}, time.Now())
 			f.b[len(f.b)-1] ^= 0xFF
@@ -342,7 +344,42 @@ func TestSnapshotLoadClampsFutureRequestTime(t *testing.T) {
 		t.Fatal(err)
 	}
 	ep, ok, _ := s.NewestEpoch(context.Background(), []store.Tag{store.TagGlobal()}, got.RequestTime)
-	if !ok || ep.Mode != store.EpochSoft {
-		t.Errorf("epoch since the entry's request time = %+v, %v; want the load-time soft epoch", ep, ok)
+	if !ok || ep.Mode != store.EpochInvalid {
+		t.Errorf("epoch since the entry's request time = %+v, %v; want the load-time invalid epoch", ep, ok)
+	}
+}
+
+// T-21: a length prefix larger than the bytes left ends the load, without
+// allocating for it, and fails closed.
+func TestSnapshotLoadLengthBeyondFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "weir.snap")
+	f := newSnapFile()
+	f.b = append(f.b, snapKindEntry)
+	f.b = binary.AppendUvarint(f.b, 100<<10) // within the object limit, far beyond the file
+	f.write(t, path)
+	s := loadFrom(t, path, Config{})
+	if !s.snapLoad.lost || !globalHard(t, s, time.Now().Add(-time.Hour)) {
+		t.Errorf("stats = %+v; want lost and a global hard epoch", s.snapLoad)
+	}
+}
+
+// T-33: a snapshot that cannot be removed would reload after a crash with its
+// old epochs, so the loader fails closed.
+func TestSnapshotRemoveFailureFailsClosed(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores directory permissions")
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "weir.snap")
+	f := newSnapFile()
+	f.entry(t, numKey(1), liveEntry("x"))
+	f.write(t, path)
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+	s := loadFrom(t, path, Config{})
+	if !globalHard(t, s, time.Now().Add(-time.Hour)) {
+		t.Error("no global hard epoch after a failed remove")
 	}
 }

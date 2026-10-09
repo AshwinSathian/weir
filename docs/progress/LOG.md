@@ -982,7 +982,7 @@ Entry template:
 - Context: medium; size S was a little small because of the failure triage.
 
 ## 2026-10-07 · M10-04 · done
-- Branch / PR: claude/zealous-ritchie-wdpztv / https://github.com/AshwinSathian/weir/pull/69
+- Branch / PR: claude/zealous-ritchie-wdpztv / see STATUS
 - Done: handoff of the work in the previous entry, plus review fixes: fuzz list no longer hides compile errors and fails on an empty matrix, script waits for origin and proxy and prints CLI errors, `npm ci` with fallback, weirproxy `splitList` test, `headers-store-Transfer-Encoding` moved to Unexplained, `conditional-etag-forward*` cites D4 only.
 - Tests: TestSplitList added; root race tests, gofmt, vet and trace (130/152) pass; the baseline run still reports no regressions. Lint unrun locally (Go 1.25 build); CI must confirm.
 - Deviations: none beyond the docs/07 §8 paragraph.
@@ -1187,3 +1187,11 @@ Entry template:
 - Deviations: docs/04 §13.3 gained the loader failure mode paragraph (no requirement change). Card note "New must not write a snapshot on failed construction" not implemented: the engine passes no SnapshotPath today.
 - Follow-ups: whichever card adds the Config field for SnapshotPath must replace `_ = c.Store.Close()` on the MaxObjectBytes failure path in engine.go with a non-snapshotting close. Public accessor for load counts needs approval.
 - Context: low; size M was right.
+
+## 2026-10-09 · M13-02 · review-fixes
+- Branch / PR: claude/cool-maxwell-y4bqri / https://github.com/AshwinSathian/weir/pull/69
+- Done: independent adversarial review. Must-fix: loader wrote a soft epoch, so an entry invalidated before restart came back servable stale (FR-STL-5); now a global invalid epoch. Should-fix: failed `os.Remove` of the snapshot now fails closed; `Engine.Close` falls back to `Store.Close()` when the grace ctx is spent; failed `New` closes with a cancelled ctx (card note met); record length capped by bytes left; rejected epochs count as skipped. Reverted an unrelated edit to an older LOG entry.
+- Tests: TestSnapshotLoadLengthBeyondFile, TestSnapshotRemoveFailureFailsClosed (skipped as root), TestCloseStoreWithCancelledContextWritesNoSnapshot; soft-stale tests now assert invalid. Race tests, vet, gofmt pass; lint unrun.
+- Deviations: FR-SNP-2/3, T-33, LLD 13.3 and docs/05 5.5 updated (invalid instead of soft; fail-closed; counters internal; admission order only). No public API added: the load-count accessor stays deferred.
+- Follow-ups: M14-01 note (loader honors quotas). Hot-first queue placement on load left as a ponytail.
+- Context: low.

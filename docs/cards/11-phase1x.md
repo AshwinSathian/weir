@@ -51,6 +51,7 @@
 - Touch: internal/limiter, store/memory/shard.go, entry.go (owner), tests
 - Tests: TestPerHostLimiterCap, TestOwnerQuotaIsolatesTenants
 - AC: defaults off in the library; `make check` passes
+- Notes: the snapshot loader (store/memory/snapshot_load.go) admits records through `put`; make it honor per-owner quotas (FR-SNP-3).
 
 ### [ ] M15-01 Eager hard purge
 - Plan: M15 · Size: S · Depends on: M14-01

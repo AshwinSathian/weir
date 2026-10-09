@@ -86,7 +86,12 @@ func New(cfg Config) (*Engine, error) {
 	}
 	if sz, ok := c.Store.(store.Sizer); ok && c.Storable.MaxObjectBytes > sz.MaxObjectBytes() {
 		if own {
-			_ = c.Store.Close()
+			// A cancelled context makes CloseContext skip the snapshot, so a
+			// failed construction cannot replace a good snapshot with an
+			// empty store's.
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			_ = closeStore(ctx, c.Store)
 		}
 		return nil, invalid("Storable.MaxObjectBytes", fmt.Sprintf("above the store's limit of %d", sz.MaxObjectBytes()))
 	}
@@ -205,7 +210,14 @@ func (e *Engine) Close(ctx context.Context) error {
 	<-done
 	var storeErr error
 	if e.ownStore {
-		storeErr = closeStore(ctx, e.sg.s)
+		if ctx.Err() != nil {
+			// The drain used the whole grace period. Skipping the snapshot
+			// would lose the cache, so the store gets its own bounded budget
+			// (SnapshotTimeout) instead of a spent context.
+			storeErr = e.sg.s.Close()
+		} else {
+			storeErr = closeStore(ctx, e.sg.s)
+		}
 	}
 	return errors.Join(graceErr, storeErr)
 }

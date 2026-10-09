@@ -52,18 +52,28 @@ func (s *Store) loadSnapshot() {
 		return
 	}
 	// From here the file is ours: whatever its state, it must not load twice.
-	defer func() { _ = os.Remove(s.snapPath) }()
+	// If it cannot be removed, a crash before the next Close would reload it
+	// together with its old epochs and lose any purge issued meanwhile, so
+	// that counts as a lost record (T-33).
+	defer func() {
+		if err := os.Remove(s.snapPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+			_ = s.ep.set(s.ep.globalTag, store.Epoch{At: time.Now(), Mode: store.EpochHard})
+		}
+	}()
 	count, ok := trailerCount(f, size)
 	if hdr[len(snapMagic)] != snapVersion || !ok {
 		return
 	}
-	if s.readRecords(bufio.NewReader(io.LimitReader(f, size-int64(snapHeaderLen)-snapTrailerLen))) != nil ||
+	if s.readRecords(&io.LimitedReader{R: f, N: size - int64(snapHeaderLen) - snapTrailerLen}) != nil ||
 		s.snapLoad.seen != count {
 		s.snapLoad.lost = true
 	}
 	now := time.Now()
-	// Everything loaded is stale as of now, whatever it was when written (T-33).
-	_ = s.ep.set(s.ep.globalTag, store.Epoch{At: now, Mode: store.EpochSoft})
+	// Everything loaded is stale as of now, and never servable stale: the
+	// writer does not persist soft or invalid epochs, so an entry that was
+	// invalidated before the restart cannot be told from one that was not
+	// (T-33, FR-STL-5). First hits revalidate.
+	_ = s.ep.set(s.ep.globalTag, store.Epoch{At: now, Mode: store.EpochInvalid})
 	if s.snapLoad.lost {
 		// T-33: a purge's hard epoch may be among what was lost, and the
 		// writer puts epochs last. Fail closed: nothing loaded may be served
@@ -99,7 +109,8 @@ func trailerCount(f *os.File, size int64) (uint64, bool) {
 // since the next record cannot be found (T-21: no length is trusted before it
 // is checked against maxRec and the bytes left). It returns an error when
 // the stream ended before a clean end of file.
-func (s *Store) readRecords(r *bufio.Reader) error {
+func (s *Store) readRecords(lr *io.LimitedReader) error {
+	r := bufio.NewReader(lr)
 	maxRec := uint64(s.MaxObjectBytes()) + uint64(snapKeyLen) + 1<<10 // headroom for codec framing
 	for {
 		kind, err := r.ReadByte()
@@ -110,12 +121,11 @@ func (s *Store) readRecords(r *bufio.Reader) error {
 			return err
 		}
 		n, err := binary.ReadUvarint(r)
-		if err != nil || n > maxRec {
+		if left := uint64(lr.N) + uint64(r.Buffered()); err != nil || n > maxRec || n+4 > left { //nolint:gosec // both non-negative
 			s.snapLoad.skipped++
 			return errors.New("store: memory: snapshot: bad record length")
 		}
-		buf := make([]byte, 1+binary.MaxVarintLen64+int(n)+4) //nolint:gosec // n <= maxRec
-		buf = append(buf[:0], kind)
+		buf := append(make([]byte, 0, 1+binary.MaxVarintLen64+int(n)+4), kind) //nolint:gosec // n <= maxRec
 		buf = binary.AppendUvarint(buf, n)
 		start := len(buf)
 		buf = buf[:start+int(n)+4] //nolint:gosec // n <= maxRec
@@ -152,6 +162,9 @@ func (s *Store) loadRecord(kind byte, p []byte) {
 		if now := time.Now(); e.RequestTime.After(now) {
 			e.RequestTime = now
 		}
+		// ponytail: every record enters the small queue, so under later
+		// pressure the oldest-admitted (hottest) records are evicted first.
+		// Upgrade: mark main-section records in the file and push them to main.
 		switch s.put(store.Key(p[:snapKeyLen]), e, true) {
 		case putStored:
 			st.loaded++
@@ -168,11 +181,7 @@ func (s *Store) loadRecord(kind byte, p []byte) {
 		}
 		at := time.Unix(0, int64(binary.BigEndian.Uint64(p[len(store.Tag{}):]))) //nolint:gosec // bit pattern
 		if err := s.ep.set(store.Tag(p[:len(store.Tag{})]), store.Epoch{At: at, Mode: store.EpochHard}); err != nil {
-			if !errors.Is(err, store.ErrUnavailable) {
-				st.skipped++
-			} else {
-				st.dropped++
-			}
+			st.skipped++
 			st.lost = true
 		}
 	default:

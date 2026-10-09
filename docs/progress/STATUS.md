@@ -18,7 +18,7 @@ none. golangci-lint in this container is built with Go 1.25 and cannot load the 
 
 ## Notes for the next session
 
-- M13-02: loader fails closed (global hard epoch) when any possible epoch record is lost. `Engine.Close` calls `CloseContext` through `closeStore`. Engine sets no SnapshotPath yet; the card adding that Config field must also stop `New`'s failure path from snapshotting via `Store.Close()`. Load counts live in unexported `Store.snapLoad`. Lint unrun (container golangci-lint is Go 1.25); CI must confirm.
+- M13-02: loader writes a global invalid epoch (not soft) at load, and a global hard epoch when a possible epoch record is lost or the file cannot be removed. `Engine.Close` falls back to `Store.Close()` when the grace ctx is spent; a failed `New` closes with a cancelled ctx (no snapshot). Load counts stay in unexported `Store.snapLoad` (decision: no public accessor yet; FR-SNP-2 says so). Queue placement is not restored on load (ponytail comment). M14-01 card notes the loader must honor quotas. Lint unrun (container golangci-lint is Go 1.25); CI must confirm.
 
 - M13-01: `memory.Store.CloseContext(ctx)` writes the snapshot; `Close()` wraps it with `Config.SnapshotTimeout` (5s). `store.Store` still has `Close() error`. The engine does not call `CloseContext` yet: M13-02 or a follow-up must wire `Engine.Close` via an optional interface so the adapter grace period bounds it (LLD 13.3 says so). The header's base wall time is written but unread. Hard-epoch records hold tag + UnixNano; writer emits main-queue records, then small, then epochs, then trailer 0xFF with the count. `snapRecord` parsing in snapshot_write_test.go can seed the loader tests.
 - Lint unrun for M13-01 (container golangci-lint is Go 1.25); CI must confirm.
