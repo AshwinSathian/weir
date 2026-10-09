@@ -1105,3 +1105,11 @@ Entry template:
 - Deviations: FR-RNG-1 gained the Accept-Ranges clause (narrows to the safe side, decided under Ashwin's delegation).
 - Follow-ups: cache-tests rows and baseline need `UPDATE=1 make cache-tests` (node and network); recorded in STATUS. Weir adds no `Accept-Ranges: bytes` to 206/416 (advisory).
 - Context: low.
+
+## 2026-10-09 · M11-02 · done
+- Branch / PR: claude/zen-carson-gp029q / PR_URL
+- Done: `rangeMiss` (serve.go) starts one background-class full fetch after a Range miss when the 206 declares a total within `MaxObjectBytes` and would be storable as a 200; `contentRangeTotal` parser; `backgroundRefresh` accepts a key with no entry. Credentialed, no-store and hit-for-miss requests never fill.
+- Tests: TestRangeMissBackgroundFillBounded, TestRangeMissFillRevalidatesStaleEntry, TestContentRangeTotal, FuzzContentRangeTotal. `make check` passes (lint built with the Go 1.27 toolchain).
+- Deviations: docs/04 §13.1 said the fill lives "in `pass()`"; it lives in `rangeMiss`, which wraps it. Reworded, plus the stale-entry and gate notes.
+- Follow-ups: reviewer found no must-fix; its stale-entry test, docs and checklist notes were applied. HEAD+Range fill is unpinned by a test.
+- Context: low; size S was right.

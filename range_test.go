@@ -378,3 +378,41 @@ func TestRangeMissBackgroundFillBounded(t *testing.T) {
 		})
 	})
 }
+
+// FR-RNG-4, T-37: with a stale entry under the key the fill revalidates it
+// (no Range, If-None-Match), and the freshened entry then answers ranges.
+func TestRangeMissFillRevalidatesStaleEntry(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		o := testorigin.NewChecked(t, 64, 16)
+		o.Default(testorigin.Behavior{Func: func(r *weir.Request) (*weir.Response, error) {
+			h := http.Header{"Cache-Control": {"max-age=60"}, "Etag": {`"v1"`}}
+			status, body := http.StatusOK, "0123456789"
+			switch {
+			case r.Header.Get("Range") != "":
+				status, body = http.StatusPartialContent, "01"
+				h.Set("Content-Range", "bytes 0-1/10")
+			case r.Header.Get("If-None-Match") != "":
+				status, body = http.StatusNotModified, ""
+			}
+			return &weir.Response{StatusCode: status, Header: h, Body: io.NopCloser(strings.NewReader(body))}, nil
+		}})
+		e := newEngine(t, cacheCfg)
+		defer closeEngine(t, e)
+		serve(t, e, getReq("/a"), o)
+		time.Sleep(61 * time.Second)
+
+		resp, body := serve(t, e, withHeader(getReq("/a"), "Range", "bytes=0-1"), o)
+		if resp.StatusCode != http.StatusPartialContent || body != "01" || resp.Cache.Hit {
+			t.Fatalf("got %d %q hit=%v, want the origin's 206", resp.StatusCode, body, resp.Cache.Hit)
+		}
+		synctest.Wait()
+		reqs := o.Requests() // initial fetch, the range, the fill
+		if len(reqs) != 3 || reqs[2].Header.Get("Range") != "" || reqs[2].Header.Get("If-None-Match") != `"v1"` {
+			t.Fatalf("calls = %d; fill must be a conditional request without Range: %v", len(reqs), reqs[len(reqs)-1].Header)
+		}
+		resp, body = serve(t, e, withHeader(getReq("/a"), "Range", "bytes=2-4"), o)
+		if resp.StatusCode != http.StatusPartialContent || body != "234" || !resp.Cache.Hit || o.Calls("/a") != 3 {
+			t.Fatalf("got %d %q hit=%v calls=%d, want a 206 hit from the revalidated entry", resp.StatusCode, body, resp.Cache.Hit, o.Calls("/a"))
+		}
+	})
+}
