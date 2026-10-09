@@ -1227,3 +1227,28 @@ Entry template:
 - Deviations: none beyond docs wording; no public signature changed.
 - Follow-ups: none.
 - Context: low.
+
+## 2026-10-09 · M16-01 · blocked
+- Branch / PR: claude/zen-rubin-hynjow / https://github.com/AshwinSathian/weir/pull/72
+- Done: throwaway pointer-free prototype (one encoded record per entry in 1 MiB chunks, pointer-free index), saved as docs/benchmarks/m16-prototype.patch and not applied; GC at 1M entries measured for heap and prototype at GOGC 100 and 200; hit path measured with benchstat; docs/benchmarks.md section and a D36 note in docs/02 written.
+- Tests: `TestGCAt1MEntries` x4, `BenchmarkServeHitSmall` and `BenchmarkMemoryStoreGetParallel` x12 samples each. No code merged, so `make check` is not affected; docs only.
+- Deviations: the AC asks to measure an allocation cut on the heap layout; it is a projection from the linear formula, not a run (stated in docs/benchmarks.md). D36 in 01 is unchanged and the card is not marked done, because the AC says the user decides.
+- Review: card-reviewer, no must-fix. Fixed: prototype GOGC=200 cells (0.007 µs, 0.06%), headroom wording, gate margin note. Left: allocation cut stays a projection.
+- Follow-ups: Ashwin's decision (STATUS, Waiting on Ashwin). The allocation-cut alternative is a projection, not a measurement. Reference-machine rerun still pending.
+- Context: medium; size S was right apart from the 15 minutes of benchmark runs.
+
+## 2026-10-09 · M16-01 · review-fixes
+- Branch / PR: claude/zen-rubin-hynjow / https://github.com/AshwinSathian/weir/pull/72
+- Done: decision taken by delegation: keep the heap layout, D36 rewritten around a 2 µs GC-per-request gate, M16-02 deferred to 20-later.md, M16-01 marked done; `gc_test.go` reports GC µs per request (GOGC-aware) instead of the 10% share line.
+- Tests: `TestGCAt1MEntries` smoke run at reduced scale; vet, gofmt, race tests, trace.
+- Deviations: D36 (a decision) and the M16-02 card changed, both by Ashwin's delegation.
+- Follow-ups: reference-machine rerun to re-base the gate; allocation cut remains a projection.
+- Context: low.
+
+## 2026-10-09 · M16-01 · review-fixes
+- Branch / PR: claude/zen-rubin-hynjow / https://github.com/AshwinSathian/weir/pull/72
+- Done: adversarial review of the decision commit, no must-fix. Fixed: docs/07 and docs/02 stale lines; gate scope stated (per harness hit, `GOMEMLIMIT` unset); deferred cards use a `[~]` marker that `card.sh next` skips (README, script); M16-02 Tests/AC rewritten to the µs gate; `gogc()` guards GOGC=off; gate log only at 1M entries; AC notes the allocation cut as a projection.
+- Tests: vet (also with the load tag), gofmt, trace 146/146; `card.sh next/list/<ID>` checked by hand.
+- Deviations: scripts/card.sh and docs/cards/README.md gained the `[~]` marker.
+- Follow-ups: reference-machine rerun to re-base the gate.
+- Context: low.

@@ -1,0 +1,52 @@
+# M16-01 hit-path benchmarks, same box, 6 runs x 2 interleaved batches (heap, proto, heap, proto).
+# WEIR_STORE=heap|proto go test -run '^$' -bench 'ServeHitSmall$|MemoryStoreGetParallel' -count 6 . ./store/memory
+## heap
+BenchmarkServeHitSmall-4   	  223862	      4683 ns/op	    1544 B/op	      14 allocs/op
+BenchmarkServeHitSmall-4   	  245992	      4610 ns/op	    1544 B/op	      14 allocs/op
+BenchmarkServeHitSmall-4   	  256718	      4710 ns/op	    1544 B/op	      14 allocs/op
+BenchmarkServeHitSmall-4   	  248632	      4326 ns/op	    1544 B/op	      14 allocs/op
+BenchmarkServeHitSmall-4   	  311848	      4577 ns/op	    1544 B/op	      14 allocs/op
+BenchmarkServeHitSmall-4   	  216408	      4696 ns/op	    1544 B/op	      14 allocs/op
+BenchmarkMemoryStoreGetParallel-4   	22963404	        54.44 ns/op	       0 B/op	       0 allocs/op
+BenchmarkMemoryStoreGetParallel-4   	20388159	        56.99 ns/op	       0 B/op	       0 allocs/op
+BenchmarkMemoryStoreGetParallel-4   	23706294	        44.75 ns/op	       0 B/op	       0 allocs/op
+BenchmarkMemoryStoreGetParallel-4   	23517598	        54.70 ns/op	       0 B/op	       0 allocs/op
+BenchmarkMemoryStoreGetParallel-4   	20998922	        53.97 ns/op	       0 B/op	       0 allocs/op
+BenchmarkMemoryStoreGetParallel-4   	21577234	        52.00 ns/op	       0 B/op	       0 allocs/op
+BenchmarkServeHitSmall-4   	  290930	      4027 ns/op	    1544 B/op	      14 allocs/op
+BenchmarkServeHitSmall-4   	  242050	      4517 ns/op	    1544 B/op	      14 allocs/op
+BenchmarkServeHitSmall-4   	  237452	      4569 ns/op	    1544 B/op	      14 allocs/op
+BenchmarkServeHitSmall-4   	  297346	      4259 ns/op	    1544 B/op	      14 allocs/op
+BenchmarkServeHitSmall-4   	  244222	      5036 ns/op	    1544 B/op	      14 allocs/op
+BenchmarkServeHitSmall-4   	  258456	      4709 ns/op	    1544 B/op	      14 allocs/op
+BenchmarkMemoryStoreGetParallel-4   	24555777	        52.44 ns/op	       0 B/op	       0 allocs/op
+BenchmarkMemoryStoreGetParallel-4   	19675234	        60.12 ns/op	       0 B/op	       0 allocs/op
+BenchmarkMemoryStoreGetParallel-4   	19317620	        58.42 ns/op	       0 B/op	       0 allocs/op
+BenchmarkMemoryStoreGetParallel-4   	18335608	        56.32 ns/op	       0 B/op	       0 allocs/op
+BenchmarkMemoryStoreGetParallel-4   	21129450	        58.27 ns/op	       0 B/op	       0 allocs/op
+BenchmarkMemoryStoreGetParallel-4   	24167391	        47.45 ns/op	       0 B/op	       0 allocs/op
+## proto
+BenchmarkServeHitSmall-4   	  175808	      6657 ns/op	    3544 B/op	      26 allocs/op
+BenchmarkServeHitSmall-4   	  204200	      6544 ns/op	    3544 B/op	      26 allocs/op
+BenchmarkServeHitSmall-4   	  187278	      6344 ns/op	    3544 B/op	      26 allocs/op
+BenchmarkServeHitSmall-4   	  186367	      7008 ns/op	    3544 B/op	      26 allocs/op
+BenchmarkServeHitSmall-4   	  201327	      6030 ns/op	    3544 B/op	      26 allocs/op
+BenchmarkServeHitSmall-4   	  186181	      6656 ns/op	    3544 B/op	      26 allocs/op
+BenchmarkMemoryStoreGetParallel-4   	 4397193	       327.1 ns/op	    1413 B/op	       2 allocs/op
+BenchmarkMemoryStoreGetParallel-4   	 3385807	       378.1 ns/op	    1415 B/op	       2 allocs/op
+BenchmarkMemoryStoreGetParallel-4   	 3818094	       354.2 ns/op	    1414 B/op	       2 allocs/op
+BenchmarkMemoryStoreGetParallel-4   	 3373004	       373.7 ns/op	    1415 B/op	       2 allocs/op
+BenchmarkMemoryStoreGetParallel-4   	 3807198	       361.7 ns/op	    1414 B/op	       2 allocs/op
+BenchmarkMemoryStoreGetParallel-4   	 3766740	       297.9 ns/op	    1414 B/op	       2 allocs/op
+BenchmarkServeHitSmall-4   	  182560	      6652 ns/op	    3544 B/op	      26 allocs/op
+BenchmarkServeHitSmall-4   	  177568	      7164 ns/op	    3544 B/op	      26 allocs/op
+BenchmarkServeHitSmall-4   	  233408	      6183 ns/op	    3544 B/op	      26 allocs/op
+BenchmarkServeHitSmall-4   	  205310	      6099 ns/op	    3544 B/op	      26 allocs/op
+BenchmarkServeHitSmall-4   	  183184	      6458 ns/op	    3544 B/op	      26 allocs/op
+BenchmarkServeHitSmall-4   	  212158	      6262 ns/op	    3544 B/op	      26 allocs/op
+BenchmarkMemoryStoreGetParallel-4   	 3073088	       368.2 ns/op	    1415 B/op	       2 allocs/op
+BenchmarkMemoryStoreGetParallel-4   	 3785997	       349.7 ns/op	    1414 B/op	       2 allocs/op
+BenchmarkMemoryStoreGetParallel-4   	 2967471	       350.1 ns/op	    1416 B/op	       2 allocs/op
+BenchmarkMemoryStoreGetParallel-4   	 3785496	       287.9 ns/op	    1414 B/op	       2 allocs/op
+BenchmarkMemoryStoreGetParallel-4   	 4153345	       324.7 ns/op	    1413 B/op	       2 allocs/op
+BenchmarkMemoryStoreGetParallel-4   	 3333577	       309.4 ns/op	    1415 B/op	       2 allocs/op

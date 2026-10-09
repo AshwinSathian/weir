@@ -4,13 +4,17 @@ Updated: 2026-10-09
 Phase: 1
 Current card: none
 Card state: awaiting-merge
-Branch: claude/serene-volta-d9nvnj
-PR: https://github.com/AshwinSathian/weir/pull/71
-Next card: M16-01 per `scripts/card.sh next` (approved as a throwaway prototype)
+Branch: claude/zen-rubin-hynjow
+PR: https://github.com/AshwinSathian/weir/pull/72
+Next card: P2-00 (Finalize the Caddy adapter spec)
 
 ## Waiting on Ashwin
 
 none
+
+## Decided 2026-10-09 (M16-01)
+
+Ashwin delegated "take decisions on all items" on PR 72. Approved the recommendation: keep the heap layout; D36 now gates on GC µs per request (at most 2 µs at 1M entries, 1 KiB, default `GOGC`; now 1.76), reported by `TestGCAt1MEntries`, not asserted; `GOGC=200` is the documented lever. M16-02 deferred (moved to `docs/cards/20-later.md`, reopens as a design change if the gate is exceeded or more than 1M entries are needed). M16-01 marked done.
 
 ## Decided 2026-10-09 (M15-01)
 

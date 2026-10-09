@@ -1,0 +1,92 @@
+# M16-01, 4 vCPU Xeon, go1.27.0, 2026-10-09. Raw output of TestGCAt1MEntries per configuration.
+# go test -tags load -count=1 -run GCAt -v ./loadtest   (WEIR_GC_STORE=heap|proto, GOGC=100|200); prototype: m16-prototype.patch
+
+## heap
+=== RUN   TestGCAt1MEntries
+    gc_test.go:198: 
+        gc at scale (scale 1, 4 CPU, go1.27.0)
+          entries (small / large)            10000 / 1000000
+          heap in use / live after fill      30 / 25 MiB / 2472 / 2099 MiB
+          hit ratio (paced)                  1.0000 / 1.0000
+          GC CPU per forced cycle            11.57 ms (5 cycles, every 5s) / 2247.41 ms (6 cycles, every 5s)
+          paced 20000/s p50                  9.216µs / 10.24µs
+          paced p99 with forced cycles       65.536µs / 57.344µs
+          paced max                          4.397238ms / 5.259991ms
+          saturated requests                 22824180 / 16019381
+          saturated alloc per request        1720.09 B / 1728.14 B
+          saturated non-GC CPU per request   9.80 µs / 12.59 µs
+          saturated natural cycles in window 1450 / 11
+          saturated GC share, runtime-reported 6.04% / 11.50%
+          saturated GC share, projected      7.16% / 12.29%
+        
+    gc_test.go:221: saturated GC share 12.29% is over the 10% line: see docs/benchmarks.md and card M16-01
+--- PASS: TestGCAt1MEntries (201.49s)
+PASS
+ok  	github.com/AshwinSathian/weir/loadtest	201.774s
+
+## proto
+=== RUN   TestGCAt1MEntries
+    gc_test.go:198: 
+        gc at scale (scale 1, 4 CPU, go1.27.0)
+          entries (small / large)            10000 / 1000000
+          heap in use / live after fill      23 / 21 MiB / 1402 / 1394 MiB
+          hit ratio (paced)                  1.0000 / 1.0000
+          GC CPU per forced cycle            1.37 ms (6 cycles, every 5s) / 5.32 ms (5 cycles, every 5s)
+          paced 20000/s p50                  11.264µs / 12.288µs
+          paced p99 with forced cycles       61.44µs / 57.344µs
+          paced max                          20.930633ms / 11.892669ms
+          saturated requests                 21683308 / 19290397
+          saturated alloc per request        3768.20 B / 3775.94 B
+          saturated non-GC CPU per request   10.64 µs / 12.22 µs
+          saturated natural cycles in window 3680 / 50
+          saturated GC share, runtime-reported 3.26% / 0.50%
+          saturated GC share, projected      2.12% / 0.11%
+        
+--- PASS: TestGCAt1MEntries (193.66s)
+PASS
+ok  	github.com/AshwinSathian/weir/loadtest	193.925s
+
+## heap200
+=== RUN   TestGCAt1MEntries
+    gc_test.go:198: 
+        gc at scale (scale 1, 4 CPU, go1.27.0)
+          entries (small / large)            10000 / 1000000
+          heap in use / live after fill      31 / 25 MiB / 2762 / 2098 MiB
+          hit ratio (paced)                  1.0000 / 1.0000
+          GC CPU per forced cycle            9.81 ms (6 cycles, every 5s) / 2362.29 ms (5 cycles, every 5s)
+          paced 20000/s p50                  9.216µs / 11.264µs
+          paced p99 with forced cycles       65.536µs / 57.344µs
+          paced max                          7.668905ms / 11.96374ms
+          saturated requests                 23783057 / 15720710
+          saturated alloc per request        1720.05 B / 1728.23 B
+          saturated non-GC CPU per request   9.69 µs / 12.54 µs
+          saturated natural cycles in window 724 / 5
+          saturated GC share, runtime-reported 3.17% / 6.22%
+          saturated GC share, projected      6.20% / 12.89%
+        
+    gc_test.go:221: saturated GC share 12.89% is over the 10% line: see docs/benchmarks.md and card M16-01
+--- PASS: TestGCAt1MEntries (202.56s)
+PASS
+ok  	github.com/AshwinSathian/weir/loadtest	202.936s
+
+## proto200
+=== RUN   TestGCAt1MEntries
+    gc_test.go:198: 
+        gc at scale (scale 1, 4 CPU, go1.27.0)
+          entries (small / large)            10000 / 1000000
+          heap in use / live after fill      23 / 21 MiB / 1403 / 1395 MiB
+          hit ratio (paced)                  1.0000 / 1.0000
+          GC CPU per forced cycle            2.02 ms (6 cycles, every 5s) / 5.68 ms (6 cycles, every 5s)
+          paced 20000/s p50                  11.264µs / 12.288µs
+          paced p99 with forced cycles       73.728µs / 61.44µs
+          paced max                          4.814201ms / 5.7445ms
+          saturated requests                 21594616 / 17952020
+          saturated alloc per request        3768.11 B / 3775.93 B
+          saturated non-GC CPU per request   10.86 µs / 13.04 µs
+          saturated natural cycles in window 1830 / 23
+          saturated GC share, runtime-reported 1.78% / 0.25%
+          saturated GC share, projected      3.03% / 0.11%
+        
+--- PASS: TestGCAt1MEntries (195.58s)
+PASS
+ok  	github.com/AshwinSathian/weir/loadtest	195.933s
