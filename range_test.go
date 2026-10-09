@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -333,6 +334,7 @@ func TestRangeMissBackgroundFillBounded(t *testing.T) {
 		{"total over MaxObjectBytes", nil, "11", weir.Config{Freshness: cacheCfg.Freshness, Storable: weir.StorableConfig{MaxObjectBytes: 10}}, nil},
 		{"unknown total", nil, "*", cacheCfg, nil},
 		{"unparsable total", nil, "9999999999999999999999", cacheCfg, nil},
+		{"total plus headers over MaxObjectBytes", nil, "10", weir.Config{Freshness: cacheCfg.Freshness, Storable: weir.StorableConfig{MaxObjectBytes: 20}}, nil},
 		{"206 that is not storable", http.Header{"Cache-Control": {"no-store"}}, "10", cacheCfg, nil},
 		{"206 with Set-Cookie", http.Header{"Set-Cookie": {"a=b"}}, "10", cacheCfg, nil},
 		{"206 with no freshness", http.Header{"Cache-Control": {"no-cache"}}, "10", cacheCfg, nil},
@@ -413,6 +415,118 @@ func TestRangeMissFillRevalidatesStaleEntry(t *testing.T) {
 		resp, body = serve(t, e, withHeader(getReq("/a"), "Range", "bytes=2-4"), o)
 		if resp.StatusCode != http.StatusPartialContent || body != "234" || !resp.Cache.Hit || o.Calls("/a") != 3 {
 			t.Fatalf("got %d %q hit=%v calls=%d, want a 206 hit from the revalidated entry", resp.StatusCode, body, resp.Cache.Hit, o.Calls("/a"))
+		}
+	})
+}
+
+// FR-RNG-4, T-37: a flood of cold URLs never holds more full-object fetches
+// than the Background limit, and a dropped fill never fails the range request.
+func TestRangeMissFillFloodBounded(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var inflight, peak atomic.Int32
+		gate := make(chan struct{})
+		o := testorigin.NewChecked(t, 64, 16)
+		o.Default(testorigin.Behavior{Func: func(r *weir.Request) (*weir.Response, error) {
+			h := http.Header{"Cache-Control": {"max-age=60"}}
+			if r.Header.Get("Range") != "" {
+				h.Set("Content-Range", "bytes 0-1/10")
+				return &weir.Response{StatusCode: 206, Header: h, Body: io.NopCloser(strings.NewReader("01"))}, nil
+			}
+			n := inflight.Add(1)
+			for {
+				p := peak.Load()
+				if n <= p || peak.CompareAndSwap(p, n) {
+					break
+				}
+			}
+			<-gate
+			inflight.Add(-1)
+			return &weir.Response{StatusCode: 200, Header: h, Body: io.NopCloser(strings.NewReader("0123456789"))}, nil
+		}})
+		cfg := cacheCfg
+		cfg.Limiter = weir.LimiterConfig{MaxConcurrent: 5, ReserveForeground: 1}
+		e := newEngine(t, cfg)
+		defer closeEngine(t, e)
+		defer close(gate)
+		for i := range 1000 {
+			resp, _ := serve(t, e, withHeader(getReq("/u"+strconv.Itoa(i)), "Range", "bytes=0-1"), o)
+			if resp.StatusCode != http.StatusPartialContent {
+				t.Fatalf("range %d: status %d, want 206", i, resp.StatusCode)
+			}
+		}
+		synctest.Wait()
+		if got := peak.Load(); got < 1 || got > 4 {
+			t.Fatalf("full fetches in flight peaked at %d, want 1..4 (limit minus the foreground reserve)", got)
+		}
+	})
+}
+
+// FR-RNG-4, FR-STO-12: a hit-for-miss marker means the URI is not shareable,
+// so a Range miss under it starts no fill.
+func TestRangeMissNoFillUnderMarker(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		o := testorigin.NewChecked(t, 64, 16)
+		o.Default(testorigin.Behavior{Func: func(r *weir.Request) (*weir.Response, error) {
+			if r.Header.Get("Range") != "" {
+				h := http.Header{"Cache-Control": {"max-age=60"}, "Content-Range": {"bytes 0-1/10"}}
+				return &weir.Response{StatusCode: 206, Header: h, Body: io.NopCloser(strings.NewReader("01"))}, nil
+			}
+			h := http.Header{"Cache-Control": {"no-store"}}
+			return &weir.Response{StatusCode: 200, Header: h, Body: io.NopCloser(strings.NewReader("0123456789"))}, nil
+		}})
+		e := newEngine(t, cacheCfg)
+		defer closeEngine(t, e)
+		serve(t, e, getReq("/a"), o) // writes the marker
+		serve(t, e, withHeader(getReq("/a"), "Range", "bytes=0-1"), o)
+		synctest.Wait()
+		if n := o.Calls("/a"); n != 2 {
+			t.Fatalf("origin calls = %d, want the GET and the range only", n)
+		}
+	})
+}
+
+// FR-RNG-4, T-37: a fill whose body is over MaxObjectBytes (the 206 total
+// lied or the representation changed) is not repeated on every range request.
+func TestRangeMissOversizeFillNotRepeated(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		o := testorigin.NewChecked(t, 64, 16)
+		o.Default(testorigin.Behavior{Func: func(r *weir.Request) (*weir.Response, error) {
+			h := http.Header{"Cache-Control": {"max-age=60"}}
+			if r.Header.Get("Range") != "" {
+				h.Set("Content-Range", "bytes 0-1/10")
+				return &weir.Response{StatusCode: 206, Header: h, Body: io.NopCloser(strings.NewReader("01"))}, nil
+			}
+			return &weir.Response{StatusCode: 200, Header: h, Body: io.NopCloser(strings.NewReader(strings.Repeat("x", 5000)))}, nil
+		}})
+		cfg := cacheCfg
+		cfg.Storable.MaxObjectBytes = 1000
+		e := newEngine(t, cfg)
+		defer closeEngine(t, e)
+		for range 5 {
+			serve(t, e, withHeader(getReq("/a"), "Range", "bytes=0-1"), o)
+			synctest.Wait()
+		}
+		if n := o.Calls("/a"); n != 6 {
+			t.Fatalf("origin calls = %d, want 5 ranges plus one fill", n)
+		}
+	})
+}
+
+// FR-RNG-4, T-37: a HEAD with Range is passed through as a GET (FR-FWD-4) and
+// starts no full-object fill.
+func TestHeadWithRangeMissNoFill(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		o := rangeFillOrigin(t, nil, "10")
+		e := newEngine(t, cacheCfg)
+		defer closeEngine(t, e)
+		req := withHeader(headReq("/a"), "Range", "bytes=0-1")
+		resp, _ := serve(t, e, req, o)
+		synctest.Wait()
+		if resp.StatusCode != http.StatusPartialContent {
+			t.Fatalf("status = %d, want the origin's 206", resp.StatusCode)
+		}
+		if n := o.Calls("/a"); n != 1 {
+			t.Fatalf("origin calls = %d, want 1", n)
 		}
 	})
 }

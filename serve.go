@@ -161,10 +161,13 @@ func (e *Engine) rangeMiss(ctx context.Context, c *keys.Classified, lk lookupRes
 	}
 	// The same requests that never lead a flight (cacheable) never start a
 	// fill, and a hit-for-miss marker says the response is not shareable.
-	if lk.marker || c.Authorized || c.ReqCC.NoStore || !e.fillable(c, resp) {
+	// A HEAD never fills: it forwards as a GET (FR-FWD-4) and a metadata probe
+	// must not cost a full-object fetch (T-37).
+	if c.Head || lk.marker || c.Authorized || c.ReqCC.NoStore || !e.fillable(c, resp) {
 		return resp, nil
 	}
-	e.backgroundRefresh(ctx, c, lk, origin) // c's forwarded request has no Range (T-7)
+	// ponytail: a fill that errors repeats on the next Range miss; see 04 §13.1.
+	e.background(ctx, c, lk, origin, true) // c's forwarded request has no Range (T-7)
 	return resp, nil
 }
 
@@ -175,29 +178,49 @@ func (e *Engine) fillable(c *keys.Classified, resp *Response) bool {
 		return false
 	}
 	total, ok := contentRangeTotal(resp.Header.Get("Content-Range"))
-	if !ok || total > e.cfg.Storable.MaxObjectBytes {
+	// The limit counts headers too (storability), so the 200 the fill will
+	// read must fit total plus its headers.
+	if !ok || total+headerBytes(resp.Header) > e.cfg.Storable.MaxObjectBytes {
 		return false
 	}
 	as200 := &Response{StatusCode: http.StatusOK, Header: resp.Header}
 	return storability(&e.cfg, c, as200, nil, time.Now()).ok
 }
 
-// contentRangeTotal returns the complete length of a "bytes a-b/total"
-// Content-Range; "*" or anything malformed reports false.
+// contentRangeTotal returns the complete length of a 206's
+// "bytes first-last/total" Content-Range. Anything else reports false: "*"
+// totals, the 416 form "bytes */total", signs, overflow, last < first or
+// last >= total (RFC 9110 §14.4).
 func contentRangeTotal(v string) (int64, bool) {
-	i := strings.LastIndexByte(v, '/')
-	if !strings.HasPrefix(v, "bytes ") || i < 0 {
+	rest, ok := strings.CutPrefix(v, "bytes ")
+	if !ok {
 		return 0, false
 	}
-	digits := v[i+1:]
-	if digits == "" || digits[0] < '0' || digits[0] > '9' { // ParseInt would take a sign
+	span, totalS, ok := strings.Cut(rest, "/")
+	if !ok {
 		return 0, false
 	}
-	n, err := strconv.ParseInt(digits, 10, 64)
-	if err != nil || n < 0 {
+	firstS, lastS, ok := strings.Cut(span, "-")
+	if !ok {
 		return 0, false
 	}
-	return n, true
+	first, ok1 := digits(firstS)
+	last, ok2 := digits(lastS)
+	total, ok3 := digits(totalS)
+	if !ok1 || !ok2 || !ok3 || first > last || last >= total {
+		return 0, false
+	}
+	return total, true
+}
+
+// digits parses a non-empty run of ASCII digits; ParseInt alone would take a
+// sign.
+func digits(s string) (int64, bool) {
+	if s == "" || s[0] < '0' || s[0] > '9' {
+		return 0, false
+	}
+	n, err := strconv.ParseInt(s, 10, 64)
+	return n, err == nil
 }
 
 // lookupResult is what the store holds for a request (04 §6.3).
@@ -332,6 +355,13 @@ func (e *Engine) fetchStored(ctx context.Context, sp *fetchSpec, origin Origin) 
 		emit(e.cfg.Observer, Event{Kind: EvNotStored, Time: res.respTime, Partition: c.Partition, Reason: "stream"})
 	case res.over:
 		emit(e.cfg.Observer, Event{Kind: EvNotStored, Time: res.respTime, Partition: c.Partition, Reason: "too-large"})
+		if sp.rangeFill {
+			// T-37: the 206 total promised a storable object. Without a marker
+			// every later Range request would repeat this MaxObjectBytes read.
+			now := res.respTime
+			e.setUnlessResponse(ctx, sp.lk.ck, sp.purged,
+				&store.Entry{Kind: store.KindHitForMiss, StoredAt: now, Expires: now.Add(e.cfg.Coalesce.HitForMissTTL)})
+		}
 	case serverError(res.resp.StatusCode):
 		// Before Publish, so before the creator's respond writes to resp.
 		fr.errHeader = maps.Clone(res.resp.Header)

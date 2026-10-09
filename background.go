@@ -47,6 +47,11 @@ func clampDelta(d time.Duration) time.Duration { return min(max(d, time.Millisec
 // that finds a flight running holds nothing; with no slot outside the
 // reserve the refresh is dropped (FR-LIM-4).
 func (e *Engine) backgroundRefresh(ctx context.Context, c *keys.Classified, lk lookupResult, origin Origin) {
+	e.background(ctx, c, lk, origin, false)
+}
+
+// background is backgroundRefresh; rangeFill marks the fill of a Range miss.
+func (e *Engine) background(ctx context.Context, c *keys.Classified, lk lookupResult, origin Origin, rangeFill bool) {
 	f, created := e.flights.Join(lk.ck, time.Now(), e.cfg.Coalesce.LeaderMaxAge)
 	if !created {
 		return
@@ -56,7 +61,7 @@ func (e *Engine) backgroundRefresh(ctx context.Context, c *keys.Classified, lk l
 	if lk.entry != nil && hasValidators(lk.entry) { // nil: a Range miss fills a key with no entry (FR-RNG-4)
 		prior = lk.entry
 	}
-	sp := &fetchSpec{c: c, lk: lk, prior: prior, found: lk.entry, class: limiter.Background}
+	sp := &fetchSpec{c: c, lk: lk, prior: prior, found: lk.entry, class: limiter.Background, rangeFill: rangeFill}
 	if !e.goBackground(func(bg context.Context) { e.runFlight(bg, ctx, f, sp, origin) }) {
 		emit(e.cfg.Observer, Event{Kind: EvRefreshDropped, Time: time.Now(), Partition: c.Partition, Reason: "closed"})
 		f.Publish(&flightResult{fetchResult: fetchResult{err: ErrClosed}})

@@ -11,9 +11,12 @@ func TestContentRangeTotal(t *testing.T) {
 		ok       bool
 	}{
 		{"closed", "bytes 0-1/10", 10, true},
-		{"zero total", "bytes 0-0/0", 0, true},
+		{"zero total has no byte to span", "bytes 0-0/0", 0, false},
 		{"unknown total", "bytes 0-1/*", 0, false},
-		{"unsatisfied form", "bytes */10", 10, true},
+		{"unsatisfied form is a 416 shape", "bytes */10", 0, false},
+		{"first after last", "bytes 5-2/10", 0, false},
+		{"last at or past total", "bytes 0-10/10", 0, false},
+		{"garbage range", "bytes garbage/10", 0, false},
 		{"wrong unit", "items 0-1/10", 0, false},
 		{"no slash", "bytes 0-1", 0, false},
 		{"negative", "bytes 0-1/-5", 0, false},

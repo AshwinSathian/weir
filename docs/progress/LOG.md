@@ -1113,3 +1113,11 @@ Entry template:
 - Deviations: docs/04 §13.1 said the fill lives "in `pass()`"; it lives in `rangeMiss`, which wraps it. Reworded, plus the stale-entry and gate notes.
 - Follow-ups: reviewer found no must-fix; its stale-entry test, docs and checklist notes were applied. HEAD+Range fill is unpinned by a test.
 - Context: low; size S was right.
+
+## 2026-10-09 · M11-02 · review-fixes
+- Branch / PR: claude/zen-carson-gp029q / https://github.com/AshwinSathian/weir/pull/65
+- Done: adversarial review. Must-fix: T-37 mitigations were unpinned (mutating the fill to Foreground class or dropping the marker gate passed all tests); added flood, marker, over-size and HEAD tests, both mutations now fail. Fixed: HEAD never fills; over-size fill writes a marker; fill gate counts header bytes; `contentRangeTotal` strict (`first <= last < total`). Decided: no code change for Range-miss preconditions (FR-SRV-5 says so); failing fills stay a documented ponytail.
+- Tests: TestRangeMissFillFloodBounded, TestRangeMissNoFillUnderMarker, TestRangeMissOversizeFillNotRepeated, TestHeadWithRangeMissNoFill, extended TestContentRangeTotal and the no-fill table. `make check` passes.
+- Deviations: docs/01 FR-SRV-5, FR-RNG-4; docs/04 §13.1; docs/06 T-37; docs/07 row clarified, no requirement weakened. Reviewer's HEAD routing change (HEAD takes the normal miss path) not taken: it contradicts a tested M11-01 behavior; noted in STATUS.
+- Follow-ups: Vary and hard-purge fill tests; HEAD Range routing; failing-fill suppression if a profile shows it.
+- Context: low.
