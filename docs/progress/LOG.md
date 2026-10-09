@@ -1154,3 +1154,20 @@ Entry template:
 - Deviations: LLD 13.2 states that targeted public, s-maxage and must-revalidate count for Authorization requests (decided: the field is the operator's shared-cache statement). Ashwin may overturn.
 - Follow-ups: none.
 - Context: low.
+
+## 2026-10-09 · M13-01 · done
+- Branch / PR: claude/amazing-bohr-2fi9ve / https://github.com/AshwinSathian/weir/pull/68
+- Done: store/memory/snapshot_write.go (0600 temp file, CRC-32C records, trailer, fsync, atomic rename, deadline discards); Config.SnapshotPath and SnapshotTimeout; `CloseContext(ctx)`.
+- Tests: TestSnapshotRoundTrip, TestSnapshotMainQueueFirst, TestSnapshotRespectsDeadline, TestSnapshotCloseUsesTimeout, TestSnapshotSkipsExpired, TestSnapshotOffAndConfig. Race tests, vet, gofmt, trace pass; lint unrun (Go 1.25 build).
+- Deviations: LLD 13.3 said `Close(ctx)` but `store.Store` is `Close() error`; Ashwin chose an optional `CloseContext` plus `SnapshotTimeout`. LLD 13.3 and docs/05 5.1 updated.
+- Review: card-reviewer must-fix: LLD claimed engine wiring that does not exist; reworded to say it lands later. Applied should-fix: best-effort directory sync, Close timeout test, expired-record test, per-record deadline comment. Left open: none.
+- Follow-ups: wire Engine.Close to CloseContext (with M13-02).
+- Context: low; size M was right.
+
+## 2026-10-09 · M13-01 · review-fixes
+- Branch / PR: claude/amazing-bohr-2fi9ve / https://github.com/AshwinSathian/weir/pull/68
+- Done: adversarial review. Must-fix: the global hard epoch (kept outside the hard table) was not written, so a hard purge would degrade to soft-stale after restart; now written. Also: Close calls serialize and a failed snapshot can be retried; ctx re-checked before rename; epochs past retention skipped; FR-SNP-1 names SnapshotTimeout and CloseContext; Config field order matches docs/05; M13-02 card notes carry the engine wiring and failed-construction caveats.
+- Tests: TestSnapshotWritesGlobalHardEpoch, TestSnapshotSkipsPrunableEpoch, TestSnapshotFailureAndRetry, TestSnapshotConcurrentClose; removed the real-clock sleep from TestSnapshotCloseUsesTimeout. Lint unrun.
+- Deviations: docs/01 FR-SNP-1 wording extended with the approved timeout and CloseContext (no behavior change).
+- Follow-ups: engine wiring and loader in M13-02. Waiting on Ashwin: none.
+- Context: low.

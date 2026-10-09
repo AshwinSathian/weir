@@ -1255,7 +1255,7 @@ FR-RNG-4's background fill: in `rangeMiss` (`serve.go`, which wraps `pass()`) fo
 
 ### 13.3 Snapshot (M13)
 
-Writer runs inside `memory.Store.Close(ctx)`: `os.CreateTemp(dir, ".weir-snap-*")`, `Chmod(0600)`, buffered writer, per-shard read lock while copying node pointers (entries are immutable so encoding happens outside the lock), trailer, `Sync`, `Rename`. Loader in `memory.New`: open, verify magic and trailer first (seek to end), then stream records. `Close` takes a context; the engine's `Close` passes its own, so the adapter's shutdown grace period bounds snapshot time.
+Writer runs inside `memory.Store.Close(ctx)`: `os.CreateTemp(dir, ".weir-snap-*")`, `Chmod(0600)`, buffered writer, per-shard read lock while copying node pointers (entries are immutable so encoding happens outside the lock), trailer, `Sync`, `Rename`. Loader in `memory.New`: open, verify magic and trailer first (seek to end), then stream records. `memory.Store.Close()` bounds the write by `Config.SnapshotTimeout` (default 5s); the optional `CloseContext(ctx)` takes the caller's context instead, and the engine's `Close` is to use it when the store has it, so the adapter's shutdown grace period bounds snapshot time (engine wiring lands with the loader card; until then `Close()` and `SnapshotTimeout` bound it). `store.Store` keeps `Close() error`.
 
 ### 13.4 Per-host fairness (M14)
 

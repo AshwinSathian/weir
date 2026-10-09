@@ -582,7 +582,7 @@ Open: none that block any milestone before Phase 3.
 
 ### 13.3 Snapshots (M13, D15)
 
-- FR-SNP-1. `memory.Config.SnapshotPath`, when set, makes the memory store write a snapshot when it is closed: every live response and vary-spec record plus all hard epochs, in the store codec with a per-record CRC-32C, to a temporary file in the same directory created with mode 0600, then `fsync` and atomic rename. Markers, negative entries and the soft/invalid sketch are not written. Writing stops at the `Close` deadline; an incomplete snapshot is discarded, never renamed.
+- FR-SNP-1. `memory.Config.SnapshotPath`, when set, makes the memory store write a snapshot when it is closed: every live response and vary-spec record plus all hard epochs, in the store codec with a per-record CRC-32C, to a temporary file in the same directory created with mode 0600, then `fsync` and atomic rename. Markers, negative entries and the soft/invalid sketch are not written. Writing stops at the `Close` deadline (`memory.Config.SnapshotTimeout`, default 5s, or the context given to the optional `CloseContext`); an incomplete snapshot is discarded, never renamed.
 - FR-SNP-2. `memory.New` with `SnapshotPath` loads an existing snapshot: records failing CRC or decoding are skipped and counted, records past `Expires` are dropped, hard epochs are restored, and then the store writes a global soft epoch at load time, so every loaded entry is stale as of the restart (T-33). The file is removed after a successful load so a crash later cannot reload old content.
 - FR-SNP-3. Load respects `MaxBytes` and per-owner quotas; records beyond capacity are dropped in file order (the writer emits main-queue records before small-queue records so hot entries load first).
 

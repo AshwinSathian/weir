@@ -4,9 +4,9 @@ Updated: 2026-10-09
 Phase: 1
 Current card: none
 Card state: awaiting-merge
-Branch: claude/blissful-galileo-ynivsa
-PR: https://github.com/AshwinSathian/weir/pull/67
-Next card: M13-01 per `scripts/card.sh next`; M16-01 is approved too (Phase 1 release gate comes first, your call)
+Branch: claude/amazing-bohr-2fi9ve
+PR: https://github.com/AshwinSathian/weir/pull/68
+Next card: M13-02 per `scripts/card.sh next`; M16-01 is approved too (Phase 1 release gate comes first, your call)
 
 ## Waiting on Ashwin
 
@@ -14,9 +14,12 @@ none
 
 ## Blockers
 
-none. golangci-lint in this container is built with Go 1.25 and cannot load the Go 1.27 config, so lint is unrun for M12-02; CI must confirm.
+none. golangci-lint in this container is built with Go 1.25 and cannot load the Go 1.27 config, so lint is unrun for M13-01; CI must confirm before merge.
 
 ## Notes for the next session
+
+- M13-01: `memory.Store.CloseContext(ctx)` writes the snapshot; `Close()` wraps it with `Config.SnapshotTimeout` (5s). `store.Store` still has `Close() error`. The engine does not call `CloseContext` yet: M13-02 or a follow-up must wire `Engine.Close` via an optional interface so the adapter grace period bounds it (LLD 13.3 says so). The header's base wall time is written but unread. Hard-epoch records hold tag + UnixNano; writer emits main-queue records, then small, then epochs, then trailer 0xFF with the count. `snapRecord` parsing in snapshot_write_test.go can seed the loader tests.
+- Lint unrun for M13-01 (container golangci-lint is Go 1.25); CI must confirm.
 
 - M12-02: targeted fields live in `httpcc.ParseResponse` (`Targeted` flag; `Lifetime` and `hasFreshness` skip Expires). Header keys must be canonical (`Cdn-Cache-Control`). `finish` strips Weir-Cache-Control by cloning the map. Target list is a package constant (D12), signature unchanged.
 - After M12-02 merges: run `UPDATE=1 make cache-tests` (node, network), drop the cdn-* row in `docs/cache-tests-expected-failures.md`, refresh `testdata/cache-tests-baseline.json`.
