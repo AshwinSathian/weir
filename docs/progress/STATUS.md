@@ -5,7 +5,7 @@ Phase: 1
 Current card: none
 Card state: awaiting-merge
 Branch: claude/blissful-galileo-ynivsa
-PR: PENDING
+PR: https://github.com/AshwinSathian/weir/pull/67
 Next card: M13-01 per `scripts/card.sh next`; M16-01 is approved too (Phase 1 release gate comes first, your call)
 
 ## Waiting on Ashwin

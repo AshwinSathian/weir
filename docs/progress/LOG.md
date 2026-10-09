@@ -1139,7 +1139,7 @@ Entry template:
 - Context: low.
 
 ## 2026-10-09 · M12-02 · done
-- Branch / PR: claude/blissful-galileo-ynivsa / none yet
+- Branch / PR: claude/blissful-galileo-ynivsa / https://github.com/AshwinSathian/weir/pull/67
 - Done: targeted fields in `httpcc.ParseResponse` (Weir- then CDN-Cache-Control, `Targeted` flag makes Expires ignored), stricter private/no-store/no-cache from Cache-Control, `finish` strips Weir-Cache-Control on every response path; LLD 13.2 updated; TCC dropped from trace.sh `later`.
 - Tests: TestTargetedFieldPrecedence, TestTargetedFieldKeepsPrivate, TestWeirCacheControlStripped, TestParseResponseTargeted, two RFC 9213 rows. Race tests, vet, gofmt, trace-strict pass; lint unrun (built with Go 1.25).
 - Deviations: ParseResponse keeps its signature (target list is an internal constant, D12); must-understand rule for targeted fields added to LLD 13.2.
