@@ -27,9 +27,16 @@ type shard struct {
 	owners   map[store.Tag]int64
 }
 
-// ownerScan bounds the nodes one over-quota Set walks looking for its own
-// owner's entries (FR-FAIR-2, 05 §5.3), so a flood cannot make Set O(shard).
+// ownerScan bounds the nodes one over-quota Set walks at each queue tail
+// looking for its own owner's entries (FR-FAIR-2, 05 §5.3), so a flood
+// cannot make Set O(shard). The budget is per queue: a shared one let
+// foreign nodes at the small tail hide an owner's entries in main, and the
+// owner could then never turn over its own quota.
 const ownerScan = 64
+
+// ownerVictims is the most nodes one over-quota Set can evict: ownerScan
+// from each queue tail.
+const ownerVictims = 2 * ownerScan
 
 func newShard(capBytes, maxOwner int64) shard {
 	var owners map[store.Tag]int64
@@ -61,7 +68,7 @@ func (sh *shard) addOwner(owner store.Tag, delta int64) {
 
 // fitOwner makes room under the owner's quota for a record of size that
 // replaces old (nil for a new key). It evicts only entries of the same
-// owner, found within ownerScan nodes of the queue tails, small first, and
+// owner, found within ownerScan nodes of each queue tail, small first, and
 // does nothing unless that frees enough (T-32). With noEvict, as when a
 // snapshot loads, it never evicts. Caller holds sh.mu.
 func (sh *shard) fitOwner(old *node, owner store.Tag, size int64, noEvict bool, ev *evictions) bool {
@@ -79,9 +86,10 @@ func (sh *shard) fitOwner(old *node, owner store.Tag, size int64, noEvict bool, 
 	if noEvict || size > sh.maxOwner {
 		return false
 	}
-	var victims [ownerScan]*node
-	nv, scanned, freed := 0, 0, int64(0)
+	var victims [ownerVictims]*node
+	nv, freed := 0, int64(0)
 	for _, q := range [...]*fifo{&sh.small, &sh.main} {
+		scanned := 0
 		for n := q.tail; n != nil && scanned < ownerScan && freed < over; n = n.prev {
 			scanned++
 			if n != old && n.owner == owner {
@@ -173,9 +181,15 @@ func (sh *shard) set(k store.Key, e *store.Entry, size int64, expires time.Time,
 		sh.bytes += size - n.size
 		sh.addOwner(n.owner, -n.size)
 		sh.addOwner(e.Owner, size)
-		n.e, n.size, n.expires, n.owner = e, size, expires, e.Owner
+		n.e, n.size, n.expires = e, size, expires
+		if sh.owners != nil {
+			n.owner = e.Owner
+		}
 	} else {
-		n = &node{key: k, e: e, size: size, expires: expires, fp: fp, owner: e.Owner}
+		n = &node{key: k, e: e, size: size, expires: expires, fp: fp}
+		if sh.owners != nil {
+			n.owner = e.Owner // kept only for the account; 32 bytes a node otherwise
+		}
 		sh.addOwner(e.Owner, size)
 		if sh.ghost.take(fp) {
 			n.queue = queueMain

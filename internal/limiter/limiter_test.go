@@ -390,8 +390,9 @@ func TestLimiterInvariants(t *testing.T) {
 		synctest.Test(t, func(t *testing.T) {
 			r := rand.New(rand.NewPCG(seed, 7))
 			slots, per := 1+r.IntN(6), 1+r.IntN(3)
+			perHost := r.IntN(3) // 0: off (FR-FAIR-1)
 			l := New(Config{
-				Max: slots, MaxQueue: 1 + r.IntN(6), PerPartition: per,
+				Max: slots, MaxQueue: 1 + r.IntN(6), PerPartition: per, PerHost: perHost,
 				Reserve: r.IntN(slots), MaxWait: time.Duration(1+r.IntN(5)) * time.Millisecond,
 			})
 			var held []*Permit
@@ -410,6 +411,16 @@ func TestLimiterInvariants(t *testing.T) {
 				if l.inflight > slots || sum != l.inflight || l.inflight != len(held) {
 					t.Fatalf("seed %d: inflight %d, max %d, partition sum %d, permits %d",
 						seed, l.inflight, slots, sum, len(held))
+				}
+				hostSum := 0
+				for host, n := range l.byHost {
+					if perHost == 0 || n <= 0 || n > perHost {
+						t.Fatalf("seed %d: host %d count %d, cap %d", seed, host, n, perHost)
+					}
+					hostSum += n
+				}
+				if perHost > 0 && hostSum != l.inflight {
+					t.Fatalf("seed %d: host sum %d, inflight %d", seed, hostSum, l.inflight)
 				}
 				queued := map[uint64]int{}
 				for _, w := range l.queue {
@@ -430,11 +441,11 @@ func TestLimiterInvariants(t *testing.T) {
 			for range 200 {
 				switch r.IntN(5) {
 				case 0, 1:
-					c, part := Class(r.IntN(3)), uint64(r.IntN(4))
+					c, part, host := Class(r.IntN(3)), uint64(r.IntN(4)), uint64(r.IntN(3))
 					ctx, cancel := context.WithTimeout(t.Context(), time.Duration(r.IntN(8))*time.Millisecond)
 					go func() {
 						defer cancel()
-						if p, err := l.Acquire(ctx, c, part, 0); err == nil {
+						if p, err := l.Acquire(ctx, c, part, host); err == nil {
 							got <- p
 						}
 					}()
@@ -761,4 +772,33 @@ func (l *Limiter) hostEntries() int {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return len(l.byHost)
+}
+
+// FR-FAIR-1, ponytail in Acquire: waiters held back by PerHost share MaxQueue,
+// so with the pool saturated a flood on one host sheds a third host. The test
+// pins that ceiling; a per-host queued count would turn it into a pass.
+func TestHostFloodFillsSharedQueue(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		l := New(Config{Max: 2, MaxQueue: 4, PerPartition: 8, PerHost: 1, MaxWait: wait})
+		held := []*Permit{mustAcquire(t, l, Foreground, 1), nil}
+		var err error
+		held[1], err = l.Acquire(t.Context(), Foreground, 2, 200)
+		if err != nil {
+			t.Fatal(err)
+		}
+		held[0].Release()
+		held[0], _ = l.Acquire(t.Context(), Foreground, 1, 100)
+		for i := range 4 {
+			acquireAsyncHost(t.Context(), l, Foreground, uint64(10+i), 100)
+		}
+		synctest.Wait()
+		if _, err := l.Acquire(t.Context(), Foreground, 99, 300); !errors.Is(err, ErrQueueFull) {
+			t.Fatalf("third host: err = %v, want ErrQueueFull (known ceiling)", err)
+		}
+		for _, p := range held {
+			p.Release()
+		}
+		time.Sleep(wait) // the flood's waiters time out
+		synctest.Wait()
+	})
 }

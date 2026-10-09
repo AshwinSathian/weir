@@ -188,7 +188,7 @@ Why this shape: entries requested once (the signature of a query-string busting 
 
 `OnEvict` is called after the shard lock is released, with counts batched per `Set` call.
 
-Per-owner quota (M14): each shard keeps `map[store.Tag]int64` of bytes per owner; entries are removed from it when their node is unlinked, so its size is bounded by the owners present in the shard. The over-quota path in FR-FAIR-2 scans at most 64 nodes and never touches another owner's nodes.
+Per-owner quota (M14): each shard keeps `map[store.Tag]int64` of bytes per owner; entries are removed from it when their node is unlinked, so its size is bounded by the owners present in the shard. The over-quota path in FR-FAIR-2 scans at most 64 nodes from each queue tail (128 in all) and never touches another owner's nodes.
 
 Scrub (M15): for each shard in turn, take the write lock, walk every node, unlink response records whose `Tags` intersect the given tags, release. Worst case O(entries) total, but never more than one shard's worth of work under one lock.
 

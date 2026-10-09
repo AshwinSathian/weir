@@ -15,6 +15,7 @@ import (
 
 	"github.com/AshwinSathian/weir"
 	"github.com/AshwinSathian/weir/internal/testorigin"
+	"github.com/AshwinSathian/weir/store/memory"
 )
 
 // eventCounter counts events by kind and reason; Observe runs on engine
@@ -769,6 +770,48 @@ func TestEnginePerHostCap(t *testing.T) {
 		}
 		if n := o.MaxInflight(); n > perHost+1 {
 			t.Fatalf("origin max in-flight = %d, want <= %d (4 for the flood, 1 for the other host)", n, perHost+1)
+		}
+	})
+}
+
+// FR-FAIR-2, T-32: the engine sets Entry.Owner to the origin tag, so a
+// quota on the memory store keeps one host's flood from evicting another
+// host's cached pages.
+func TestEngineOwnerQuotaIsolatesHosts(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		o := testorigin.NewChecked(t, 64, 16)
+		o.Default(cacheable(strings.Repeat("x", 100)))
+		st, err := memory.New(memory.Config{MaxBytes: 1 << 30, Shards: 1, MaxBytesPerOwner: 4000})
+		if err != nil {
+			t.Fatal(err)
+		}
+		cfg := cacheCfg
+		cfg.Store = st
+		e := newEngine(t, cfg)
+		defer closeEngine(t, e)
+
+		quiet := func(i int) *weir.Request {
+			r := getReq(fmt.Sprintf("/q%d", i))
+			r.Host = "quiet.example"
+			return r
+		}
+		for i := range 3 {
+			serve(t, e, quiet(i), o)
+		}
+		for i := range 60 {
+			serve(t, e, getReq(fmt.Sprintf("/f%d", i)), o)
+		}
+		before := o.TotalCalls()
+		for i := range 3 {
+			if resp, _ := serve(t, e, quiet(i), o); !resp.Cache.Hit {
+				t.Fatalf("quiet host page %d was evicted by the flood", i)
+			}
+		}
+		if o.TotalCalls() != before {
+			t.Fatal("quiet host hits reached the origin")
+		}
+		if resp, _ := serve(t, e, getReq("/f0"), o); resp.Cache.Hit {
+			t.Fatal("flooding host kept its oldest page past its quota")
 		}
 	})
 }

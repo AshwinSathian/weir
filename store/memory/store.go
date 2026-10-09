@@ -20,7 +20,8 @@ type Config struct {
 	MaxHardEpochs int           // 0: 10000 (E-6)
 	EpochSlots    int           // 0: 1 << 19; a power of two, at most MaxEpochSlots (E-7)
 	// MaxBytesPerOwner caps the bytes one Entry.Owner may hold in each shard
-	// (FR-FAIR-2). 0 disables it. An over-quota Set first evicts that owner's
+	// (FR-FAIR-2), so an owner may hold Shards times this in all. A cap below
+	// one object's size declines every Set for that owner. 0 disables it. An over-quota Set first evicts that owner's
 	// own entries and is declined if that is not enough; entries with the
 	// zero Owner are never limited.
 	MaxBytesPerOwner int64
