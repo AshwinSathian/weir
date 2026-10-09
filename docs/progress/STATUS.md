@@ -2,10 +2,10 @@
 
 Updated: 2026-10-09
 Phase: 1
-Current card: none
-Card state: awaiting-merge
-Branch: card/P2-00-caddy-spec
-PR: https://github.com/AshwinSathian/weir/pull/73
+Current card: P2-01 (Module skeleton and JSON config)
+Card state: in-progress
+Branch: card/P2-01-module-skeleton
+PR: none
 Next card: P2-01 (Module skeleton and Caddyfile)
 
 ## Waiting on Ashwin
