@@ -1156,7 +1156,7 @@ Entry template:
 - Context: low.
 
 ## 2026-10-09 · M13-01 · done
-- Branch / PR: claude/amazing-bohr-2fi9ve / PR_URL
+- Branch / PR: claude/amazing-bohr-2fi9ve / https://github.com/AshwinSathian/weir/pull/68
 - Done: store/memory/snapshot_write.go (0600 temp file, CRC-32C records, trailer, fsync, atomic rename, deadline discards); Config.SnapshotPath and SnapshotTimeout; `CloseContext(ctx)`.
 - Tests: TestSnapshotRoundTrip, TestSnapshotMainQueueFirst, TestSnapshotRespectsDeadline, TestSnapshotCloseUsesTimeout, TestSnapshotSkipsExpired, TestSnapshotOffAndConfig. Race tests, vet, gofmt, trace pass; lint unrun (Go 1.25 build).
 - Deviations: LLD 13.3 said `Close(ctx)` but `store.Store` is `Close() error`; Ashwin chose an optional `CloseContext` plus `SnapshotTimeout`. LLD 13.3 and docs/05 5.1 updated.

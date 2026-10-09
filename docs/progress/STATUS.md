@@ -5,7 +5,7 @@ Phase: 1
 Current card: none
 Card state: awaiting-merge
 Branch: claude/amazing-bohr-2fi9ve
-PR: PR_URL
+PR: https://github.com/AshwinSathian/weir/pull/68
 Next card: M13-02 per `scripts/card.sh next`; M16-01 is approved too (Phase 1 release gate comes first, your call)
 
 ## Waiting on Ashwin
