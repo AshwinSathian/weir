@@ -1,8 +1,8 @@
 # cache-tests expected failures
 
-Updated: 2026-10-08
+Updated: 2026-10-09
 
-Tests from [http-tests/cache-tests](https://github.com/http-tests/cache-tests) that `examples/weirproxy` fails, from the run recorded in `testdata/cache-tests-baseline.json` (suite commit `d644cf4`, 365 tests, 264 pass, 101 fail). The nightly job (docs/07 §8) fails only when a test that passed in the baseline fails now, so this list is documentation, not configuration. Update both files together with `UPDATE=1 scripts/cache-tests.sh`.
+Tests from [http-tests/cache-tests](https://github.com/http-tests/cache-tests) that `examples/weirproxy` fails, from the run recorded in `testdata/cache-tests-baseline.json` (suite commit `d644cf4`, 365 tests, 265 pass, 100 fail). The nightly job (docs/07 §8) fails only when a test that passed in the baseline fails now, so this list is documentation, not configuration. Update both files together with `UPDATE=1 scripts/cache-tests.sh`.
 
 The proxy runs with default Weir settings plus `-forward-allow Req-Num,Test-ID,Test-Name,Foo,Bar,Baz,Abc`. The first three are the suite's own bookkeeping headers; the others are request headers its Vary tests set. Without them strict forwarding (D4) hides the headers and the suite cannot run.
 

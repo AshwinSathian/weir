@@ -1073,3 +1073,11 @@ Entry template:
 - Deviations: docs/01 FR-SRV-2 wording and date (approved 2026-10-08 per the card); docs/04 note.
 - Follow-ups: `/handoff` not run (the Skill tool refuses it): needs card-reviewer pass, card mark, PR. docs/07 has no FR-SRV rows, so it is untouched.
 - Context: low; size S was right.
+
+## 2026-10-09 · M10-10 · done
+- Branch / PR: claude/admiring-curie-sv9a2w / PR_URL
+- Done: reviewer pass on 49cbf53. Fixed the stale count in docs/cache-tests-expected-failures.md (265/100), moved the LLD sentence, and added tests for Vary variants and Authorization plus a discarded-304 case. Card marked done; supersedes the `blocked` entry above.
+- Tests: TestClientConditionalVariantsAndAuthorization, TestClientConditionalUsesFinalEntry (rewritten, discarded 304 names "2", final entry "3"). Root race tests, vet, trace-strict pass; lint unrun (Go 1.25 binary), CI must confirm.
+- Deviations: none beyond the FR-SRV-2 widening already logged.
+- Follow-ups: RFC 9110 §13.2 text not re-checked; Range plus matching conditional untested (Range bypasses the cache). PLAN M10.4 stays unticked until the nightly run is green.
+- Context: low; size S was right.

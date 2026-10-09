@@ -475,7 +475,7 @@ func TestStoredEntriesEncode(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		o := testorigin.NewChecked(t, 64, 16)
 		o.Default(testorigin.Behavior{Func: func(*weir.Request) (*weir.Response, error) {
-			return respond(200, http.Header{"cache-control": {"max-age=60"}, "eTag": {`"a"`}, "x-odd": {"1"}, "vary": {"accept"}}, "v"), nil
+			return respond(200, http.Header{"cache-control": {"max-age=60"}, "eTag": {`"text/a"`}, "x-odd": {"1"}, "vary": {"accept"}}, "v"), nil
 		}})
 		e, st := newRecordingEngine(t)
 		defer closeEngine(t, e)
@@ -588,24 +588,74 @@ func TestClientConditionalUsesFinalEntry(t *testing.T) {
 		defer closeEngine(t, e)
 		serve(t, e, getReq("/a"), o)
 		time.Sleep(61 * time.Second)
+		// The discarded 304 names "2", the retry's final entry "3".
 		o.Default(testorigin.Behavior{Func: func(r *weir.Request) (*weir.Response, error) {
 			if r.Header.Get("If-None-Match") != "" {
 				return respond(http.StatusNotModified, http.Header{"Etag": {`"2"`}}, ""), nil
 			}
-			return respond(http.StatusOK, http.Header{"Cache-Control": {"max-age=60"}, "Etag": {`"2"`}}, "v2"), nil
+			return respond(http.StatusOK, http.Header{"Cache-Control": {"max-age=60"}, "Etag": {`"3"`}}, "v3"), nil
 		}})
 		r := getReq("/a")
-		r.Header["If-None-Match"] = []string{`"1"`}
+		r.Header["If-None-Match"] = []string{`"2"`}
 		resp, body := serve(t, e, r, o)
-		if resp.StatusCode != http.StatusOK || body != "v2" {
-			t.Fatalf("client holding the old tag: %d %q, want 200 v2", resp.StatusCode, body)
+		if resp.StatusCode != http.StatusOK || body != "v3" {
+			t.Fatalf("client holding the discarded tag: %d %q, want 200 v3", resp.StatusCode, body)
 		}
 		time.Sleep(61 * time.Second)
-		o.Default(testorigin.Behavior{Header: http.Header{"Cache-Control": {"max-age=60"}, "Etag": {`"2"`}}, Body: []byte("v2")})
+		o.Default(testorigin.Behavior{Header: http.Header{"Cache-Control": {"max-age=60"}, "Etag": {`"3"`}}, Body: []byte("v3")})
 		r = getReq("/a")
-		r.Header["If-None-Match"] = []string{`"2"`}
+		r.Header["If-None-Match"] = []string{`"3"`}
 		if resp, _ = serve(t, e, r, o); resp.StatusCode != http.StatusNotModified {
-			t.Fatalf("client holding the new tag: %d, want 304", resp.StatusCode)
+			t.Fatalf("client holding the final tag: %d, want 304", resp.StatusCode)
+		}
+	})
+}
+
+// FR-SRV-2, FR-KEY-7, T-8: each Vary variant is judged against its own
+// stored entry, and an Authorization request whose public response was
+// stored gets the same treatment.
+func TestClientConditionalVariantsAndAuthorization(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		o := testorigin.NewChecked(t, 64, 16)
+		tag := func(r *weir.Request) string { return `"` + r.Header.Get("X-Tenant") + `"` }
+		o.Default(testorigin.Behavior{Func: func(r *weir.Request) (*weir.Response, error) {
+			if r.Header.Get("If-None-Match") == tag(r) {
+				return respond(http.StatusNotModified, http.Header{"Cache-Control": {"public, max-age=60"}}, ""), nil
+			}
+			return respond(http.StatusOK, http.Header{"Cache-Control": {"public, max-age=60"}, "Etag": {tag(r)}, "Vary": {"X-Tenant"}}, "for "+tag(r)), nil
+		}})
+		cfg := cacheCfg
+		cfg.Forward.Allow = []string{"X-Tenant"}
+		e := newEngine(t, cfg)
+		defer closeEngine(t, e)
+		req := func(accept, inm string, auth bool) *weir.Request {
+			r := getReq("/v")
+			r.Header.Set("X-Tenant", accept)
+			if inm != "" {
+				r.Header["If-None-Match"] = []string{inm}
+			}
+			if auth {
+				r.Header.Set("Authorization", "Bearer x")
+			}
+			return r
+		}
+		serve(t, e, req("ta", "", false), o)
+		serve(t, e, req("tb", "", true), o)
+		time.Sleep(61 * time.Second)
+		for _, tc := range []struct {
+			name string
+			r    *weir.Request
+			want int
+		}{
+			{"own variant tag", req("ta", `"ta"`, false), 304},
+			{"other variant tag", req("ta", `"tb"`, false), 200},
+			{"authorized, own tag", req("tb", `"tb"`, true), 304},
+			{"authorized, other tag", req("tb", `"ta"`, true), 200},
+		} {
+			time.Sleep(61 * time.Second) // every case revalidates
+			if resp, _ := serve(t, e, tc.r, o); resp.StatusCode != tc.want {
+				t.Errorf("%s: status %d (%+v) %v want %d", tc.name, resp.StatusCode, resp.Cache, resp.Header, tc.want)
+			}
 		}
 	})
 }
