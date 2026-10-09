@@ -2,7 +2,9 @@ package memory
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -267,4 +269,99 @@ func TestOwnerQuotaAccounting(t *testing.T) {
 			t.Fatalf("a live small victim counted %d, want 1", small)
 		}
 	})
+}
+
+// FR-PRG-8: Scrub deletes response records by exact tag, in every shard,
+// and leaves other records and kinds alone. 05 S-2: a closed store and a
+// cancelled context are ErrUnavailable.
+func TestScrub(t *testing.T) {
+	a, b := store.Tag{1}, store.Tag{2}
+	tagged := func(kind store.Kind, tags ...store.Tag) *store.Entry {
+		e := entry(10)
+		e.Kind, e.Tags = kind, tags
+		return e
+	}
+	s := newStore(t, Config{MaxBytes: 1 << 20, Shards: 4})
+	for i := uint64(1); i <= 20; i++ {
+		_ = s.Set(t.Context(), numKey(i), tagged(store.KindResponse, store.TagGlobal(), a))
+	}
+	_ = s.Set(t.Context(), numKey(100), tagged(store.KindResponse, store.TagGlobal(), b))
+	_ = s.Set(t.Context(), numKey(101), tagged(store.KindVarySpec, a))
+	_ = s.Set(t.Context(), numKey(102), tagged(store.KindResponse))
+
+	if n, err := s.Scrub(t.Context(), nil); n != 0 || err != nil {
+		t.Fatalf("Scrub(nil) = %d, %v; want 0, nil", n, err)
+	}
+	if n, err := s.Scrub(t.Context(), []store.Tag{a}); n != 20 || err != nil {
+		t.Fatalf("Scrub(a) = %d, %v; want 20, nil", n, err)
+	}
+	for i := uint64(1); i <= 20; i++ {
+		if present(t.Context(), s, numKey(i)) {
+			t.Fatalf("record %d with tag a survived", i)
+		}
+	}
+	for _, k := range []uint64{100, 101, 102} {
+		if !present(t.Context(), s, numKey(k)) {
+			t.Fatalf("record %d was scrubbed but does not match", k)
+		}
+	}
+	if n, _ := s.Scrub(t.Context(), []store.Tag{store.TagGlobal()}); n != 1 {
+		t.Fatalf("Scrub(global) = %d, want the one remaining response with it", n)
+	}
+	if got := s.Bytes(); got != tagged(store.KindVarySpec, a).Size()+tagged(store.KindResponse).Size() {
+		t.Fatalf("Bytes = %d after scrub: byte account not released", got)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if _, err := s.Scrub(ctx, []store.Tag{a}); !errors.Is(err, store.ErrUnavailable) {
+		t.Fatalf("Scrub with cancelled ctx = %v, want ErrUnavailable", err)
+	}
+	_ = s.Close()
+	if _, err := s.Scrub(t.Context(), []store.Tag{a}); !errors.Is(err, store.ErrUnavailable) {
+		t.Fatalf("Scrub after Close = %v, want ErrUnavailable", err)
+	}
+}
+
+// FR-PRG-8, race detector: Scrub runs against Set, Get and Delete without
+// corrupting a shard's byte account, and a final Scrub leaves none of its tag.
+func TestScrubConcurrentWithWrites(t *testing.T) {
+	tag := store.Tag{7}
+	s := newStore(t, Config{MaxBytes: 1 << 20, Shards: 2})
+	mk := func() *store.Entry {
+		e := entry(10)
+		e.Tags = []store.Tag{tag}
+		return e
+	}
+	var wg sync.WaitGroup
+	for g := range 4 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range 500 {
+				k := numKey(uint64(g*1000 + i%50))
+				_ = s.Set(t.Context(), k, mk())
+				_, _ = s.Get(t.Context(), k)
+				if i%7 == 0 {
+					_ = s.Delete(t.Context(), k)
+				}
+			}
+		}()
+	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for range 100 {
+			if _, err := s.Scrub(t.Context(), []store.Tag{tag}); err != nil {
+				t.Errorf("Scrub: %v", err)
+				return
+			}
+		}
+	}()
+	wg.Wait()
+	if _, err := s.Scrub(t.Context(), []store.Tag{tag}); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.Bytes(); got != 0 {
+		t.Fatalf("Bytes = %d after a final scrub of every record, want 0", got)
+	}
 }

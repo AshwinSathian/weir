@@ -271,7 +271,7 @@ Named in [06-threat-model.md](06-threat-model.md), [01-technical-spec.md](01-tec
 | `TestSnapshotRespectsDeadline` (component) | `Close` with an expired context leaves no snapshot and no temp file |
 | `TestOwnerQuotaIsolatesTenants` (component) | owner A inserting 10× its quota evicts only A's entries; owner B's entries all remain |
 | `TestPerHostLimiterCap` (component) | host cap holds while other hosts proceed |
-| `TestEagerHardPurgeDeletesAllPartitions` (engine) | eager hard purge of a URL removes variant and keyed-header entries from the memory store; `Bytes()` drops accordingly |
+| `TestEagerHardPurgeDeletesAllPartitions` (engine) | eager hard purge of a URL removes variant and keyed-header entries from the memory store; `Bytes()` drops accordingly. `TestEagerPurgeByURLAndGroup` checks URL and group tags and that other URLs survive; `TestEagerScrubFailuresDoNotOpenBreaker` that scrub failures never count toward the breaker |
 | `TestEagerSoftIsError`, `TestEagerUnsupportedStore` (engine) | invalid combination rejected; store without `Scrubber` returns `ErrEagerUnsupported` after writing the epoch |
 
 ### Decisions D25 to D42

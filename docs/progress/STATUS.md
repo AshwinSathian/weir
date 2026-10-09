@@ -4,19 +4,30 @@ Updated: 2026-10-09
 Phase: 1
 Current card: none
 Card state: awaiting-merge
-Branch: claude/peaceful-babbage-hrdup8
-PR: https://github.com/AshwinSathian/weir/pull/70
-Next card: M15-01 per `scripts/card.sh next`; M16-01 is approved too
+Branch: claude/serene-volta-d9nvnj
+PR: https://github.com/AshwinSathian/weir/pull/71
+Next card: M16-01 per `scripts/card.sh next` (approved as a throwaway prototype)
 
 ## Waiting on Ashwin
 
 none
+
+## Decided 2026-10-09 (M15-01)
+
+From the adversarial review of PR #71 (Ashwin delegated "take decisions on all items"). "Waiting on Ashwin" was empty. No must-fix.
+
+- Scrub failures do not count toward the store breaker (same rule as `purgeEpoch`), emit `EvStoreError{scrub}`; pinned by `TestStoreGuardScrubFailureNotCounted`. LLD 5.2 and the event table updated.
+- Scrub ignores request times and cannot stop an in-flight store: documented in LLD 13.5 and 05 §5.3 rather than changing `Scrubber`'s signature (public API; the epoch decides reachability). A part-way epoch failure scrubs nothing (documented; repeating is safe).
+- Added engine tests by URI and group tag with a surviving URL, a cancelled-context case, and a concurrent Scrub/Set/Get/Delete race test. `Scrubber` doc comment and docs/07 row updated.
+- Declined: keeping `context.Canceled` in the scrub error (nit; callers see `store.ErrUnavailable` and their own ctx).
 
 ## Blockers
 
 none. golangci-lint in this container is built with Go 1.25 and cannot load the Go 1.27 config; run it with `GOTOOLCHAIN=go1.27.0 go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0 run`. CI must confirm.
 
 ## Notes for the next session
+
+- M15-01: `store/memory/scrub.go` holds `Scrub`; `hasTag` is O(entry tags x purge tags) under the shard lock (ponytail in the file, upgrade path named). `Engine.scrub` in purge.go reports the deleted count as `EvPurge{hard}` `Status`. Work happened on the session branch `claude/serene-volta-d9nvnj`, not `card/M15-01-*`.
 
 - M14-01: `limiter.Acquire(ctx, class, part, host)`; `Classified.HostH` is the host hash; `LimiterConfig.MaxPerHost` feeds both pools. Waiters blocked by the host cap still share `MaxQueue` (ponytail in limiter.go, LLD 13.4, pinned by `TestHostFloodFillsSharedQueue`).
 - M14-01: `memory.Config.MaxBytesPerOwner` is per shard, 0 off, zero `Owner` exempt. The engine's default memory store does not set it; the Caddy adapter does (FR-FAIR-3).

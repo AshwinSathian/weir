@@ -150,6 +150,9 @@ type Store interface {
 
 // Scrubber is an optional Store capability: Scrub deletes response records
 // whose tags intersect tags and returns how many it deleted (FR-PRG-8).
+// Matching is exact and other kinds are left alone. On a context that ends
+// mid-scan it returns the count so far and ErrUnavailable. The engine writes
+// the epochs first, so Scrub frees memory and never decides reachability.
 type Scrubber interface {
 	Scrub(ctx context.Context, tags []Tag) (int, error)
 }

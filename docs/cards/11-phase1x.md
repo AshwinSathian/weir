@@ -53,7 +53,7 @@
 - AC: defaults off in the library; `make check` passes
 - Notes: the snapshot loader (store/memory/snapshot_load.go) admits records through `put`; make it honor per-owner quotas (FR-SNP-3).
 
-### [ ] M15-01 Eager hard purge
+### [x] M15-01 Eager hard purge
 - Plan: M15 · Size: S · Depends on: M14-01
 - Read: 01 §13.5; 05 §5.3 (scrub paragraph); 04 §13.5
 - Touch: purge.go, store/memory/scrub.go, tests

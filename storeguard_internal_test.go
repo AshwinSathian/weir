@@ -112,3 +112,31 @@ func TestStoreGuardBackoff(t *testing.T) {
 		}
 	})
 }
+
+// scrubFail is a Scrubber that always fails with ErrUnavailable.
+type scrubFail struct{ store.Store }
+
+func (scrubFail) Info() store.Info { return store.Info{} }
+func (scrubFail) Scrub(context.Context, []store.Tag) (int, error) {
+	return 0, store.ErrUnavailable
+}
+
+// FR-PRG-8, 04 §5.2: failed scrubs are reported with EvStoreError{scrub} but
+// never counted toward the breaker, as with purgeEpoch, so retried eager
+// purges cannot open it.
+func TestStoreGuardScrubFailureNotCounted(t *testing.T) {
+	obs := &openDurations{}
+	s := scrubFail{}
+	g := newStoreGuard(s, time.Second, obs)
+	for range 3 * storeBreakerFails {
+		if _, err := g.scrub(t.Context(), s, []store.Tag{{1}}); !errors.Is(err, store.ErrUnavailable) {
+			t.Fatalf("scrub = %v, want ErrUnavailable from the store", err)
+		}
+	}
+	if n := g.fails.Load(); n != 0 {
+		t.Fatalf("fails = %d after failed scrubs, want 0", n)
+	}
+	if len(obs.d) != 0 {
+		t.Fatalf("breaker opened %d times on scrub failures", len(obs.d))
+	}
+}

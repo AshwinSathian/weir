@@ -99,7 +99,8 @@ func (e *Engine) sameOriginTag(c *keys.Classified, base *url.URL, ref string) (s
 // one longer than Limits.MaxGroupBytes or with a byte outside 0x20 to 0x7E
 // (FR-STO-10). A store error stops the call and is returned: epochs
 // already written stay, EvPurge is still emitted for them, and repeating
-// the call is safe. The memory store refuses a hard purge of a new URL or
+// the call is safe; with Eager, the tags written before the failure are not
+// scrubbed. The memory store refuses a hard purge of a new URL or
 // group past its MaxHardEpochs with an error matching store.ErrUnavailable
 // (05 E-6); purge with All instead. Such a refusal does not count toward
 // the store breaker.
@@ -109,9 +110,11 @@ func (e *Engine) sameOriginTag(c *keys.Classified, base *url.URL, ref string) (s
 // stale-while-revalidate and stale-if-error windows can run up to 1 s long,
 // and a refresh sent in that second may be repeated once.
 //
-// Eager with PurgeSoft is invalid input. No store scrubs yet (M15), so
-// Eager with PurgeHard writes its epochs and returns ErrEagerUnsupported
-// (FR-PRG-8).
+// Eager with PurgeSoft is invalid input. Eager with PurgeHard writes its
+// epochs, then deletes the matching records when the store implements
+// store.Scrubber (FR-PRG-8); otherwise it returns ErrEagerUnsupported with
+// the epochs in place. A scrub error is returned too, and the entries stay
+// unreachable.
 func (e *Engine) Purge(ctx context.Context, p Purge) error {
 	if e.closed.Load() {
 		return ErrClosed
@@ -166,9 +169,30 @@ func (e *Engine) Purge(ctx context.Context, p Purge) error {
 			return fmt.Errorf("weir: purge: %w", err)
 		}
 	}
-	emit(e.cfg.Observer, Event{Kind: EvPurge, Time: ep.At, Reason: reason})
-	if p.Eager {
-		return ErrEagerUnsupported // FR-PRG-8: the epochs are written, nothing was deleted
+	if !p.Eager {
+		emit(e.cfg.Observer, Event{Kind: EvPurge, Time: ep.At, Reason: reason})
+		return nil
+	}
+	return e.scrub(ctx, tags, ep.At)
+}
+
+// scrub is the eager half of a hard Purge (FR-PRG-8, 04 §13.5). The epochs
+// are already written, so reachability never depends on it finishing: an
+// error here leaves the entries unreachable and only their memory held.
+// EvPurge carries the number of records deleted as Status.
+func (e *Engine) scrub(ctx context.Context, tags []store.Tag, at time.Time) error {
+	sc, ok := e.sg.s.(store.Scrubber)
+	if !ok {
+		emit(e.cfg.Observer, Event{Kind: EvPurge, Time: at, Reason: "hard"})
+		return ErrEagerUnsupported // the epochs are written, nothing was deleted
+	}
+	n, err := e.sg.scrub(ctx, sc, tags)
+	emit(e.cfg.Observer, Event{Kind: EvPurge, Time: at, Status: n, Reason: "hard"})
+	if err != nil {
+		if e.closed.Load() {
+			return ErrClosed
+		}
+		return fmt.Errorf("weir: purge: scrub: %w", err)
 	}
 	return nil
 }

@@ -110,6 +110,26 @@ func (g *storeGuard) purgeEpoch(ctx context.Context, t store.Tag, ep store.Epoch
 	return g.exit(ctx, "set-epoch", nil)
 }
 
+// scrub runs the store's Scrubber under the same breaker gate and deadline
+// as every other store call. Like purgeEpoch, a failure is reported and
+// counted by nothing: a keyspace-wide scan is the call most likely to time
+// out on a remote store, and an operator retrying eager purges must not turn
+// every lookup into a miss. The epochs are already written, so a failed scrub
+// costs memory, not correctness. The caller has checked that s implements it.
+func (g *storeGuard) scrub(ctx context.Context, sc store.Scrubber, tags []store.Tag) (int, error) {
+	ctx, cancel, err := g.enter(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer cancel()
+	n, err := sc.Scrub(ctx, tags)
+	if err != nil {
+		emit(g.obs, Event{Kind: EvStoreError, Time: time.Now(), Reason: "scrub"})
+		return n, err
+	}
+	return n, g.exit(ctx, "scrub", nil)
+}
+
 func noCancel() {}
 
 // enter refuses the call while the breaker is open and adds the remote
