@@ -5,7 +5,7 @@ Phase: 1
 Current card: M16-01
 Card state: blocked
 Branch: claude/zen-rubin-hynjow
-PR: none yet
+PR: https://github.com/AshwinSathian/weir/pull/72
 Next card: M16-02 only if Ashwin approves it (see below)
 
 ## Waiting on Ashwin

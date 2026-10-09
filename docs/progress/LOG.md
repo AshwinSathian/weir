@@ -1229,7 +1229,7 @@ Entry template:
 - Context: low.
 
 ## 2026-10-09 · M16-01 · blocked
-- Branch / PR: claude/zen-rubin-hynjow / none yet
+- Branch / PR: claude/zen-rubin-hynjow / https://github.com/AshwinSathian/weir/pull/72
 - Done: throwaway pointer-free prototype (one encoded record per entry in 1 MiB chunks, pointer-free index), saved as docs/benchmarks/m16-prototype.patch and not applied; GC at 1M entries measured for heap and prototype at GOGC 100 and 200; hit path measured with benchstat; docs/benchmarks.md section and a D36 note in docs/02 written.
 - Tests: `TestGCAt1MEntries` x4, `BenchmarkServeHitSmall` and `BenchmarkMemoryStoreGetParallel` x12 samples each. No code merged, so `make check` is not affected; docs only.
 - Deviations: the AC asks to measure an allocation cut on the heap layout; it is a projection from the linear formula, not a run (stated in docs/benchmarks.md). D36 in 01 is unchanged and the card is not marked done, because the AC says the user decides.
