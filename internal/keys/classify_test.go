@@ -538,3 +538,32 @@ func TestClassifyCanonicalizesRequestKeys(t *testing.T) {
 		t.Fatalf("pass forward kept Connection: %v", pc.Forwarded.Header)
 	}
 }
+
+// FR-FAIR-1: the host hash follows the normalized host, so spellings of one
+// host share a limiter slot count and paths on one host do too.
+func TestClassifyHostHash(t *testing.T) {
+	hash := func(host, path string) uint64 {
+		r := classifyReq("GET", nil)
+		r.Host, r.Path = host, path
+		c, err := Classify(r, classifyCfg())
+		if err != nil {
+			t.Fatal(err)
+		}
+		return c.HostH
+	}
+	t.Run("case and default port normalize to one host", func(t *testing.T) {
+		if hash("Example.COM:443", "/a") != hash("example.com", "/a") {
+			t.Error("two spellings of one host hashed apart")
+		}
+	})
+	t.Run("paths on one host share a hash", func(t *testing.T) {
+		if hash("example.com", "/a") != hash("example.com", "/b") {
+			t.Error("host hash depends on the path")
+		}
+	})
+	t.Run("different hosts differ", func(t *testing.T) {
+		if hash("example.com", "/a") == hash("example.org", "/a") {
+			t.Error("two hosts share a hash")
+		}
+	})
+}

@@ -25,9 +25,13 @@ type result struct {
 
 // acquireAsync starts an Acquire and returns the channel its result lands on.
 func acquireAsync(ctx context.Context, l *Limiter, c Class, part uint64) <-chan result {
+	return acquireAsyncHost(ctx, l, c, part, 0)
+}
+
+func acquireAsyncHost(ctx context.Context, l *Limiter, c Class, part, host uint64) <-chan result {
 	ch := make(chan result, 1)
 	go func() {
-		p, err := l.Acquire(ctx, c, part)
+		p, err := l.Acquire(ctx, c, part, host)
 		ch <- result{p, err}
 	}()
 	return ch
@@ -35,7 +39,7 @@ func acquireAsync(ctx context.Context, l *Limiter, c Class, part uint64) <-chan 
 
 func mustAcquire(t *testing.T, l *Limiter, c Class, part uint64) *Permit {
 	t.Helper()
-	p, err := l.Acquire(context.Background(), c, part)
+	p, err := l.Acquire(context.Background(), c, part, 0)
 	if err != nil {
 		t.Fatalf("Acquire(%v, %d): %v", c, part, err)
 	}
@@ -104,7 +108,7 @@ func TestLimiterPartitionQueueCap(t *testing.T) {
 		held := []*Permit{mustAcquire(t, l, Foreground, 1), mustAcquire(t, l, Foreground, 1)}
 		queued := []<-chan result{acquireAsync(t.Context(), l, Foreground, 1), acquireAsync(t.Context(), l, Warm, 1)}
 		synctest.Wait()
-		if _, err := l.Acquire(t.Context(), Foreground, 1); !errors.Is(err, ErrQueueFull) {
+		if _, err := l.Acquire(t.Context(), Foreground, 1, 0); !errors.Is(err, ErrQueueFull) {
 			t.Fatalf("third waiter of a partition: %v, want ErrQueueFull", err)
 		}
 		other := acquireAsync(t.Context(), l, Foreground, 2)
@@ -161,7 +165,7 @@ func TestLimiterPartitionQueueCapQuarter(t *testing.T) {
 			acquireAsync(t.Context(), l, Foreground, 1)
 		}
 		synctest.Wait()
-		if _, err := l.Acquire(t.Context(), Foreground, 1); !errors.Is(err, ErrQueueFull) {
+		if _, err := l.Acquire(t.Context(), Foreground, 1, 0); !errors.Is(err, ErrQueueFull) {
 			t.Fatalf("fifth waiter: %v, want ErrQueueFull", err)
 		}
 		acquireAsync(t.Context(), l, Foreground, 2) // another partition still queues
@@ -209,7 +213,7 @@ func TestLimiterQueueTimeout(t *testing.T) {
 			p := mustAcquire(t, l, Foreground, 1)
 			defer p.Release()
 			start := time.Now()
-			_, err := l.Acquire(t.Context(), Foreground, 2)
+			_, err := l.Acquire(t.Context(), Foreground, 2, 0)
 			if !errors.Is(err, ErrQueueTimeout) {
 				t.Fatalf("err = %v, want ErrQueueTimeout", err)
 			}
@@ -228,7 +232,7 @@ func TestLimiterQueueTimeout(t *testing.T) {
 			queued := acquireAsync(t.Context(), l, Foreground, 2)
 			synctest.Wait()
 			start := time.Now()
-			if _, err := l.Acquire(t.Context(), Foreground, 3); !errors.Is(err, ErrQueueFull) {
+			if _, err := l.Acquire(t.Context(), Foreground, 3, 0); !errors.Is(err, ErrQueueFull) {
 				t.Fatalf("err = %v, want ErrQueueFull", err)
 			}
 			if time.Since(start) != 0 {
@@ -245,7 +249,7 @@ func TestLimiterQueueTimeout(t *testing.T) {
 			for range 3 {
 				held = append(held, mustAcquire(t, l, Background, 1))
 			}
-			if _, err := l.Acquire(t.Context(), Background, 2); !errors.Is(err, ErrShed) || errors.Is(err, ErrQueueFull) {
+			if _, err := l.Acquire(t.Context(), Background, 2, 0); !errors.Is(err, ErrShed) || errors.Is(err, ErrQueueFull) {
 				t.Fatalf("background into the reserve: err = %v, want ErrShed", err)
 			}
 			if _, q, _ := l.state(); q != 0 {
@@ -409,7 +413,7 @@ func TestLimiterInvariants(t *testing.T) {
 				}
 				queued := map[uint64]int{}
 				for _, w := range l.queue {
-					if l.canRun(w.class, w.part) {
+					if l.canRun(w.class, w.part, w.host) {
 						t.Fatalf("seed %d: runnable waiter left in the queue", seed)
 					}
 					queued[w.part]++
@@ -430,7 +434,7 @@ func TestLimiterInvariants(t *testing.T) {
 					ctx, cancel := context.WithTimeout(t.Context(), time.Duration(r.IntN(8))*time.Millisecond)
 					go func() {
 						defer cancel()
-						if p, err := l.Acquire(ctx, c, part); err == nil {
+						if p, err := l.Acquire(ctx, c, part, 0); err == nil {
 							got <- p
 						}
 					}()
@@ -477,7 +481,7 @@ func BenchmarkLimiterAcquireRelease(b *testing.B) {
 			var part uint64
 			for pb.Next() {
 				part++
-				p, err := l.Acquire(ctx, Foreground, part%32)
+				p, err := l.Acquire(ctx, Foreground, part%32, 0)
 				if err != nil {
 					b.Fatal(err)
 				}
@@ -494,7 +498,7 @@ func BenchmarkLimiterAcquireRelease(b *testing.B) {
 		for part := range uint64(1023) {
 			hold := mustAcquireB(b, l, part)
 			defer hold.Release()
-			go func() { _, _ = l.Acquire(ctx, Warm, part) }() // parked: its partition is full
+			go func() { _, _ = l.Acquire(ctx, Warm, part, 0) }() // parked: its partition is full
 		}
 		for {
 			if _, q, _ := l.state(); q == 1023 {
@@ -510,7 +514,7 @@ func BenchmarkLimiterAcquireRelease(b *testing.B) {
 }
 
 func mustAcquireB(b *testing.B, l *Limiter, part uint64) *Permit {
-	p, err := l.Acquire(context.Background(), Foreground, part)
+	p, err := l.Acquire(context.Background(), Foreground, part, 0)
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -651,9 +655,110 @@ func TestLimiterThrottle(t *testing.T) {
 			l.Throttle(now, now.Add(time.Minute), map[uint64]int{1: 5})
 			defer mustAcquire(t, l, Foreground, 1).Release()
 			defer mustAcquire(t, l, Foreground, 1).Release()
-			if _, err := l.Acquire(t.Context(), Background, 1); !errors.Is(err, ErrShed) {
+			if _, err := l.Acquire(t.Context(), Background, 1, 0); !errors.Is(err, ErrShed) {
 				t.Fatalf("third fetch: %v, want ErrShed", err)
 			}
 		})
 	})
+}
+
+// FR-FAIR-1, D16: a host at its cap queues its own fetches and leaves the
+// other hosts' slots alone, and a waiter of a full host does not block the
+// FIFO behind it.
+func TestPerHostLimiterCap(t *testing.T) {
+	newHostLimiter := func(perHost int) *Limiter {
+		return New(Config{Max: 8, MaxQueue: 16, PerPartition: 8, PerHost: perHost, MaxWait: wait})
+	}
+	acq := func(t *testing.T, l *Limiter, part, host uint64) *Permit {
+		t.Helper()
+		p, err := l.Acquire(context.Background(), Foreground, part, host)
+		if err != nil {
+			t.Fatalf("Acquire(part %d, host %d): %v", part, host, err)
+		}
+		return p
+	}
+
+	t.Run("a full host queues while another host still runs", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			l := newHostLimiter(2)
+			a1, a2 := acq(t, l, 1, 100), acq(t, l, 2, 100)
+			third := acquireAsyncHost(t.Context(), l, Foreground, 3, 100)
+			synctest.Wait()
+			if !pending(third) {
+				t.Fatal("third fetch of a full host ran")
+			}
+			b := acq(t, l, 4, 200) // another host, free slots globally
+			b.Release()
+			a1.Release()
+			synctest.Wait()
+			r := <-third
+			if r.err != nil {
+				t.Fatalf("queued fetch after a release: %v", r.err)
+			}
+			r.p.Release()
+			a2.Release()
+		})
+	})
+
+	t.Run("a queued waiter of a full host does not block other hosts behind it", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			l := newHostLimiter(1)
+			held := acq(t, l, 1, 100)
+			blocked := acquireAsyncHost(t.Context(), l, Foreground, 2, 100)
+			synctest.Wait()
+			other := acq(t, l, 3, 200)
+			if !pending(blocked) {
+				t.Fatal("blocked waiter ran past the host cap")
+			}
+			other.Release()
+			held.Release()
+			synctest.Wait()
+			r := <-blocked
+			if r.err != nil {
+				t.Fatal(r.err)
+			}
+			r.p.Release()
+		})
+	})
+
+	t.Run("a background fetch of a full host is shed", func(t *testing.T) {
+		l := newHostLimiter(1)
+		defer acq(t, l, 1, 100).Release()
+		if _, err := l.Acquire(context.Background(), Background, 2, 100); !errors.Is(err, ErrShed) {
+			t.Fatalf("err = %v, want ErrShed", err)
+		}
+	})
+
+	t.Run("zero disables the cap", func(t *testing.T) {
+		l := newHostLimiter(0)
+		for i := range 8 {
+			defer acq(t, l, uint64(i), 100).Release()
+		}
+		if got := l.hostEntries(); got != 0 {
+			t.Fatalf("host map holds %d entries with the cap off", got)
+		}
+	})
+
+	t.Run("the host map empties when permits are released", func(t *testing.T) {
+		l := newHostLimiter(2)
+		var held []*Permit
+		for i := range 6 {
+			held = append(held, acq(t, l, uint64(i), uint64(i)))
+		}
+		if got := l.hostEntries(); got != 6 {
+			t.Fatalf("host map = %d, want 6 while held", got)
+		}
+		for _, p := range held {
+			p.Release()
+		}
+		if got := l.hostEntries(); got != 0 {
+			t.Fatalf("host map = %d after all releases, want 0", got)
+		}
+	})
+}
+
+func (l *Limiter) hostEntries() int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return len(l.byHost)
 }

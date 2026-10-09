@@ -735,3 +735,40 @@ func TestStreamIdleCountsOnlyReads(t *testing.T) {
 		}
 	})
 }
+
+// FR-FAIR-1, D16: with MaxPerHost set, a flood of distinct paths on one host
+// never holds more than that many origin slots, and a request for another
+// host runs at once instead of queueing behind it.
+func TestEnginePerHostCap(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		const perHost = 4
+		o := testorigin.NewChecked(t, 64, 16)
+		b := cacheable("v")
+		b.Delay = 50 * time.Millisecond
+		o.Default(b)
+		cfg := cacheCfg
+		cfg.Limiter = weir.LimiterConfig{MaxConcurrent: 64, MaxPerPartition: 16, MaxQueue: 1000, MaxQueueWait: time.Minute, MaxPerHost: perHost}
+		e := newEngine(t, cfg)
+		defer closeEngine(t, e)
+
+		flood := make([]<-chan timedServe, 40)
+		for i := range flood {
+			flood[i] = serveTimed(t, e, getReq(fmt.Sprintf("/f%d", i)), o)
+		}
+		synctest.Wait()
+		other := getReq("/other")
+		other.Host = "other.example"
+		r := <-serveTimed(t, e, other, o)
+		if r.err != nil || r.elapsed > 100*time.Millisecond {
+			t.Fatalf("other host: err %v after %v, want an immediate slot", r.err, r.elapsed)
+		}
+		for i, ch := range flood {
+			if r := <-ch; r.err != nil {
+				t.Fatalf("flood %d: %v", i, r.err)
+			}
+		}
+		if n := o.MaxInflight(); n > perHost+1 {
+			t.Fatalf("origin max in-flight = %d, want <= %d (4 for the flood, 1 for the other host)", n, perHost+1)
+		}
+	})
+}

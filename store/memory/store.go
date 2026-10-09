@@ -19,6 +19,11 @@ type Config struct {
 	MaxRetention  time.Duration // 0: 24h; caps every record's lifetime (E-11)
 	MaxHardEpochs int           // 0: 10000 (E-6)
 	EpochSlots    int           // 0: 1 << 19; a power of two, at most MaxEpochSlots (E-7)
+	// MaxBytesPerOwner caps the bytes one Entry.Owner may hold in each shard
+	// (FR-FAIR-2). 0 disables it. An over-quota Set first evicts that owner's
+	// own entries and is declined if that is not enough; entries with the
+	// zero Owner are never limited.
+	MaxBytesPerOwner int64
 	// SnapshotPath, when set, makes Close write a snapshot there (FR-SNP-1).
 	SnapshotPath string
 	// SnapshotTimeout bounds the snapshot written by Close; CloseContext uses
@@ -77,8 +82,8 @@ func New(cfg Config) (*Store, error) {
 	if cfg.SnapshotTimeout == 0 {
 		cfg.SnapshotTimeout = defaultSnapshotTimeout
 	}
-	if cfg.MaxBytes < 0 || cfg.MaxRetention < 0 || cfg.MaxHardEpochs < 0 || cfg.SnapshotTimeout < 0 {
-		return nil, errors.New("store: memory: negative MaxBytes, MaxRetention, MaxHardEpochs or SnapshotTimeout")
+	if cfg.MaxBytes < 0 || cfg.MaxRetention < 0 || cfg.MaxHardEpochs < 0 || cfg.SnapshotTimeout < 0 || cfg.MaxBytesPerOwner < 0 {
+		return nil, errors.New("store: memory: negative MaxBytes, MaxRetention, MaxHardEpochs, SnapshotTimeout or MaxBytesPerOwner")
 	}
 	if !powerOfTwo(cfg.Shards, MaxShards) {
 		return nil, errors.New("store: memory: Shards is not a power of two up to MaxShards")
@@ -97,7 +102,7 @@ func New(cfg Config) (*Store, error) {
 		ep:          newEpochs(cfg.EpochSlots, cfg.MaxHardEpochs, cfg.MaxRetention),
 	}
 	for i := range s.shards {
-		s.shards[i] = newShard(cfg.MaxBytes / int64(cfg.Shards))
+		s.shards[i] = newShard(cfg.MaxBytes/int64(cfg.Shards), cfg.MaxBytesPerOwner)
 	}
 	if s.snapPath != "" {
 		s.loadSnapshot()

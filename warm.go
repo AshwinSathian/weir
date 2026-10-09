@@ -134,7 +134,7 @@ func (e *Engine) warmOne(ctx context.Context, req *Request, origin Origin, st *W
 		// Acquire before joining: a warm fetch queued for a slot must not
 		// hold a flight that foreground requests join and then wait on
 		// (FR-LIM-4).
-		permit, err := e.limFor(&c).Acquire(ctx, limiter.Warm, c.PartitionH)
+		permit, err := e.limFor(&c).Acquire(ctx, limiter.Warm, c.PartitionH, c.HostH)
 		if err != nil {
 			if ctx.Err() == nil {
 				e.shed(&c, limiter.Warm, err)
