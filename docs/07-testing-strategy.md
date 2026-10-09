@@ -258,7 +258,7 @@ Named in [06-threat-model.md](06-threat-model.md), [01-technical-spec.md](01-tec
 | `TestRangeUnsatisfiable416` (engine) | `bytes=10-`, `bytes=50-60`, `bytes=-0` on a 10-byte entry return 416 with `Content-Range: bytes */10` |
 | `TestRangeMultiOrInvalidGets200` (engine) | `bytes=0-1,4-5`, `bytes=5-2`, `bytes=a-b`, `items=0-1`, repeated Range lines return the full 200; `Accept-Ranges: none` on the stored entry does too |
 | `TestIfRangeStrongOnly` (engine) | weak ETag or a non-strong date in `If-Range` yields the full 200 |
-| `TestRangeMissBackgroundFillBounded` (engine) | 1 000 range requests across 1 000 cold URLs: origin in-flight stays within the background limit; exactly one fill per URL whose 206 total is within `MaxObjectBytes`; none for larger totals |
+| `TestRangeMissBackgroundFillBounded` (engine) | 1 000 range requests across 1 000 cold URLs: origin in-flight stays within the background limit; exactly one fill per URL whose 206 total is within `MaxObjectBytes`; none for larger totals; no fill for HEAD, marked keys or an over-size body repeated (`TestRangeMissFillFloodBounded`, `TestRangeMissNoFillUnderMarker`, `TestRangeMissOversizeFillNotRepeated`, `TestHeadWithRangeMissNoFill`) |
 | `FuzzRange` (property) | no panic; `RangeOK` results always satisfy `0 <= start <= end < size` |
 | `TestTargetedFieldPrecedence` (engine) | `Weir-Cache-Control` beats `CDN-Cache-Control` beats `Cache-Control`; invalid targeted field falls through |
 | `TestTargetedFieldKeepsPrivate` (engine) | `CDN-Cache-Control: max-age=600` with `Cache-Control: private` is not stored |

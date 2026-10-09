@@ -8,6 +8,8 @@ import (
 	"maps"
 	"net/http"
 	"slices"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/AshwinSathian/weir/internal/httpcc"
@@ -149,6 +151,78 @@ func (e *Engine) pass(ctx context.Context, c *keys.Classified, origin Origin, fw
 	return e.finish(res.resp, CacheInfo{Fwd: fwd, FwdStatus: res.resp.StatusCode}), nil
 }
 
+// rangeMiss passes a Range request through and, when the origin's 206 shows
+// a whole object the cache would store, starts one background fetch of it
+// (FR-RNG-4, 04 §13.1). The client never waits on that fetch (T-37).
+func (e *Engine) rangeMiss(ctx context.Context, c *keys.Classified, lk lookupResult, origin Origin) (*Response, error) {
+	resp, err := e.pass(ctx, c.AsRangePass(), origin, lk.fwd)
+	if err != nil {
+		return nil, err
+	}
+	// The same requests that never lead a flight (cacheable) never start a
+	// fill, and a hit-for-miss marker says the response is not shareable.
+	// A HEAD never fills: it forwards as a GET (FR-FWD-4) and a metadata probe
+	// must not cost a full-object fetch (T-37).
+	if c.Head || lk.marker || c.Authorized || c.ReqCC.NoStore || !e.fillable(c, resp) {
+		return resp, nil
+	}
+	// ponytail: a fill that errors repeats on the next Range miss; see 04 §13.1.
+	e.background(ctx, c, lk, origin, true) // c's forwarded request has no Range (T-7)
+	return resp, nil
+}
+
+// fillable reports a 206 whose Content-Range declares a total within
+// MaxObjectBytes and that would pass storability if it were a 200 (T-37).
+func (e *Engine) fillable(c *keys.Classified, resp *Response) bool {
+	if resp.StatusCode != http.StatusPartialContent {
+		return false
+	}
+	total, ok := contentRangeTotal(resp.Header.Get("Content-Range"))
+	// The limit counts headers too (storability), so the 200 the fill will
+	// read must fit total plus its headers.
+	if !ok || total+headerBytes(resp.Header) > e.cfg.Storable.MaxObjectBytes {
+		return false
+	}
+	as200 := &Response{StatusCode: http.StatusOK, Header: resp.Header}
+	return storability(&e.cfg, c, as200, nil, time.Now()).ok
+}
+
+// contentRangeTotal returns the complete length of a 206's
+// "bytes first-last/total" Content-Range. Anything else reports false: "*"
+// totals, the 416 form "bytes */total", signs, overflow, last < first or
+// last >= total (RFC 9110 §14.4).
+func contentRangeTotal(v string) (int64, bool) {
+	rest, ok := strings.CutPrefix(v, "bytes ")
+	if !ok {
+		return 0, false
+	}
+	span, totalS, ok := strings.Cut(rest, "/")
+	if !ok {
+		return 0, false
+	}
+	firstS, lastS, ok := strings.Cut(span, "-")
+	if !ok {
+		return 0, false
+	}
+	first, ok1 := digits(firstS)
+	last, ok2 := digits(lastS)
+	total, ok3 := digits(totalS)
+	if !ok1 || !ok2 || !ok3 || first > last || last >= total {
+		return 0, false
+	}
+	return total, true
+}
+
+// digits parses a non-empty run of ASCII digits; ParseInt alone would take a
+// sign.
+func digits(s string) (int64, bool) {
+	if s == "" || s[0] < '0' || s[0] > '9' {
+		return 0, false
+	}
+	n, err := strconv.ParseInt(s, 10, 64)
+	return n, err == nil
+}
+
 // lookupResult is what the store holds for a request (04 §6.3).
 type lookupResult struct {
 	ck      store.Key    // the key the records below live under: Primary, or the variant key under a vary spec
@@ -234,7 +308,7 @@ func (e *Engine) cacheable(ctx context.Context, c *keys.Classified, origin Origi
 	// FR-SRV-5, T-37: a Range request no entry answers passes through, even
 	// with a stale entry: not stored, not coalesced, no marker.
 	if c.Range {
-		return e.pass(ctx, c.AsRangePass(), origin, lk.fwd)
+		return e.rangeMiss(ctx, c, lk, origin)
 	}
 	sp := &fetchSpec{c: c, lk: lk, prior: prior, found: found, purged: purged, reentered: prevCK != nil}
 	// FR-COA-8, FR-STO-12. A no-store request's response is never shared,
@@ -281,6 +355,13 @@ func (e *Engine) fetchStored(ctx context.Context, sp *fetchSpec, origin Origin) 
 		emit(e.cfg.Observer, Event{Kind: EvNotStored, Time: res.respTime, Partition: c.Partition, Reason: "stream"})
 	case res.over:
 		emit(e.cfg.Observer, Event{Kind: EvNotStored, Time: res.respTime, Partition: c.Partition, Reason: "too-large"})
+		if sp.rangeFill {
+			// T-37: the 206 total promised a storable object. Without a marker
+			// every later Range request would repeat this MaxObjectBytes read.
+			now := res.respTime
+			e.setUnlessResponse(ctx, sp.lk.ck, sp.purged,
+				&store.Entry{Kind: store.KindHitForMiss, StoredAt: now, Expires: now.Add(e.cfg.Coalesce.HitForMissTTL)})
+		}
 	case serverError(res.resp.StatusCode):
 		// Before Publish, so before the creator's respond writes to resp.
 		fr.errHeader = maps.Clone(res.resp.Header)

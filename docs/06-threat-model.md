@@ -1,7 +1,7 @@
 # Weir threat model
 
 Status: v1.0
-Date: 2026-10-08
+Date: 2026-10-09
 Depends on: [01-technical-spec.md](01-technical-spec.md), [02-architecture.md](02-architecture.md)
 
 The seed's §7.3 makes the cache key a security boundary. This document says what that boundary protects, from whom, how each known attack class is answered, and what remains the operator's problem. Every threat has an ID so tests and code comments can cite it (`// T-3: ...`).
@@ -72,7 +72,7 @@ Each row: the attack, where it comes from, Weir's answer, the requirement or ADR
 | T-34 | Targeted-field leak: origin sets `CDN-Cache-Control` globally and marks per-user pages `private` only in `Cache-Control`; RFC 9213 would have the cache ignore `private` | `private`, `no-store`, `no-cache` in `Cache-Control` still apply (stricter than RFC 9213) | FR-TCC-3 | `TestTargetedFieldKeepsPrivate` |
 | T-35 | Variant spoofing: client sends `Weir-Variant` or edits the assignment cookie to pick a variant | header always replaced; cookie HMAC-signed with rotation | [10 §2](10-experiments-spec.md) E2, §5 | Phase 3 tests |
 | T-36 | Downstream variant mixing: a CDN in front of Weir caches variant responses (or the assignment `Set-Cookie`) under a key without the variant | experiment responses rewritten to `private` for downstream unless the operator declares variant-aware downstream caches | [10 §2](10-experiments-spec.md) E7 | Phase 3 tests |
-| T-37 | Range amplification: range requests on many URLs trigger full-object fetches | range requests never cause foreground full fetches; background fill only when the origin's 206 declares a total size within `MaxObjectBytes`, one flight per key, background class (no queueing, reserve respected) | FR-RNG-4 | `TestRangeMissBackgroundFillBounded` |
+| T-37 | Range amplification: range requests on many URLs trigger full-object fetches | range requests never cause foreground full fetches; background fill only when the origin's 206 declares a total size within `MaxObjectBytes`, one flight per key, background class (no queueing, never takes the foreground reserve), no fill for HEAD, credentialed or `no-store` requests or marked keys, and an over-size fill leaves a marker. Residual: a fill that fails (5xx, error) repeats per Range request, bounded by the Background limit and counted by the breaker | FR-RNG-4 | `TestRangeMissBackgroundFillBounded` |
 | T-38 | Multi-node purge gap: with per-node memory stores, a purge sent to one node leaves others serving the content | Phase 2 is single-node (D17); multi-node requires the Valkey store (shared entries and epochs) | D17 | deployment rule, checked at Phase 2 kickoff |
 | T-39 | Slow-upload slot pinning: many requests with slowly streamed bodies hold origin slots | bodies use a separate upload pool, so cacheable misses and bodyless requests are unaffected; adapters must bound body size and read time. Residual: an upload flood can still shed other uploads | FR-LIM-7 | `TestSlowUploadsDoNotStarveMisses` |
 | T-40 | Trace-header echo: an origin reflects `X-Request-Id` or `traceparent` into a cacheable body, making it an unkeyed input | forwarded by default for tracing; validated format, length and byte set (letters, digits and `-_.:/=+@,;*~!|`), at most 32 `tracestate` lines, none empty, no `..`, so neither field can carry a payload or a field count that a WAF or origin would reject onto the shared key (T-31); documented as origin misuse; operators can set `Forward.NoTraceHeaders` | FR-FWD-6 | `TestTraceparentValidated` |

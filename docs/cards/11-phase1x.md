@@ -9,7 +9,7 @@
 - Tests: TestRangeSingleFromCache, TestRangeUnsatisfiable416, TestRangeMultiOrInvalidGets200, TestIfRangeStrongOnly, FuzzRange
 - AC: `make check` passes
 
-### [ ] M11-02 Range miss background fill
+### [x] M11-02 Range miss background fill
 - Plan: M11 · Size: S · Depends on: M11-01
 - Read: 01 FR-RNG-4; 04 §13.1 (second paragraph); 06 T-37
 - Touch: serve.go (pass path), tests

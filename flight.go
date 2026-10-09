@@ -38,6 +38,8 @@ type fetchSpec struct {
 	// reentered marks a follower's second pass (FR-COA-5); a flight that
 	// again cannot serve it sends it to fetchDirect.
 	reentered bool
+	// rangeFill marks the Background fetch a Range miss starts (FR-RNG-4).
+	rangeFill bool
 }
 
 // flightResult is what a fetch-and-store produced, and what a flight

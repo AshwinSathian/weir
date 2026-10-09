@@ -4,9 +4,9 @@ Updated: 2026-10-09
 Phase: 1
 Current card: none
 Card state: awaiting-merge
-Branch: claude/busy-ramanujan-mhd5kg
-PR: #64 https://github.com/AshwinSathian/weir/pull/64
-Next card: M11-02 per `scripts/card.sh next`; M16-01 is approved too (Phase 1 release gate comes first, your call)
+Branch: claude/zen-carson-gp029q
+PR: https://github.com/AshwinSathian/weir/pull/65
+Next card: M12-01 per `scripts/card.sh next`; M16-01 is approved too (Phase 1 release gate comes first, your call)
 
 ## Waiting on Ashwin
 
@@ -20,8 +20,9 @@ none
 
 - M11-01: Range on a stored 200 (hit, SWR) is sliced in `fromEntry` (respond.go); the client's 304 check runs first. A stored `Accept-Ranges: none` makes Weir ignore Range (full 200). FR-SRV-5 and FR-RNG-1 in docs/01 say so.
 - M11-01: `docs/cache-tests-expected-failures.md` still lists the three `partial-store-complete-reuse-partial*` rows as not built, and the baseline is unchanged. Run `UPDATE=1 make cache-tests` (needs node and network) after merge, drop the row, refresh `testdata/cache-tests-baseline.json`.
-- M11-02: drop `FR-RNG-4` from the `later` allowlist in scripts/trace.sh in the PR that adds its first citing test. docs/06 maps T-37 only to FR-RNG-4, so cite T-37 there only.
-- M11-01: the M10-10 Range-plus-precondition-on-a-miss question is still open for M11-02 (pass-through drops preconditions, FR-FWD-1; 206 from cache now evaluates them as a hit).
+- M11-02: the fill is `rangeMiss` in serve.go (wraps `pass`); a stale entry under the key becomes the prior, so the fill revalidates it. Decided after adversarial review: a Range miss returns the origin's 206/200 whatever preconditions the client sent (compliant; hits evaluate them), HEAD never fills, an over-size fill leaves a hit-for-miss marker, `Content-Range` parsing is strict. Residual (ponytail, docs/04 §13.1): a fill that errors or gets a 5xx repeats per Range miss, bounded by the Background limit.
+- M11-02: a HEAD Range miss is still forwarded as GET with Range and answered with the origin's 206, while a HEAD Range hit gets the 200 (FR-RNG-3). The disagreement predates M11-02 (tested in TestRangeGarbageNotPoisoning); a later card may route HEAD around the Range pass.
+- M11-02: not tested: a fill under a Vary spec (reads correct: `lk.ck` is the variant key) and a hard-purged entry (`purged` is not passed to the fill).
 - `ParseRange` accepts whitespace before `=` (`bytes =0-1`); lenient, harmless on a hit.
 
 - M10-10: RFC 9110 §13.2.1 makes evaluating preconditions on any 2xx a MUST, 9111 §4.3.2 a SHOULD for stored 200/206; FR-SRV-2 keeps stored 200 and GET/HEAD only (compliant, conservative; 203/204 are gaps; a 206 built from cache is not stored, so M11-01 serves it after the 304 check). A hit with Range and a matching `If-None-Match` answers 304 (tested); a miss with Range goes to the pass-through, which drops client preconditions (FR-FWD-1). Revisit that in the M11 card.

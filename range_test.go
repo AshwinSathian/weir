@@ -1,9 +1,11 @@
 package weir_test
 
 import (
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -235,6 +237,296 @@ func TestRangeIgnoredWhenAcceptRangesNone(t *testing.T) {
 		resp, body := serve(t, e, withHeader(getReq("/a"), "Range", "bytes=1-2"), o)
 		if resp.StatusCode != http.StatusOK || body != "0123456789" || resp.Header.Get("Content-Range") != "" || !resp.Cache.Hit {
 			t.Fatalf("got %d %q Content-Range=%q hit=%v, want the full 200 hit", resp.StatusCode, body, resp.Header.Get("Content-Range"), resp.Cache.Hit)
+		}
+	})
+}
+
+// rangeFillOrigin answers a Range request with a 206 of the first two bytes
+// and anything else with the full 200. hdr overrides the default headers;
+// total is the size the Content-Range declares.
+func rangeFillOrigin(t *testing.T, hdr http.Header, total string) *testorigin.Origin {
+	t.Helper()
+	return rangeFillGated(t, hdr, total, nil)
+}
+
+// rangeFillGated is rangeFillOrigin whose full-object answers wait for gate.
+func rangeFillGated(t *testing.T, hdr http.Header, total string, gate <-chan struct{}) *testorigin.Origin {
+	t.Helper()
+	o := testorigin.NewChecked(t, 64, 16)
+	o.Default(testorigin.Behavior{Func: func(r *weir.Request) (*weir.Response, error) {
+		h := http.Header{"Cache-Control": {"max-age=60"}, "Content-Type": {"text/plain"}}
+		for k, v := range hdr {
+			h[k] = v
+		}
+		status, body := http.StatusOK, "0123456789"
+		if r.Header.Get("Range") != "" {
+			status, body = http.StatusPartialContent, "01"
+			h.Set("Content-Range", "bytes 0-1/"+total)
+		} else if gate != nil {
+			<-gate
+		}
+		return &weir.Response{StatusCode: status, Header: h, Body: io.NopCloser(strings.NewReader(body))}, nil
+	}})
+	return o
+}
+
+// FR-RNG-4, T-37
+func TestRangeMissBackgroundFillBounded(t *testing.T) {
+	t.Run("a 206 with a known total fills the key once, then ranges hit", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			o := rangeFillOrigin(t, nil, "10")
+			e := newEngine(t, cacheCfg)
+			defer closeEngine(t, e)
+
+			resp, body := serve(t, e, withHeader(getReq("/a"), "Range", "bytes=0-1"), o)
+			if resp.StatusCode != http.StatusPartialContent || body != "01" || resp.Cache.Hit {
+				t.Fatalf("got %d %q hit=%v, want the origin's 206", resp.StatusCode, body, resp.Cache.Hit)
+			}
+			synctest.Wait()
+			if n := o.Calls("/a"); n != 2 {
+				t.Fatalf("origin calls = %d, want the range plus one fill", n)
+			}
+			reqs := o.Requests()
+			if reqs[0].Header.Get("Range") == "" || reqs[1].Header.Get("Range") != "" {
+				t.Fatalf("Range on the calls = %q, %q; the fill must not carry it",
+					reqs[0].Header.Get("Range"), reqs[1].Header.Get("Range"))
+			}
+			resp, body = serve(t, e, withHeader(getReq("/a"), "Range", "bytes=2-4"), o)
+			if resp.StatusCode != http.StatusPartialContent || body != "234" || !resp.Cache.Hit {
+				t.Fatalf("got %d %q hit=%v, want a 206 hit from the filled entry", resp.StatusCode, body, resp.Cache.Hit)
+			}
+			if n := o.Calls("/a"); n != 2 {
+				t.Fatalf("origin calls = %d after the hit, want 2", n)
+			}
+		})
+	})
+
+	t.Run("concurrent range misses start one fill", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			gate := make(chan struct{})
+			o := rangeFillGated(t, nil, "10", gate)
+			e := newEngine(t, cacheCfg)
+			defer closeEngine(t, e)
+			defer close(gate)
+			for range 5 {
+				go func() { serve(t, e, withHeader(getReq("/a"), "Range", "bytes=0-1"), o) }()
+			}
+			synctest.Wait()
+			full := 0
+			for _, r := range o.Requests() {
+				if r.Header.Get("Range") == "" {
+					full++
+				}
+			}
+			if full != 1 {
+				t.Fatalf("full fetches = %d, want 1", full)
+			}
+		})
+	})
+
+	tests := []struct {
+		name  string
+		hdr   http.Header
+		total string
+		cfg   weir.Config
+		req   func() *weir.Request
+	}{
+		{"total over MaxObjectBytes", nil, "11", weir.Config{Freshness: cacheCfg.Freshness, Storable: weir.StorableConfig{MaxObjectBytes: 10}}, nil},
+		{"unknown total", nil, "*", cacheCfg, nil},
+		{"unparsable total", nil, "9999999999999999999999", cacheCfg, nil},
+		{"total plus headers over MaxObjectBytes", nil, "10", weir.Config{Freshness: cacheCfg.Freshness, Storable: weir.StorableConfig{MaxObjectBytes: 20}}, nil},
+		{"206 that is not storable", http.Header{"Cache-Control": {"no-store"}}, "10", cacheCfg, nil},
+		{"206 with Set-Cookie", http.Header{"Set-Cookie": {"a=b"}}, "10", cacheCfg, nil},
+		{"206 with no freshness", http.Header{"Cache-Control": {"no-cache"}}, "10", cacheCfg, nil},
+		{"request with credentials", nil, "10", cacheCfg, func() *weir.Request {
+			return withHeader(withHeader(getReq("/a"), "Authorization", "Bearer x"), "Range", "bytes=0-1")
+		}},
+		{"no-store request", nil, "10", cacheCfg, func() *weir.Request {
+			return withHeader(withHeader(getReq("/a"), "Cache-Control", "no-store"), "Range", "bytes=0-1")
+		}},
+	}
+	for _, tc := range tests {
+		t.Run("no fill: "+tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				o := rangeFillOrigin(t, tc.hdr, tc.total)
+				e := newEngine(t, tc.cfg)
+				defer closeEngine(t, e)
+				req := withHeader(getReq("/a"), "Range", "bytes=0-1")
+				if tc.req != nil {
+					req = tc.req()
+				}
+				resp, _ := serve(t, e, req, o)
+				if resp.StatusCode != http.StatusPartialContent {
+					t.Fatalf("status = %d, want 206", resp.StatusCode)
+				}
+				synctest.Wait()
+				if n := o.Calls("/a"); n != 1 {
+					t.Fatalf("origin calls = %d, want only the range request", n)
+				}
+			})
+		})
+	}
+
+	t.Run("a 200 answer to a range request is not a fill trigger", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			o := rangeOrigin(t, nil, "0123456789")
+			e := newEngine(t, cacheCfg)
+			defer closeEngine(t, e)
+			serve(t, e, withHeader(getReq("/a"), "Range", "bytes=0-1"), o)
+			synctest.Wait()
+			if n := o.Calls("/a"); n != 1 {
+				t.Fatalf("origin calls = %d, want 1", n)
+			}
+		})
+	})
+}
+
+// FR-RNG-4, T-37: with a stale entry under the key the fill revalidates it
+// (no Range, If-None-Match), and the freshened entry then answers ranges.
+func TestRangeMissFillRevalidatesStaleEntry(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		o := testorigin.NewChecked(t, 64, 16)
+		o.Default(testorigin.Behavior{Func: func(r *weir.Request) (*weir.Response, error) {
+			h := http.Header{"Cache-Control": {"max-age=60"}, "Etag": {`"v1"`}}
+			status, body := http.StatusOK, "0123456789"
+			switch {
+			case r.Header.Get("Range") != "":
+				status, body = http.StatusPartialContent, "01"
+				h.Set("Content-Range", "bytes 0-1/10")
+			case r.Header.Get("If-None-Match") != "":
+				status, body = http.StatusNotModified, ""
+			}
+			return &weir.Response{StatusCode: status, Header: h, Body: io.NopCloser(strings.NewReader(body))}, nil
+		}})
+		e := newEngine(t, cacheCfg)
+		defer closeEngine(t, e)
+		serve(t, e, getReq("/a"), o)
+		time.Sleep(61 * time.Second)
+
+		resp, body := serve(t, e, withHeader(getReq("/a"), "Range", "bytes=0-1"), o)
+		if resp.StatusCode != http.StatusPartialContent || body != "01" || resp.Cache.Hit {
+			t.Fatalf("got %d %q hit=%v, want the origin's 206", resp.StatusCode, body, resp.Cache.Hit)
+		}
+		synctest.Wait()
+		reqs := o.Requests() // initial fetch, the range, the fill
+		if len(reqs) != 3 || reqs[2].Header.Get("Range") != "" || reqs[2].Header.Get("If-None-Match") != `"v1"` {
+			t.Fatalf("calls = %d; fill must be a conditional request without Range: %v", len(reqs), reqs[len(reqs)-1].Header)
+		}
+		resp, body = serve(t, e, withHeader(getReq("/a"), "Range", "bytes=2-4"), o)
+		if resp.StatusCode != http.StatusPartialContent || body != "234" || !resp.Cache.Hit || o.Calls("/a") != 3 {
+			t.Fatalf("got %d %q hit=%v calls=%d, want a 206 hit from the revalidated entry", resp.StatusCode, body, resp.Cache.Hit, o.Calls("/a"))
+		}
+	})
+}
+
+// FR-RNG-4, T-37: a flood of cold URLs never holds more full-object fetches
+// than the Background limit, and a dropped fill never fails the range request.
+func TestRangeMissFillFloodBounded(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var inflight, peak atomic.Int32
+		gate := make(chan struct{})
+		o := testorigin.NewChecked(t, 64, 16)
+		o.Default(testorigin.Behavior{Func: func(r *weir.Request) (*weir.Response, error) {
+			h := http.Header{"Cache-Control": {"max-age=60"}}
+			if r.Header.Get("Range") != "" {
+				h.Set("Content-Range", "bytes 0-1/10")
+				return &weir.Response{StatusCode: 206, Header: h, Body: io.NopCloser(strings.NewReader("01"))}, nil
+			}
+			n := inflight.Add(1)
+			for {
+				p := peak.Load()
+				if n <= p || peak.CompareAndSwap(p, n) {
+					break
+				}
+			}
+			<-gate
+			inflight.Add(-1)
+			return &weir.Response{StatusCode: 200, Header: h, Body: io.NopCloser(strings.NewReader("0123456789"))}, nil
+		}})
+		cfg := cacheCfg
+		cfg.Limiter = weir.LimiterConfig{MaxConcurrent: 5, ReserveForeground: 1}
+		e := newEngine(t, cfg)
+		defer closeEngine(t, e)
+		defer close(gate)
+		for i := range 1000 {
+			resp, _ := serve(t, e, withHeader(getReq("/u"+strconv.Itoa(i)), "Range", "bytes=0-1"), o)
+			if resp.StatusCode != http.StatusPartialContent {
+				t.Fatalf("range %d: status %d, want 206", i, resp.StatusCode)
+			}
+		}
+		synctest.Wait()
+		if got := peak.Load(); got < 1 || got > 4 {
+			t.Fatalf("full fetches in flight peaked at %d, want 1..4 (limit minus the foreground reserve)", got)
+		}
+	})
+}
+
+// FR-RNG-4, FR-STO-12: a hit-for-miss marker means the URI is not shareable,
+// so a Range miss under it starts no fill.
+func TestRangeMissNoFillUnderMarker(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		o := testorigin.NewChecked(t, 64, 16)
+		o.Default(testorigin.Behavior{Func: func(r *weir.Request) (*weir.Response, error) {
+			if r.Header.Get("Range") != "" {
+				h := http.Header{"Cache-Control": {"max-age=60"}, "Content-Range": {"bytes 0-1/10"}}
+				return &weir.Response{StatusCode: 206, Header: h, Body: io.NopCloser(strings.NewReader("01"))}, nil
+			}
+			h := http.Header{"Cache-Control": {"no-store"}}
+			return &weir.Response{StatusCode: 200, Header: h, Body: io.NopCloser(strings.NewReader("0123456789"))}, nil
+		}})
+		e := newEngine(t, cacheCfg)
+		defer closeEngine(t, e)
+		serve(t, e, getReq("/a"), o) // writes the marker
+		serve(t, e, withHeader(getReq("/a"), "Range", "bytes=0-1"), o)
+		synctest.Wait()
+		if n := o.Calls("/a"); n != 2 {
+			t.Fatalf("origin calls = %d, want the GET and the range only", n)
+		}
+	})
+}
+
+// FR-RNG-4, T-37: a fill whose body is over MaxObjectBytes (the 206 total
+// lied or the representation changed) is not repeated on every range request.
+func TestRangeMissOversizeFillNotRepeated(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		o := testorigin.NewChecked(t, 64, 16)
+		o.Default(testorigin.Behavior{Func: func(r *weir.Request) (*weir.Response, error) {
+			h := http.Header{"Cache-Control": {"max-age=60"}}
+			if r.Header.Get("Range") != "" {
+				h.Set("Content-Range", "bytes 0-1/10")
+				return &weir.Response{StatusCode: 206, Header: h, Body: io.NopCloser(strings.NewReader("01"))}, nil
+			}
+			return &weir.Response{StatusCode: 200, Header: h, Body: io.NopCloser(strings.NewReader(strings.Repeat("x", 5000)))}, nil
+		}})
+		cfg := cacheCfg
+		cfg.Storable.MaxObjectBytes = 1000
+		e := newEngine(t, cfg)
+		defer closeEngine(t, e)
+		for range 5 {
+			serve(t, e, withHeader(getReq("/a"), "Range", "bytes=0-1"), o)
+			synctest.Wait()
+		}
+		if n := o.Calls("/a"); n != 6 {
+			t.Fatalf("origin calls = %d, want 5 ranges plus one fill", n)
+		}
+	})
+}
+
+// FR-RNG-4, T-37: a HEAD with Range is passed through as a GET (FR-FWD-4) and
+// starts no full-object fill.
+func TestHeadWithRangeMissNoFill(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		o := rangeFillOrigin(t, nil, "10")
+		e := newEngine(t, cacheCfg)
+		defer closeEngine(t, e)
+		req := withHeader(headReq("/a"), "Range", "bytes=0-1")
+		resp, _ := serve(t, e, req, o)
+		synctest.Wait()
+		if resp.StatusCode != http.StatusPartialContent {
+			t.Fatalf("status = %d, want the origin's 206", resp.StatusCode)
+		}
+		if n := o.Calls("/a"); n != 1 {
+			t.Fatalf("origin calls = %d, want 1", n)
 		}
 	})
 }
