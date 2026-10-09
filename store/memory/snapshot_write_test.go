@@ -8,6 +8,7 @@ import (
 	"hash/crc32"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -236,11 +237,11 @@ func TestSnapshotOffAndConfig(t *testing.T) {
 // no file.
 func TestSnapshotCloseUsesTimeout(t *testing.T) {
 	dir := t.TempDir()
+	// A 1ns timeout has elapsed by the time Close builds its context.
 	s, err := New(Config{SnapshotPath: filepath.Join(dir, "weir.snap"), SnapshotTimeout: time.Nanosecond})
 	if err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(time.Millisecond)
 	if err := s.Close(); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("Close = %v, want DeadlineExceeded", err)
 	}
@@ -271,4 +272,125 @@ func TestSnapshotSkipsExpired(t *testing.T) {
 			t.Fatalf("snapshot holds %d records, want only the unexpired key", len(recs))
 		}
 	})
+}
+
+// FR-SNP-1, FR-PRG-5: the global hard epoch lives outside the hard table and
+// must still be written, or a hard purge degrades to soft-stale on restart.
+func TestSnapshotWritesGlobalHardEpoch(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "weir.snap")
+	s, err := New(Config{SnapshotPath: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	at := time.Now().Add(-time.Minute)
+	if err := s.SetEpoch(context.Background(), store.TagGlobal(), store.Epoch{At: at, Mode: store.EpochHard}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	recs := readSnapshot(t, path)
+	if len(recs) != 1 || recs[0].kind != snapKindEpoch || store.Tag(recs[0].payload[:32]) != store.TagGlobal() {
+		t.Fatalf("records = %+v, want one global epoch", recs)
+	}
+	if d := time.Duration(int64(binary.BigEndian.Uint64(recs[0].payload[32:])) - at.UnixNano()); d < -time.Millisecond || d > time.Millisecond {
+		t.Errorf("global epoch time off by %v", d)
+	}
+}
+
+// FR-SNP-1: a hard epoch past MaxRetention applies to no live record and is
+// not written.
+func TestSnapshotSkipsPrunableEpoch(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "weir.snap")
+		s, err := New(Config{SnapshotPath: path, MaxRetention: time.Hour})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = s.SetEpoch(context.Background(), store.Tag{1}, store.Epoch{At: time.Now(), Mode: store.EpochHard})
+		time.Sleep(2 * time.Hour)
+		if err := s.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if recs := readSnapshot(t, path); len(recs) != 0 {
+			t.Fatalf("snapshot holds %d records, want none", len(recs))
+		}
+	})
+}
+
+// FR-SNP-1: failures leave no temp file and do not panic, and a snapshot
+// that failed can be retried.
+func TestSnapshotFailureAndRetry(t *testing.T) {
+	t.Run("target is a directory", func(t *testing.T) {
+		dir := t.TempDir()
+		target := filepath.Join(dir, "weir.snap")
+		if err := os.Mkdir(target, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		s, _ := New(Config{SnapshotPath: target})
+		if err := s.Close(); err == nil {
+			t.Fatal("Close = nil, want a rename error")
+		}
+		if names := dirNames(t, dir); len(names) != 1 || names[0] != "weir.snap" {
+			t.Fatalf("directory holds %v, want only the target directory", names)
+		}
+	})
+	t.Run("missing directory", func(t *testing.T) {
+		s, _ := New(Config{SnapshotPath: filepath.Join(t.TempDir(), "gone", "weir.snap")})
+		if err := s.Close(); err == nil {
+			t.Fatal("Close = nil, want an error")
+		}
+	})
+	t.Run("retry after a cut-off close", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "weir.snap")
+		s, _ := New(Config{SnapshotPath: path})
+		_ = s.Set(context.Background(), numKey(1), entry(10))
+		if err := s.CloseContext(canceled()); err == nil {
+			t.Fatal("cancelled CloseContext = nil")
+		}
+		if err := s.CloseContext(context.Background()); err != nil {
+			t.Fatalf("retry: %v", err)
+		}
+		if len(readSnapshot(t, path)) != 1 {
+			t.Fatal("retry did not write the entry")
+		}
+		os.Remove(path)
+		if err := s.Close(); err != nil || len(dirNames(t, dir)) != 0 {
+			t.Fatal("a written snapshot must not be written twice")
+		}
+	})
+}
+
+// FR-SNP-1: Set, Delete and concurrent Close calls during the write are safe
+// (run under -race), and every caller returns after the file exists.
+func TestSnapshotConcurrentClose(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "weir.snap")
+	s, _ := New(Config{SnapshotPath: path})
+	ctx := context.Background()
+	for i := uint64(1); i <= 200; i++ {
+		_ = s.Set(ctx, numKey(i), entry(10))
+	}
+	var wg sync.WaitGroup
+	for g := range 4 {
+		wg.Go(func() {
+			if g%2 == 0 {
+				if err := s.Close(); err != nil {
+					t.Errorf("Close: %v", err)
+				}
+				if _, err := os.Stat(path); err != nil {
+					t.Errorf("snapshot missing after Close returned: %v", err)
+				}
+				return
+			}
+			for i := uint64(1); i <= 200; i++ {
+				_ = s.Set(ctx, numKey(i+1000), entry(10))
+				_ = s.Delete(ctx, numKey(i))
+			}
+		})
+	}
+	wg.Wait()
+	readSnapshot(t, path)
 }

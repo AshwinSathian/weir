@@ -44,11 +44,21 @@ func (s *Store) Close() error {
 // CloseContext is Close with the snapshot bounded by ctx, so an adapter's
 // shutdown grace period bounds it (FR-SNP-1). A snapshot cut short by ctx is
 // discarded and the error wraps ctx's. The store is closed either way.
+// Concurrent calls wait for each other; once a snapshot is written later
+// calls return nil, and after a failure a later call tries again (the store
+// accepts no writes by then, so the content does not change).
 func (s *Store) CloseContext(ctx context.Context) error {
-	if s.closed.Swap(true) || s.snapPath == "" {
+	s.closeMu.Lock()
+	defer s.closeMu.Unlock()
+	s.closed.Store(true)
+	if s.snapPath == "" || s.snapDone {
 		return nil
 	}
-	return s.writeSnapshot(ctx)
+	if err := s.writeSnapshot(ctx); err != nil {
+		return err
+	}
+	s.snapDone = true
+	return nil
 }
 
 // writeSnapshot writes every live response and vary-spec record and all hard
@@ -92,7 +102,11 @@ func (s *Store) writeSnapshot(ctx context.Context) (err error) {
 	if w.err == nil {
 		w.err = f.Sync()
 	}
-	if err = w.err; err != nil {
+	if err = w.err; err == nil {
+		// The deadline can pass during Flush or Sync; do not rename after it.
+		err = ctx.Err()
+	}
+	if err != nil {
 		return fmt.Errorf("store: memory: snapshot: %w", err)
 	}
 	if err = f.Close(); err != nil {
@@ -130,13 +144,23 @@ func (sh *shard) live(queue uint8) []snapRec {
 	return out
 }
 
-// hardEpochs returns a copy of the hard epoch table.
+// hardEpochs returns a copy of the hard epochs still in force: the table
+// (minus entries past retention, which are pruned lazily and cannot apply to
+// any live record) and the global hard epoch, which lives outside the table
+// (E-5). Dropping the global one would let a hard purge degrade to soft-stale
+// after a restart.
 func (ep *epochs) hardEpochs() map[store.Tag]time.Time {
+	cutoff := time.Now().Add(-ep.retention)
 	ep.mu.RLock()
 	defer ep.mu.RUnlock()
-	out := make(map[store.Tag]time.Time, len(ep.hard))
+	out := make(map[store.Tag]time.Time, len(ep.hard)+1)
 	for t, at := range ep.hard {
-		out[t] = at
+		if !at.Before(cutoff) {
+			out[t] = at
+		}
+	}
+	if g := ep.global[store.EpochHard-1].Load(); g != noEpoch {
+		out[ep.globalTag] = ep.base.Add(time.Duration(g))
 	}
 	return out
 }
@@ -161,7 +185,9 @@ func (w *snapWriter) entry(r snapRec) {
 	}
 	enc, err := store.Encode(r.e)
 	if err != nil {
-		return // cannot happen for a stored entry; skip rather than lose the rest
+		// Cannot happen for a stored entry. Skip it rather than lose the
+		// rest; the trailer counts written records only.
+		return
 	}
 	w.record(snapKindEntry, append(r.key[:], enc...))
 	w.count++

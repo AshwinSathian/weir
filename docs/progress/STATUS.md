@@ -14,7 +14,7 @@ none
 
 ## Blockers
 
-none. golangci-lint in this container is built with Go 1.25 and cannot load the Go 1.27 config, so lint is unrun for M12-02; CI must confirm.
+none. golangci-lint in this container is built with Go 1.25 and cannot load the Go 1.27 config, so lint is unrun for M13-01; CI must confirm before merge.
 
 ## Notes for the next session
 

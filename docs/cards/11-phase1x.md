@@ -43,7 +43,7 @@
 - Touch: store/memory/snapshot_load.go, tests
 - Tests: TestSnapshotRoundTrip, TestSnapshotLoadIsSoftStale, TestSnapshotHardEpochSurvives, TestSnapshotCorruptRecordsSkipped
 - AC: file deleted after successful load; `make check` passes
-- Notes: security-sensitive (decoder of on-disk bytes): checklist in PR body.
+- Notes: security-sensitive (decoder of on-disk bytes): checklist in PR body. Also wire `Engine.Close` to the store's optional `CloseContext(ctx)` in this card (same card that exposes SnapshotPath, or the 5s timeout silently overrides the adapter grace period; LLD 13.3). `New` must not write a snapshot on a failed construction: engine.go's `c.Store.Close()` failure path would otherwise replace a good snapshot with an empty one before the loader ran. The writer already includes the global hard epoch (`TestSnapshotWritesGlobalHardEpoch`); the loader must restore it.
 
 ### [ ] M14-01 Per-host limiter cap and per-owner quota
 - Plan: M14 · Size: M · Depends on: M13-02

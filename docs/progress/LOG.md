@@ -1163,3 +1163,11 @@ Entry template:
 - Review: card-reviewer must-fix: LLD claimed engine wiring that does not exist; reworded to say it lands later. Applied should-fix: best-effort directory sync, Close timeout test, expired-record test, per-record deadline comment. Left open: none.
 - Follow-ups: wire Engine.Close to CloseContext (with M13-02).
 - Context: low; size M was right.
+
+## 2026-10-09 · M13-01 · review-fixes
+- Branch / PR: claude/amazing-bohr-2fi9ve / https://github.com/AshwinSathian/weir/pull/68
+- Done: adversarial review. Must-fix: the global hard epoch (kept outside the hard table) was not written, so a hard purge would degrade to soft-stale after restart; now written. Also: Close calls serialize and a failed snapshot can be retried; ctx re-checked before rename; epochs past retention skipped; FR-SNP-1 names SnapshotTimeout and CloseContext; Config field order matches docs/05; M13-02 card notes carry the engine wiring and failed-construction caveats.
+- Tests: TestSnapshotWritesGlobalHardEpoch, TestSnapshotSkipsPrunableEpoch, TestSnapshotFailureAndRetry, TestSnapshotConcurrentClose; removed the real-clock sleep from TestSnapshotCloseUsesTimeout. Lint unrun.
+- Deviations: docs/01 FR-SNP-1 wording extended with the approved timeout and CloseContext (no behavior change).
+- Follow-ups: engine wiring and loader in M13-02. Waiting on Ashwin: none.
+- Context: low.
