@@ -5,7 +5,7 @@ Phase: 1
 Current card: none
 Card state: awaiting-merge
 Branch: claude/zen-carson-gp029q
-PR: PR_URL
+PR: https://github.com/AshwinSathian/weir/pull/65
 Next card: M12-01 per `scripts/card.sh next`; M16-01 is approved too (Phase 1 release gate comes first, your call)
 
 ## Waiting on Ashwin
