@@ -5,7 +5,7 @@ Phase: 1
 Current card: none
 Card state: awaiting-merge
 Branch: card/P2-00-caddy-spec
-PR: none yet
+PR: https://github.com/AshwinSathian/weir/pull/73
 Next card: P2-01 (Module skeleton and Caddyfile)
 
 ## Waiting on Ashwin
