@@ -1197,7 +1197,7 @@ Entry template:
 - Context: low.
 
 ## 2026-10-09 · M14-01 · done
-- Branch / PR: claude/peaceful-babbage-hrdup8 / see STATUS
+- Branch / PR: claude/peaceful-babbage-hrdup8 / https://github.com/AshwinSathian/weir/pull/70
 - Done: per-host limiter cap (`limiter.Config.PerHost`, `Classified.HostH`, `Acquire` host argument, both pools); per-owner byte quota in the memory shard (`MaxBytesPerOwner`, own-entry eviction within a 64-node scan, decline otherwise); snapshot loader honors it without evicting.
 - Tests: TestPerHostLimiterCap, TestOwnerQuotaIsolatesTenants, TestSnapshotLoadHonorsOwnerQuota, TestEnginePerHostCap, TestClassifyHostHash. Race tests, vet, gofmt, trace pass; lint 0 issues via the Go 1.27 build of v2.14.0.
 - Deviations: LLD 13.4 updated (int map, Acquire signature, queue ceiling). FR-FAIR-2 scan wording left as is; question under "Waiting on Ashwin".

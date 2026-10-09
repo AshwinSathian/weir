@@ -5,7 +5,7 @@ Phase: 1
 Current card: none
 Card state: awaiting-merge
 Branch: claude/peaceful-babbage-hrdup8
-PR: pending (see LOG)
+PR: https://github.com/AshwinSathian/weir/pull/70
 Next card: M15-01 per `scripts/card.sh next`; M16-01 is approved too
 
 ## Waiting on Ashwin
