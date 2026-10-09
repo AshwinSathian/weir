@@ -1277,3 +1277,10 @@ Entry template:
 - Deviations: none from normative text; five keys added beyond the 08 example, recorded in the 08 table. `max_bytes`/`snapshot_dir` parsed but applied by P2-02. `internal/keys.IsUpgrade` imports across modules, so no `weirhttp.IsUpgrade` fallback.
 - Review: card-reviewer, no must-fix. Fixed: invalid T-45 citation dropped, exact int parsing for byte sizes (no exponent or hex forms), 08 says P2-02 owns `snapshot_dir` validation. Open: Cleanup clears `h.engine` without a lock, revisit in P2-03 when serving reads it.
 - Context: low; size M was right.
+
+## 2026-10-09 · P2-01 · review-fixes
+- Branch / PR: card/P2-01-module-skeleton (remote branch claude/epic-maxwell-jkv0at) / https://github.com/AshwinSathian/weir/pull/74
+- Done: adversarial review of PR 74 (agent), no must-fix, nothing was waiting on Ashwin. Applied: dot-leading names rejected (08 §2), 1 PiB cap on `max_bytes`, warning when `max_bytes`/`snapshot_dir` are set, second `Provision` refused, stricter byte-size grammar, `null` no-op, doubled error prefix, real newline test case.
+- Tests: added cases in TestConfigFromJSON and TestProvisionReportsBadConfig; `make check` passes with the pinned lint under Go 1.27.
+- Deviations: 08 §2 `name` rule gained "no leading dot" (delegated decision, recorded in STATUS).
+- Follow-ups: xcaddy resolution of the root module (P2-01c), `Cleanup` vs `ServeHTTP` on `h.engine` (P2-03).

@@ -4,7 +4,7 @@ package weircaddy
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"net/http"
 	"time"
 
@@ -49,14 +49,22 @@ func (*Handler) CaddyModule() caddy.ModuleInfo {
 // config, so a bad one fails here and in caddy validate (08 §2). A failed
 // weir.New leaves nothing to close.
 func (h *Handler) Provision(ctx caddy.Context) error {
+	if h.engine != nil {
+		return errors.New("weir: handler is already provisioned")
+	}
 	if err := h.Validate(); err != nil {
 		return err
 	}
 	cfg := h.weirConfig()
 	cfg.Logger = ctx.Slogger()
+	// ponytail: the store pool and serving land in P2-02 and P2-03; say so
+	// instead of silently ignoring what the operator set.
+	if h.MaxBytes != 0 || h.SnapshotDir != "" {
+		cfg.Logger.Warn("weir: max_bytes and snapshot_dir are parsed but not applied yet (P2-02)", "name", h.Name)
+	}
 	e, err := weir.New(cfg)
 	if err != nil {
-		return fmt.Errorf("weir: %w", err)
+		return err // already prefixed "weir:"
 	}
 	h.engine = e
 	return nil

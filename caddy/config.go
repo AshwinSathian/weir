@@ -19,8 +19,8 @@ import (
 const maxNameLen = 64
 
 // ByteSize is a size in bytes. JSON accepts a non-negative integer, or a
-// string such as "512MiB" (B, KB, MB, GB, TB decimal; KiB, MiB, GiB, TiB
-// binary; a bare digit string is bytes).
+// string such as "512MiB" (B, KB, MB, GB, TB, PB decimal; KiB, MiB, GiB, TiB, PiB
+// binary; a bare digit string is bytes). The cap is 1 PiB.
 type ByteSize int64
 
 var byteUnits = []struct {
@@ -28,14 +28,17 @@ var byteUnits = []struct {
 	mult   float64
 }{
 	// Longest suffix first so "MiB" is not read as "B".
-	{"kib", 1 << 10}, {"mib", 1 << 20}, {"gib", 1 << 30}, {"tib", 1 << 40},
-	{"kb", 1e3}, {"mb", 1e6}, {"gb", 1e9}, {"tb", 1e12},
+	{"kib", 1 << 10}, {"mib", 1 << 20}, {"gib", 1 << 30}, {"tib", 1 << 40}, {"pib", 1 << 50},
+	{"kb", 1e3}, {"mb", 1e6}, {"gb", 1e9}, {"tb", 1e12}, {"pb", 1e15},
 	{"b", 1},
 }
 
 // UnmarshalJSON implements json.Unmarshaler.
 func (b *ByteSize) UnmarshalJSON(data []byte) error {
 	data = bytes.TrimSpace(data)
+	if string(data) == "null" {
+		return nil // JSON convention: null leaves the field alone
+	}
 	s := string(data)
 	if len(data) > 0 && data[0] == '"' {
 		if err := json.Unmarshal(data, &s); err != nil {
@@ -62,31 +65,42 @@ func parseByteSize(s string) (int64, error) {
 			break
 		}
 	}
-	// Whole numbers go through ParseInt so values above 2^53 stay exact;
-	// only fractions and scaled values use floats. Exponent and hex forms
-	// are not sizes.
-	if mult == 1 {
-		if n, err := strconv.ParseInt(s, 10, 64); err == nil && n >= 0 {
-			return n, nil
-		}
-	}
-	if strings.ContainsAny(s, "ex") {
+	// Digits and at most the decimal point: no sign, exponent, hex or
+	// underscores. Whole numbers go through ParseInt so values above 2^53
+	// stay exact; only fractions and scaled values use floats.
+	if s == "" || strings.Trim(s, "0123456789.") != "" {
 		return 0, errors.New("weir: invalid byte size")
+	}
+	if mult == 1 {
+		if n, err := strconv.ParseInt(s, 10, 64); err == nil {
+			return checkMaxBytes(n)
+		}
 	}
 	f, err := strconv.ParseFloat(s, 64)
 	if err != nil || math.IsNaN(f) || f < 0 {
 		return 0, errors.New("weir: invalid byte size")
 	}
 	f *= mult
-	if f >= math.MaxInt64 {
-		return 0, errors.New("weir: byte size too large")
+	if f > maxByteSize {
+		return 0, errors.New("weir: byte size is above 1 PiB")
 	}
 	// A bare JSON number must be whole bytes; "1.5MiB" is fine because it
 	// resolves to whole bytes after scaling.
 	if f != math.Trunc(f) {
 		return 0, errors.New("weir: byte size is not a whole number of bytes")
 	}
-	return int64(f), nil
+	return checkMaxBytes(int64(f))
+}
+
+// maxByteSize caps ByteSize at 1 PiB so later budget sums and shard math
+// (P2-02, P2-04) cannot overflow int64 (NFR-3).
+const maxByteSize = 1 << 50
+
+func checkMaxBytes(n int64) (int64, error) {
+	if n > maxByteSize {
+		return 0, errors.New("weir: byte size is above 1 PiB")
+	}
+	return n, nil
 }
 
 // KeyConfig mirrors weir.KeyConfig (FR-KEY).
@@ -144,6 +158,11 @@ func validateName(name string) error {
 	}
 	if len(name) > maxNameLen {
 		return fmt.Errorf("weir: name is longer than %d bytes", maxNameLen)
+	}
+	// A leading dot would make "." and ".." admin path segments that clients
+	// and the mux collapse, and hides the snapshot file.
+	if name[0] == '.' {
+		return errors.New("weir: name must not start with a dot")
 	}
 	for i := range len(name) {
 		c := name[i]

@@ -41,6 +41,16 @@ Ashwin delegated "take decisions on all items"; "Waiting on Ashwin" was empty. A
 - Snapshots: the superseded store skips its snapshot; `name` is restricted to `[A-Za-z0-9._-]{1,64}`; config keys table added to 08 §2.
 - Cards: P2-01 split into P2-01, P2-01b (Caddyfile), P2-01c (xcaddy CI); `TestRetryAfterSurvivesHandleErrors` moved to P2-03b (needs caddytest).
 
+## Decided 2026-10-09 (P2-01, review of PR 74)
+
+Ashwin delegated "take decisions on all items"; "Waiting on Ashwin" was empty. An independent agent attacked the PR; no must-fix. Decisions:
+
+- `name` may not start with a dot (admin URL `/weir/../purge` collapses). Changes the 08 §2 charset rule; 08 updated.
+- `max_bytes` is capped at 1 PiB at parse time (later budget sums cannot overflow); `Provision` warns when `max_bytes` or `snapshot_dir` is set, since P2-02 applies them.
+- A second `Provision` on a provisioned `Handler` fails instead of leaking the first engine. Byte sizes accept digits and one decimal point only; JSON `null` is a no-op; doubled `weir:` error prefix removed.
+- Risk for P2-01c: `caddy/go.mod` uses `replace => ..`, which importers ignore; `xcaddy build --with .../weir/caddy` outside the repo may not resolve the root module until it has a tag. P2-01c must test this.
+- P2-03: `Cleanup` clears `h.engine` without a lock; `ServeHTTP` must read it safely (atomic pointer or the engine registry).
+
 ## Notes for the next session
 
 - P2-01: Go package in `caddy/` is named `weircaddy`. `Handler.weirConfig()` maps adapter settings to `weir.Config`; `Provision` builds the engine with `weir.New` (default store). `max_bytes` and `snapshot_dir` are parsed and validated but not applied: P2-02 builds the pooled store and must pass it as `Config.Store`. `ServeHTTP` is a pass-through until P2-03.

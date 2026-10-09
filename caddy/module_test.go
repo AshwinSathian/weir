@@ -86,18 +86,25 @@ func TestConfigFromJSON(t *testing.T) {
 	t.Run("max_bytes forms", func(t *testing.T) {
 		for in, want := range map[string]int64{
 			`1048576`: 1 << 20, `"1048576"`: 1 << 20, `"64KiB"`: 64 << 10, `"2GiB"`: 2 << 30,
-			`"10MB"`: 10_000_000, `"1.5MiB"`: 3 << 19, `9007199254740993`: 9007199254740993,
+			`"10MB"`: 10_000_000, `"1.5MiB"`: 3 << 19, `1125899906842623`: 1<<50 - 1, `1125899906842624`: 1 << 50, `"1PiB"`: 1 << 50,
 		} {
 			var b ByteSize
 			if err := b.UnmarshalJSON([]byte(in)); err != nil || int64(b) != want {
 				t.Errorf("%s = %d, %v; want %d", in, int64(b), err, want)
 			}
 		}
-		for _, in := range []string{`"-1MiB"`, `-5`, `"abc"`, `"1XiB"`, `""`, `true`, `"99999999999GiB"`, `1.5`, `"1e3"`, `"0x10"`, `"1e3MiB"`} {
+		for _, in := range []string{`"-1MiB"`, `-5`, `"abc"`, `"1XiB"`, `""`, `true`, `"99999999999GiB"`, `1.5`, `"1e3"`, `"0x10"`, `"1e3MiB"`, `"+5"`, `"1_000"`, `"2PiB"`, `1125899906842625`} {
 			var b ByteSize
 			if err := b.UnmarshalJSON([]byte(in)); err == nil {
 				t.Errorf("%s accepted as %d", in, int64(b))
 			}
+		}
+	})
+
+	t.Run("null max_bytes is a no-op", func(t *testing.T) {
+		b := ByteSize(7)
+		if err := b.UnmarshalJSON([]byte(`null`)); err != nil || b != 7 {
+			t.Fatalf("null: %d, %v", int64(b), err)
 		}
 	})
 
@@ -112,15 +119,13 @@ func TestConfigFromJSON(t *testing.T) {
 
 	t.Run("name is required and restricted", func(t *testing.T) {
 		long := strings.Repeat("a", 65)
-		for _, name := range []string{``, long, `a b`, `a/b`, `é`, `a%2f`, `a:b`, `a\n`} {
+		for _, name := range []string{``, long, `a b`, `a/b`, `é`, `a%2f`, `a:b`, "a\n", `.`, `..`, `.hidden`} {
 			h := &Handler{Name: name}
 			if err := h.Validate(); err == nil {
 				t.Errorf("name %q accepted", name)
 			}
 		}
-		for _, name := range []string{`a`, `site-a`, `Site_A.1`, strings.Repeat("a", 64), `..`} {
-			// ".." passes the charset; the snapshot file is "<name>.weir", so it
-			// stays a plain file name inside snapshot_dir (08 §2).
+		for _, name := range []string{`a`, `site-a`, `Site_A.1`, strings.Repeat("a", 64), `a..b`} {
 			h := &Handler{Name: name}
 			if err := h.Validate(); err != nil {
 				t.Errorf("name %q rejected: %v", name, err)
@@ -156,6 +161,9 @@ func TestProvisionReportsBadConfig(t *testing.T) {
 		}
 		if h.engine == nil {
 			t.Fatal("no engine after Provision")
+		}
+		if err := h.Provision(caddy.Context{}); err == nil {
+			t.Fatal("second Provision accepted; it would leak the first engine")
 		}
 		if err := h.Cleanup(); err != nil {
 			t.Fatal(err)
