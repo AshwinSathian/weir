@@ -58,6 +58,9 @@ type Classified struct {
 	PartitionH uint64 // maphash of Partition, per-process seed
 	ReqCC      httpcc.RequestDirectives
 	ClientCond ClientConditionals
+	RangeValue string   // the Range value a hit may slice (FR-RNG-1); "" when absent or repeated
+	HasIfRange bool     // request carried If-Range
+	IfRange    string   // its value; "" when repeated, which never applies
 	rangeHdr   []string // the client's Range lines, for AsRangePass
 	ifRange    []string // the client's If-Range lines, for AsRangePass
 	req        *Request // the client request, for AsBypass; never modified
@@ -95,6 +98,9 @@ func Classify(r *Request, c *Config) (Classified, error) {
 		req:        r,
 		Range:      len(h["Range"]) > 0,
 		rangeHdr:   h["Range"],
+		RangeValue: single(h["Range"]),
+		HasIfRange: len(h["If-Range"]) > 0,
+		IfRange:    single(h["If-Range"]),
 		ifRange:    h["If-Range"],
 		Authorized: len(h["Authorization"]) > 0,
 		URITag:     TagURI(origin, path, query),
@@ -256,4 +262,14 @@ func trimOWS(s string) string {
 		s = s[:len(s)-1]
 	}
 	return s
+}
+
+// single returns the only line of a header, or "" for none or several: a
+// repeated Range is ignored (RFC 9110 §14.2) and a repeated If-Range never
+// applies, so both read as "serve the full 200" (FR-RNG-3).
+func single(lines []string) string {
+	if len(lines) != 1 {
+		return ""
+	}
+	return lines[0]
 }
