@@ -39,6 +39,8 @@ type ResponseDirectives struct {
 	// Targeted reports that a valid Weir-Cache-Control or CDN-Cache-Control
 	// supplied the freshness directives, so Expires is ignored (FR-TCC-2).
 	Targeted bool
+	// from names the targeted field Targeted came from.
+	from string
 }
 
 // Unusable reports an invalid or conflicting delta-seconds directive, which
@@ -62,6 +64,15 @@ type RequestDirectives struct {
 func ParseResponse(h http.Header) ResponseDirectives {
 	cc := parseCacheControl(h["Cache-Control"])
 	t, ok := parseTargeted(h)
+	// T-34: a targeted field that is ignored (invalid, too long, unparsable)
+	// still keeps its restrictions. The tolerant Cache-Control scanner finds
+	// them even where the Dictionary parser gave up.
+	for _, name := range targetFields {
+		if len(h[name]) > 0 && !(ok && t.from == name) {
+			r := parseCacheControl(h[name])
+			cc.NoStore, cc.NoCache, cc.Private = cc.NoStore || r.NoStore, cc.NoCache || r.NoCache, cc.Private || r.Private
+		}
+	}
 	if !ok {
 		return cc
 	}
@@ -74,6 +85,7 @@ func ParseResponse(h http.Header) ResponseDirectives {
 	t.Malformed = t.Malformed || cc.Malformed
 	// must-understand lifts only the no-store of the field it came with.
 	t.MustUnderstand = t.MustUnderstand && (cc.MustUnderstand || !cc.NoStore)
+	t.from = ""
 	return t
 }
 
@@ -94,6 +106,7 @@ func parseTargeted(h http.Header) (d ResponseDirectives, ok bool) {
 			continue
 		}
 		if d, ok = fromDict(dict); ok {
+			d.from = name
 			return d, true
 		}
 	}

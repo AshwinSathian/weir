@@ -163,11 +163,20 @@ func TestMaxAgeWhitespaceIsNonInteger(t *testing.T) {
 func FuzzCacheControl(f *testing.F) {
 	f.Add("max-age =3600")
 	f.Add("max-age= 3600")
+	f.Add("max-age=1.5, private")
+	f.Add("max-age=(1")
+	f.Add(`max-age=?1, public, s-maxage=-1`)
 	// FR-FRS-2, NFR-2: no panic and no negative or unclamped lifetime on any input.
 	f.Fuzz(func(t *testing.T, v string) {
 		h := header("Cache-Control", v)
 		h.Set("Pragma", v)
+		h.Set("Cdn-Cache-Control", v)
+		h.Set("Weir-Cache-Control", v)
 		r := ParseResponse(h)
+		// T-34: restrictions survive any targeted field, valid or not.
+		if r := ParseResponse(header("Cdn-Cache-Control", v+", no-store, private")); !r.NoStore || !r.Private {
+			t.Fatalf("%q: targeted no-store or private lost: %+v", v, r)
+		}
 		q := ParseRequest(h)
 		// A malformed prefix must never hide a later private or no-store.
 		if r := ParseResponse(header("Cache-Control", v+", no-store, private")); !r.NoStore || !r.Private {
@@ -213,6 +222,10 @@ func TestParseResponseTargeted(t *testing.T) {
 			ResponseDirectives{NoStore: true, Targeted: true}},
 		{"largest SFV integer clamps", http.Header{"Cdn-Cache-Control": {"max-age=999999999999999"}},
 			ResponseDirectives{MaxAge: set(maxDelta), Targeted: true}},
+		{"restrictions survive a decimal max-age", http.Header{"Cache-Control": {"max-age=100"}, "Cdn-Cache-Control": {"no-store, max-age=1.5"}},
+			ResponseDirectives{MaxAge: set(100), NoStore: true}},
+		{"restrictions survive an unparsable field", http.Header{"Cache-Control": {"max-age=100"}, "Cdn-Cache-Control": {"private, max-age=(1"}},
+			ResponseDirectives{MaxAge: set(100), Private: true}},
 		{"empty field is ignored", http.Header{"Cache-Control": {"max-age=3"}, "Cdn-Cache-Control": {""}},
 			ResponseDirectives{MaxAge: set(3)}},
 		{"too many members is ignored", http.Header{"Cdn-Cache-Control": {strings.Repeat("a, ", 70) + "max-age=9"}},

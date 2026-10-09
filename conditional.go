@@ -104,7 +104,7 @@ func opaqueTag(t string) string {
 // §15.4.5). The value slices stay shared; they are clipped (04 §6.10).
 func notModifiedHeader(stored http.Header) http.Header {
 	h := make(http.Header, 8)
-	for _, k := range [...]string{"Cache-Control", "Content-Location", "Date", "Etag", "Expires", "Vary"} {
+	for _, k := range [...]string{"Cache-Control", "Cdn-Cache-Control", "Content-Location", "Date", "Etag", "Expires", "Vary"} {
 		if v, ok := stored[k]; ok {
 			h[k] = v
 		}

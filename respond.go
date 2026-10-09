@@ -29,6 +29,7 @@ func (e *Engine) fromEntry(c *keys.Classified, ent *store.Entry, now time.Time, 
 	if h == nil {
 		h = http.Header{}
 	}
+	delete(h, "Weir-Cache-Control") // FR-TCC-4, on the clone this function owns
 	h["Age"] = age
 	data, status := ent.Body, ent.Status
 	// FR-RNG-1..3, T-37. HEAD ignores Range; If-Range is judged first.

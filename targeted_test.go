@@ -74,6 +74,8 @@ func TestTargetedFieldKeepsPrivate(t *testing.T) {
 		notStored("max-age=100", "max-age=100, no-store"),
 		notStored("max-age=100", "max-age=100, private=?0"),
 		notStored("no-store", "max-age=100, must-understand"),
+		notStored("max-age=100", "no-store, max-age=1.5"),
+		notStored("max-age=100", "private, max-age=(1"),
 		{name: "Weir-Cache-Control keeps Cache-Control private", steps: []rfcStep{
 			{origin: bh(200, "a", "Cache-Control", "private", "Weir-Cache-Control", "max-age=100"), calls: 1},
 			{calls: 2},
@@ -114,6 +116,14 @@ func TestTargetedFieldRevalidationAndAuthorization(t *testing.T) {
 			{after: 11 * time.Second, origin: bh(304, "", "Weir-Cache-Control", "max-age=100", "Etag", `"v"`), calls: 2, body: "a",
 				resp: []string{"Weir-Cache-Control", ""}},
 			{after: 50 * time.Second, calls: 2, body: "a"},
+		}},
+		{name: "Authorization request with targeted s-maxage is stored", steps: []rfcStep{
+			{origin: bh(200, "a", "Cdn-Cache-Control", "s-maxage=100"), hdr: []string{"Authorization", "Bearer x"}, calls: 1},
+			{hdr: []string{"Authorization", "Bearer x"}, calls: 1, body: "a"},
+		}},
+		{name: "Authorization request with targeted must-revalidate is stored", steps: []rfcStep{
+			{origin: bh(200, "a", "Cache-Control", "max-age=10", "Cdn-Cache-Control", "max-age=60, must-revalidate"), hdr: []string{"Authorization", "Bearer x"}, calls: 1},
+			{hdr: []string{"Authorization", "Bearer x"}, calls: 1, body: "a"},
 		}},
 		{name: "Authorization request with Cdn-Cache-Control public is stored", steps: []rfcStep{
 			{origin: bh(200, "a", "Cdn-Cache-Control", "public, max-age=100"), hdr: []string{"Authorization", "Bearer x"}, calls: 1},
