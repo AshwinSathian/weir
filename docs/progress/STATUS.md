@@ -4,9 +4,9 @@ Updated: 2026-10-09
 Phase: 1
 Current card: none
 Card state: awaiting-merge
-Branch: claude/peaceful-babbage-hrdup8
-PR: https://github.com/AshwinSathian/weir/pull/70
-Next card: M15-01 per `scripts/card.sh next`; M16-01 is approved too
+Branch: claude/serene-volta-d9nvnj
+PR: pending
+Next card: M16-01 per `scripts/card.sh next` (approved as a throwaway prototype)
 
 ## Waiting on Ashwin
 
@@ -17,6 +17,8 @@ none
 none. golangci-lint in this container is built with Go 1.25 and cannot load the Go 1.27 config; run it with `GOTOOLCHAIN=go1.27.0 go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0 run`. CI must confirm.
 
 ## Notes for the next session
+
+- M15-01: `store/memory/scrub.go` holds `Scrub`; `hasTag` is O(entry tags x purge tags) under the shard lock (ponytail in the file, upgrade path named). `Engine.scrub` in purge.go reports the deleted count as `EvPurge{hard}` `Status`. Work happened on the session branch `claude/serene-volta-d9nvnj`, not `card/M15-01-*`.
 
 - M14-01: `limiter.Acquire(ctx, class, part, host)`; `Classified.HostH` is the host hash; `LimiterConfig.MaxPerHost` feeds both pools. Waiters blocked by the host cap still share `MaxQueue` (ponytail in limiter.go, LLD 13.4, pinned by `TestHostFloodFillsSharedQueue`).
 - M14-01: `memory.Config.MaxBytesPerOwner` is per shard, 0 off, zero `Owner` exempt. The engine's default memory store does not set it; the Caddy adapter does (FR-FAIR-3).

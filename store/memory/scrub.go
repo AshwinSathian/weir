@@ -9,7 +9,8 @@ import (
 // Scrub deletes the response records whose Tags intersect tags and returns
 // how many it deleted (FR-PRG-8, 05 §5.3). It takes one shard's write lock at
 // a time and walks that shard in full, so the work under any one lock is
-// bounded by the shard and a Get on another shard never waits for it. The
+// bounded by the shard's size and a Get on another shard never waits for it.
+// On a cancelled context it returns the count so far with ErrUnavailable. The
 // scan is exact (it compares tags, not the epoch sketch), and reaches every
 // variant and keyed-header partition because each record carries its own
 // tags. Other kinds are left alone: a vary spec or marker is covered by the
@@ -45,8 +46,12 @@ func (sh *shard) scrub(tags []store.Tag) int {
 	return n
 }
 
-// hasTag reports whether a and b share a tag. Both are short: an entry has
-// at most 2 + MaxGroups tags and a purge names an operator-sized list.
+// hasTag reports whether a and b share a tag.
+//
+// ponytail: O(len(a)*len(b)) per node under the shard lock. An entry has at
+// most 2 + MaxGroups tags and b is the operator's own list, so a purge of
+// thousands of URLs against a large shard is the ceiling. Upgrade path: build
+// a map[store.Tag]struct{} of b once in Scrub when len(b) passes a few dozen.
 func hasTag(a, b []store.Tag) bool {
 	for _, x := range a {
 		for _, y := range b {

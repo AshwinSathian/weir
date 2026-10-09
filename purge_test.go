@@ -817,6 +817,42 @@ func TestEagerUnsupportedStore(t *testing.T) {
 	})
 }
 
+// failScrub is a Scrubber that always fails.
+type failScrub struct{ store.Store }
+
+func (failScrub) Scrub(context.Context, []store.Tag) (int, error) { return 0, store.ErrUnavailable }
+
+// FR-PRG-8: a failing Scrub is returned wrapped, the epochs written before
+// it stay (the entry is unreachable) and the purge is still reported.
+func TestEagerScrubErrorKeepsEpochs(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		mem, err := memory.New(memory.Config{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		o := testorigin.NewChecked(t, 64, 16)
+		o.Default(purgeable("v"))
+		obs := &scrubCounts{}
+		cfg := cacheCfg
+		cfg.Store, cfg.Observer = failScrub{mem}, obs
+		e := newEngine(t, cfg)
+		defer closeEngine(t, e)
+
+		serve(t, e, getReq("/a"), o)
+		time.Sleep(time.Second)
+		err = e.Purge(t.Context(), weir.Purge{Mode: weir.PurgeHard, Eager: true, All: true})
+		if !errors.Is(err, store.ErrUnavailable) || errors.Is(err, weir.ErrEagerUnsupported) {
+			t.Fatalf("eager purge with failing Scrub = %v, want store.ErrUnavailable", err)
+		}
+		if want := []int{0}; !slices.Equal(obs.ns, want) {
+			t.Fatalf("EvPurge Status = %v, want %v", obs.ns, want)
+		}
+		if resp, _ := serve(t, e, getReq("/a"), o); resp.Cache.Hit {
+			t.Fatal("/a is a hit: the epoch must be written before Scrub runs")
+		}
+	})
+}
+
 // FR-PRG-7, T-10: a fetch sent before a Purge and stored after it does not
 // survive the purge, soft or hard.
 func TestPurgeDuringInflightFetchPurgeAPI(t *testing.T) {

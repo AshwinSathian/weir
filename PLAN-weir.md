@@ -181,7 +181,7 @@ Refs: [01 §13](docs/01-technical-spec.md), decisions D11, D12, D15, D16, D18.
 - [x] M12 Targeted cache-control (`Weir-Cache-Control`, `CDN-Cache-Control`) with the stricter `private` rule. AC: `TestTargetedFieldPrecedence`, `TestTargetedFieldKeepsPrivate`, `TestWeirCacheControlStripped`, `FuzzSFDictionary` pass; RFC 9213 examples pass.
 - [x] M13 Memory-store snapshots. AC: `TestSnapshotRoundTrip`, `TestSnapshotLoadIsSoftStale`, `TestSnapshotHardEpochSurvives`, `TestSnapshotCorruptRecordsSkipped`, `TestSnapshotRespectsDeadline` pass.
 - [x] M14 Per-host fairness (limiter cap, per-owner quota). AC: `TestOwnerQuotaIsolatesTenants`, `TestPerHostLimiterCap` pass; defaults off in the library.
-- [ ] M15 Eager hard purge via `store.Scrubber`. AC: `TestEagerHardPurgeDeletesAllPartitions`, `TestEagerSoftIsError`, `TestEagerUnsupportedStore` pass.
+- [x] M15 Eager hard purge via `store.Scrubber`. AC: `TestEagerHardPurgeDeletesAllPartitions`, `TestEagerSoftIsError`, `TestEagerUnsupportedStore` pass.
 
 ### Phase 2: Caddy adapter (~3 weeks)
 

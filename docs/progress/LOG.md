@@ -1211,3 +1211,11 @@ Entry template:
 - Deviations: FR-FAIR-2 and 05 §5.3 wording only (per-queue window), decided by delegation. STATUS.md restored: the first handoff overwrote it and dropped the older Decided sections and notes.
 - Follow-ups: per-host queued cap if host floods shedding other hosts shows up in practice.
 - Context: low.
+
+## 2026-10-09 · M15-01 · done
+- Branch / PR: claude/serene-volta-d9nvnj / pending
+- Done: `memory.Store.Scrub` (one shard lock at a time, exact tag match, response records only); `Engine.Purge` with `Eager` calls it through `storeGuard.scrub` after the epochs and emits the count as `EvPurge{hard}` `Status`; stores without `Scrubber` still get `ErrEagerUnsupported`.
+- Tests: TestEagerHardPurgeDeletesAllPartitions, TestEagerSoftIsError, TestEagerUnsupportedStore, TestEagerScrubErrorKeepsEpochs, TestScrub. Race tests, vet, gofmt, trace pass; lint 0 issues via the Go 1.27 build of v2.14.0.
+- Deviations: LLD purge section reworded (no store scrubs yet is no longer true). No requirement changed.
+- Follow-ups: review should-fix on `hasTag` cost with very large URL lists left as a ponytail; engine test scrubs by `All` only, URI and group tags are covered at store level.
+- Context: low; size S was right.
