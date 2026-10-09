@@ -211,6 +211,9 @@ func (l *Limiter) Acquire(ctx context.Context, c Class, part, host uint64) (*Per
 		l.mu.Unlock()
 		return nil, ErrShed
 	}
+	// ponytail: waiters held back by PerHost share MaxQueue; a flood of
+	// distinct paths on one host can fill it. Ceiling: foreground requests for
+	// other hosts then shed. Upgrade: a per-host queued count like queuedBy.
 	// T-11: a flood on one partition, whose waiters cannot run anyway,
 	// must not fill the queue every other partition shares (FR-LIM-3).
 	if len(l.queue) >= l.cfg.MaxQueue || l.queuedBy[part] >= l.queueCap() {

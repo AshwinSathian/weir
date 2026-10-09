@@ -1261,7 +1261,7 @@ Loader failure mode (T-33): the writer puts hard epochs last, so a record that m
 
 ### 13.4 Per-host fairness (M14)
 
-Limiter: `byHost map[uint64]int` alongside `byPart`, kept only when `PerHost` is set and holding only hosts with a slot in flight, so it has at most `Max` entries; `canRun` adds `byHost[host] < PerHost` when enabled. `Acquire` takes the host hash as its last argument. The host hash is computed once in `Classify` (`Classified.HostH`) from the normalized host. The engine passes `MaxPerHost` to both the main and the upload pool. Memory store: see [05 §5.3](05-storage-interface-spec.md) quota paragraph.
+Limiter: `byHost map[uint64]int` alongside `byPart`, kept only when `PerHost` is set and holding only hosts with a slot in flight, so it has at most `Max` entries; `canRun` adds `byHost[host] < PerHost` when enabled. `Acquire` takes the host hash as its last argument. The host hash is computed once in `Classify` (`Classified.HostH`) from the normalized host. The engine passes `MaxPerHost` to both the main and the upload pool. Known ceiling: waiters blocked by the host cap still share `MaxQueue`, so a flood across many paths of one host can fill the queue and shed other hosts' foreground requests; a per-host queued count (like `queuedBy`) is the upgrade. Memory store: see [05 §5.3](05-storage-interface-spec.md) quota paragraph.
 
 ### 13.5 Eager purge (M15)
 

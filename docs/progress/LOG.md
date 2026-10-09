@@ -1195,3 +1195,11 @@ Entry template:
 - Deviations: FR-SNP-2/3, T-33, LLD 13.3 and docs/05 5.5 updated (invalid instead of soft; fail-closed; counters internal; admission order only). No public API added: the load-count accessor stays deferred.
 - Follow-ups: M14-01 note (loader honors quotas). Hot-first queue placement on load left as a ponytail.
 - Context: low.
+
+## 2026-10-09 · M14-01 · done
+- Branch / PR: claude/peaceful-babbage-hrdup8 / see STATUS
+- Done: per-host limiter cap (`limiter.Config.PerHost`, `Classified.HostH`, `Acquire` host argument, both pools); per-owner byte quota in the memory shard (`MaxBytesPerOwner`, own-entry eviction within a 64-node scan, decline otherwise); snapshot loader honors it without evicting.
+- Tests: TestPerHostLimiterCap, TestOwnerQuotaIsolatesTenants, TestSnapshotLoadHonorsOwnerQuota, TestEnginePerHostCap, TestClassifyHostHash. Race tests, vet, gofmt, trace pass; lint 0 issues via the Go 1.27 build of v2.14.0.
+- Deviations: LLD 13.4 updated (int map, Acquire signature, queue ceiling). FR-FAIR-2 scan wording left as is; question under "Waiting on Ashwin".
+- Follow-ups: review should-fix 1 recorded as a ponytail (per-host queue share); should-fix 2 is the question above.
+- Context: low; size M was right.
