@@ -56,6 +56,9 @@ type Handler struct {
 	pool    *pooledStore
 	release func() error
 	closed  *atomic.Bool // set by Provision; a pointer so Handler stays copyable
+	// admin is the registry entry for the admin API (08 §7); set last by a
+	// successful Provision, removed first by Cleanup.
+	admin *adminEntry
 
 	// Serving state, set by Provision. firstHost is the only host the handler
 	// remembers (NFR-3); warnedHosts makes the multi_host warning one-shot.
@@ -87,6 +90,8 @@ func (h *Handler) Provision(ctx caddy.Context) (err error) {
 	}
 	cfg := h.weirConfig()
 	cfg.Logger = ctx.Slogger()
+	tap := new(purgeTap)
+	cfg.Observer = tap
 	load := any(ctx.GetMetricsRegistry())
 	keyGen := keyGenHash(cfg)
 	var built bool // the pool called the constructor: a new store, not a reuse
@@ -140,6 +145,8 @@ func (h *Handler) Provision(ctx caddy.Context) (err error) {
 	h.log, h.chainOnce = cfg.Logger, new(sync.Once)
 	h.firstHost, h.warnedHosts = new(atomic.Pointer[string]), new(atomic.Bool)
 	h.httpApp = func() (any, error) { return ctx.AppIfConfigured("http") }
+	h.admin = &adminEntry{engine: e, tap: tap}
+	engines.add(h.Name, h.admin)
 	return nil
 }
 
@@ -164,6 +171,7 @@ func (h *Handler) Cleanup() error {
 	if h.engine == nil || h.closed.Swap(true) {
 		return nil
 	}
+	engines.remove(h.Name, h.admin) // before Close: no new admin call reaches a closing engine
 	ctx, cancel := context.WithTimeout(context.Background(), closeTimeout)
 	defer cancel()
 	err := h.engine.Close(ctx)

@@ -433,3 +433,43 @@ func TestE2EPurgeHerd(t *testing.T) {
 		t.Fatalf("origin saw at most %d concurrent requests, want exactly %d", m, wantRefreshes)
 	}
 }
+
+// FR-PRG-1, FR-PRG-2, T-26, T6.12: a purge sent to Caddy's real admin endpoint
+// reaches the engine of the running config, and the next request is
+// stale-forwarded. The route exists only on the admin listener.
+func TestE2EAdminPurge(t *testing.T) {
+	o := newE2EOrigin(t, cacheableBody)
+	tester := newTester(t)
+	tester.InitServer(o.caddyfile("\tweir {\n\t\tname e2e-admin\n\t}\n"), "caddyfile")
+	c := tester.Client
+	get(t, c, "/p")
+	if cs := get(t, c, "/p").header.Get("Cache-Status"); !strings.Contains(cs, "hit") {
+		t.Fatalf("second request Cache-Status = %q, want a hit", cs)
+	}
+
+	// Epochs have a one-second grain (05 E-7, rounded up): an entry stored in the same second as
+	// the purge is not older than it.
+	time.Sleep(1100 * time.Millisecond)
+	post := func(url, body string) int {
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, url, strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp, err := c.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		return resp.StatusCode
+	}
+	if code := post("http://localhost:2999/weir/e2e-admin/purge", `{"all":true}`); code != http.StatusAccepted {
+		t.Fatalf("admin purge: %d", code)
+	}
+	if cs := get(t, c, "/p").header.Get("Cache-Status"); !strings.Contains(cs, "fwd=stale") {
+		t.Fatalf("after purge Cache-Status = %q, want fwd=stale", cs)
+	}
+	// A purge route on the site listener would be reachable by clients (T-26).
+	if code := post("http://localhost:9080/weir/e2e-admin/purge", `{"all":true}`); code == http.StatusAccepted {
+		t.Fatal("the site listener accepted a purge")
+	}
+}

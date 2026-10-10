@@ -1403,3 +1403,11 @@ Entry template:
 - Tests: TestMemoryShareSameNameReplacement, TestMemoryReleasedStoreStopsCounting, TestMemoryBudgetClamps; TestMemoryShareNewSiteFirst now exact. Lint, shuffled race tests, trace-strict pass.
 - Deviations: 08 §7 states that a renamed or removed site's store counts until destroyed, so a swap-sites reload can shrink the new ones (set `max_bytes`), and that sizing assumes Caddy provisions handlers one at a time (ponytail comment names the upgrade: reserve the grant under `r.mu`).
 - Declined: reserving the grant under a lock now (no concurrent provisioning exists); skipping every superseded store (would let a swap exceed 40% while both live).
+
+## 2026-10-10 · P2-05 · blocked
+- Branch / PR: claude/wizardly-ride-guhrru / none yet
+- Done: `caddy/registry.go` (engines per name, removal by identity, `purgeTap` observer), `caddy/admin.go` (`admin.api.weir`: purge, mode, stats; bodies bounded), Provision/Cleanup wiring, 08 §7 JSON shapes and status mapping.
+- Tests: admin_test.go (all nine card tests plus invalid-input, closed-engine 503), `TestE2EAdminPurge` under caddytest. Race and shuffle tests, lint on Go 1.27 and `make trace-strict` pass; `make check` not run as one command (lint toolchain, see STATUS).
+- Deviations: scrubbed count read from `EvPurge` Status through `purgeTap` because `Engine.Purge` returns only an error (P2-06 must chain its observer behind it); an empty purge is a 400 at the adapter; documented in 08 §7.
+- Follow-ups: card not marked done and no PR opened, because `/handoff` can only be run by the user. Run `/handoff`.
+- Context: medium; size M was right.

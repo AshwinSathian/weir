@@ -2,15 +2,15 @@
 
 Updated: 2026-10-10
 Phase: 1
-Current card: none
-Card state: awaiting-merge
-Branch: claude/focused-dijkstra-cr32by
-PR: https://github.com/AshwinSathian/weir/pull/80
-Next card: P2-05 (Admin API: purge, mode, stats)
+Current card: P2-05 (Admin API: purge, mode, stats)
+Card state: blocked
+Branch: claude/wizardly-ride-guhrru
+PR: none yet
+Next card: P2-06
 
 ## Waiting on Ashwin
 
-none. Decided 2026-10-10 (P2-03b, review of PR 79; Ashwin delegated "take decisions on all items"): caddytest e2e files are a named exception to the real-clock rule (CLAUDE.md rule 6, docs/07 §1) instead of a build tag, because a tag would stop CI running them; a skip outside `-short` fails the test; the test site binds 127.0.0.1; the herd test uses a 2 s client timeout so a hard purge reports counts. Also decided (P2-02): multi-host is an explicit `multi_host` key; scanning the http app was rejected (handler cannot find its own route; global scan would cap unrelated sites and flush their stores). Documented in 08 §2/§3/§4b.
+Run `/handoff` for P2-05 (code and tests are committed on this branch; the skill cannot be invoked by the model). Otherwise none. Decided 2026-10-10 (P2-03b, review of PR 79; Ashwin delegated "take decisions on all items"): caddytest e2e files are a named exception to the real-clock rule (CLAUDE.md rule 6, docs/07 §1) instead of a build tag, because a tag would stop CI running them; a skip outside `-short` fails the test; the test site binds 127.0.0.1; the herd test uses a 2 s client timeout so a hard purge reports counts. Also decided (P2-02): multi-host is an explicit `multi_host` key; scanning the http app was rejected (handler cannot find its own route; global scan would cap unrelated sites and flush their stores). Documented in 08 §2/§3/§4b.
 
 ## Decided 2026-10-10 (P2-04)
 
