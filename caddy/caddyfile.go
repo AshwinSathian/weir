@@ -32,6 +32,7 @@ func parseCaddyfile(h httpcaddyfile.Helper) (caddyhttp.MiddlewareHandler, error)
 //	    name <name>
 //	    max_bytes <size>
 //	    snapshot_dir <dir>
+//	    multi_host
 //	    key { query_drop|query_keep|headers|cookies|accept_encoding <v>...; query_sort; normalize_path }
 //	    forward { allow <header>... }
 //	    bypass { cookies|headers <v>... }
@@ -73,6 +74,8 @@ func (h *Handler) blockKey(d *caddyfile.Dispenser, key string, seen map[string]b
 		return oneArg(d, &h.Name)
 	case "snapshot_dir":
 		return oneArg(d, &h.SnapshotDir)
+	case "multi_host":
+		return flag(d, &h.MultiHost)
 	case "max_bytes":
 		var s string
 		if err := oneArg(d, &s); err != nil {

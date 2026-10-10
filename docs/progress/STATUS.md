@@ -3,14 +3,14 @@
 Updated: 2026-10-10
 Phase: 1
 Current card: P2-02 (store pool and key-generation hash)
-Card state: blocked
+Card state: in-progress
 Branch: claude/peaceful-mccarthy-b9uz60
 PR: none (PR 76 merged)
 Next card: P2-02
 
 ## Waiting on Ashwin
 
-P2-02: how does the Handler learn that a site is multi-host or uses on-demand TLS (FR-FAIR-3, 08 §3/§4b)? 08 does not say and `Handler` has no field. Ashwin chose "inspect Caddy's http app", but that does not work as described. `ctx.AppIfConfigured("http")` does return the app during `Provision` (Caddy registers apps before provisioning them, context.go:415), but the handler cannot tell which route or server it belongs to (`ctx.ancestry` is private), and the routes' matcher sets are not provisioned yet, so the host list cannot be tied to this handler. Options: (a) scan every server in the http app and enable the cap if any route has more than one `host` matcher value or any TLS automation policy has `on_demand` (coarse, errs toward the cap on; slightly wrong for a config with several sites); (b) add an explicit `multi_host` key (new config field, 08 §2 change); (c) pool and tests take the bool, Provision passes false until a later card. Also note: `Forward.Mode` and `Storable.StripSetCookie` have no JSON form yet, so the key-generation hash covers only `forward.allow` for now.
+none. Decided 2026-10-10 (P2-02): multi-host is an explicit `multi_host` key; scanning the http app was rejected (handler cannot find its own route; global scan would cap unrelated sites and flush their stores). Documented in 08 §2/§3/§4b.
 
 ## Decided 2026-10-09 (M16-01)
 
