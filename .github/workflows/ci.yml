@@ -31,11 +31,58 @@ jobs:
       - name: govulncheck
         run: make vuln
 
+  # P2-01c: catches Caddy API drift (docs/08 §9). The root `replace` is needed
+  # because no root tag exists yet; drop it once one does.
+  caddy-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.27"
+          cache: true
+          cache-dependency-path: |
+            go.mod
+            **/go.sum
+      - name: xcaddy build
+        run: |
+          go install github.com/caddyserver/xcaddy/cmd/xcaddy@v0.4.5
+          xcaddy build \
+            --with github.com/AshwinSathian/weir=. \
+            --with github.com/AshwinSathian/weir/caddy=./caddy \
+            --output ./caddy-weir
+      - name: start with a minimal Caddyfile
+        run: |
+          cat > Caddyfile.ci <<'EOF'
+          {
+          	admin localhost:2999
+          	auto_https off
+          }
+          :8099 {
+          	route {
+          		weir {
+          			name ci
+          		}
+          		respond "ok"
+          	}
+          }
+          EOF
+          ./caddy-weir validate --config Caddyfile.ci --adapter caddyfile
+          ./caddy-weir run --config Caddyfile.ci --adapter caddyfile &
+          pid=$!
+          trap 'kill $pid' EXIT
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:8099/ | grep -qx ok; then exit 0; fi
+            sleep 1
+          done
+          echo "caddy did not serve the minimal Caddyfile" >&2
+          exit 1
+
   # Keeps a stable required-check name (`check`) however many Go versions the
   # matrix holds.
   check:
     if: always()
-    needs: check-go
+    needs: [check-go, caddy-build]
     runs-on: ubuntu-latest
     steps:
-      - run: test "${{ needs.check-go.result }}" = success
+      - run: test "${{ needs.check-go.result }}" = success -a "${{ needs.caddy-build.result }}" = success
