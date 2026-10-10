@@ -1456,3 +1456,11 @@ Entry template:
 - Review: card-reviewer found one must-fix (inner `encode` example listed `br` that `encode` cannot produce; now `zstd gzip` both sides) and six should-fix (shutdown budget wording, `.keygen` file, `max_bytes` below 160 MiB is rejected, `bypass` wording, metrics wiring, ratelimit source version); all fixed.
 - Follow-ups: run the runbook's Caddyfile examples through `caddy adapt`; Phase 2 cards are done, next is P25-00.
 - Context: low; size S was right.
+
+## 2026-10-10 · P2-07 · review-fixes
+- Branch / PR: claude/nice-rubin-sw5o8p / https://github.com/AshwinSathian/weir/pull/83 (corrects the earlier entry: it was opened at /handoff; the branch is not `card/*`)
+- Done: adversarial review, built a real Caddy v2.11.7 and ran `adapt`/`validate` and the curl examples. Fixed: the inner `encode` example used a one-line `key { }` block (invalid Caddyfile); the group-purge example needed `origin` as `scheme://host` (was a 400); `caddy validate` builds the store and touches `snapshot_dir` (runbook 7.8, 08 §2, comment in caddy/pool.go were wrong or silent); outer `encode` stores compressed bodies when the origin compresses (runbook, 08 §5); admin API has no auth and `Origin` is checked only when sent (unix socket advice); packaged `TimeoutStopSec=5s`; purge check waits 2 s; `StripSetCookie` has no Caddy key; extra placeholders; bold limit; GOMEMLIMIT cross-reference.
+- Tests: none (docs and one comment); `go vet` for caddy module passes.
+- Deviations: 08 §2 and §5 reworded to match observed behavior.
+- Follow-ups: 06 T-45/R-6 per-client placeholder case at its next revision; the 5xx mapping from P2-03; STATUS still says Phase 1 (unchanged).
+- Context: low

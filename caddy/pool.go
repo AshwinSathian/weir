@@ -330,7 +330,8 @@ func (h *Handler) memoryConfig(size int64, sink *evictSink) memory.Config {
 }
 
 // buildStore creates the memory store for h. The snapshot directory is made
-// here, not at Validate, so caddy validate has no side effects on disk. A
+// here, not in Validate. Caddy's own validate command runs Provision, so it
+// reaches this code and does touch the directory (runbook 7.8). A
 // snapshot written under a different key-generation hash is deleted before
 // the store can load it (R-3), and the current hash is recorded beside it.
 func (h *Handler) buildStore(keyGen [sha256.Size]byte, size int64, sink *evictSink) (*memory.Store, error) {
