@@ -2,8 +2,8 @@
 
 Updated: 2026-10-10
 Phase: 1
-Current card: P25-03b
-Card state: in-progress
+Current card: none
+Card state: awaiting-merge
 Branch: claude/compassionate-pasteur-k8ueay
 PR: none yet
 Next card: P25-04
@@ -101,6 +101,12 @@ Ashwin delegated "take decisions on all items"; "Waiting on Ashwin" was empty. A
 Ashwin delegated "take decisions on all items"; "Waiting on Ashwin" was empty. An independent agent attacked the PR; no must-fix. Decisions: empty `Prefix`/`HashTag` mean the default (card test list reworded); config errors wrap `weir.ErrInvalidConfig` (no new sentinel); upper bounds added (MaxRetention 10 y, MaxClockSkew 1 h, MaxHardEpochs 1e6, key parts 64 bytes); `HardEpochWait` whole ms and below `CallTimeout`; `Addrs` must be unique `host:port`. Fixed: `Validate` copy aliased `Addrs`/`TLS`, returns the zero Config on error; JSON marshalling leaked the password (now redacted); `mapError` leaves wrapped `valkey.Nil` and `ErrNotFound` alone. Written into 05 §7.
 
 ## Notes for the next session
+
+- P25-03b done: `store/valkey/sketch.go` (seed, positions, `NewestEpochShared`, `setSketch`). Loss is now `meta` without field `v` or a missing plane; the client writes `meta.seed` first with `HSETNX`, so `meta` alone no longer means "initialised". Scripts take the seed id and reply `SEED_CHANGED` (write: error reply mapped to `errSeedChanged`; read: `{-2}`); the read arguments are four per non-global tag. `SetEpoch` refuses only unknown modes now, so the store can be wired into an engine (P25-07 still depends on P25-04..06).
+- `storetest.EpochNeverUnderInvalidates` now accepts a more severe colliding mode and checks time only for the tag's own mode (skew makes the other case legitimate); `Parallel(n)` added. The Valkey conformance run passes no `EpochModes` and takes about 10 s for 200 000 epochs locally (redis 7.0.15).
+- A server upgraded from P25-03 has no planes: its first lookup purges everything once (05 §7).
+- Container lint: `GOTOOLCHAIN=go1.27.0 go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0 run ./...` per module; `make -o lint check` stops at the caddy module with the Go 1.25 binary. CI must confirm.
+- This work was done on `claude/compassionate-pasteur-k8ueay`, not a `card/*` branch.
 
 - P25-03 done: `store/valkey/{epochs,scripts,meta}.go`. The client seam gained `evalWrite`, `evalRead`, `evalWriteWait`. Both scripts take the six epoch keys in `KEYS` (`Store.ekeys`, slots in meta.go); P25-03b fills `sketch:soft`/`sketch:invalid` and the `seed` field of `meta` (today `meta` holds only `v`), and must add the plane-absent loss check to the read script and `SEED_CHANGED` to both. `SetEpoch` refuses soft/invalid on non-global tags until then (`epochs.go`).
 - Any write that finds `meta` absent also raises `global.hard` to server time (05 §7 note added). `HardEpochWait` sends `EVAL` + `WAIT` on one dedicated connection; the reviewer showed `WAIT` on the shared connection never waited. `TestHardEpochWaitWaitsForReplica` needs a pausable replica (`WEIR_VALKEY_REPLICA_ADDR`, `--enable-debug-command yes`) and skips in CI.

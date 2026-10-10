@@ -427,6 +427,7 @@ func strlen(t *testing.T, s *Store, key string) int64 {
 
 // E-9, NFR-3: each plane is created full-size on the first write and never
 // grows, however many tags are written. 100 000 distinct tags, both modes.
+// IDs: E-7, E-9
 func TestSketchStrlenAtMost2MiB(t *testing.T) {
 	s := newEpochStore(t, nil)
 	const want = 2 << 20 // 2^19 cells of 4 bytes
@@ -461,6 +462,7 @@ func TestSketchStrlenAtMost2MiB(t *testing.T) {
 // E-12, T-29: a shared tag is found in the soft plane and the hard table but
 // never in the invalid plane, in one call, and the global tag follows the
 // same rule through its own fields.
+// IDs: E-12, T-29
 func TestSharedTagsSkipInvalidPlane(t *testing.T) {
 	s := newEpochStore(t, func(c *Config) { c.NoClockSkew = true })
 	base := whole(time.Minute)
@@ -518,6 +520,7 @@ func TestSharedTagsSkipInvalidPlane(t *testing.T) {
 // 05 §7 (Sketch positions): a second store on the same server uses the
 // first store's seed, so both compute the same cells and see each other's
 // soft and invalid epochs; the seed is 16 bytes in meta.
+// IDs: E-7, T-29
 func TestSeedSharedAcrossStores(t *testing.T) {
 	a := newEpochStore(t, nil)
 	b, err := New(Config{Addrs: a.cfg.Addrs, Prefix: a.cfg.Prefix})
@@ -580,6 +583,7 @@ func instrument(t *testing.T, s *Store) *scriptCounter {
 // seed gets SEED_CHANGED, refetches, retries once and writes at the new
 // positions: two script calls, and the epoch is then visible to a store that
 // never saw the old seed.
+// IDs: E-7, T-29
 func TestSeedChangedAfterFlushRetries(t *testing.T) {
 	a := newEpochStore(t, nil)
 	b, err := New(Config{Addrs: a.cfg.Addrs, Prefix: a.cfg.Prefix})
@@ -641,6 +645,7 @@ func mustClient(t *testing.T, s *Store) client {
 // recreates the planes full-size, and the epoch written before the loss is
 // covered by the global hard epoch. A write that finds a plane missing
 // repairs it too.
+// IDs: E-7, FR-PRG-2, T-29
 func TestSketchPlaneLossRepairs(t *testing.T) {
 	for _, plane := range []int{keySketchSoft, keySketchInvalid} {
 		for _, via := range []string{"lookup", "write"} {

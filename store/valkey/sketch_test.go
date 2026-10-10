@@ -19,6 +19,7 @@ func softAt(at time.Time) store.Epoch { return store.Epoch{At: at, Mode: store.E
 // big-endian u32 words of SHA-256(seed || tag) modulo the plane size, so the
 // secret seed decides them and an attacker who can compute a tag cannot aim
 // at its cells.
+// IDs: E-7, T-29
 func TestSketchPositions(t *testing.T) {
 	seed := [seedLen]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
 	tg := tag(1)
@@ -46,6 +47,7 @@ func TestSketchPositions(t *testing.T) {
 // 05 §7: the seed is drawn from crypto/rand once, stored with HSETNX, cached,
 // and reused. Soft and invalid writes carry the positions and the first 8
 // bytes of the seed; a hard or global write needs neither.
+// IDs: E-7, T-29
 func TestSketchWriteArguments(t *testing.T) {
 	s, cl := connected(t, nil)
 	tg := tag(1)
@@ -78,6 +80,7 @@ func TestSketchWriteArguments(t *testing.T) {
 // 05 §7: a seed that differs on the server (after a flush) makes the script
 // reply SEED_CHANGED; the store refetches and retries once. A second reply
 // is an error, not a loop.
+// IDs: E-7, T-29
 func TestSeedChangedRetriesOnce(t *testing.T) {
 	t.Run("write", func(t *testing.T) {
 		s, cl := connected(t, nil)
@@ -160,6 +163,7 @@ func TestSeedChangedRetriesOnce(t *testing.T) {
 // E-12: a lookup with shared tags sends each non-global tag with its two
 // positions and a flag; the global tag in shared is marked so the script
 // skips its invalid field; a tag named in both lists is plain.
+// IDs: E-12, T-29
 func TestSharedReadArguments(t *testing.T) {
 	s, cl := connected(t, nil)
 	g, uri, grp := store.TagGlobal(), tag(1), tag(2)
@@ -196,6 +200,7 @@ func TestSharedReadArguments(t *testing.T) {
 }
 
 // With only the global tag, no position is needed and no seed is fetched.
+// IDs: E-5, E-7
 func TestGlobalOnlyLookupNeedsNoSeed(t *testing.T) {
 	s, cl := connected(t, nil)
 	cl.ep.readRes = [][]int64{{}}
@@ -209,6 +214,7 @@ func TestGlobalOnlyLookupNeedsNoSeed(t *testing.T) {
 
 // NewestEpochShared with no tags in either list answers "none" with no
 // round trip, like NewestEpoch.
+// IDs: E-12
 func TestNewestEpochSharedNoTags(t *testing.T) {
 	s, cl := connected(t, nil)
 	if _, ok, err := s.NewestEpochShared(t.Context(), nil, nil, time.Unix(1, 0)); ok || err != nil {

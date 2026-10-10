@@ -71,7 +71,7 @@ elseif sketch then
     local cell = '#' .. ARGV[i]
     local cur = redis.call('BITFIELD', key, 'GET', 'u32', cell)[1]
     if cur < at then
-      redis.call('BITFIELD', key, 'OVERFLOW', 'SAT', 'SET', 'u32', cell, ARGV[4])
+      redis.call('BITFIELD', key, 'OVERFLOW', 'SAT', 'SET', 'u32', cell, at)
     end
   end
 else

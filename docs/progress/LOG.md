@@ -1566,3 +1566,12 @@ Entry template:
 - Follow-ups: none.
 - Context: low
 
+
+## 2026-10-10 · P25-03b · done
+- Branch / PR: claude/compassionate-pasteur-k8ueay / PR pending
+- Done: soft and invalid sketch for `store/valkey` (sketch.go, scripts.go, meta.go): two 2 MiB planes created full-size, positions `SHA-256(seed || tag)` in Go, `crypto/rand` seed shared through `HSETNX meta seed`, `SEED_CHANGED` retry once, plane loss repaired by the global hard write, `NewestEpochShared`. `storetest.Parallel` added.
+- Tests: TestSketchStrlenAtMost2MiB, TestSharedTagsSkipInvalidPlane, TestSeedSharedAcrossStores, TestSeedChangedAfterFlushRetries, TestSketchPlaneLossRepairs, TestSketchPositions, TestSeedChangedRetriesOnce and fake-client argument tests; the full conformance suite now runs without `EpochModes` under `Parallel(64)`. Root tests pass; module lint 0 issues; `make check` stops at the caddy module lint (container's Go 1.25 golangci-lint), CI must confirm. Integration passes on redis 7.0.15, not Valkey.
+- Deviations: 05 §7 (sketch writes, loss definition, upgrade note) and §8 (`Parallel`, property wording); docs/07 Conformance row. `EpochNeverUnderInvalidates` loosened: a more severe colliding mode is valid, time is checked only for the tag's own mode (clock skew can place it before `since`).
+- Review: card-reviewer, no must-fix. Fixed both should-fix (the BITFIELD `SET` now uses the same `at` it compared; requirement IDs on the new tests) and the upgrade note. Left: O(n²) duplicate check in `readArgs` (bounded by the caller).
+- Follow-ups: none. The CI Valkey job has still not run.
+- Context: medium; size M was right.
