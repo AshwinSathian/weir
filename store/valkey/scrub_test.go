@@ -17,19 +17,24 @@ import (
 // keys that start with the pattern's prefix, pageSize at a time, the cursor
 // being an index plus one.
 type fakeScan struct {
-	nodes    []string // nil: one primary, "n1"
-	pageSize int
-	scans    int
-	gets     []string // every key read by getMulti
-	dels     []string
-	err      error
-	snap     []string // keys listed at cursor 0; real SCAN is stable under deletes
-	onScan   func()   // runs at the end of each SCAN step, with the key lock held
+	nodes     []string // nil: one primary, "n1"
+	noPrimary bool     // every node is a replica
+	pageSize  int
+	scans     int
+	gets      []string // every key read by getMulti
+	maxBatch  int      // largest getMulti call
+	dels      []string
+	err       error
+	snap      []string // keys listed at cursor 0; real SCAN is stable under deletes
+	onScan    func()   // runs at the end of each SCAN step, with the key lock held
 }
 
 func (f *fakeClient) primaries(context.Context) ([]string, error) {
 	if f.scan.err != nil {
 		return nil, f.scan.err
+	}
+	if f.scan.noPrimary {
+		return nil, nil
 	}
 	if f.scan.nodes == nil {
 		return []string{"n1"}, nil
@@ -77,6 +82,7 @@ func (f *fakeClient) getMulti(_ context.Context, keys []string) ([][]byte, error
 		return nil, f.scan.err
 	}
 	f.scan.gets = append(f.scan.gets, keys...)
+	f.scan.maxBatch = max(f.scan.maxBatch, len(keys))
 	out := make([][]byte, len(keys))
 	for i, k := range keys {
 		out[i] = f.kv.vals[k]
@@ -176,22 +182,23 @@ func TestScrubSkipsNonEntryKeys(t *testing.T) {
 			if !colo {
 				foreign = append(foreign, "weir:{e}:"+h)
 			}
+			// Each foreign key holds a record that decodes and carries the
+			// scrubbed tag, so a filter that lets one through deletes it.
+			rec, err := store.Encode(func() *store.Entry { e := testEntry(time.Now()); e.Tags = []store.Tag{tagN(1)}; return e }())
+			if err != nil {
+				t.Fatal(err)
+			}
 			cl.kv.mu.Lock()
 			for _, k := range foreign {
-				if cl.kv.vals == nil {
-					cl.kv.vals = map[string][]byte{}
-				}
-				cl.kv.vals[k] = []byte("planted")
+				cl.kv.vals[k] = rec
 			}
 			cl.kv.mu.Unlock()
 			n, err := s.Scrub(t.Context(), []store.Tag{tagN(1)})
 			if err != nil || n != 1 {
 				t.Fatalf("Scrub = %d, %v; want 1, nil", n, err)
 			}
-			for _, k := range cl.scan.gets {
-				if !s.isEntryKey(k) {
-					t.Errorf("read non-entry key %q", k)
-				}
+			if want := []string{s.entryKey(keyN(1))}; !slices.Equal(cl.scan.gets, want) {
+				t.Errorf("keys read = %q, want exactly %q", cl.scan.gets, want)
 			}
 			for _, k := range foreign {
 				if _, ok := cl.kv.vals[k]; !ok {
@@ -286,6 +293,37 @@ func TestScrubErrorsAndNodes(t *testing.T) {
 		_ = s.Close()
 		if _, err := s.Scrub(t.Context(), []store.Tag{tagN(1)}); !errors.Is(err, store.ErrUnavailable) {
 			t.Fatalf("err = %v, want ErrUnavailable", err)
+		}
+	})
+}
+
+// FR-PRG-8, P5: with no primary node Scrub fails instead of reporting an
+// empty success, and a large batch is read in chunks of at most scrubChunk.
+func TestScrubNoPrimaryAndChunking(t *testing.T) {
+	t.Run("no primary is ErrUnavailable", func(t *testing.T) {
+		s, cl := connected(t, nil)
+		putResp(t, s, keyN(1), store.KindResponse, tagN(1))
+		cl.scan.noPrimary = true
+		n, err := s.Scrub(t.Context(), []store.Tag{tagN(1)})
+		if !errors.Is(err, store.ErrUnavailable) || n != 0 {
+			t.Fatalf("Scrub = %d, %v; want 0, ErrUnavailable", n, err)
+		}
+		if !present(cl, s, keyN(1)) {
+			t.Fatal("entry deleted with no primary")
+		}
+	})
+	t.Run("GET pipelines are chunked", func(t *testing.T) {
+		s, cl := connected(t, nil)
+		const n = 3*scrubChunk + 7
+		for i := range n {
+			putResp(t, s, store.Key{byte(i), byte(i >> 8), 1}, store.KindResponse, tagN(1))
+		}
+		got, err := s.Scrub(t.Context(), []store.Tag{tagN(1)})
+		if err != nil || got != n {
+			t.Fatalf("Scrub = %d, %v; want %d, nil", got, err, n)
+		}
+		if cl.scan.maxBatch > scrubChunk {
+			t.Fatalf("largest GET pipeline = %d keys, want at most %d", cl.scan.maxBatch, scrubChunk)
 		}
 	})
 }

@@ -148,6 +148,8 @@ func (v valkeyClient) getMulti(ctx context.Context, keys []string) ([][]byte, er
 			out[i] = b
 		case valkey.IsValkeyNil(err):
 			// deleted or expired since the scan
+		case isWrongType(err):
+			// Another application's key under our prefix: not an entry.
 		default:
 			return nil, err
 		}
@@ -160,15 +162,27 @@ func (v valkeyClient) delMulti(ctx context.Context, keys []string) (int64, error
 	for i, k := range keys {
 		cmds[i] = v.c.B().Del().Key(k).Build()
 	}
+	// Every reply is read: the pipeline ran in full, so the count must include
+	// the DELs after a failed one.
 	var total int64
+	var first error
 	for _, r := range v.c.DoMulti(ctx, cmds...) {
 		n, err := r.AsInt64()
 		if err != nil {
-			return total, err
+			if first == nil {
+				first = err
+			}
+			continue
 		}
 		total += n
 	}
-	return total, nil
+	return total, first
+}
+
+// isWrongType reports the server's reply to GET on a key holding another type.
+func isWrongType(err error) bool {
+	ve, ok := valkey.IsValkeyErr(err)
+	return ok && strings.HasPrefix(ve.Error(), "WRONGTYPE")
 }
 
 func (v valkeyClient) evalVarySet(ctx context.Context, key string, prev []byte, hasPrev bool, val []byte, pxat int64) (bool, error) {

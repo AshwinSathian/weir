@@ -1656,3 +1656,11 @@ Entry template:
 - Deviations: none beyond the first entry.
 - Follow-ups: engine scrub deadline; CI run on Valkey 8.1.
 - Context: medium
+
+## 2026-10-10 · P25-06 · review-fixes
+- Branch / PR: card/P25-06-scrubber-scan / https://github.com/AshwinSathian/weir/pull/93
+- Done: adversarial review (agent), decisions delegated by Ashwin. No-primary scrub fails closed; WRONGTYPE keys skipped; DEL counts summed over the pipeline; GET pipelines chunked at 100; filter and storm tests made non-vacuous (mutation checked); 05 §7 breaker claim corrected, 09 §7 reworded.
+- Tests: Scrub unit tests, integration suite pass with `-race` on redis 7.0.15 (replica case run against a local replica); trace 146/146; lint not run here.
+- Deviations: none beyond 05 §7.
+- Follow-ups: engine scrub deadline (new card); CI run on Valkey 8.1; MOVED handling in P25-07.
+- Context: medium

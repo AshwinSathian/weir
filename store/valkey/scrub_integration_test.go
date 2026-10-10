@@ -95,6 +95,12 @@ func TestScrubByTag(t *testing.T) {
 			if err := c.Do(ctx, c.B().Set().Key(planted).Value("x").Build()).Error(); err != nil {
 				t.Fatal(err)
 			}
+			// Another application's hash at an entry-shaped key: GET fails with
+			// WRONGTYPE, which is "not ours", not a failed scrub.
+			wrongType := s.entryKey(store.Key{0xdd})
+			if err := c.Do(ctx, c.B().Hset().Key(wrongType).FieldValue().FieldValue("f", "v").Build()).Error(); err != nil {
+				t.Fatal(err)
+			}
 			got, err := s.Scrub(ctx, []store.Tag{tagN(2)})
 			if err != nil || got != n/5 {
 				t.Fatalf("Scrub(tag 2) = %d, %v; want %d, nil", got, err, n/5)
@@ -111,7 +117,7 @@ func TestScrubByTag(t *testing.T) {
 			if _, err := s.Get(ctx, store.Key{0xee}); err != nil {
 				t.Fatalf("a vary spec was scrubbed: %v", err)
 			}
-			if !keyExists(t, c, planted) {
+			if !keyExists(t, c, planted) || !keyExists(t, c, wrongType) {
 				t.Fatal("a non-entry key under the prefix was deleted")
 			}
 			for _, name := range []string{"meta", "global", "sketch:soft", "sketch:invalid"} {
@@ -380,6 +386,12 @@ func TestEvictionStormEngineStaysCorrect(t *testing.T) {
 	for next.Load() < total/3 {
 		time.Sleep(10 * time.Millisecond)
 	}
+	// The purge is only a test of the epoch if the entry is still cached: the
+	// flood may have evicted it, so fetch it again and require a hit.
+	engineServe(t, e, "/victim", o)
+	if resp, _ := engineServe(t, e, "/victim", o); !resp.Cache.Hit {
+		t.Fatal("/victim is not cached right before the purge; the purge would prove nothing")
+	}
 	o.Route("/victim", cc(200, "max-age=3600", "v2"))
 	if err := e.Purge(t.Context(), weir.Purge{Mode: weir.PurgeHard, URLs: []string{"https://example.com/victim"}}); err != nil {
 		t.Fatal(err)
@@ -410,6 +422,9 @@ func TestEvictionStormEngineStaysCorrect(t *testing.T) {
 		t.Fatalf("victim after the flood = %q, %v (hit=%v); want v2", b, err, resp != nil && resp.Cache.Hit)
 	}
 	after := hits()
+	if after == 0 {
+		t.Errorf("no hot key is cached after the flood")
+	}
 	t.Logf("eviction storm: %d one-hit writes (%d failed), %d keys evicted; hot hits %d/%d before, %d/%d after",
 		total, setErrs.Load(), evicted, before, hot, after, hot)
 }
@@ -454,5 +469,25 @@ func TestAllKeysPolicyRefused(t *testing.T) {
 	defer s.Close()
 	if _, err := s.Get(t.Context(), store.Key{1}); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("volatile-lfu: Get err = %v, want ErrNotFound", err)
+	}
+}
+
+// FR-PRG-8, 05 §7: a store whose only address is a replica has no primary to
+// scan, and Scrub says so instead of reporting an empty success. Needs a
+// replica of WEIR_VALKEY_ADDR in WEIR_VALKEY_REPLICA_ADDR (as the HardEpochWait
+// test); skips without one, so CI does not run it.
+func TestScrubOnReplicaIsUnavailable(t *testing.T) {
+	ra := os.Getenv("WEIR_VALKEY_REPLICA_ADDR")
+	if ra == "" {
+		t.Skip("WEIR_VALKEY_REPLICA_ADDR is not set (a replica of WEIR_VALKEY_ADDR)")
+	}
+	s, err := New(Config{Addrs: []string{ra}, SkipPolicyCheck: true, Prefix: "r" + strconv.FormatInt(time.Now().UnixNano(), 36)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	n, err := s.Scrub(t.Context(), []store.Tag{tagN(1)})
+	if !errors.Is(err, store.ErrUnavailable) || n != 0 {
+		t.Fatalf("Scrub on a replica = %d, %v; want 0, ErrUnavailable", n, err)
 	}
 }
