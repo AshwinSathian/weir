@@ -1624,3 +1624,11 @@ Entry template:
 - Deviations: none beyond the notes above.
 - Follow-ups: P25-05b (Valkey script); CI Valkey 8.1 run.
 - Context: medium
+
+## 2026-10-10 · P25-05b · done
+- Branch / PR: claude/youthful-ride-2vosqo / PENDING
+- Done: `store/valkey/vary.go` `SetVarySpec` (store.VarySetter) over one Lua script on the spec's entry key (`GET`, byte compare with the encoded prev, `SET PXAT`); `expiryMillis` shared with `Set`; a nil prev that loses swaps over a record past its Expires or undecodable; docs 05 §7 rewritten for the mechanism.
+- Tests: TestSetVarySpec, TestSetVarySpecConcurrentWritersLoseNothing (fake); integration TestVaryCASConcurrentWriters (64 writers, cap 8, with and without CoLocateEntries), TestEngineVaryCapHoldsAcrossWriters. Pass with `-race` on redis 7.0.15; root race tests and trace pass. golangci-lint cannot run here (Go 1.25 build), so CI must confirm lint.
+- Deviations: bytes compared instead of a digest (05 §7 updated). Review: card-reviewer, no must-fix; the one should-fix (undecodable record) is fixed with a test.
+- Follow-ups: CI Valkey 8.1 run still pending.
+- Context: low; size S was right.
