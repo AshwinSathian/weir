@@ -4,7 +4,10 @@ go 1.27.0
 
 require (
 	github.com/AshwinSathian/weir v0.0.0
+	github.com/AshwinSathian/weir/observe/prom v0.0.0
 	github.com/caddyserver/caddy/v2 v2.11.7
+	github.com/prometheus/client_golang v1.24.1
+	github.com/prometheus/client_model v0.6.3
 )
 
 require (
@@ -87,8 +90,6 @@ require (
 	github.com/pbnjay/memory v0.0.0-20210728143218-7b4eea64cf58 // indirect
 	github.com/pires/go-proxyproto v0.15.0 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
-	github.com/prometheus/client_golang v1.24.1 // indirect
-	github.com/prometheus/client_model v0.6.3 // indirect
 	github.com/prometheus/common v0.71.0 // indirect
 	github.com/prometheus/otlptranslator v1.0.0 // indirect
 	github.com/prometheus/procfs v0.22.0 // indirect
@@ -176,3 +177,5 @@ require (
 // ponytail: the root module has no release tag yet; once one exists, require it
 // and drop this replace (a replace is ignored by importers of this module).
 replace github.com/AshwinSathian/weir => ..
+
+replace github.com/AshwinSathian/weir/observe/prom => ../observe/prom
