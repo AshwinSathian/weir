@@ -1,7 +1,7 @@
 # Weir technical specification
 
 Status: v1.0, approved for Phase 0 and Phase 1 implementation
-Date: 2026-10-10
+Date: 2026-10-11
 Owner: Ashwin Sathian
 Module: `github.com/AshwinSathian/weir`
 Supersedes: the interface sketch in [00-design-doc.md §7.2](00-design-doc.md)
@@ -42,7 +42,7 @@ Phase 1.x (milestones M11 to M15, §13) adds single-range responses, targeted ca
 - No trailer storage. Trailers from the origin are discarded on stored responses (RFC 9111 §3.1 permits this).
 - Targeted cache-control fields (RFC 9213) arrive in M12 (§13.2), not in M1 to M10.
 - No persistence across crashes. Graceful shutdowns snapshot the memory store (M13, §13.3); `Warm` covers everything else.
-- No multi-node cache coherence before Phase 2.5. Phase 2 deployments run one Caddy node (D17).
+- No multi-node cache coherence before Phase 2.5. Memory-store deployments run one Caddy node (D17); several nodes share a cache only through the Valkey store (runbook §8).
 
 ## 2. Decisions locked before this spec
 
@@ -66,7 +66,7 @@ These were settled with the project owner on 2026-09-27 and are not reopened by 
 | D14 | Phase order after Phase 1: Caddy adapter (2), then Valkey store (2.5). |
 | D15 | Graceful-shutdown snapshot of the memory store, loaded as soft-stale (M13). |
 | D16 | Per-host fairness: limiter per-host cap and memory-store per-owner byte quota (M14), off by default in the library, on in the Caddy adapter for multi-host sites. |
-| D17 | Phase 2 runs a single Caddy node; multi-node waits for the Valkey store. |
+| D17 | Phase 2 runs a single Caddy node; multi-node waits for the Valkey store. Lifted 2026-10-11 (P25-07b): several Caddy nodes may share one cache through the `store valkey` block, under the rules in runbook §8. A memory-store site is still one node per cache. |
 | D18 | Hard purge is lazy; `Purge.Eager` additionally deletes matching records now (M15). |
 | D19 | Remote-store epoch lookups fail open with an event (T-9). |
 | D20 | `Cache-Status` on by default with minimal parameters. |

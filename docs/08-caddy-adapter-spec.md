@@ -110,7 +110,7 @@ Constraints this places on Phase 1, all already met:
 
 ## 4a. Deployment topology
 
-Phase 2 supports exactly one Caddy node per cache (D17, T-38). Purges, snapshots and the memory store all assume it. Running several nodes behind a load balancer before the Valkey store (Phase 2.5) exists means each node has its own cache and a purge reaches only the node it is sent to; the adapter docs state this as unsupported.
+A site on the memory store supports exactly one Caddy node per cache (D17, T-38): each node holds its own entries and epochs, so behind a load balancer a purge reaches only the node it was sent to. Several nodes may share one cache through a `store valkey` block (D17 lifted, P25-07b): entries and epochs live on the server, so a purge sent to any node is seen by all. `TestE2ETwoNodePurge` runs two Caddy processes against one Valkey to show it. The rules for nodes that share a cache (one `prefix`, identical `forward`, `stale` and key settings, clock skew, shutdown order) are in [runbook §8](runbook.md).
 
 ## 4b. Multi-host sites (BYOD)
 

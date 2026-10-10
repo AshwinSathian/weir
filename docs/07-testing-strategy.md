@@ -1,7 +1,7 @@
 # Weir testing strategy
 
 Status: v1.0
-Date: 2026-10-10
+Date: 2026-10-11
 Depends on: [01-technical-spec.md](01-technical-spec.md), [06-threat-model.md](06-threat-model.md)
 Seed name: `03-testing-strategy.md` (renumbered, see [docs/README.md](README.md))
 
@@ -11,6 +11,7 @@ The seed scattered a test strategy under each failure mode. This document turns 
 
 1. Every requirement ID in the spec (`FR-*`, `NFR-*`) and every invariant (`INV-*`) is cited by at least one test, in a comment on the line above the test function: `// FR-COA-4, T-19`. A script (`scripts/trace.sh`, added in Phase 0) lists requirement IDs with no citing test; Phase 1 is not done while the list is non-empty.
 2. Tests that involve time, timeouts, tickers or concurrency run inside `synctest.Test`. No unit or component test calls `time.Sleep` on the real clock or relies on wall-clock timing to pass. Engines, stores, test origins and test servers are created inside the bubble (channels and timers created outside a bubble panic when used inside it), and closed before the bubble function returns.
+   Exception: tests under the `integration` build tag use the real clock (remote stores, and the two-node Caddy test, which runs two Caddy processes against one Valkey and polls observable state). `make test-valkey` runs them.
    Exception: the `caddytest` end-to-end files in `caddy/` start a real in-process Caddy with real listeners, which a synctest bubble cannot hold. They use the real clock without a build tag (so `make check` and CI run them), wait by polling observable state, and name each fixed pause in a comment. They skip under `-short`; a skip outside `-short` (the harness could not start its admin port) is turned into a failure so CI cannot pass with no coverage. They bind to 127.0.0.1 and use the fixed ports 2999 (admin) and 9080, so no other caddytest package may run in parallel.
 3. Every test run uses `-race`. CI also runs with `-shuffle=on` and `-count=1`.
 4. Randomness in the code under test comes from `Config.Rand`. Tests that assert on distributions inject a seeded `math/rand/v2` PCG source wrapped in a mutex (`Config.Rand` is called concurrently); tests that assert exact behavior inject a scripted sequence, also mutex-guarded.
@@ -25,7 +26,7 @@ The seed scattered a test strategy under each failure mode. This document turns 
 | Property | invariants over generated inputs (INV-1, INV-2, INV-3, codec round trip) written as `Fuzz*` targets so the seed corpus runs in every `go test` and longer runs happen in fuzzing | same packages | none | every `go test`; fuzzing nightly |
 | Component | one stateful component in isolation: flight table, limiter, breaker, missrate, memory store | `internal/*`, `store/memory` | synctest | every `go test` |
 | Engine | `weir.Engine` with the memory store and `testorigin` | root package | synctest | every `go test` |
-| Integration | `weirhttp` middleware and `TransportOrigin` against `httptest.NewTestServer` (in-memory network, Go 1.27) | `weirhttp` | synctest | every `go test` (no build tag; the `integration` tag below is for remote stores only) |
+| Integration | `weirhttp` middleware and `TransportOrigin` against `httptest.NewTestServer` (in-memory network, Go 1.27) | `weirhttp` | synctest | every `go test` (no build tag; the `integration` tag below is for remote stores and for `TestE2ETwoNodePurge`, which starts two Caddy processes against one Valkey, runs in the `valkey` CI job through `make test-valkey` and uses the real clock) |
 | Conformance | `storetest.Run` for each store; RFC behavior tables; external `http-tests/cache-tests` suite against `examples/weirproxy` | `store/*`, root, CI job | synctest / real | every `go test`; remote stores' real-clock cases only under build tag `integration` (05 §8), so their CI job must pass it; cache-tests nightly; a store that lacks an epoch mode passes `storetest.EpochModes(...)`, so the cases that need the missing mode skip and the rest run (the Valkey store passes none: all modes run, `EpochNeverUnderInvalidates` under `Parallel(64)`); `Parallel` and `HardEpochCap` are the other options (05 §8) |
 | Load and adversarial | taxonomy scenarios at volume with real time and real goroutine scheduling | `loadtest/` (build tag `load`) | real | nightly and before each milestone closes |
 | Benchmarks | hit path, miss path, key build, store ops | `*_test.go` `Benchmark*` | real | on demand; compared with `benchstat` in milestone reviews |

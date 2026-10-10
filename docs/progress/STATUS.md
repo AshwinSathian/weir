@@ -4,9 +4,9 @@ Updated: 2026-10-11
 Phase: 1
 Current card: none
 Card state: awaiting-merge
-Branch: claude/gracious-brown-acmyd0 (session branch, not card/*)
-PR: https://github.com/AshwinSathian/weir/pull/94
-Next card: P25-07b
+Branch: card/P25-07b-two-node-purge (pushed to claude/dreamy-dijkstra-egbmbq)
+PR: https://github.com/AshwinSathian/weir/pull/95
+Next card: P25-07c (needs Ashwin's approval: persisted key-generation hash changes purge semantics)
 
 ## Decided 2026-10-11 (P25-07, adversarial review of PR 94)
 
@@ -17,6 +17,24 @@ Ashwin delegated "take decisions on all items"; "Waiting on Ashwin" was empty. A
 - `username` and `password` accept `{env.VAR}`, resolved at Provision; `{$VAR}` still works but puts the secret in the adapted JSON and autosave (documented). Caddyfile errors for secrets and flags no longer quote tokens.
 - `closeStore` honors the caller's deadline for Valkey. `multi_host` with Valkey logs a warning. Tests added for pool sharing, close on last release, every-field digest coverage.
 - Declined as code: persisting the key-generation hash in Valkey (changes purge semantics): new card P25-07c, ask first. Restart after tightening `forward` stays documented in 08 §3.
+
+## Decided 2026-10-11 (P25-07b, adversarial review of PR 95)
+
+"Waiting on Ashwin" was empty; Ashwin asked for decisions on every item. An independent agent attacked the PR; no must-fix. Decisions, all implemented:
+
+- The post-purge assertion is the first request to B (one retry), not a 5 s poll: a future-dated epoch counts as now (05 E-7), the 2 s window only re-purges later fetches. Runbook 8.3 and 8.9 reworded; a fresh cache needs 3 s and a poll for A's hit before B is asked.
+- Runbook: `strip_set_cookie` removed (not an adapter setting); post-rollout purge is non-eager (`eager` optional, scans the keyspace); set `prefix` explicitly or keep `name` identical on all nodes; server-down start wording corrected.
+- `make test-valkey` runs the two-node test with `-race` (docs/07 rule 3).
+- Rule 6 amendment broadened to "tests under the `integration` tag" (CLAUDE.md, docs/07 §1); stale single-node wording in 01 non-goals, README and PLAN fixed.
+- D17 lift and rule 6 stand as decided under delegation. PLAN 2.5.5 stays unticked until P25-07c and a green Valkey 8.1 run.
+- Declined: B-to-A, hard and URL purge cases and cluster/`co_locate_entries`/`hard_epoch_wait` coverage (a later card if wanted); silent skip without `WEIR_VALKEY_ADDR` (make always sets it).
+
+## Notes for the next session (P25-07b)
+
+- Decided under delegation (Ashwin: "decide and proceed"): D17 lifted for Valkey only; two-process harness; `integration` tag run by `make test-valkey`. Ashwin should confirm D17 and the CLAUDE.md rule 6 exception at review.
+- PLAN 2.5.5 stays unticked: P25-07c is also mapped to it. CI must still run lint and the test on Valkey 8.1.
+- The test sends SIGKILL at cleanup, so graceful shutdown with a Valkey store is not exercised; runbook 8.8 describes it from the design.
+- `freePort` has a small bind race on busy runners.
 
 ## Notes for the next session (P25-07)
 

@@ -1680,3 +1680,19 @@ Entry template:
 - Deviations: 08 §2, §3, §4b updated.
 - Follow-ups: P25-07c (server-side key-generation record, needs approval); CI run.
 - Context: medium
+
+## 2026-10-11 · P25-07b · done
+- Branch / PR: card/P25-07b-two-node-purge / https://github.com/AshwinSathian/weir/pull/95
+- Done: `TestE2ETwoNodePurge` (two Caddy processes, one Valkey; `caddy/twonode_integration_test.go`, `caddy/internal/e2enode`); runbook §8; D17 lifted for Valkey (01, 06 T-38, 08 §4a); `make test-valkey` runs it; CLAUDE.md rule 6 and 07 §1 name the exception.
+- Tests: passes with `-race` on redis 7.0.15; root tests, gofmt, trace 146/146 pass; lint and `make modules` cannot run here (Go 1.25 build).
+- Deviations: CLAUDE.md rule 6 and D17 changed under delegated decisions, needs Ashwin's confirmation. Reviewer: no must-fix; date lines bumped, log buffer made race-free, two unsupported runbook claims softened.
+- Follow-ups: P25-07c; CI run on Valkey 8.1.
+- Context: medium; size M was right.
+
+## 2026-10-11 · P25-07b · review-fixes
+- Branch / PR: card/P25-07b-two-node-purge / https://github.com/AshwinSathian/weir/pull/95
+- Done: adversarial review (agent), decisions delegated by Ashwin. Test asserts the first post-purge request; runbook 8 corrected (window wording, prefix/name, non-eager purge, server-down start, setting name); `-race` in `make test-valkey`; rule 6 broadened to the `integration` tag; stale single-node wording fixed.
+- Tests: two-node test passes 3 of 3 with `-race` on redis 7.0.15; lint not run here.
+- Deviations: CLAUDE.md rule 6 and docs/07 §1 wording.
+- Follow-ups: P25-07c (needs approval); CI run on Valkey 8.1.
+- Context: medium
