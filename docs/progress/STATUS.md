@@ -1,12 +1,12 @@
 # Status
 
-Updated: 2026-10-09
+Updated: 2026-10-10
 Phase: 1
-Current card: none
-Card state: awaiting-merge
-Branch: card/P2-01-module-skeleton
-PR: https://github.com/AshwinSathian/weir/pull/74
-Next card: P2-01b (Caddyfile parsing and directive order)
+Current card: P2-01b
+Card state: in-progress
+Branch: claude/adoring-curie-pvckor
+PR: none yet (P2-01 PR 74 merged)
+Next card: P2-01c (CI for the Caddy module)
 
 ## Waiting on Ashwin
 
