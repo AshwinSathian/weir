@@ -60,12 +60,14 @@ func newStore(cfg Config, dial dialFunc) (*Store, error) {
 func (s *Store) Info() store.Info { return store.Info{Name: "valkey", Remote: true} }
 
 // Close stops dials in flight, closes the client and is safe to call twice.
-// No client is built after it. valkey.NewClient takes no context, so a real
-// dial in flight delays Close by at most CallTimeout.
+// No client is built after it. valkey.NewClient takes no context, so Close
+// waits for a real dial in flight: bounded by valkey-go's own dial and
+// handshake timeouts (each CallTimeout), per seed address in cluster mode.
 func (s *Store) Close() error {
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
+		s.wg.Wait() // a second Close returns only once everything has stopped
 		return nil
 	}
 	s.closed = true
@@ -156,6 +158,7 @@ func (s *Store) connect(ctx context.Context, done chan struct{}) (client, error)
 			s.lastErr = err
 		case s.closed:
 			err = errClosed
+			s.lastErr = err
 		default:
 			s.cl = cl
 		}
@@ -181,7 +184,9 @@ func (s *Store) dialChecked(ctx context.Context) (client, error) {
 	defer cancel()
 	dctx, stop := context.WithCancel(dctx)
 	defer stop()
+	s.wg.Add(1) // the caller's goroutine is counted, so the counter is above zero
 	go func() { // ends with dctx; Close ends a dial in flight
+		defer s.wg.Done()
 		select {
 		case <-s.closing:
 			stop()

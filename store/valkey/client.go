@@ -52,6 +52,9 @@ type valkeyClient struct{ c valkey.Client }
 func dialValkey(_ context.Context, cfg Config) (client, error) {
 	c, err := valkey.NewClient(clientOption(cfg))
 	if err != nil {
+		if c != nil { // single-client mode returns the client with the error
+			c.Close()
+		}
 		return nil, err
 	}
 	return valkeyClient{c}, nil
@@ -71,8 +74,16 @@ func (v valkeyClient) policies(ctx context.Context) (map[string]string, error) {
 	return out, nil
 }
 
+// policyOK is an allowlist: only a policy known to leave TTL-less keys alone
+// passes, so a future allkeys-like policy fails closed.
+func policyOK(p string) bool {
+	return p == "noeviction" || strings.HasPrefix(p, "volatile-")
+}
+
 // checkPolicy refuses a server that may evict keys without a TTL: epoch
-// state has none, and a lost epoch is a missed purge (T-29, 05 §7).
+// state has none, and a lost epoch is a missed purge (T-29, 05 §7). It runs
+// once per successful connect, so a later CONFIG SET or a node that joins
+// the cluster afterwards is not rechecked.
 func checkPolicy(policies map[string]string) error {
 	if len(policies) == 0 {
 		return fmt.Errorf("store: valkey: %w: no node reported maxmemory-policy; set SkipPolicyCheck if the service hides it", errPolicy)
@@ -82,7 +93,7 @@ func checkPolicy(policies map[string]string) error {
 		if p == "" {
 			return fmt.Errorf("store: valkey: %w: node %s reported no maxmemory-policy; set SkipPolicyCheck if the service hides it", errPolicy, addr)
 		}
-		if strings.HasPrefix(p, "allkeys-") {
+		if !policyOK(p) {
 			return fmt.Errorf("store: valkey: %w: node %s has maxmemory-policy %q, which can evict epoch keys; use volatile-lfu or noeviction (or set SkipPolicyCheck)", errPolicy, addr, p)
 		}
 	}

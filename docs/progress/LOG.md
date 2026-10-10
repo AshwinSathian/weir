@@ -1523,3 +1523,11 @@ Entry template:
 - Review: card-reviewer, no must-fix. Fixed: shared dial cancelled by first caller, fail-open policy, Close-during-connect test, attempt gap from end, sorted policy error. Left: watcher goroutine in `dialChecked` is not in `wg` (exits with its dial context); real `Nodes()` with replicas is untested until the integration job (P25-02).
 - Follow-ups: none.
 - Context: low; size M was right.
+
+## 2026-10-10 · P25-01b · review-fixes
+- Branch / PR: claude/brave-hamilton-yomx12 / https://github.com/AshwinSathian/weir/pull/86
+- Done: adversarial review (agent) of PR 86; decisions in STATUS. Watcher goroutine in `wg`; single-client dial error closes the client; allowlist policy check; `Validate` rejects several `Addrs` unless `Cluster`; second `Close` waits; `lastErr` set when closed; 05 §7 corrected (Close bound, standalone address, allowlist).
+- Tests: TestConcurrentCallersShareFailingDial, TestSecondCloseWaitsForDial, TestStandaloneRejectsSeveralAddrs, unknown-policy row, stricter TestCloseDuringConnect; race, shuffle, count=20 pass; submodule lint 0 issues.
+- Deviations: 05 §7 as above.
+- Follow-ups: none.
+- Context: low

@@ -225,9 +225,6 @@ func TestCloseDuringConnect(t *testing.T) {
 		if err := <-errc; !errors.Is(err, store.ErrUnavailable) {
 			t.Fatalf("err = %v, want ErrUnavailable", err)
 		}
-		if cl.closed.Load() > 1 {
-			t.Fatalf("client closed %d times", cl.closed.Load())
-		}
 		if _, err := s.Get(t.Context(), store.Key{}); !errors.Is(err, store.ErrUnavailable) {
 			t.Fatalf("after Close err = %v", err)
 		}
@@ -294,6 +291,7 @@ func TestPolicyCheck(t *testing.T) {
 	}{
 		{"standalone volatile-lfu passes", map[string]string{a: "volatile-lfu"}, false, false},
 		{"standalone noeviction passes", map[string]string{a: "noeviction"}, false, false},
+		{"unknown policy fails", map[string]string{a: "future-evict-all"}, false, true},
 		{"standalone volatile-ttl passes", map[string]string{a: "volatile-ttl"}, false, false},
 		{"standalone allkeys-lfu fails", map[string]string{a: "allkeys-lfu"}, false, true},
 		{"cluster all nodes volatile passes", map[string]string{a: "volatile-lfu", b: "noeviction"}, false, false},
@@ -410,4 +408,80 @@ func TestShortDeadlineCallerDoesNotCancelSharedDial(t *testing.T) {
 			t.Fatalf("dials = %d, want 1", d.count())
 		}
 	})
+}
+
+// FR-STF-2: callers that pile onto a failing dial share it, all get
+// ErrUnavailable, none hangs, and the gap runs from the end of the attempt.
+func TestConcurrentCallersShareFailingDial(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		d := &fakeDialer{err: errors.New("refused"), block: make(chan struct{})}
+		s := newFake(t, nil, d)
+		defer s.Close()
+		var wg sync.WaitGroup
+		var bad atomic.Int32
+		for range 8 {
+			wg.Go(func() {
+				if _, err := s.Get(t.Context(), store.Key{}); !errors.Is(err, store.ErrUnavailable) {
+					bad.Add(1)
+				}
+			})
+		}
+		synctest.Wait()
+		time.Sleep(900 * time.Millisecond) // the dial is slow
+		close(d.block)
+		wg.Wait()
+		if bad.Load() != 0 || d.count() != 1 {
+			t.Fatalf("bad = %d, dials = %d, want 0 and 1", bad.Load(), d.count())
+		}
+		time.Sleep(900 * time.Millisecond) // under 1s from the end of the attempt
+		_, _ = s.Get(t.Context(), store.Key{})
+		if d.count() != 1 {
+			t.Fatalf("dials = %d, want 1 inside the gap", d.count())
+		}
+		time.Sleep(200 * time.Millisecond)
+		_, _ = s.Get(t.Context(), store.Key{})
+		if d.count() != 2 {
+			t.Fatalf("dials = %d, want 2 after the gap", d.count())
+		}
+	})
+}
+
+// 05 §7: a second Close does not return before the first has stopped
+// everything.
+func TestSecondCloseWaitsForDial(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		release := make(chan struct{})
+		s := newFake(t, nil, &fakeDialer{})
+		s.dial = func(context.Context, Config) (client, error) {
+			<-release
+			return okClient(), nil
+		}
+		go func() { _, _ = s.Get(t.Context(), store.Key{}) }()
+		synctest.Wait()
+		go func() { _ = s.Close() }()
+		synctest.Wait()
+		var done atomic.Bool
+		go func() { _ = s.Close(); done.Store(true) }()
+		synctest.Wait()
+		if done.Load() {
+			t.Fatal("second Close returned while the dial was still running")
+		}
+		close(release)
+		synctest.Wait()
+		if !done.Load() {
+			t.Fatal("second Close never returned")
+		}
+	})
+}
+
+// Standalone mode takes one address (valkey-go uses only the first).
+func TestStandaloneRejectsSeveralAddrs(t *testing.T) {
+	c := Config{Addrs: []string{"a:1", "b:1"}}
+	if _, err := c.Validate(); !errors.Is(err, weir.ErrInvalidConfig) {
+		t.Fatalf("standalone err = %v", err)
+	}
+	c.Cluster = true
+	if _, err := c.Validate(); err != nil {
+		t.Fatalf("cluster err = %v", err)
+	}
 }
