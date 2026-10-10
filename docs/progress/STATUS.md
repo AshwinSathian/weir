@@ -4,13 +4,17 @@ Updated: 2026-10-10
 Phase: 1
 Current card: none
 Card state: awaiting-merge
-Branch: claude/lucid-wright-8y0epq
-PR: https://github.com/AshwinSathian/weir/pull/79
-Next card: P2-04 (Memory budget split and memory sizing)
+Branch: claude/focused-dijkstra-cr32by
+PR: https://github.com/AshwinSathian/weir/pull/80
+Next card: P2-05 (Admin API: purge, mode, stats)
 
 ## Waiting on Ashwin
 
 none. Decided 2026-10-10 (P2-03b, review of PR 79; Ashwin delegated "take decisions on all items"): caddytest e2e files are a named exception to the real-clock rule (CLAUDE.md rule 6, docs/07 §1) instead of a build tag, because a tag would stop CI running them; a skip outside `-short` fails the test; the test site binds 127.0.0.1; the herd test uses a 2 s client timeout so a hard purge reports counts. Also decided (P2-02): multi-host is an explicit `multi_host` key; scanning the http app was rejected (handler cannot find its own route; global scan would cap unrelated sites and flush their stores). Documented in 08 §2/§3/§4b.
+
+## Decided 2026-10-10 (P2-04)
+
+Ashwin chose "halve the remainder" (via question) because Caddy gives `Provision` no look-ahead for an even split. Each new auto-sized store takes half of the budget the live auto-sized stores have not claimed (20%, 10%, 5% of the limit), floored at 160 MiB with a warning. A lone site gets 20%, not 40%. FR-MEM-1, 08 §7 and T-43 reworded.
 
 ## Decided 2026-10-09 (M16-01)
 
@@ -57,6 +61,7 @@ Ashwin delegated "take decisions on all items"; "Waiting on Ashwin" was empty. A
 
 ## Notes for the next session
 
+- P2-04: the deployment guide (P2-09 or later) must tell single-site operators to set `max_bytes` if they want more than 20% of the limit. Tests that depend on the memory budget call `isolateStores` because the caddytest instance and earlier tests leave stores live in the global registry.
 - P2-03b ran the T6.12 scenario through a POST with `Cache-Group-Invalidation`; the admin purge endpoint does not exist yet, so P2-05 should add an end-to-end purge case (`fwd=stale` on the next `Cache-Status`).
 - caddytest tests use the real clock (two named pauses: 300 ms for followers, 1.1 s for the epoch second) and skip under `-short`. Ports 2999 (admin) and 9080 are fixed by the harness; do not run two caddytest packages in parallel.
 - Still open from P2-03: 5xx statuses chosen by `next` (a dial error from `reverse_proxy`) become 502 with no body. The outage test confirms 502 reaches the client and trips the breaker; no custom mapping was added.

@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
@@ -86,18 +87,24 @@ func (h *Handler) Provision(ctx caddy.Context) (err error) {
 	}
 	cfg := h.weirConfig()
 	cfg.Logger = ctx.Slogger()
-	if h.MaxBytes == 0 {
-		// ponytail: auto-sizing lands in P2-04; until then the store default
-		// (256 MiB) applies.
-		cfg.Logger.Debug("weir: max_bytes unset, using the store default", "name", h.Name)
-	}
-
 	load := any(ctx.GetMetricsRegistry())
 	keyGen := keyGenHash(cfg)
+	var built bool // the pool called the constructor: a new store, not a reuse
 	p, keyChanged, err := stores.acquire(load, h.storeSpec(), keyGen,
-		func() (*memory.Store, error) { return h.buildStore(keyGen) })
+		func() (*memory.Store, int64, error) {
+			built = true
+			size := int64(h.MaxBytes)
+			if size == 0 {
+				size = stores.autoSize(debug.SetMemoryLimit(-1), cfg.Logger, h.Name)
+			}
+			st, err := h.buildStore(keyGen, size)
+			return st, size, err
+		})
 	if err != nil {
 		return err
+	}
+	if built {
+		stores.checkOvercommit(cfg.Logger, h.Name)
 	}
 	release := func() error {
 		p.dropHolder(h)
