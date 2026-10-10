@@ -4,9 +4,9 @@ Updated: 2026-10-10
 Phase: 1
 Current card: none
 Card state: awaiting-merge
-Branch: claude/amazing-galileo-2z89q7
-PR: https://github.com/AshwinSathian/weir/pull/91
-Next card: P25-05b
+Branch: claude/youthful-ride-2vosqo
+PR: https://github.com/AshwinSathian/weir/pull/92
+Next card: P25-06
 
 ## Waiting on Ashwin
 
@@ -20,7 +20,16 @@ Earlier decisions: none open. Decided 2026-10-10 (P2-03b, review of PR 79; Ashwi
 - Implemented in this PR with P25-04b, at Ashwin's request: interface, memory store, engine (`setVariantCAS`, 16 attempts, a writer that loses to a full spec deletes its variant), docs 04 §6.7 and 05 V-1. The old path showed 64 of 64 variants reachable with `MaxVariants` 8, because lookup finds a variant by key and the lost spec refs only hid the accounting.
 - Valkey implementation stays P25-05b (a script comparing a digest of the stored spec). Until then the Valkey store has no capability and keeps the old bound.
 
-## Notes for the next session (P25-04b)
+## Decided 2026-10-10 (P25-05b, adversarial review of PR 92)
+
+Ashwin delegated "take decisions on all items"; "Waiting on Ashwin" was empty. No must-fix. The undecodable-record swap stays but is documented as unreachable from the engine; no SHA-1 digest (gosec; the cost bound is in 05 §7); fallback tests and a real-server stale-record test added.
+
+## Notes for the next session (P25-05b)
+
+- The Valkey vary CAS compares the encoded `prev` bytes; a real server confirmed decode-then-encode reproduces the stored bytes. A nil `prev` that loses re-reads the key and swaps over a record past its `Expires` or one that does not decode (Get hides both).
+- golangci-lint and the `modules` make target cannot run in this container (Go 1.25 build); CI must confirm. PLAN 2.5.2 still waits on the CI Valkey 8.1 run.
+
+## Notes from P25-04b
 
 - PLAN 2.5.2 stays unticked until the CI `valkey` job has run both engine files on Valkey 8.1 (card AC).
 - Measured on redis 7.0.15: a hit costs about 0.27-0.32 ms before and 0.46-0.51 ms after 300 invalidations (lookup is GET newest plus a script). A newest cache is the upgrade only if this matters; no change made.

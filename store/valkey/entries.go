@@ -76,7 +76,25 @@ func (s *Store) Set(ctx context.Context, k store.Key, e *store.Entry) error {
 	if err != nil {
 		return err
 	}
-	now := time.Now()
+	pxat, ok := s.expiryMillis(e, time.Now())
+	if !ok {
+		return nil
+	}
+	val, err := store.Encode(e)
+	ctx, cancel := s.callCtx(ctx)
+	defer cancel()
+	if err != nil {
+		// Best effort: a failed DEL leaves the old record, which S-4 allows.
+		_ = cl.del(ctx, s.entryKey(k))
+		return nil
+	}
+	return mapError(cl.set(ctx, s.entryKey(k), val, pxat))
+}
+
+// expiryMillis is the PXAT for e: its Expires clamped to MaxRetention after
+// the request time (E-11). ok is false for a record already past its expiry,
+// which the caller must not write (05 §2.3).
+func (s *Store) expiryMillis(e *store.Entry, now time.Time) (pxat int64, ok bool) {
 	// From RequestTime, not StoredAt: a hard epoch at P is pruned at
 	// P + MaxRetention and applies to records requested at or before P
 	// (E-6, E-11).
@@ -93,19 +111,8 @@ func (s *Store) Set(ctx context.Context, k store.Key, e *store.Entry) error {
 	}
 	// Compared in milliseconds because that is what PXAT stores: an expiry
 	// that rounds to now would be a write the server drops at once.
-	pxat := expires.UnixMilli()
-	if pxat <= now.UnixMilli() {
-		return nil
-	}
-	val, err := store.Encode(e)
-	ctx, cancel := s.callCtx(ctx)
-	defer cancel()
-	if err != nil {
-		// Best effort: a failed DEL leaves the old record, which S-4 allows.
-		_ = cl.del(ctx, s.entryKey(k))
-		return nil
-	}
-	return mapError(cl.set(ctx, s.entryKey(k), val, pxat))
+	pxat = expires.UnixMilli()
+	return pxat, pxat > now.UnixMilli()
 }
 
 // Delete removes the record at k; a missing key is fine.

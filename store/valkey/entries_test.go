@@ -26,13 +26,19 @@ type fakeKV struct {
 
 func (f *fakeClient) get(_ context.Context, key string) ([]byte, error) {
 	f.kv.mu.Lock()
-	defer f.kv.mu.Unlock()
-	if f.kv.err != nil {
-		return nil, f.kv.err
+	err, v, ok := f.kv.err, f.kv.vals[key], false
+	if err == nil {
+		_, ok = f.kv.vals[key]
 	}
-	v, ok := f.kv.vals[key]
+	f.kv.mu.Unlock()
+	if err != nil {
+		return nil, err
+	}
 	if !ok {
 		return nil, valkey.Nil
+	}
+	if h := f.vary.afterGet; h != nil {
+		h() // a concurrent writer acts between this read and the caller's next call
 	}
 	return v, nil
 }

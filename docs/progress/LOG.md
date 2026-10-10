@@ -1624,3 +1624,19 @@ Entry template:
 - Deviations: none beyond the notes above.
 - Follow-ups: P25-05b (Valkey script); CI Valkey 8.1 run.
 - Context: medium
+
+## 2026-10-10 · P25-05b · done
+- Branch / PR: claude/youthful-ride-2vosqo / https://github.com/AshwinSathian/weir/pull/92
+- Done: `store/valkey/vary.go` `SetVarySpec` (store.VarySetter) over one Lua script on the spec's entry key (`GET`, byte compare with the encoded prev, `SET PXAT`); `expiryMillis` shared with `Set`; a nil prev that loses swaps over a record past its Expires or undecodable; docs 05 §7 rewritten for the mechanism.
+- Tests: TestSetVarySpec, TestSetVarySpecConcurrentWritersLoseNothing (fake); integration TestVaryCASConcurrentWriters (64 writers, cap 8, with and without CoLocateEntries), TestEngineVaryCapHoldsAcrossWriters. Pass with `-race` on redis 7.0.15; root race tests and trace pass. golangci-lint cannot run here (Go 1.25 build), so CI must confirm lint.
+- Deviations: bytes compared instead of a digest (05 §7 updated). Review: card-reviewer, no must-fix; the one should-fix (undecodable record) is fixed with a test.
+- Follow-ups: CI Valkey 8.1 run still pending.
+- Context: low; size S was right.
+
+## 2026-10-10 · P25-05b · review-fixes
+- Branch / PR: claude/youthful-ride-2vosqo / https://github.com/AshwinSathian/weir/pull/92
+- Done: adversarial review (agent), no must-fix. Decisions (delegated by Ashwin): the undecodable-record fallback is unreachable from the engine (`Get` returns `ErrUnavailable`), so it is documented as serving direct callers and `Get` is unchanged; a SHA-1 digest compare was declined (gosec flags SHA-1, the bound is stated instead); 05 §7 now lists the wire cost, round trips, skew and rolling-upgrade limits. New tests: vanished key, re-read error, second script losing to a concurrent writer (hooks on the fake), a real-server stale-record test; the unit concurrency loop is capped; the integration test comment says what it proves. The card's Touch list was short by `client.go`, `entries.go`, `scripts.go` and `vary_integration_test.go`.
+- Tests: Vary tests pass with `-race -count=2` on redis 7.0.15; `store/valkey` race tests and vet pass; lint cannot run here.
+- Deviations: none beyond 05 §7.
+- Follow-ups: whether `Get` should treat an undecodable spec as a miss so the engine can overwrite it (T-21 trade-off) is not decided; CI Valkey 8.1 run.
+- Context: low
