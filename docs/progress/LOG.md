@@ -1213,7 +1213,7 @@ Entry template:
 - Context: low.
 
 ## 2026-10-09 · M15-01 · done
-- Branch / PR: claude/serene-volta-d9nvnj / pending
+- Branch / PR: claude/serene-volta-d9nvnj / https://github.com/AshwinSathian/weir/pull/76
 - Done: `memory.Store.Scrub` (one shard lock at a time, exact tag match, response records only); `Engine.Purge` with `Eager` calls it through `storeGuard.scrub` after the epochs and emits the count as `EvPurge{hard}` `Status`; stores without `Scrubber` still get `ErrEagerUnsupported`.
 - Tests: TestEagerHardPurgeDeletesAllPartitions, TestEagerSoftIsError, TestEagerUnsupportedStore, TestEagerScrubErrorKeepsEpochs, TestScrub. Race tests, vet, gofmt, trace pass; lint 0 issues via the Go 1.27 build of v2.14.0.
 - Deviations: LLD purge section reworded (no store scrubs yet is no longer true). No requirement changed.
@@ -1307,3 +1307,19 @@ Entry template:
 - Tests: new cases in TestCaddyfileParse; caddy lint (Go 1.27) clean, race tests pass with GOWORK=off.
 - Deviations: 08 §2 text added; no requirement, default or signature changed.
 - Follow-ups: P2-02 placeholders in `snapshot_dir` and duplicate-name test (in STATUS).
+
+## 2026-10-10 · P2-01c · done
+- Branch / PR: claude/friendly-bardeen-ufk3ke (session branch, not card/*) / https://github.com/AshwinSathian/weir/pull/76
+- Done: `caddy-build` CI job (xcaddy with root and caddy module via `--with`, `caddy validate`, run a minimal Caddyfile and curl it); aggregate `check` now needs it. 15 minute timeout, Caddy log printed on failure, Go version from caddy/go.mod.
+- Tests: built and smoke-ran locally with xcaddy v0.4.5 (Caddy v2.11.7). `make check` passes (lint pinned v2.14.0 under Go 1.27).
+- Deviations: none.
+- Review: card-reviewer, no must-fix. Applied timeout, log capture, go-version-file, comment on why Caddy is unpinned. Its note that the Go matrix was added by this commit is wrong: it predates it.
+- Follow-ups: none.
+- Context: low; size S was right.
+
+## 2026-10-10 · P2-01c · review-fixes
+- Branch / PR: claude/friendly-bardeen-ufk3ke / https://github.com/AshwinSathian/weir/pull/76
+- Done: adversarial review (agent), no must-fix, nothing waiting on Ashwin. Applied: Caddy matrix (v2.11.7 required, `latest` continue-on-error) so an upstream release cannot block unrelated PRs; `kill -0` liveness check after the first served response; tolerant EXIT trap; corrected the comment on the root replace (a v0.1.0 root tag exists but predates the APIs `caddy/` uses).
+- Tests: smoke step re-run locally under `bash -ex` (second poll served `ok`, process alive); YAML parses.
+- Deviations: none. Declined: SHA-pinning actions (matches the other jobs), `[ ] && [ ]` instead of `-a` (works in bash and dash).
+- Follow-ups: flip the root `=.` to the tag after the next root release (in STATUS).

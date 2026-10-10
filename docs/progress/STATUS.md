@@ -4,9 +4,9 @@ Updated: 2026-10-10
 Phase: 1
 Current card: none
 Card state: awaiting-merge
-Branch: claude/adoring-curie-pvckor
-PR: https://github.com/AshwinSathian/weir/pull/75
-Next card: P2-01c (CI for the Caddy module)
+Branch: claude/friendly-bardeen-ufk3ke
+PR: https://github.com/AshwinSathian/weir/pull/76
+Next card: P2-02 (store pool and key-generation hash)
 
 ## Waiting on Ashwin
 
@@ -57,6 +57,7 @@ Ashwin delegated "take decisions on all items"; "Waiting on Ashwin" was empty. A
 
 ## Notes for the next session
 
+- P2-01c: `caddy-build` in ci.yml builds with xcaddy (matrix: Caddy v2.11.7 is the required gate, `latest` is allowed to fail and reports drift), validates and starts a minimal Caddyfile. The root `=.` replace stays because the v0.1.0 root tag predates the APIs `caddy/` uses; switch to the tag after the next root release.
 - P2-02 must (a) reject or expand `{...}` in `snapshot_dir` (the Caddyfile path keeps `{env.X}` literally), (b) test that two handlers with the same `name` and different config in one load fail (08 §3), including a `weir` in `handle_errors`.
 - P2-01b: `caddy/caddyfile.go` parses the `weir` block into `Handler` (strict keys, single-set keys, errors carry the Caddyfile line); `init` registers the directive and `RegisterDirectiveOrder(Before, reverse_proxy)`. `route` keeps written order, so weir must be written first there (pinned by a test). Caddyfile tests import caddy `standard`, `encode` and `reverseproxy`, so `caddy/go.sum` grew. Two `weir` directives with the same `name` in one config are not rejected yet: P2-02 (store pool) should own that. Integer upper bounds are left to `weir.New`.
 - P2-01: Go package in `caddy/` is named `weircaddy`. `Handler.weirConfig()` maps adapter settings to `weir.Config`; `Provision` builds the engine with `weir.New` (default store). `max_bytes` and `snapshot_dir` are parsed and validated but not applied: P2-02 builds the pooled store and must pass it as `Config.Store`. `ServeHTTP` is a pass-through until P2-03.

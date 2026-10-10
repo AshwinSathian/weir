@@ -31,11 +31,73 @@ jobs:
       - name: govulncheck
         run: make vuln
 
+  # P2-01c: catches Caddy API drift (docs/08 §9). The pinned entry is the
+  # required gate (v2.11.7, the version docs/08 §7 and §11 were verified
+  # against). The `latest` entry reports drift without blocking unrelated PRs
+  # when Caddy ships a release: it is allowed to fail.
+  # The root `replace` (`=.`) stays because the v0.1.0 root tag predates the
+  # APIs caddy/ uses; flip to the tag once a newer one exists, so the job
+  # also tests the path real users take.
+  caddy-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    continue-on-error: ${{ matrix.caddy == 'latest' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        caddy: ["v2.11.7", "latest"]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: caddy/go.mod
+          cache: true
+          cache-dependency-path: |
+            go.mod
+            **/go.sum
+      - name: xcaddy build
+        run: |
+          go install github.com/caddyserver/xcaddy/cmd/xcaddy@v0.4.5
+          xcaddy build ${{ matrix.caddy }} \
+            --with github.com/AshwinSathian/weir=. \
+            --with github.com/AshwinSathian/weir/caddy=./caddy \
+            --output ./caddy-weir
+      - name: start with a minimal Caddyfile
+        run: |
+          cat > Caddyfile.ci <<'EOF'
+          {
+          	admin localhost:2999
+          	auto_https off
+          }
+          :8099 {
+          	route {
+          		weir {
+          			name ci
+          		}
+          		respond "ok"
+          	}
+          }
+          EOF
+          ./caddy-weir validate --config Caddyfile.ci --adapter caddyfile
+          ./caddy-weir run --config Caddyfile.ci --adapter caddyfile >caddy.log 2>&1 &
+          pid=$!
+          trap 'kill $pid 2>/dev/null || true' EXIT
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:8099/ 2>/dev/null | grep -qx ok; then
+              kill -0 $pid || { echo "caddy exited after serving" >&2; cat caddy.log >&2; exit 1; }
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "caddy did not serve the minimal Caddyfile" >&2
+          cat caddy.log >&2
+          exit 1
+
   # Keeps a stable required-check name (`check`) however many Go versions the
   # matrix holds.
   check:
     if: always()
-    needs: check-go
+    needs: [check-go, caddy-build]
     runs-on: ubuntu-latest
     steps:
-      - run: test "${{ needs.check-go.result }}" = success
+      - run: test "${{ needs.check-go.result }}" = success -a "${{ needs.caddy-build.result }}" = success

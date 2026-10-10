@@ -27,7 +27,7 @@ These phases start from draft specs. Each begins with one planning card that ver
 - Tests: `TestCaddyfileParse` (every key in the 08 §2 example, nested blocks, unknown key, missing `name`, byte sizes and durations), `TestDirectiveOrder` (adapted Caddyfile puts `weir` before `reverse_proxy`, and inside `handle` and `route` blocks)
 - AC: the 08 §2 example adapts to the same JSON as the hand-written equivalent; errors name the line; `RegisterHandlerDirective` and `RegisterDirectiveOrder` are called in `init` (the Caddy module registration exception in CLAUDE.md)
 
-### [ ] P2-01c CI for the Caddy module
+### [x] P2-01c CI for the Caddy module
 - Plan: 2.2 · Size: S · Depends on: P2-01b
 - Read: 08 §9; Makefile; .github/workflows/ci.yml
 - Touch: .github/workflows/ci.yml
