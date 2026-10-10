@@ -1592,3 +1592,11 @@ Entry template:
 - Deviations: none. Review: card-reviewer, no must-fix; fixed the timing-margin should-fixes (breaker, negative TTL, stale-if-error windows, longer coalesce delay, per-test prefix).
 - Follow-ups: flood measurement of the two-round-trip lookup (P25-03b note) is unowned; the CI Valkey job has still not run on Valkey 8.1.
 - Context: low; size M was right.
+
+## 2026-10-10 · P25-04 · review-fixes
+- Branch / PR: claude/optimistic-mendel-k6iji6 / https://github.com/AshwinSathian/weir/pull/90
+- Done: adversarial review (agent) of PR 90; decisions in STATUS. Suite sets `Timeouts.Store` to 2 s (store breaker opened under starvation); SWR test refresh gets `max-age=60`; store closed when `weir.New` fails; card P25-04b added for the skipped scenarios; PLAN 2.5.2 unticked.
+- Tests: TestEngine* pass with `-race -count=2 -shuffle=on` on redis 7.0.15; module lint 0 issues.
+- Deviations: none. The earlier excluded-scenario list was incomplete: Invalid epoch, global soft, Vary variants, MustRevalidate, Warm and creator cancel could run on Valkey; they are P25-04b.
+- Follow-ups: P25-05 API decision waits on Ashwin; Valkey 8.1 CI job still not run.
+- Context: low

@@ -6,11 +6,22 @@ Current card: none
 Card state: awaiting-merge
 Branch: claude/optimistic-mendel-k6iji6
 PR: https://github.com/AshwinSathian/weir/pull/90
-Next card: P25-05
+Next card: P25-04b (P25-05 is blocked on the question below)
 
 ## Waiting on Ashwin
 
-none. Decided 2026-10-10 (P2-03b, review of PR 79; Ashwin delegated "take decisions on all items"): caddytest e2e files are a named exception to the real-clock rule (CLAUDE.md rule 6, docs/07 §1) instead of a build tag, because a tag would stop CI running them; a skip outside `-short` fails the test; the test site binds 127.0.0.1; the herd test uses a 2 s client timeout so a hard purge reports counts. Also decided (P2-02): multi-host is an explicit `multi_host` key; scanning the http app was rejected (handler cannot find its own route; global scan would cap unrelated sites and flush their stores). Documented in 08 §2/§3/§4b.
+- P25-05 (does not block P25-04b): how the engine updates a vary spec atomically. (a) optional capability `VarySetter` (public API addition, leaves the codec alone; recommended) or (b) a version field on `store.Entry` (public type change touching memory store and codec). Not decided: it is a public API choice, not covered by the delegation on PR 90.
+
+Earlier decisions: none open. Decided 2026-10-10 (P2-03b, review of PR 79; Ashwin delegated "take decisions on all items"): caddytest e2e files are a named exception to the real-clock rule (CLAUDE.md rule 6, docs/07 §1) instead of a build tag, because a tag would stop CI running them; a skip outside `-short` fails the test; the test site binds 127.0.0.1; the herd test uses a 2 s client timeout so a hard purge reports counts. Also decided (P2-02): multi-host is an explicit `multi_host` key; scanning the http app was rejected (handler cannot find its own route; global scan would cap unrelated sites and flush their stores). Documented in 08 §2/§3/§4b.
+
+## Decided 2026-10-10 (P25-04, adversarial review of PR 90)
+
+Ashwin delegated "take decisions on all items"; "Waiting on Ashwin" was empty. An independent agent attacked the PR; no must-fix. Decisions:
+
+- The suite sets `Timeouts.Store` to 2 s: under CPU starvation 200 concurrent `Get`s exceeded the 50 ms default, opened the store breaker and failed `TestEngineCoalesceColdKey` (3 of 4 runs in the extreme case). The 50 ms default is not what this suite tests.
+- SWR test: the refresh answers with `max-age=60`, so a stall cannot make it stale again. `engineWith` closes the store when `weir.New` fails. The header comment states why engine-side pauses are real-clock.
+- New card P25-04b lists the scenarios P25-04 skipped (Invalid epoch, global soft, Vary through the codec, others). PLAN 2.5.2 unticked until it is done. Not added to this PR: the card said "new scenarios" are out of scope.
+- The P25-05 API question moved to "Waiting on Ashwin"; not decided.
 
 ## Decided 2026-10-10 (P25-03b, adversarial review of PR 89)
 
@@ -112,9 +123,10 @@ Ashwin delegated "take decisions on all items"; "Waiting on Ashwin" was empty. A
 
 ## Notes for the next session
 
-- P25-04 done: `store/valkey/engine_integration_test.go` (tag `integration`, eight engine scenarios on the real clock, about 15 s). A fresh prefix starts with a repair epoch at `ceil(server now)`, and an entry fetched in that second is purged (05 §7, E-7), so `engineStore` primes the store and waits 2.1 s with `NoClockSkew`. Not repeated against Valkey (they read memory-store internals or need a wrapper or synctest timing): flight-table bounds, the store-outage wrapper tests, the 5 000-key limiter cap, batch expiry spread, limiter/partition/miss-rate component tests.
+- P25-04 done: `store/valkey/engine_integration_test.go` (tag `integration`, eight engine scenarios on the real clock, about 15 s). A fresh prefix starts with a repair epoch at `ceil(server now)`, and an entry fetched in that second is purged (05 §7, E-7), so `engineStore` primes the store and waits 2.1 s with `NoClockSkew`. Memory-store internal or wrapper-based scenarios are not repeated: flight-table bounds, the store-outage wrapper tests, the 5 000-key limiter cap, batch expiry spread, limiter/partition/miss-rate component tests.
 - Still open from P25-03b: nobody has measured the two-round-trip lookup under an invalidation flood; P25-04 did not add a benchmark (not in its scope). The CI Valkey job has not run on Valkey 8.1; local runs use redis 7.0.15.
-- P25-05 needs Ashwin's decision first (card Notes: capability `VarySetter` vs a version field on `Entry`).
+- P25-05 needs Ashwin's decision first (see Waiting on Ashwin).
+- PR 90 review (2026-10-10): P25-04b added for the scenarios the suite skips; PLAN 2.5.2 is unticked until it is done.
 - Work was done on `claude/optimistic-mendel-k6iji6`, not a `card/*` branch.
 
 - P25-03b done: `store/valkey/sketch.go` (seed, positions, `NewestEpochShared`, `setSketch`). Loss is now `meta` without field `v` or a missing plane; the client writes `meta.seed` first with `HSETNX`, so `meta` alone no longer means "initialised". Scripts take the seed id and reply `SEED_CHANGED` (write: error reply mapped to `errSeedChanged`; read: `{-2}`); the read arguments are four per non-global tag. `SetEpoch` refuses only unknown modes now, so the store can be wired into an engine (P25-07 still depends on P25-04..06).

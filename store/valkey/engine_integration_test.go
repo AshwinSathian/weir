@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -22,6 +23,9 @@ import (
 // The engine suite against a real server (P25-04, docs/07 §6). These run on
 // the real clock: the server expires keys and orders epochs on its own clock
 // (CLAUDE.md hard rule 6, 05 §8), so they cannot sit in a synctest bubble.
+// The breaker, stale-window and negative-TTL pauses wait on engine-side
+// clocks, but the engine here talks to a real server, so the whole test runs
+// outside a bubble and its pauses are real too.
 // Lifetimes are 1 to 2 s and every fixed pause is named. The scenarios that
 // read the memory store's internals (TestBatchWriteExpirySpread's counters,
 // flight-table sizes, store-outage wrappers, limiter cap at 5 000 keys) are
@@ -52,8 +56,13 @@ func engineWith(t *testing.T, cfg weir.Config) *weir.Engine {
 	t.Helper()
 	cfg.Store = engineStore(t)
 	cfg.Freshness.NoJitter = true
+	// The 50 ms production default for remote stores is not under test here: a
+	// 200-goroutine burst on a starved CI runner exceeds it, opens the store
+	// breaker and turns a hit into a miss.
+	cfg.Timeouts.Store = 2 * time.Second
 	e, err := weir.New(cfg)
 	if err != nil {
+		_ = cfg.Store.Close()
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
@@ -174,7 +183,16 @@ func TestEngineCoalesceColdKey(t *testing.T) {
 func TestEngineStaleWhileRevalidate(t *testing.T) {
 	t.Parallel()
 	o := testorigin.NewChecked(t, 64, 16)
-	o.Default(cc(200, "max-age=1, stale-while-revalidate=60", "a"))
+	// The first answer is fresh for 1 s; the refresh gets a long lifetime so a
+	// stall after it cannot make the entry stale again and cost a third call.
+	var answers atomic.Int32
+	o.Default(testorigin.Behavior{Func: func(*weir.Request) (*weir.Response, error) {
+		cc := "max-age=1, stale-while-revalidate=60"
+		if answers.Add(1) > 1 {
+			cc = "max-age=60"
+		}
+		return &weir.Response{StatusCode: http.StatusOK, Header: http.Header{"Cache-Control": {cc}, "Etag": {`"a"`}}, Body: io.NopCloser(strings.NewReader("a"))}, nil
+	}})
 	e := engineWith(t, weir.Config{})
 
 	engineServe(t, e, "/a", o)
