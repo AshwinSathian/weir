@@ -172,7 +172,7 @@ func (h *Handler) Provision(ctx caddy.Context) (err error) {
 	// side if a purge that is needed cannot be written.
 	purge := func(ctx context.Context) error {
 		if perr := e.Purge(ctx, weir.Purge{All: true, Mode: weir.PurgeHard}); perr != nil {
-			cctx, cancel := context.WithTimeout(context.Background(), closeTimeout)
+			cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), closeTimeout)
 			defer cancel()
 			_ = e.Close(cctx)
 			return fmt.Errorf("weir: key-generation change: %w", perr)
