@@ -17,7 +17,7 @@ var _ store.VarySetter = (*Store)(nil)
 // evalVarySet is the fake of the compare-and-set script: it holds the same
 // lock as the other fake commands, so the compare and the write are atomic as
 // they are on the server.
-func (f *fakeClient) evalVarySet(ctx context.Context, key string, prev []byte, hasPrev bool, val []byte, pxat int64) (bool, error) {
+func (f *fakeClient) evalVarySet(_ context.Context, key string, prev []byte, hasPrev bool, val []byte, pxat int64) (bool, error) {
 	ok, err := f.evalVarySetLocked(key, prev, hasPrev, val, pxat)
 	if h := f.vary.afterEval; h != nil {
 		h()
