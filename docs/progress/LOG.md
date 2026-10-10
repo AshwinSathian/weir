@@ -1650,7 +1650,7 @@ Entry template:
 - Context: medium
 
 ## 2026-10-10 · P25-06 · done
-- Branch / PR: card/P25-06-scrubber-scan / PR link in STATUS
+- Branch / PR: card/P25-06-scrubber-scan / https://github.com/AshwinSathian/weir/pull/93
 - Done: handoff. card-reviewer found one must-fix (CI container lookup; now `job.services.<id>.id`) and three should-fix (storm reader busy loop, unnamed poll, empty-tag Scrub dialing), all fixed; hit counts stay logged, not asserted, and 09 §7 says so. Card and PLAN 2.5.4 ticked.
 - Tests: Scrub unit and integration tests, storm and policy tests pass with `-race` on redis 7.0.15; trace 146/146; lint not run here.
 - Deviations: none beyond the first entry.
