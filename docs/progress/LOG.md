@@ -1316,3 +1316,10 @@ Entry template:
 - Review: card-reviewer, no must-fix. Applied timeout, log capture, go-version-file, comment on why Caddy is unpinned. Its note that the Go matrix was added by this commit is wrong: it predates it.
 - Follow-ups: none.
 - Context: low; size S was right.
+
+## 2026-10-10 · P2-01c · review-fixes
+- Branch / PR: claude/friendly-bardeen-ufk3ke / https://github.com/AshwinSathian/weir/pull/76
+- Done: adversarial review (agent), no must-fix, nothing waiting on Ashwin. Applied: Caddy matrix (v2.11.7 required, `latest` continue-on-error) so an upstream release cannot block unrelated PRs; `kill -0` liveness check after the first served response; tolerant EXIT trap; corrected the comment on the root replace (a v0.1.0 root tag exists but predates the APIs `caddy/` uses).
+- Tests: smoke step re-run locally under `bash -ex` (second poll served `ok`, process alive); YAML parses.
+- Deviations: none. Declined: SHA-pinning actions (matches the other jobs), `[ ] && [ ]` instead of `-a` (works in bash and dash).
+- Follow-ups: flip the root `=.` to the tag after the next root release (in STATUS).
