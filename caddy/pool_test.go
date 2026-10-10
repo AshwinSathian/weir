@@ -404,7 +404,7 @@ func TestRegistryConcurrentAcquireRelease(t *testing.T) {
 	r := newStoreRegistry()
 	spec := storeSpec{name: "conc", maxBytes: 0}
 	var kg [sha256.Size]byte
-	build := func(*evictSink) (*memory.Store, int64, error) {
+	build := func(*evictSink) (store.Store, int64, error) {
 		st, err := memory.New(memory.Config{})
 		return st, 0, err
 	}

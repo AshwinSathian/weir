@@ -1,11 +1,11 @@
 # Status
 
-Updated: 2026-10-10
+Updated: 2026-10-11
 Phase: 1
-Current card: none
-Card state: awaiting-merge
-Branch: card/P25-06-scrubber-scan (pushed as claude/serene-dirac-0yagok)
-PR: https://github.com/AshwinSathian/weir/pull/93
+Current card: P25-07
+Card state: in-progress
+Branch: claude/gracious-brown-acmyd0 (session branch, not card/*)
+PR: none yet
 Next card: P25-07
 
 ## Notes for the next session (P25-06)

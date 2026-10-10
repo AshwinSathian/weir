@@ -33,6 +33,11 @@ func parseCaddyfile(h httpcaddyfile.Helper) (caddyhttp.MiddlewareHandler, error)
 //	    max_bytes <size>
 //	    snapshot_dir <dir>
 //	    multi_host
+//	    store valkey {
+//	        addrs <host:port>...; username|password|prefix|hash_tag <v>
+//	        tls; cluster; co_locate_entries; no_clock_skew; skip_policy_check
+//	        max_retention|max_clock_skew|call_timeout|hard_epoch_wait <duration>; max_hard_epochs <n>
+//	    }
 //	    key { query_drop|query_keep|headers|cookies|accept_encoding <v>...; query_sort; normalize_path }
 //	    forward { allow <header>... }
 //	    bypass { cookies|headers <v>... }
@@ -49,10 +54,15 @@ func (h *Handler) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 	}
 	seen := map[string]bool{}
 	nameFile, nameLine := file, line
+	var storeFile string
+	var storeLine int
 	for d.NextBlock(0) {
 		key := d.Val()
 		if key == "name" {
 			nameFile, nameLine = d.File(), d.Line()
+		}
+		if key == "store" {
+			storeFile, storeLine = d.File(), d.Line()
 		}
 		if err := h.blockKey(d, key, seen); err != nil {
 			return err
@@ -60,6 +70,13 @@ func (h *Handler) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 	}
 	if err := validateName(h.Name); err != nil {
 		return fmt.Errorf("%w, at %s:%d", err, nameFile, nameLine)
+	}
+	// Checked here as well as in Provision so `caddy adapt` reports a bad
+	// store block with its line.
+	if h.Store != nil {
+		if err := h.Validate(); err != nil {
+			return fmt.Errorf("%w, at %s:%d", err, storeFile, storeLine)
+		}
 	}
 	return nil
 }
@@ -87,6 +104,8 @@ func (h *Handler) blockKey(d *caddyfile.Dispenser, key string, seen map[string]b
 		}
 		h.MaxBytes = ByteSize(n)
 		return nil
+	case "store":
+		return h.storeBlock(d)
 	case "key":
 		return subBlock(d, "key", map[string]func() error{
 			"query_drop":      func() error { return listArg(d, &h.Key.QueryDrop) },
@@ -120,6 +139,40 @@ func (h *Handler) blockKey(d *caddyfile.Dispenser, key string, seen map[string]b
 		})
 	}
 	return d.Errf("unknown key %q", key)
+}
+
+// storeBlock parses `store valkey { ... }`. The type is an argument so a
+// second store kind can follow without breaking existing files.
+func (h *Handler) storeBlock(d *caddyfile.Dispenser) error {
+	if !d.NextArg() {
+		return d.ArgErr()
+	}
+	if typ := d.Val(); typ != "valkey" {
+		return d.Errf("unknown store type %q (only \"valkey\")", typ)
+	}
+	s := &StoreConfig{Type: "valkey"}
+	err := subBlock(d, "store", map[string]func() error{
+		"addrs":             func() error { return listArg(d, &s.Addrs) },
+		"username":          func() error { return oneArg(d, &s.Username) },
+		"password":          func() error { return oneArg(d, &s.Password) },
+		"tls":               func() error { return flag(d, &s.TLS) },
+		"cluster":           func() error { return flag(d, &s.Cluster) },
+		"prefix":            func() error { return oneArg(d, &s.Prefix) },
+		"hash_tag":          func() error { return oneArg(d, &s.HashTag) },
+		"co_locate_entries": func() error { return flag(d, &s.CoLocateEntries) },
+		"max_retention":     func() error { return durArg(d, &s.MaxRetention) },
+		"max_clock_skew":    func() error { return durArg(d, &s.MaxClockSkew) },
+		"no_clock_skew":     func() error { return flag(d, &s.NoClockSkew) },
+		"max_hard_epochs":   func() error { return intArg(d, &s.MaxHardEpochs) },
+		"call_timeout":      func() error { return durArg(d, &s.CallTimeout) },
+		"hard_epoch_wait":   func() error { return durArg(d, &s.HardEpochWait) },
+		"skip_policy_check": func() error { return flag(d, &s.SkipPolicyCheck) },
+	})
+	if err != nil {
+		return err
+	}
+	h.Store = s
+	return nil
 }
 
 // subBlock parses the nested block of one key. A block key is set once, and

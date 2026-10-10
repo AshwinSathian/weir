@@ -14,6 +14,7 @@ import (
 
 	"github.com/caddyserver/caddy/v2"
 
+	"github.com/AshwinSathian/weir/store"
 	"github.com/AshwinSathian/weir/store/memory"
 )
 
@@ -34,6 +35,9 @@ const (
 var stores = newStoreRegistry()
 
 // storeSpec is the pool key (08 §3): everything fixed when a store is built.
+// valkey is the digest of the store block (zero for the memory store), so any
+// changed store setting, the password included, builds a new store and the key
+// never holds a secret.
 // The shard count is not a key yet: no setting changes it, so every store
 // uses the memory default (16). ownerCap is FR-FAIR-3, "more than one host or
 // on-demand TLS". snapshotDir is part of the key so a changed directory
@@ -43,12 +47,13 @@ type storeSpec struct {
 	maxBytes    int64
 	ownerCap    bool
 	snapshotDir string
+	valkey      [sha256.Size]byte
 }
 
 // pooledStore is the value in the UsagePool. It implements caddy.Destructor.
 type pooledStore struct {
 	spec  storeSpec
-	store *memory.Store
+	store store.Store
 	reg   *storeRegistry
 
 	// superseded is set when a newer store with the same name exists, so
@@ -140,12 +145,21 @@ func (p *pooledStore) destruct(ctx context.Context) error {
 		// store is closed either way (FR-SNP-1).
 		cctx, cancel := context.WithCancel(ctx)
 		cancel()
-		if err := p.store.CloseContext(cctx); err != nil && !errors.Is(err, context.Canceled) {
+		if err := p.closeStore(cctx); err != nil && !errors.Is(err, context.Canceled) {
 			return errors.Join(recErr, err)
 		}
 		return recErr
 	}
-	return p.store.CloseContext(ctx)
+	return p.closeStore(ctx)
+}
+
+// closeStore closes the store under ctx when it takes one (the memory store
+// writes its snapshot under it) and plainly otherwise (the Valkey store).
+func (p *pooledStore) closeStore(ctx context.Context) error {
+	if c, ok := p.store.(interface{ CloseContext(context.Context) error }); ok {
+		return c.CloseContext(ctx)
+	}
+	return p.store.Close()
 }
 
 // storeRegistry wraps the UsagePool with the two pieces of state the pool
@@ -185,7 +199,7 @@ func newStoreRegistry() *storeRegistry {
 // when no live handler has it. keyChanged is true when a store that other
 // handlers already used was last used with a different key-generation hash.
 func (r *storeRegistry) acquire(load any, spec storeSpec, keyGen [sha256.Size]byte,
-	build func(*evictSink) (*memory.Store, int64, error)) (p *pooledStore, keyChanged bool, err error) {
+	build func(*evictSink) (store.Store, int64, error)) (p *pooledStore, keyChanged bool, err error) {
 	if err := r.claimName(load, spec, keyGen); err != nil {
 		return nil, false, err
 	}
@@ -303,6 +317,11 @@ func (r *storeRegistry) loadClaims(load any) int {
 
 // storeSpec derives the pool key from the handler.
 func (h *Handler) storeSpec() storeSpec {
+	if h.Store != nil {
+		// Memory-only settings are refused by Validate, so the key is the name
+		// and the digest (08 §3).
+		return storeSpec{name: h.Name, valkey: h.Store.digest()}
+	}
 	return storeSpec{
 		name: h.Name, maxBytes: int64(h.MaxBytes), ownerCap: h.MultiHost, snapshotDir: h.snapshotDir(),
 	}

@@ -22,7 +22,8 @@ import (
 
 	"github.com/AshwinSathian/weir"
 	"github.com/AshwinSathian/weir/internal/keys"
-	"github.com/AshwinSathian/weir/store/memory"
+	"github.com/AshwinSathian/weir/store"
+	"github.com/AshwinSathian/weir/store/valkey"
 	"github.com/AshwinSathian/weir/weirhttp"
 )
 
@@ -49,6 +50,10 @@ type Handler struct {
 	// TLS. It turns on the per-host fairness caps at 25% (FR-FAIR-3) and is
 	// part of the store identity (08 §3, §4b).
 	MultiHost bool `json:"multi_host,omitempty"`
+	// Store, when set, replaces the memory store with a shared one (08 §2).
+	// max_bytes and snapshot_dir belong to the memory store and are refused
+	// with it.
+	Store *StoreConfig `json:"store,omitempty"`
 
 	engine *weir.Engine
 	// pool and release are set by a successful Provision and not changed
@@ -107,11 +112,19 @@ func (h *Handler) Provision(ctx caddy.Context) (err error) {
 	}()
 	cfg.Observer = fanout{tap, ms.obs}
 	load := any(reg)
-	keyGen := keyGenHash(cfg)
+	spec := h.storeSpec()
+	keyGen := keyGenHashFor(cfg, spec.valkey)
 	var built bool // the pool called the constructor: a new store, not a reuse
-	p, keyChanged, err := stores.acquire(load, h.storeSpec(), keyGen,
-		func(sink *evictSink) (*memory.Store, int64, error) {
+	p, keyChanged, err := stores.acquire(load, spec, keyGen,
+		func(sink *evictSink) (store.Store, int64, error) {
 			built = true
+			if h.Store != nil {
+				// The client connects on first use, so an unreachable server
+				// opens the store breaker instead of failing the load
+				// (FR-STF-2).
+				st, err := valkey.New(h.Store.valkeyConfig())
+				return st, 0, err
+			}
 			size := int64(h.MaxBytes)
 			if size == 0 {
 				size = stores.autoSize(debug.SetMemoryLimit(-1), cfg.Logger, h.Name)
@@ -122,7 +135,7 @@ func (h *Handler) Provision(ctx caddy.Context) (err error) {
 	if err != nil {
 		return err
 	}
-	if built {
+	if built && h.Store == nil {
 		stores.checkOvercommit(cfg.Logger, h.Name)
 	}
 	release := func() error {
@@ -172,6 +185,14 @@ func (h *Handler) Provision(ctx caddy.Context) (err error) {
 func (h *Handler) Validate() error {
 	if err := validateName(h.Name); err != nil {
 		return err
+	}
+	if h.Store != nil {
+		if h.MaxBytes != 0 || h.SnapshotDir != "" {
+			return errors.New("weir: max_bytes and snapshot_dir size and persist the memory store; they cannot be combined with a store block")
+		}
+		if err := h.Store.validate(); err != nil {
+			return err
+		}
 	}
 	if h.MaxBytes != 0 && h.MaxBytes < minStoreBytes {
 		return fmt.Errorf("weir: max_bytes must be at least %d MiB (the largest cacheable object is 10%% of a shard)", minStoreBytes>>20)
