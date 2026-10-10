@@ -44,3 +44,32 @@ func TestStoreConformance(t *testing.T) {
 		return s
 	}, storetest.WithoutEpochs())
 }
+
+// E-11: the clamped expiry reaches the server as a TTL no longer than
+// MaxRetention (the fake client cannot show what PXAT does).
+func TestSetTTLIsClamped(t *testing.T) {
+	addr := serverAddr(t)
+	s, err := New(Config{Addrs: []string{addr}, Prefix: "ttl" + strconv.FormatInt(time.Now().UnixNano(), 36), MaxRetention: time.Hour})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	var k store.Key
+	now := time.Now()
+	e := testEntry(now)
+	e.Expires = now.Add(48 * time.Hour)
+	if err := s.Set(t.Context(), k, e); err != nil {
+		t.Fatal(err)
+	}
+	cl, err := s.acquire(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ttl, err := cl.(valkeyClient).c.Do(t.Context(), cl.(valkeyClient).c.B().Pttl().Key(s.entryKey(k)).Build()).AsInt64()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ttl <= 0 || ttl > time.Hour.Milliseconds() {
+		t.Fatalf("PTTL = %d ms, want in (0, %d]", ttl, time.Hour.Milliseconds())
+	}
+}

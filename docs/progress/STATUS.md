@@ -72,6 +72,17 @@ Ashwin delegated "take decisions on all items"; "Waiting on Ashwin" was empty. A
 
 "Waiting on Ashwin" was empty. No must-fix. Decided: sub-block keys (`key`, `forward`, `bypass`, `limiter`, `stale`) with no block or empty braces are an error; repeated keys stay an error and 08 §2 now says so; the `weir <matcher>` form is supported and documented; runtime placeholders (`{env.X}`, `{host}`) are not expanded, only parse-time `{$VAR}`, documented in 08 §2; the `name` error points at the `name` line. Tests added for repeated sub-block keys, negative durations, directive arguments, bare and empty sub-blocks, the matcher form. Kept: duplicate `name` handling in P2-02, the non-`card/*` branch, `RegisterDirectiveOrder` (TestDirectiveOrder fails loudly on a Caddy bump).
 
+## Decided 2026-10-10 (P25-02, adversarial review of PR 87)
+
+Ashwin delegated "take decisions on all items"; "Waiting on Ashwin" was empty. An independent agent attacked the PR; no must-fix. Decisions, written into 05 §7:
+
+- A `Set` the codec rejects now deletes the record at the key and returns nil (S-4: new record or nothing, as the memory store does for oversized records). A past-expiry or clamped-away `Set` keeps the older record (05 §2.3 literal).
+- `Get` returns `ErrNotFound` for a record past its `Expires` (05 §2.2), since the server clock differs.
+- `Decode` stays bounded by the 512 MiB server limit; no new config field (needs approval). The residual download-per-`Get` from a planted value needs server write access and is documented. A `MaxValueBytes` field can be proposed later.
+- Documented: same `Prefix` with different `HashTag` is a silent missed purge; the scrubber must read only 64-hex suffix keys; poisoned keys can open the store breaker.
+- Tests: vacuous future-RequestTime case fixed (bounds the PXAT); integration `TestSetTTLIsClamped` checks PTTL on a real server.
+- Kept: floating `valkey/valkey:8.1` tag (the minor was left to this card), `Value(string(val))` copy, error text prefixes.
+
 ## Decided 2026-10-10 (P25-01b, adversarial review of PR 86)
 
 Ashwin delegated "take decisions on all items"; "Waiting on Ashwin" was empty. An independent agent attacked the PR; no must-fix. Decisions, written into 05 §7: standalone mode (`Cluster` false) takes exactly one address (valkey-go uses only the first; `Validate` rejects more, a config-behavior change inside the approved Config); the policy check is an allowlist (`noeviction`, `volatile-*`); `Close` waits for a real dial, and the doc no longer claims a single `CallTimeout` bound; a second `Close` waits for the first. Fixed: the watcher goroutine joins `wg`, a failed single-client dial is closed, `lastErr` is set when closed. Tests added for failing-dial fan-in, the end-of-attempt gap, second `Close`, standalone addresses. Kept: no recheck of the policy after connect (documented).

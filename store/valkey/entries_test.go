@@ -151,11 +151,17 @@ func TestSetClampsToMaxRetention(t *testing.T) {
 		e := testEntry(now)
 		e.RequestTime = now.Add(24 * time.Hour)
 		e.Expires = now.Add(48 * time.Hour)
+		before := time.Now()
 		if err := s.Set(t.Context(), k, e); err != nil {
 			t.Fatal(err)
 		}
-		if got := cl.kv.pxat[s.entryKey(k)]; got > time.Now().Add(time.Hour).UnixMilli() {
-			t.Fatalf("PXAT %d is beyond now + MaxRetention", got)
+		after := time.Now()
+		got, ok := cl.kv.pxat[s.entryKey(k)]
+		if !ok {
+			t.Fatal("nothing was written")
+		}
+		if lo, hi := before.Add(time.Hour).UnixMilli(), after.Add(time.Hour).UnixMilli(); got < lo || got > hi {
+			t.Fatalf("PXAT %d outside [%d, %d]", got, lo, hi)
 		}
 	})
 	t.Run("past expires is a no-op", func(t *testing.T) {
@@ -178,6 +184,21 @@ func TestSetClampsToMaxRetention(t *testing.T) {
 		}
 		if cl.kv.sets != 0 {
 			t.Fatal("an unencodable record was sent")
+		}
+	})
+	// S-4: Set leaves the new record or nothing, never an older one.
+	t.Run("a record the codec rejects removes the one it would replace", func(t *testing.T) {
+		s, _ := connected(t, nil)
+		if err := s.Set(t.Context(), k, testEntry(now)); err != nil {
+			t.Fatal(err)
+		}
+		bad := testEntry(now)
+		bad.Status = 5000
+		if err := s.Set(t.Context(), k, bad); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.Get(t.Context(), k); !errors.Is(err, store.ErrNotFound) {
+			t.Fatalf("Get = %v, want ErrNotFound", err)
 		}
 	})
 }
@@ -242,4 +263,21 @@ func TestEntryCommandErrors(t *testing.T) {
 			t.Fatalf("Get after Delete = %v", err)
 		}
 	})
+}
+
+// 05 §2.2: a record past Expires is not found even if the server still has
+// it (its clock differs from ours).
+func TestGetPastExpiresIsNotFound(t *testing.T) {
+	var k store.Key
+	s, cl := connected(t, nil)
+	e := testEntry(time.Now())
+	e.Expires = time.Now().Add(-time.Second)
+	v, err := store.Encode(e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = cl.set(t.Context(), s.entryKey(k), v, 1)
+	if _, err := s.Get(t.Context(), k); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("Get = %v, want ErrNotFound", err)
+	}
 }
