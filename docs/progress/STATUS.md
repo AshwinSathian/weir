@@ -2,10 +2,10 @@
 
 Updated: 2026-10-10
 Phase: 1
-Current card: P25-00
-Card state: in-progress
+Current card: none
+Card state: awaiting-merge
 Branch: claude/nice-davinci-rh3zjh
-PR: none yet (run /handoff)
+PR: pending
 Next card: P25-01
 
 ## Waiting on Ashwin

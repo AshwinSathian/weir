@@ -1,7 +1,7 @@
 # Weir low-level design
 
 Status: v1.0
-Date: 2026-10-09
+Date: 2026-10-10
 Depends on: [01-technical-spec.md](01-technical-spec.md), [02-architecture.md](02-architecture.md), [03-hld.md](03-hld.md)
 
 This document is written for the person (or agent) implementing a milestone. It gives exact type definitions, algorithms, locking rules and pseudo-code. Code may differ in naming of unexported identifiers; exported names, behavior, bounds and locking rules may not change without updating this document in the same commit.
@@ -870,7 +870,7 @@ Marker and negative writes share `setUnlessResponse`, a read-before-write: they 
 
 Adapters must not write into header value slices in place (`h[k][0] = v`); `Set`, `Add` and `Del` are safe (§6.10).
 
-When the vary spec already lists `MaxVariants` live variants and the new variant is not among them, the entry is not stored (`EvVaryOverflow`). Spec updates are read-modify-write without compare-and-swap, so concurrent writers of different variants can exceed `MaxVariants`; the overshoot is bounded by `MaxPerPartition`, because all writers for one URI share a partition. Phase 2.5 may add CAS via the Valkey store.
+When the vary spec already lists `MaxVariants` live variants and the new variant is not among them, the entry is not stored (`EvVaryOverflow`). Spec updates are read-modify-write without compare-and-swap, so concurrent writers of different variants can exceed `MaxVariants`; the overshoot is bounded by `MaxPerPartition`, because all writers for one URI share a partition. Phase 2.5 may add CAS for the Valkey store; the mechanism (a store capability or an `Entry` field) is decided in card P25-05.
 
 ### 6.8 Background refresh and early refresh
 

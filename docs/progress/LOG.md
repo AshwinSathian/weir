@@ -1465,10 +1465,11 @@ Entry template:
 - Follow-ups: 06 T-45/R-6 per-client placeholder case at its next revision; the 5xx mapping from P2-03; STATUS still says Phase 1 (unchanged).
 - Context: low
 
-## 2026-10-10 · P25-00 · blocked
-- Branch / PR: claude/nice-davinci-rh3zjh (session-designated, not card/*) / not opened; waiting for the user to run /handoff
-- Done: client chosen with Ashwin (valkey-go v1.0.78); 05 §7 corrected (Lua for epoch writes, one-script reads, client options, Unix-second epochs, cap counter); cards P25-01 to P25-07 (with P25-03b) written in docs/cards/20-later.md.
-- Tests: none (docs only); `make check` not run.
-- Deviations: none beyond 05 §7 edits.
-- Follow-ups: P25-05 and P25-07 need user approval first (public API change; new config block and D17); P25-06 decides epoch-key eviction policy.
+## 2026-10-10 · P25-00 · done
+- Branch / PR: claude/nice-davinci-rh3zjh (session-designated, not card/*) / see STATUS
+- Done: client chosen with Ashwin via question (valkey-go v1.0.78); 05 §7 and §4.3 updated (Lua epoch scripts, pruned sorted set for the hard-epoch cap, `SpreadEntries`, Unix-second epochs, server-side sketch seed, vary CAS mechanism left to P25-05); 04 §6.7 note aligned; cards P25-01 to P25-07b written in docs/cards/20-later.md.
+- Tests: none (docs only); `go vet`, gofmt, `make trace-strict`, short race tests pass; `make check` stops at lint (container golangci-lint built with Go 1.25), CI must confirm.
+- Deviations: none.
+- Review: card-reviewer found two must-fix (a counter cannot track hard-epoch expiry; P25-03 needed a storetest option) and seven should-fix (card sizes, hash-tag contradiction, vary CAS wording, dangling 4.3 reference, AC/Out of scope gaps). All fixed.
+- Follow-ups: P25-05 and P25-07/07b need Ashwin's approval first; P25-06 decides epoch-key eviction policy.
 - Context: low; size S was right.

@@ -98,7 +98,7 @@ Note on E-3: `At >= since` means an epoch written in the same clock tick as a re
 
 ### 4.3 Clocks
 
-Epochs compare the purging node's clock with the fetching node's clock. In Phase 1 both are the same process, and the memory store measures every epoch and `since` value as a monotonic offset from a base instant taken at `New` (`t.Sub(base)` uses monotonic readings when both values have them), so wall-clock steps cannot make a purge miss. Sketch cells hold those offsets in whole seconds, rounded up. In Phase 2.5 nodes must keep clocks within `MaxClockSkew` (a Valkey store option, default 1 s), and the Valkey store adds `MaxClockSkew` to `since` comparisons conservatively: `At + MaxClockSkew >= since`. This can purge a response fetched up to one skew interval after the purge, which is the safe direction.
+Epochs compare the purging node's clock with the fetching node's clock. In Phase 1 both are the same process, and the memory store measures every epoch and `since` value as a monotonic offset from a base instant taken at `New` (`t.Sub(base)` uses monotonic readings when both values have them), so wall-clock steps cannot make a purge miss. Sketch cells hold those offsets in whole seconds, rounded up. In Phase 2.5 nodes must keep clocks within `MaxClockSkew` (a Valkey store option, default 1 s), and the Valkey store adds `MaxClockSkew` to `since` comparisons conservatively: `At + MaxClockSkew >= since`. This can purge a response fetched up to one skew interval after the purge, which is the safe direction. The Valkey store stores epochs as Unix seconds rounded up (u32, valid to 2106) instead of offsets from a base instant, because nodes share no base; sketch cell positions use a seed kept on the server (`weir:{e}:seed`, written once with `SETNX`) so every node agrees, where the memory store uses a per-process seed (E-7).
 
 ### 4.4 Bounds
 
@@ -257,7 +257,7 @@ This section exists to prove the interface above does not assume in-process sema
 
 | Interface call | Valkey operation |
 |---|---|
-| `Get(k)` | `GET weir:{e}:<hex(k)>`, decode |
+| `Get(k)` | `GET weir:{e}:<hex(k)>`, decode (`weir:<hex(k)>` when `SpreadEntries` is set) |
 | `Set(k, e)` | `SET weir:{e}:<hex(k)> <encoded> PXAT <e.Expires in ms>` |
 | `Delete(k)` | `DEL` |
 | `SetEpoch(t, ep)` | one Lua script (`EVALSHA`, all keys under `{e}`): hard: `max` update of `weir:{e}:epoch:hard:<hex(t)>` with expiry `MaxRetention`; soft and invalid: raise the `d` sketch cells (`BITFIELD GET`/`SET ... u32`, because `BITFIELD` has no max operation) on one 2 MiB string per plane (`weir:{e}:sketch:<mode>`), which keeps memory fixed as in E-9; plus the newest-epoch key |
@@ -266,15 +266,15 @@ This section exists to prove the interface above does not assume in-process sema
 
 Notes that follow from the table and require nothing new from the interface:
 
-- `{e}` is an operator-configured hash tag, so in cluster mode the per-request keys can be spread (`{e}` omitted for entries) while epoch keys share a slot.
+- `{e}` is an operator-configured hash tag. Epoch keys always carry it, so one script touches one slot. Entry keys carry it too unless the operator sets `SpreadEntries`, which drops it so cluster mode spreads entries over all slots.
 - `PXAT` gives absolute expiry from `Entry.Expires`, so retention needs no clock translation.
 - Eviction is Valkey's (`maxmemory-policy allkeys-lfu` recommended). The engine does not care which policy (seed T6.11: "the storage interface must not assume a single eviction policy").
 - Timeouts: every call runs under the engine's `Timeouts.Store` deadline; the client library is configured with no internal retries longer than that.
 - Client-side caching (RESP3 tracking) can make `Get` for hot keys local; invalidation messages from Valkey keep it coherent. This is an optimization inside the store and invisible to the engine.
 - Client library (decided 2026-10-10): `github.com/valkey-io/valkey-go` v1.0.78 (needs Go 1.25, the project needs 1.27), pure Go, in the `store/valkey` module only (the root module stays standard-library only, NFR-6). `ClientOption.DisableRetry` is true so a call never outlives `Timeouts.Store`; `DisableCache` is true until the client-side caching card; scripts use `valkey.NewLuaScript` (`EVALSHA` with `EVAL` fallback). `valkey.ErrClosing`, context errors and network errors map to `ErrUnavailable`; a record that fails `Decode` is `ErrUnavailable` too (S-3).
 - Epoch times are wall-clock Unix seconds (u32, valid to 2106), not the memory store's monotonic offsets (§4.3). The Valkey store adds `MaxClockSkew` when comparing with `since`.
-- Hard-epoch cap (E-6): a Lua-maintained counter key under `{e}`, checked in the same script as the write.
-- What the paper design exposed: the vary-spec read-modify-write race ([04-lld.md §6.7](04-lld.md)) is wider across nodes. It stays bounded by the per-partition cap per node times the node count. A Lua compare-and-set for vary specs is the planned mitigation, still behind the same `Set` call.
+- Hard-epoch cap (E-6): a sorted set `weir:{e}:hardidx` (member: tag, score: `At`) beside the hard keys. The write script first removes members older than `now - MaxRetention`, so the count follows expiry, then refuses a new member beyond `MaxHardEpochs` before writing. The hard keys hold the epochs; the set only counts them.
+- What the paper design exposed: the vary-spec read-modify-write race ([04-lld.md §6.7](04-lld.md)) is wider across nodes. It stays bounded by the per-partition cap per node times the node count. A compare-and-set for vary specs is the planned mitigation. Because a store cannot tell that a `Set` is a spec update that must merge, it needs either a new optional capability or a version field on `Entry`; both are public API changes, decided in card P25-05 with the user.
 
 ## 8. Conformance suite (`store/storetest`)
 
