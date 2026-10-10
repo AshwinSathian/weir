@@ -12,11 +12,12 @@ import (
 
 // perClientPrefixes start Caddy placeholders whose value depends on the
 // client that triggered the fetch. The request context's replacer comes from
-// that client (08 §6, T-4, T-45).
+// that client (08 §6, T-4, T-45). Best effort: regexp Replace ops and
+// placeholders built from Caddy vars set elsewhere are not inspected.
 var perClientPrefixes = []string{
 	"{http.request.header.", "{http.request.cookie.", "{http.request.remote",
 	"{http.request.uri.query", "{http.auth.", "{http.request.tls.client",
-	"{remote", "{client_ip}", "{query", "{header.", "{cookie.",
+	"{http.request.uri}", "{http.request.orig_uri", "{http.vars.", "{remote", "{client_ip}", "{uri", "{query", "{header.", "{cookie.",
 }
 
 // chainWarnings inspects the handlers that run after self in one route and

@@ -1356,3 +1356,12 @@ Entry template:
 - Deviations: none beyond 08 §2/§3 wording.
 - Declined: warning for on-demand TLS without `multi_host`; per-name closing gate; docs/07 adapter rows (no adapter table exists, add with P2-03b); a crash-leftover temp sweep (bounded by crashes, safe side).
 - Follow-ups: P2-03 card now has the multi-host warning test and the ErrClosed 503; P2-04 card has the 160 MiB floor AC.
+
+## 2026-10-10 · P2-03 · done
+- Branch / PR: claude/funny-bohr-vcgmor / PR pending (branch name set by the environment, not `card/*`)
+- Done: caddy/module.go `ServeHTTP` (upgrade bypass, engine call, `serveError` with Retry-After, ErrClosed 503), caddy/origin.go `nextOrigin` on `weirhttp.HandlerOrigin`, caddy/warn.go (route scan on first request: X-Forwarded-For and per-client placeholder warnings; one-host memory for the multi_host warning). The card's Touch list named `serve.go`; the code lives in `module.go`, `origin.go` and `warn.go`.
+- Tests: TestUpgradeAndConnectBypassEngine, TestNextOriginUsesDetachedContext, TestNextOriginForwardsKeyedRequest, TestNextOriginErrorIsOriginError, TestErrorsReturnHandlerError, TestServeCachesThroughNext, TestForwardedForWarning, TestPlaceholderHeaderWarning, TestRouteScanFindsHandler, TestSecondHostWithoutMultiHostWarnsOnce. Root race tests, caddy race tests and lint (via `go run` v2.14.0) pass; `make check` lint step cannot run here (Go 1.25 build); trace 146/146.
+- Deviations: docs/08 §6 reworded, warnings run on the first request, not at provision time (the route does not hold the handler until the http app provisions). Not a requirement change.
+- Review: card-reviewer, no must-fix. Fixed: client `GetBody`/`Pattern`/`Close`/`Response` cleared on the clone, port stripped in the host comparison, more placeholder prefixes, recovered panic logged at Debug, test cites. Left: error text of `next` reaches `{http.error.message}` (ponytail comment, 08 §6 note, P2-03b); no SWR test of a background Fetch with a live writer (`next` asserts it never gets the client writer instead).
+- Follow-ups: P2-03b (status mapping for `next` errors, warnings against a real config).
+- Context: medium; size M was right.

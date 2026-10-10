@@ -41,7 +41,7 @@ These phases start from draft specs. Each begins with one planning card that ver
 - AC: a reload with an unchanged key-generation hash keeps entries as hits; a changed `Forward.Mode`, `Forward.Allow` or `Storable.StripSetCookie` makes them misses (hard epoch, 08 §3); changing query rules, key headers, hosts or on-demand TLS domains changes nothing once the site is multi-host (going from one host to two starts one new store, 08 §3); same `name` with different store settings or hash in one load fails `Provision`, across loads it is allowed; the pooled value implements `caddy.Destructor` and closes within `SnapshotTimeout`; `MaxPerHost` and `MaxBytesPerOwner` default to 25% for multi-host sites
 - Out of scope: serving requests (P2-03)
 
-### [ ] P2-03 nextOrigin, errors and upgrades
+### [x] P2-03 nextOrigin, errors and upgrades
 - Plan: 2.2, 2.3 · Size: M · Depends on: P2-02
 - Read: 08 §4, §5, §6; 01 FR-UPG-1, FR-COA-9; 04 §10
 - Touch: caddy/serve.go, caddy/origin.go, caddy/serve_test.go

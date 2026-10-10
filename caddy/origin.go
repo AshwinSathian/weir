@@ -38,10 +38,12 @@ func (o nextOrigin) serve(w http.ResponseWriter, hr *http.Request) {
 	r.Proto, r.ProtoMajor, r.ProtoMinor = hr.Proto, hr.ProtoMajor, hr.ProtoMinor
 	// Parsed state of the client's request does not describe the forwarded one.
 	r.Form, r.PostForm, r.MultipartForm, r.Trailer, r.TransferEncoding = nil, nil, nil, nil, nil
+	// The client's body rewinder and cancel hook must not outlive the swap (INV-1).
+	r.GetBody, r.Close, r.Pattern, r.Response = nil, false, "", nil
 	if err := o.next.ServeHTTP(w, r); err != nil {
 		// ponytail: HandlerOrigin has no error channel, so the error leaves as a
 		// panic it recovers into a weir.ErrOrigin (502). Statuses next picked
-		// (file_server's 404) are lost; P2-03b decides whether to map them.
+		// (file_server's 404) are lost, and next's error text reaches {http.error.message}; P2-03b decides whether to map them.
 		panic(err)
 	}
 }

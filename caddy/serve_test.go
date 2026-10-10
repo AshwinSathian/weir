@@ -129,6 +129,7 @@ func TestNextOriginUsesDetachedContext(t *testing.T) {
 func TestNextOriginForwardsKeyedRequest(t *testing.T) {
 	base := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "http://example.com/a?x=1", nil)
 	base.Header.Set("Cookie", "session=abc")
+	base.GetBody = func() (io.ReadCloser, error) { return http.NoBody, nil }
 	var got *http.Request
 	next := caddyhttp.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) error {
 		got = r
@@ -149,9 +150,12 @@ func TestNextOriginForwardsKeyedRequest(t *testing.T) {
 	if got.TLS == nil {
 		t.Fatal("scheme https lost")
 	}
+	if got.GetBody != nil || got.Pattern != "" {
+		t.Fatal("client request state survived the clone")
+	}
 }
 
-// 08 §4: an error from next is an origin failure (502), not a response.
+// FR-LCY-2, 08 §4: an error from next is an origin failure (502), not a response.
 func TestNextOriginErrorIsOriginError(t *testing.T) {
 	base := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "http://example.com/a", nil)
 	boom := errors.New("dial failed")
@@ -201,14 +205,22 @@ func TestErrorsReturnHandlerError(t *testing.T) {
 	})
 }
 
-// End to end through the engine: a miss reaches next once, the second
+// FR-LCY-2, FR-COA-9: end to end through the engine: a miss reaches next once, the second
 // request is a hit.
 func TestServeCachesThroughNext(t *testing.T) {
 	h, _ := loadServe(t, "")
 	var calls atomic.Int32
-	next := respond(&calls, "hello")
+	var orig http.ResponseWriter
+	inner := respond(&calls, "hello")
+	next := caddyhttp.HandlerFunc(func(nw http.ResponseWriter, r *http.Request) error {
+		if nw == orig {
+			t.Error("next received the client's ResponseWriter")
+		}
+		return inner.ServeHTTP(nw, r)
+	})
 	for range 2 {
 		w := httptest.NewRecorder()
+		orig = w
 		r := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "http://example.com/cached", nil)
 		if err := h.ServeHTTP(w, r, next); err != nil {
 			t.Fatal(err)
@@ -300,7 +312,7 @@ func TestPlaceholderHeaderWarning(t *testing.T) {
 	})
 }
 
-// The route scan finds weir inside subroutes and reports each problem once
+// T-4, T-45: the route scan finds weir inside subroutes and reports each problem once
 // per process lifetime of the handler.
 func TestRouteScanFindsHandler(t *testing.T) {
 	self := &Handler{Name: "x"}
@@ -336,7 +348,7 @@ func TestSecondHostWithoutMultiHostWarnsOnce(t *testing.T) {
 	t.Run("warns once on the second host", func(t *testing.T) {
 		h, buf := loadServe(t, "")
 		serve(h, "a.example")
-		serve(h, "a.example")
+		serve(h, "a.example:443")
 		if strings.Contains(buf.String(), "multi_host") {
 			t.Fatalf("warned for one host: %s", buf)
 		}

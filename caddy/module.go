@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -197,6 +198,9 @@ func (h *Handler) noteHost(host string) {
 	if h.MultiHost {
 		return
 	}
+	if hp, _, err := net.SplitHostPort(host); err == nil {
+		host = hp // example.com and example.com:443 are one site
+	}
 	first := h.firstHost.Load()
 	if first == nil {
 		if h.firstHost.CompareAndSwap(nil, &host) {
@@ -219,7 +223,11 @@ func (h *Handler) warnChain() {
 	}
 	// Best effort (08 §6): a context without a config, as unit tests build,
 	// makes ctx.App panic, and a warning must never fail a request.
-	defer func() { _ = recover() }()
+	defer func() {
+		if v := recover(); v != nil {
+			h.log.Debug("weir: chain inspection skipped", "reason", v)
+		}
+	}()
 	v, err := h.httpApp()
 	if err != nil {
 		return
