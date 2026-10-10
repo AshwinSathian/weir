@@ -1585,7 +1585,7 @@ Entry template:
 - Context: low
 
 ## 2026-10-10 · P25-04 · done
-- Branch / PR: claude/optimistic-mendel-k6iji6 / pending (see STATUS)
+- Branch / PR: claude/optimistic-mendel-k6iji6 / https://github.com/AshwinSathian/weir/pull/90
 - Done: `store/valkey/engine_integration_test.go` (tag `integration`): the engine with a Valkey store on the real clock, parallel tests on fresh prefixes. Helper primes the store and waits 2.1 s because a fresh prefix writes a repair epoch at `ceil(server now)` (05 §7).
 - Tests: TestEngineCoalesceColdKey, TestEngineStaleWhileRevalidate, TestEngineStaleIfErrorOnOriginDown, TestEngineSoftPurge, TestEngineHardPurge, TestEngineGroupPurge, TestEngineNegativeCache, TestEngineBreaker. They pass with `-race -count=2 -shuffle=on` on redis 7.0.15 (about 15 s per run); module lint 0 issues; root `make check` passes except the `modules` target, which stops on the container's Go 1.25 golangci-lint (CI must confirm).
 - Excluded and why: flight-table and store-size bounds, `TestStoreOutageStillCoalescedAndLimited` and `TestStoreSlowRemote` (store wrappers, not the Valkey store), `TestLimiterCap5000Keys` and the other limiter, partition and miss-rate engine tests (synctest timing, no store dependence beyond what is covered), `TestBatchWriteExpirySpread` (needs fake time over 300 s).

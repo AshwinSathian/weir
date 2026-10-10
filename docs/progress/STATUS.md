@@ -5,7 +5,7 @@ Phase: 1
 Current card: none
 Card state: awaiting-merge
 Branch: claude/optimistic-mendel-k6iji6
-PR: pending (filled after the PR is opened)
+PR: https://github.com/AshwinSathian/weir/pull/90
 Next card: P25-05
 
 ## Waiting on Ashwin
