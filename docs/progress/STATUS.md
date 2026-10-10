@@ -5,7 +5,7 @@ Phase: 1
 Current card: none
 Card state: awaiting-merge
 Branch: claude/nice-davinci-rh3zjh
-PR: pending
+PR: https://github.com/AshwinSathian/weir/pull/84
 Next card: P25-01
 
 ## Waiting on Ashwin
