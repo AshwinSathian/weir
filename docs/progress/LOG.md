@@ -1489,3 +1489,12 @@ Entry template:
 - Deviations: none.
 - Follow-ups: P25-05, P25-07/07b need Ashwin first.
 - Context: low
+
+## 2026-10-10 · P25-01 · done
+- Branch / PR: claude/nice-goodall-atnlor / see STATUS
+- Done: `store/valkey` module (valkey-go v1.0.78): `Config` with defaults, `Validate` (returns a filled copy), redaction in `String`/`GoString`/`LogValue`, `mapError` wrapping every client error with `store.ErrUnavailable`.
+- Tests: TestConfigValidate, TestConfigRedacts, TestMapError; module lint, vet and race tests pass with go1.27 toolchain; root `make check` stops at lint (container golangci-lint is Go 1.25), CI must confirm.
+- Deviations: empty `HashTag` means the default `e` (so it cannot be rejected); `NoClockSkew` with non-zero `MaxClockSkew` is an error; `0 < HardEpochWait < 1ms` is rejected (WAIT 0 blocks forever); `mapError(valkey.Nil)` returns Nil unchanged. `*ValkeyError` in tests is a zero value (no public constructor). Branch is the session-designated one, not `card/*`.
+- Review: card-reviewer, no must-fix; should-fix (sub-ms wait, `go mod tidy`, Nil contract) fixed. Left: no cap on `MaxRetention`/`MaxClockSkew` magnitude (P25-03 clamps).
+- Follow-ups: P25-01b next.
+- Context: low; size M was right.

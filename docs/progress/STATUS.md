@@ -2,8 +2,8 @@
 
 Updated: 2026-10-10
 Phase: 1
-Current card: P25-01
-Card state: in-progress
+Current card: none
+Card state: awaiting-merge
 Branch: claude/nice-goodall-atnlor
 PR: none
 Next card: P25-01b
@@ -73,6 +73,10 @@ Ashwin delegated "take decisions on all items"; "Waiting on Ashwin" was empty. A
 "Waiting on Ashwin" was empty. No must-fix. Decided: sub-block keys (`key`, `forward`, `bypass`, `limiter`, `stale`) with no block or empty braces are an error; repeated keys stay an error and 08 §2 now says so; the `weir <matcher>` form is supported and documented; runtime placeholders (`{env.X}`, `{host}`) are not expanded, only parse-time `{$VAR}`, documented in 08 §2; the `name` error points at the `name` line. Tests added for repeated sub-block keys, negative durations, directive arguments, bare and empty sub-blocks, the matcher form. Kept: duplicate `name` handling in P2-02, the non-`card/*` branch, `RegisterDirectiveOrder` (TestDirectiveOrder fails loudly on a Caddy bump).
 
 ## Notes for the next session
+
+- P25-01 done: `store/valkey` module (Config, Validate, redaction, `mapError`). `Validate` returns a defaults-filled copy; `mapError(valkey.Nil)` returns Nil unchanged, so `Get` (P25-01b onward) maps it to `ErrNotFound`. `store/valkey` is not in `go.work` yet (the card left it out); add it with P25-01b if tooling needs it.
+- Lint for submodules: run golangci-lint v2.14.0 with `GOTOOLCHAIN=go1.27.0` and `GOWORK=off` inside the module.
+- Nothing bounds `MaxRetention`/`MaxClockSkew` magnitude; P25-03 must clamp before the prune arithmetic.
 
 - P2-07 done: runbook section 7. Not yet run through `caddy adapt`; the examples were read against Caddy v2.11.7 source only. caddy-ratelimit order was read on `master` (no tag).
 

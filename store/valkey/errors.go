@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/AshwinSathian/weir/store"
+	"github.com/valkey-io/valkey-go"
 )
 
 // mapError turns any error from the Valkey client into one that wraps
@@ -13,10 +14,11 @@ import (
 // READONLY, CLUSTERDOWN, LOADING, BUSY) all mean "could not answer". The
 // cause stays in the chain for errors.Is and errors.As.
 //
-// valkey.Nil is not an outage; Get checks for it before calling mapError.
+// valkey.Nil is not an outage and is returned unchanged; Get turns it into
+// store.ErrNotFound.
 func mapError(err error) error {
-	if err == nil {
-		return nil
+	if err == nil || valkey.IsValkeyNil(err) {
+		return err
 	}
 	if errors.Is(err, store.ErrUnavailable) {
 		return err

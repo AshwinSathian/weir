@@ -89,6 +89,7 @@ func TestConfigValidate(t *testing.T) {
 		{"negative MaxClockSkew", func(c *Config) { c.MaxClockSkew = -time.Second }},
 		{"negative CallTimeout", func(c *Config) { c.CallTimeout = -1 }},
 		{"negative HardEpochWait", func(c *Config) { c.HardEpochWait = -1 }},
+		{"HardEpochWait below one millisecond", func(c *Config) { c.HardEpochWait = time.Microsecond }},
 		{"negative MaxHardEpochs", func(c *Config) { c.MaxHardEpochs = -1 }},
 	}
 	for _, tc := range bad {
@@ -104,7 +105,7 @@ func TestConfigValidate(t *testing.T) {
 	}
 }
 
-// T-29-adjacent: a password in a log line or panic dump is a leak.
+// A password in a log line or panic dump is a leak.
 func TestConfigRedacts(t *testing.T) {
 	c := validConfig()
 	c.Username, c.Password = "svc", "hunter2-secret"

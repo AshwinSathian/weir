@@ -30,7 +30,7 @@ func TestMapError(t *testing.T) {
 		{"io.EOF", io.EOF},
 		{"io.ErrUnexpectedEOF", io.ErrUnexpectedEOF},
 		{"no slot", valkey.ErrNoSlot},
-		{"server error (OOM, READONLY, CLUSTERDOWN, LOADING, BUSY)", serverErr},
+		{"server error (zero value)", serverErr},
 		{"wrapped server error", fmt.Errorf("script: %w", serverErr)},
 		{"unknown error", errors.New("something else")},
 	}
@@ -45,6 +45,11 @@ func TestMapError(t *testing.T) {
 			}
 		})
 	}
+	t.Run("valkey.Nil is left for the caller", func(t *testing.T) {
+		if got := mapError(valkey.Nil); errors.Is(got, store.ErrUnavailable) {
+			t.Fatalf("Nil must not map to ErrUnavailable: %v", got)
+		}
+	})
 	t.Run("nil stays nil", func(t *testing.T) {
 		if got := mapError(nil); got != nil {
 			t.Fatalf("got %v", got)

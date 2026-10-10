@@ -101,6 +101,10 @@ func (c Config) Validate() (Config, error) {
 			return c, fmt.Errorf("store: valkey: config: %s is negative", d.name)
 		}
 	}
+	if c.HardEpochWait > 0 && c.HardEpochWait < time.Millisecond {
+		// WAIT takes whole milliseconds and 0 means block forever.
+		return c, errors.New("store: valkey: config: HardEpochWait is below 1ms")
+	}
 	if c.MaxHardEpochs < 0 {
 		return c, errors.New("store: valkey: config: MaxHardEpochs is negative")
 	}

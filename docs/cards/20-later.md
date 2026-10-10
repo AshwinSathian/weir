@@ -94,7 +94,7 @@ These phases start from draft specs. Each begins with one planning card that ver
 - AC: client library and version chosen with the user; cards written (expected: connection and codec, Get/Set/Delete, epochs sketch in Lua with `SharedTagEpochs` in the same one round trip (05 E-12; without it the 4% group residual of T-29 returns), conformance in CI with `-tags integration` (05 §8, else `ExpiredIsNotFound` skips), engine suite re-run, vary CAS, multi-node guide)
 - Notes: client chosen with Ashwin 2026-10-10: valkey-go v1.0.78 (05 §7). Cards P25-01 to P25-07b below replace the "expected" list; plan items 2.5.1 to 2.5.5 are split across them. A Valkey server is needed from P25-02 on (Docker or `valkey-server` in PATH); unit tests that need none stay in the default run.
 
-### [ ] P25-01 Config and error mapping
+### [x] P25-01 Config and error mapping
 - Plan: 2.5.1 · Size: M · Depends on: P25-00
 - Read: 05 §2.1 (S-2, S-3), §7; valkey-go `ClientOption`, `ValkeyError` at v1.0.78
 - Touch: store/valkey/go.mod and go.sum (new; requires valkey-go v1.0.78 and the root module with `replace => ../..`), store/valkey/{config.go,errors.go,config_test.go,errors_test.go}
