@@ -61,8 +61,8 @@ func globalEpoch(t *testing.T, st store.Store) (store.Epoch, bool) {
 // instance's reference and close the store under a live engine.
 func TestCleanupDeletesOnce(t *testing.T) {
 	ctx1, ctx2 := newCtx(t), newCtx(t)
-	h1 := mustLoad(t, ctx1, `{"name":"once","max_bytes":"8MiB"}`)
-	h2 := mustLoad(t, ctx2, `{"name":"once","max_bytes":"8MiB"}`)
+	h1 := mustLoad(t, ctx1, `{"name":"once","max_bytes":"200MiB"}`)
+	h2 := mustLoad(t, ctx2, `{"name":"once","max_bytes":"200MiB"}`)
 	if refs(t, h1) != 2 {
 		t.Fatalf("refs = %d, want 2", refs(t, h1))
 	}
@@ -87,8 +87,8 @@ func TestCleanupDeletesOnce(t *testing.T) {
 
 // 08 §3: the store, not the engine, survives a reload.
 func TestPoolSharesStoreAcrossReload(t *testing.T) {
-	h1 := mustLoad(t, newCtx(t), `{"name":"share","max_bytes":"8MiB"}`)
-	h2 := mustLoad(t, newCtx(t), `{"name":"share","max_bytes":"8MiB","limiter":{"max_concurrent":9}}`)
+	h1 := mustLoad(t, newCtx(t), `{"name":"share","max_bytes":"200MiB"}`)
+	h2 := mustLoad(t, newCtx(t), `{"name":"share","max_bytes":"200MiB","limiter":{"max_concurrent":9}}`)
 	if h1.pool != h2.pool || h1.pool.store != h2.pool.store {
 		t.Fatal("reload built a second store")
 	}
@@ -100,14 +100,14 @@ func TestPoolSharesStoreAcrossReload(t *testing.T) {
 // 08 §3: one load may not disagree about a name; across loads it may.
 func TestPoolSettingsMismatchFailsProvision(t *testing.T) {
 	for name, second := range map[string]string{
-		"max_bytes":      `{"name":"mis","max_bytes":"16MiB"}`,
-		"snapshot_dir":   `{"name":"mis","max_bytes":"8MiB","snapshot_dir":"` + t.TempDir() + `"}`,
-		"multi_host":     `{"name":"mis","max_bytes":"8MiB","multi_host":true}`,
-		"key generation": `{"name":"mis","max_bytes":"8MiB","forward":{"allow":["x-a"]}}`,
+		"max_bytes":      `{"name":"mis","max_bytes":"400MiB"}`,
+		"snapshot_dir":   `{"name":"mis","max_bytes":"200MiB","snapshot_dir":"` + t.TempDir() + `"}`,
+		"multi_host":     `{"name":"mis","max_bytes":"200MiB","multi_host":true}`,
+		"key generation": `{"name":"mis","max_bytes":"200MiB","forward":{"allow":["x-a"]}}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			ctx := newCtx(t)
-			mustLoad(t, ctx, `{"name":"mis","max_bytes":"8MiB"}`)
+			mustLoad(t, ctx, `{"name":"mis","max_bytes":"200MiB"}`)
 			if _, err := loadIn(t, ctx, second); err == nil {
 				t.Fatal("conflicting site in one load accepted")
 			}
@@ -116,8 +116,8 @@ func TestPoolSettingsMismatchFailsProvision(t *testing.T) {
 
 	t.Run("identical sites in one load share a store", func(t *testing.T) {
 		ctx := newCtx(t)
-		a := mustLoad(t, ctx, `{"name":"same","max_bytes":"8MiB"}`)
-		b := mustLoad(t, ctx, `{"name":"same","max_bytes":"8MiB","limiter":{"max_concurrent":9}}`)
+		a := mustLoad(t, ctx, `{"name":"same","max_bytes":"200MiB"}`)
+		b := mustLoad(t, ctx, `{"name":"same","max_bytes":"200MiB","limiter":{"max_concurrent":9}}`)
 		if a.pool != b.pool {
 			t.Fatal("not shared")
 		}
@@ -125,8 +125,8 @@ func TestPoolSettingsMismatchFailsProvision(t *testing.T) {
 
 	t.Run("a failed provision leaves no claim behind", func(t *testing.T) {
 		ctx := newCtx(t)
-		mustLoad(t, ctx, `{"name":"claim","max_bytes":"8MiB"}`)
-		if _, err := loadIn(t, ctx, `{"name":"claim","max_bytes":"9MiB"}`); err == nil {
+		mustLoad(t, ctx, `{"name":"claim","max_bytes":"200MiB"}`)
+		if _, err := loadIn(t, ctx, `{"name":"claim","max_bytes":"201MiB"}`); err == nil {
 			t.Fatal("conflict accepted")
 		}
 		if n := stores.loadClaims(ctx.GetMetricsRegistry()); n != 1 {
@@ -137,8 +137,8 @@ func TestPoolSettingsMismatchFailsProvision(t *testing.T) {
 
 // 08 §3: a resize reload has two settings for one name alive at once.
 func TestPoolResizeReloadAllowed(t *testing.T) {
-	old := mustLoad(t, newCtx(t), `{"name":"resize","max_bytes":"8MiB"}`)
-	neu := mustLoad(t, newCtx(t), `{"name":"resize","max_bytes":"16MiB"}`)
+	old := mustLoad(t, newCtx(t), `{"name":"resize","max_bytes":"200MiB"}`)
+	neu := mustLoad(t, newCtx(t), `{"name":"resize","max_bytes":"400MiB"}`)
 	if old.pool == neu.pool {
 		t.Fatal("resize shared the store")
 	}
@@ -149,8 +149,8 @@ func TestPoolResizeReloadAllowed(t *testing.T) {
 
 // 08 §3: the pooled value closes with the last release.
 func TestPoolDestructsOnLastRelease(t *testing.T) {
-	h1 := mustLoad(t, newCtx(t), `{"name":"last","max_bytes":"8MiB"}`)
-	h2 := mustLoad(t, newCtx(t), `{"name":"last","max_bytes":"8MiB"}`)
+	h1 := mustLoad(t, newCtx(t), `{"name":"last","max_bytes":"200MiB"}`)
+	h2 := mustLoad(t, newCtx(t), `{"name":"last","max_bytes":"200MiB"}`)
 	spec, st := h1.pool.spec, h1.pool.store
 	_ = h1.Cleanup()
 	if _, err := st.Get(context.Background(), store.Key{}); !errors.Is(err, store.ErrNotFound) {
@@ -169,8 +169,8 @@ func TestPoolDestructsOnLastRelease(t *testing.T) {
 func TestSupersededStoreSkipsSnapshot(t *testing.T) {
 	dir := t.TempDir()
 	snap := filepath.Join(dir, "snap.weir")
-	old := mustLoad(t, newCtx(t), `{"name":"snap","max_bytes":"8MiB","snapshot_dir":"`+dir+`"}`)
-	neu := mustLoad(t, newCtx(t), `{"name":"snap","max_bytes":"16MiB","snapshot_dir":"`+dir+`"}`)
+	old := mustLoad(t, newCtx(t), `{"name":"snap","max_bytes":"200MiB","snapshot_dir":"`+dir+`"}`)
+	neu := mustLoad(t, newCtx(t), `{"name":"snap","max_bytes":"400MiB","snapshot_dir":"`+dir+`"}`)
 	if err := old.Cleanup(); err != nil {
 		t.Fatal(err)
 	}
@@ -189,18 +189,18 @@ func TestSupersededStoreSkipsSnapshot(t *testing.T) {
 // one keeps the cache.
 func TestKeyGenHashChangeWritesHardEpoch(t *testing.T) {
 	t.Run("unchanged hash writes nothing", func(t *testing.T) {
-		a := mustLoad(t, newCtx(t), `{"name":"kg-same","max_bytes":"8MiB","key":{"query_sort":true}}`)
-		mustLoad(t, newCtx(t), `{"name":"kg-same","max_bytes":"8MiB","key":{"query_sort":false},"multi_host":false}`)
+		a := mustLoad(t, newCtx(t), `{"name":"kg-same","max_bytes":"200MiB","key":{"query_sort":true}}`)
+		mustLoad(t, newCtx(t), `{"name":"kg-same","max_bytes":"200MiB","key":{"query_sort":false},"multi_host":false}`)
 		if _, ok := globalEpoch(t, a.pool.store); ok {
 			t.Fatal("epoch written without a key-generation change")
 		}
 	})
 	t.Run("changed hash writes one hard epoch", func(t *testing.T) {
-		a := mustLoad(t, newCtx(t), `{"name":"kg-chg","max_bytes":"8MiB"}`)
+		a := mustLoad(t, newCtx(t), `{"name":"kg-chg","max_bytes":"200MiB"}`)
 		if _, ok := globalEpoch(t, a.pool.store); ok {
 			t.Fatal("fresh store has an epoch")
 		}
-		mustLoad(t, newCtx(t), `{"name":"kg-chg","max_bytes":"8MiB","forward":{"allow":["x-a"]}}`)
+		mustLoad(t, newCtx(t), `{"name":"kg-chg","max_bytes":"200MiB","forward":{"allow":["x-a"]}}`)
 		ep, ok := globalEpoch(t, a.pool.store)
 		if !ok || ep.Mode != store.EpochHard {
 			t.Fatalf("epoch = %+v, %v; want hard", ep, ok)
@@ -242,9 +242,9 @@ func TestMultiHostEnablesFairnessCaps(t *testing.T) {
 // 08 §3: going from one host to two starts one new store, so the cap is never
 // silently missing.
 func TestSingleToMultiHostStartsNewStore(t *testing.T) {
-	one := mustLoad(t, newCtx(t), `{"name":"grow","max_bytes":"8MiB"}`)
-	two := mustLoad(t, newCtx(t), `{"name":"grow","max_bytes":"8MiB","multi_host":true}`)
-	three := mustLoad(t, newCtx(t), `{"name":"grow","max_bytes":"8MiB","multi_host":true}`)
+	one := mustLoad(t, newCtx(t), `{"name":"grow","max_bytes":"200MiB"}`)
+	two := mustLoad(t, newCtx(t), `{"name":"grow","max_bytes":"200MiB","multi_host":true}`)
+	three := mustLoad(t, newCtx(t), `{"name":"grow","max_bytes":"200MiB","multi_host":true}`)
 	if one.pool == two.pool {
 		t.Fatal("multi_host reused the uncapped store")
 	}

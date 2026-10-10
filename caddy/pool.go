@@ -27,13 +27,12 @@ const (
 var stores = newStoreRegistry()
 
 // storeSpec is the pool key (08 §3): everything fixed when a store is built.
-// shards is the configured count (0: the store default); ownerCap is
-// FR-FAIR-3 "more than one host or on-demand TLS". snapshotDir is part of the
+// The shard count is not a key yet: no setting changes it, so every store
+// uses the memory default (16). ownerCap is FR-FAIR-3 "more than one host or on-demand TLS". snapshotDir is part of the
 // key so a changed directory builds a store that loads from it.
 type storeSpec struct {
 	name        string
 	maxBytes    int64
-	shards      int
 	ownerCap    bool
 	snapshotDir string
 }
