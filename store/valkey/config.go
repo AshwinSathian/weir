@@ -18,7 +18,8 @@ import (
 // selects the default noted on it (05 §7).
 type Config struct {
 	// Addrs lists the server addresses ("host:port"); at least one is
-	// required. In cluster mode they are seed nodes.
+	// required. Standalone mode takes exactly one; in cluster mode they are
+	// seed nodes.
 	Addrs []string
 	// Username and Password authenticate to the server. Both are hidden by
 	// String, GoString and LogValue.
@@ -124,6 +125,11 @@ func (c Config) Validate() (Config, error) {
 func (c Config) check() error {
 	if len(c.Addrs) == 0 {
 		return cfgErr("no addresses")
+	}
+	if !c.Cluster && len(c.Addrs) > 1 {
+		// valkey-go's single-client mode uses only the first address, so
+		// extra ones would be ignored and never policy-checked.
+		return cfgErr("standalone mode takes one address, got %d (set Cluster for several seed nodes)", len(c.Addrs))
 	}
 	for i, a := range c.Addrs {
 		if err := addrOK(a); err != nil {

@@ -2,6 +2,7 @@
 //
 // It is a separate module so the root module keeps importing only the Go
 // standard library (NFR-6). The design is in docs/05-storage-interface-spec.md
-// section 7. This file set holds the configuration and error mapping; the
-// Store type arrives with card P25-01b.
+// section 7. Config and error mapping live in config.go and errors.go; Store,
+// the lazy connect and the maxmemory-policy check live in store.go and
+// client.go. Get, Set, Delete and epochs arrive with later cards.
 package valkey

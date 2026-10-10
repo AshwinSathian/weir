@@ -4,9 +4,9 @@ Updated: 2026-10-10
 Phase: 1
 Current card: none
 Card state: awaiting-merge
-Branch: claude/nice-goodall-atnlor
-PR: https://github.com/AshwinSathian/weir/pull/85
-Next card: P25-01b
+Branch: claude/brave-hamilton-yomx12
+PR: https://github.com/AshwinSathian/weir/pull/86
+Next card: P25-02
 
 ## Waiting on Ashwin
 
@@ -72,11 +72,18 @@ Ashwin delegated "take decisions on all items"; "Waiting on Ashwin" was empty. A
 
 "Waiting on Ashwin" was empty. No must-fix. Decided: sub-block keys (`key`, `forward`, `bypass`, `limiter`, `stale`) with no block or empty braces are an error; repeated keys stay an error and 08 §2 now says so; the `weir <matcher>` form is supported and documented; runtime placeholders (`{env.X}`, `{host}`) are not expanded, only parse-time `{$VAR}`, documented in 08 §2; the `name` error points at the `name` line. Tests added for repeated sub-block keys, negative durations, directive arguments, bare and empty sub-blocks, the matcher form. Kept: duplicate `name` handling in P2-02, the non-`card/*` branch, `RegisterDirectiveOrder` (TestDirectiveOrder fails loudly on a Caddy bump).
 
+## Decided 2026-10-10 (P25-01b, adversarial review of PR 86)
+
+Ashwin delegated "take decisions on all items"; "Waiting on Ashwin" was empty. An independent agent attacked the PR; no must-fix. Decisions, written into 05 §7: standalone mode (`Cluster` false) takes exactly one address (valkey-go uses only the first; `Validate` rejects more, a config-behavior change inside the approved Config); the policy check is an allowlist (`noeviction`, `volatile-*`); `Close` waits for a real dial, and the doc no longer claims a single `CallTimeout` bound; a second `Close` waits for the first. Fixed: the watcher goroutine joins `wg`, a failed single-client dial is closed, `lastErr` is set when closed. Tests added for failing-dial fan-in, the end-of-attempt gap, second `Close`, standalone addresses. Kept: no recheck of the policy after connect (documented).
+
 ## Decided 2026-10-10 (P25-01, adversarial review of PR 85)
 
 Ashwin delegated "take decisions on all items"; "Waiting on Ashwin" was empty. An independent agent attacked the PR; no must-fix. Decisions: empty `Prefix`/`HashTag` mean the default (card test list reworded); config errors wrap `weir.ErrInvalidConfig` (no new sentinel); upper bounds added (MaxRetention 10 y, MaxClockSkew 1 h, MaxHardEpochs 1e6, key parts 64 bytes); `HardEpochWait` whole ms and below `CallTimeout`; `Addrs` must be unique `host:port`. Fixed: `Validate` copy aliased `Addrs`/`TLS`, returns the zero Config on error; JSON marshalling leaked the password (now redacted); `mapError` leaves wrapped `valkey.Nil` and `ErrNotFound` alone. Written into 05 §7.
 
 ## Notes for the next session
+
+- P25-01b done: `valkey.New` returns `*Store` (as `memory.New`); `acquire(ctx)` hands out the `client` seam (`policies`, `close`) that P25-02 extends with the real commands. The shared dial runs under `CallTimeout`, not the caller's deadline. Policy check fails closed. `go.work` now includes `./store/valkey`. Errors use `store: valkey:` (card note reconciled).
+- Container lint workaround for the root `make check`: `make -o lint check` after running golangci-lint with `GOTOOLCHAIN=go1.27.0`; the `modules` target also hits the Go 1.25 binary, so run each submodule by hand. CI must confirm.
 
 - P25-01 done: `store/valkey` module (Config, Validate, redaction, `mapError`). `Validate` returns a defaults-filled copy; `mapError(valkey.Nil)` returns Nil unchanged, so `Get` (P25-01b onward) maps it to `ErrNotFound`. `store/valkey` is not in `go.work` yet (the card left it out); add it with P25-01b if tooling needs it.
 - Lint for submodules: run golangci-lint v2.14.0 with `GOTOOLCHAIN=go1.27.0` and `GOWORK=off` inside the module.

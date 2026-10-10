@@ -103,14 +103,14 @@ These phases start from draft specs. Each begins with one planning card that ver
 - Out of scope: the `Store` type, `go.work`, any client or server call (P25-01b)
 - Notes: the fields in 05 §7 and above were approved by Ashwin's delegation on 2026-10-10 (STATUS). New dependency approved at P25-00. The Makefile finds submodules by `find`, so it needs no change.
 
-### [ ] P25-01b Store skeleton, lazy connect and policy check
+### [x] P25-01b Store skeleton, lazy connect and policy check
 - Plan: 2.5.1 · Size: M · Depends on: P25-01
 - Read: 05 §7 (Connection, Epoch state), 01 FR-STF-2; valkey-go `NewClient`, `ClientOption.ForceSingleClient`, `ClusterOption`
 - Touch: store/valkey/{doc.go,store.go,client.go,store_test.go}, go.work (add `./store/valkey`)
 - Tests: `TestNewBadConfigFails`, `TestNewUnreachableServerSucceeds` (calls return `ErrUnavailable`, no goroutine leaked), `TestReconnectRateLimited` (at most one dial per second, under synctest with a fake dialer), `TestInfo`, `TestCloseTwice`, `TestCloseDuringConnect`, `TestNoDialAfterClose`, `TestCanceledContextDoesNotDial`, `TestPolicyCheck` (fake client, standalone and cluster node lists: `allkeys-lfu` fails `New`'s first connect check and every call stays `ErrUnavailable`; `volatile-lfu` and `noeviction` pass; `SkipPolicyCheck` skips)
 - AC: `valkey.New(cfg)` returns a `store.Store`; the client is built on first use with `DisableRetry`, `DisableCache`, `MaxMovedRedirections` 3, `ForceSingleClient` unless `Cluster`, no replica reads; a default deadline of `CallTimeout` is applied when the context has none; every method checks the context and the closed flag before dialing, and no lock is held across the dial or the policy check (single-flight channel); the policy check runs once per successful connect on every known node, and a failure wraps `ErrUnavailable` and names the policy; interface guard present
 - Out of scope: Get, Set, Delete and epochs
-- Notes: the policy check cannot run inside `New` because `New` does not connect (05 §7); until it passes, calls return `ErrUnavailable` and a `weir:`-prefixed error naming the policy.
+- Notes: the policy check cannot run inside `New` because `New` does not connect (05 §7); until it passes, calls return `ErrUnavailable` and an error prefixed `store: valkey:` naming the policy (the store package's prefix).
 
 ### [ ] P25-02 Get, Set, Delete and the CI Valkey job
 - Plan: 2.5.1 · Size: M · Depends on: P25-01b
