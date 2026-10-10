@@ -59,6 +59,10 @@ type pooledStore struct {
 	// its life.
 	size atomic.Int64
 
+	// sink receives the store's eviction counts and is repointed at each
+	// Provision's metric set (08 §8).
+	sink *evictSink
+
 	mu      sync.Mutex
 	keyGen  [sha256.Size]byte // hash of the newest engine that used the store
 	holders []holder          // engines that committed a hash, oldest first
@@ -181,16 +185,17 @@ func newStoreRegistry() *storeRegistry {
 // when no live handler has it. keyChanged is true when a store that other
 // handlers already used was last used with a different key-generation hash.
 func (r *storeRegistry) acquire(load any, spec storeSpec, keyGen [sha256.Size]byte,
-	build func() (*memory.Store, int64, error)) (p *pooledStore, keyChanged bool, err error) {
+	build func(*evictSink) (*memory.Store, int64, error)) (p *pooledStore, keyChanged bool, err error) {
 	if err := r.claimName(load, spec, keyGen); err != nil {
 		return nil, false, err
 	}
 	v, loaded, err := r.pool.LoadOrNew(spec, func() (caddy.Destructor, error) {
-		st, size, err := build()
+		sink := new(evictSink)
+		st, size, err := build(sink)
 		if err != nil {
 			return nil, err
 		}
-		ps := &pooledStore{spec: spec, store: st, reg: r, keyGen: keyGen}
+		ps := &pooledStore{spec: spec, store: st, reg: r, keyGen: keyGen, sink: sink}
 		ps.size.Store(size)
 		return ps, nil
 	})
@@ -305,9 +310,10 @@ func (h *Handler) storeSpec() storeSpec {
 
 // memoryConfig maps the handler onto the store settings. A multi-host site
 // gets MaxBytesPerOwner at 25% of a shard (FR-FAIR-3).
-func (h *Handler) memoryConfig(size int64) memory.Config {
+func (h *Handler) memoryConfig(size int64, sink *evictSink) memory.Config {
 	cfg := memory.Config{
 		MaxBytes:        size,
+		OnEvict:         sink.emit,
 		SnapshotTimeout: closeTimeout,
 	}
 	if dir := h.snapshotDir(); dir != "" {
@@ -327,7 +333,7 @@ func (h *Handler) memoryConfig(size int64) memory.Config {
 // here, not at Validate, so caddy validate has no side effects on disk. A
 // snapshot written under a different key-generation hash is deleted before
 // the store can load it (R-3), and the current hash is recorded beside it.
-func (h *Handler) buildStore(keyGen [sha256.Size]byte, size int64) (*memory.Store, error) {
+func (h *Handler) buildStore(keyGen [sha256.Size]byte, size int64, sink *evictSink) (*memory.Store, error) {
 	if dir := h.snapshotDir(); dir != "" {
 		if err := prepareSnapshotDir(dir); err != nil {
 			return nil, err
@@ -336,7 +342,7 @@ func (h *Handler) buildStore(keyGen [sha256.Size]byte, size int64) (*memory.Stor
 			return nil, err
 		}
 	}
-	st, err := memory.New(h.memoryConfig(size))
+	st, err := memory.New(h.memoryConfig(size, sink))
 	if err != nil {
 		return nil, fmt.Errorf("weir: %w", err)
 	}

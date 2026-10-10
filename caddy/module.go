@@ -18,6 +18,7 @@ import (
 
 	"github.com/caddyserver/caddy/v2"
 	"github.com/caddyserver/caddy/v2/modules/caddyhttp"
+	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/AshwinSathian/weir"
 	"github.com/AshwinSathian/weir/internal/keys"
@@ -59,6 +60,9 @@ type Handler struct {
 	// admin is the registry entry for the admin API (08 §7); set last by a
 	// successful Provision, removed first by Cleanup.
 	admin *adminEntry
+	// metrics is this handler's share of the load's collector set (08 §8).
+	metrics    *metricSet
+	metricsReg *prometheus.Registry
 
 	// Serving state, set by Provision. firstHost is the only host the handler
 	// remembers (NFR-3); warnedHosts makes the multi_host warning one-shot.
@@ -91,18 +95,28 @@ func (h *Handler) Provision(ctx caddy.Context) (err error) {
 	cfg := h.weirConfig()
 	cfg.Logger = ctx.Slogger()
 	tap := newPurgeTap()
-	cfg.Observer = tap
-	load := any(ctx.GetMetricsRegistry())
+	reg := ctx.GetMetricsRegistry()
+	ms, err := metricSets.acquire(reg, h.Name)
+	if err != nil {
+		return fmt.Errorf("weir: register metrics: %w", err)
+	}
+	defer func() {
+		if err != nil {
+			metricSets.release(reg, h.Name, ms)
+		}
+	}()
+	cfg.Observer = fanout{tap, ms.obs}
+	load := any(reg)
 	keyGen := keyGenHash(cfg)
 	var built bool // the pool called the constructor: a new store, not a reuse
 	p, keyChanged, err := stores.acquire(load, h.storeSpec(), keyGen,
-		func() (*memory.Store, int64, error) {
+		func(sink *evictSink) (*memory.Store, int64, error) {
 			built = true
 			size := int64(h.MaxBytes)
 			if size == 0 {
 				size = stores.autoSize(debug.SetMemoryLimit(-1), cfg.Logger, h.Name)
 			}
-			st, err := h.buildStore(keyGen, size)
+			st, err := h.buildStore(keyGen, size, sink)
 			return st, size, err
 		})
 	if err != nil {
@@ -146,6 +160,9 @@ func (h *Handler) Provision(ctx caddy.Context) (err error) {
 	h.firstHost, h.warnedHosts = new(atomic.Pointer[string]), new(atomic.Bool)
 	h.httpApp = func() (any, error) { return ctx.AppIfConfigured("http") }
 	h.admin = &adminEntry{engine: e, tap: tap}
+	h.metrics, h.metricsReg = ms, reg
+	ms.addEngine(e)
+	p.sink.attach(ms)
 	engines.add(h.Name, h.admin)
 	return nil
 }
@@ -174,7 +191,11 @@ func (h *Handler) Cleanup() error {
 	engines.remove(h.Name, h.admin) // before Close: no new admin call reaches a closing engine
 	ctx, cancel := context.WithTimeout(context.Background(), closeTimeout)
 	defer cancel()
+	h.metrics.removeEngine(h.engine) // before Close: a scrape never polls a closing engine
 	err := h.engine.Close(ctx)
+	if metricSets.release(h.metricsReg, h.Name, h.metrics) {
+		h.pool.sink.detach(h.metrics) // the set's last user: stop feeding its collectors
+	}
 	return errors.Join(err, h.release())
 }
 

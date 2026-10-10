@@ -1426,3 +1426,24 @@ Entry template:
 - Tests: TestAdminPurgeReachesEveryStoreInOverlap, TestAdminPurgeSkipsClosedEngine (now checks fwd=stale), TestPurgeTapWaitHonoursContext, TestAdminConcurrentEagerPurgeCounts, TestAdminRacesWithCleanup, TestPurgeErrorWordsPartialScrub, TestAdminBodyEdges, TestAdminModeNormalIgnoresTTL; e2e now checks the cached entry survives a site-listener purge attempt. Race and shuffle tests and lint on Go 1.27 pass.
 - Deviations: 08 §7 reworded (purge through every engine, semaphore, partial-failure wording, ttl for normal).
 - Declined: checking count limits before decode (bounded by the 1 MiB cap); hiding which names exist from a prober (admin API is operator-only); an integration test for an origin group invalidation during an eager purge (the tap is unit-tested on the event reason).
+
+## 2026-10-10 · P2-06 · done
+- Branch / PR: claude/inspiring-galileo-j1jrdh / https://github.com/AshwinSathian/weir/pull/82
+- Done: `caddy/metrics.go`: collector set per (registry, name) wrapping `observe/prom` with a constant `name` label, aggregating gauges over same-name engines, `evictSink` that fans the pooled store's evictions to the newest live set; `fanout` observer after `purgeTap`; Provision/Cleanup wiring; `caddy/go.mod` requires `observe/prom` and `client_golang`.
+- Tests: TestMetricsNamesAndNameLabel, TestMetricsRegisteredOncePerRegistry, TestEvictionSinkRepointsOnReload, TestMetricsSurviveReload, TestMetricsGaugesAcrossEngines, TestSiblingCleanupKeepsEvictionSink, TestFailedLoadCleanupKeepsOlderSink, TestProvisionFailureReleasesMetricSetOnce. Race and shuffle tests pass in all three modules, `make trace-strict` passes; `make check` stops at the Go 1.25 golangci-lint binary (known), lint not run.
+- Deviations: 08 §8 records the wrap decision and the sink/set design.
+- Review (card-reviewer): must-fix fixed (a sibling Cleanup cleared the shared sink; the sink now keeps all live sets, which also covers a failed load). Stats() now calls engines outside the lock; nil sink is safe; package var renamed `metricSets`.
+- Follow-ups: none. P2-07 is next.
+- Context: medium; size S was right.
+
+## 2026-10-10 · P2-06 · review-fixes
+- Branch / PR: claude/inspiring-galileo-j1jrdh / https://github.com/AshwinSathian/weir/pull/82
+- Done: adversarial review (agent); "Waiting on Ashwin" was empty, no must-fix. Fixed S1-S5: evictions now count in every attached set (overlapping loads and a not-yet-cleaned failed load all expose the one store), so the older serving load no longer undercounts (08 §8 states it); `removeEngine` runs before `Close`; garbled comment fixed.
+- Tests: TestStoreEvictionReachesMetric (a real store fill reaches `weir_evictions_total`), TestPoolKeepsTheSinkItBuiltWith, TestProvisionFailureInEngineReleasesMetricSet (weir.New failure), stronger TestMetricsGaugesAcrossEngines (max not sum, survives sibling Cleanup), every `weir_*` series carries `name`. Race and shuffle tests (count=3), vet, gofmt and lint on Go 1.27 (`GOTOOLCHAIN=go1.27.0 ... golangci-lint@v2.14.0`) pass.
+- Deviations: 08 §8 reworded (count in all attached sets).
+- Declined: asserting all 19 names of 04 §9.3 (labelled families appear only after an event; `observe/prom`'s own tests cover the names).
+
+## 2026-10-10 · P2-06 · review-fixes
+- Branch / PR: claude/inspiring-galileo-j1jrdh / https://github.com/AshwinSathian/weir/pull/82
+- Done: CI `caddy-build` failed because xcaddy cannot resolve `observe/prom` (an unreleased module; a `replace` in `caddy/go.mod` is ignored by importers). The job now passes `--with github.com/AshwinSathian/weir/observe/prom=./observe/prom`. Verified locally with xcaddy v0.4.5 against Caddy v2.11.7 (build complete).
+- Follow-ups: any later module the `caddy` module requires needs its own `--with` until root and sub-modules have release tags.

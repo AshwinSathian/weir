@@ -61,6 +61,7 @@ jobs:
           xcaddy build ${{ matrix.caddy }} \
             --with github.com/AshwinSathian/weir=. \
             --with github.com/AshwinSathian/weir/caddy=./caddy \
+            --with github.com/AshwinSathian/weir/observe/prom=./observe/prom \
             --output ./caddy-weir
       - name: start with a minimal Caddyfile
         run: |

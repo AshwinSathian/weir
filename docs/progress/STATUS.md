@@ -4,9 +4,9 @@ Updated: 2026-10-10
 Phase: 1
 Current card: none
 Card state: awaiting-merge
-Branch: claude/wizardly-ride-guhrru
-PR: https://github.com/AshwinSathian/weir/pull/81
-Next card: P2-06
+Branch: claude/inspiring-galileo-j1jrdh
+PR: https://github.com/AshwinSathian/weir/pull/82
+Next card: P2-07
 
 ## Waiting on Ashwin
 
@@ -61,7 +61,9 @@ Ashwin delegated "take decisions on all items"; "Waiting on Ashwin" was empty. A
 
 ## Notes for the next session
 
-- P2-06: `Handler.Provision` sets `cfg.Observer` to a `purgeTap` (caddy/registry.go), which the admin API uses to report the eager-purge scrubbed count. The metrics observer must wrap it (forward every event to the tap), not replace it.
+- CI's xcaddy step needs one `--with <module>=<path>` per unreleased module the `caddy` module requires (root, `caddy`, `observe/prom`); add one when another sub-module becomes a dependency.
+
+- P2-06 done: `cfg.Observer` is `fanout{purgeTap, metric set Observer}` (caddy/metrics.go). Any further observer joins that fanout; do not replace the tap. Metrics wrap `observe/prom` (decision in 08 §8).
 - P2-05 admin tests call the router handler directly; the only real-Caddy admin case is `TestE2EAdminPurge` (admin port 2999, one named 1.1 s pause).
 
 - P2-04: the deployment guide (P2-09 or later) must tell single-site operators to set `max_bytes` if they want more than 20% of the limit. Tests that depend on the memory budget call `isolateStores` because the caddytest instance and earlier tests leave stores live in the global registry.
