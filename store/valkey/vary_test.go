@@ -103,6 +103,16 @@ func TestSetVarySpec(t *testing.T) {
 			t.Fatalf("swap over an expired record = %v, %v", ok, err)
 		}
 	})
+	t.Run("nil prev replaces a record that does not decode", func(t *testing.T) {
+		s, cl := connected(t, nil)
+		_ = cl.set(t.Context(), s.entryKey(k), []byte("not a record"), time.Now().Add(time.Hour).UnixMilli())
+		if ok, err := s.SetVarySpec(t.Context(), k, nil, specEntry(now, "fr")); !ok || err != nil {
+			t.Fatalf("swap over an undecodable record = %v, %v", ok, err)
+		}
+		if got, err := s.Get(t.Context(), k); err != nil || len(got.Variants) != 1 {
+			t.Fatalf("record after the swap = %v, %v", got, err)
+		}
+	})
 	t.Run("a next that is past its expiry is declined and leaves the record", func(t *testing.T) {
 		s, _ := connected(t, nil)
 		a := specEntry(now, "en")

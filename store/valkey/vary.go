@@ -57,8 +57,9 @@ func (s *Store) swapOverStale(ctx context.Context, cl client, key string, val []
 	raw, err := cl.get(ctx, key)
 	switch {
 	case err == nil:
-		e, derr := store.Decode(raw, maxValueBytes)
-		if derr != nil || e.Expires.IsZero() || time.Now().Before(e.Expires) {
+		// An undecodable record counts as stale too: Get reports it as a miss,
+		// and a plain Set would overwrite it, so the swap must as well.
+		if e, derr := store.Decode(raw, maxValueBytes); derr == nil && (e.Expires.IsZero() || time.Now().Before(e.Expires)) {
 			return false, nil
 		}
 	case valkey.IsValkeyNil(err):
