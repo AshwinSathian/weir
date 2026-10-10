@@ -60,7 +60,8 @@ func newStore(cfg Config, dial dialFunc) (*Store, error) {
 func (s *Store) Info() store.Info { return store.Info{Name: "valkey", Remote: true} }
 
 // Close stops dials in flight, closes the client and is safe to call twice.
-// No client is built after it.
+// No client is built after it. valkey.NewClient takes no context, so a real
+// dial in flight delays Close by at most CallTimeout.
 func (s *Store) Close() error {
 	s.mu.Lock()
 	if s.closed {
@@ -126,7 +127,6 @@ func (s *Store) acquire(ctx context.Context) (client, error) {
 		}
 		done := make(chan struct{})
 		s.connecting = done
-		s.lastTry = time.Now()
 		s.wg.Add(1) // under mu, so Close cannot Wait first
 		s.mu.Unlock()
 		return s.connect(ctx, done)
@@ -149,14 +149,11 @@ func (s *Store) connect(ctx context.Context, done chan struct{}) (client, error)
 		cl, err := s.dialChecked(ctx)
 		s.mu.Lock()
 		s.connecting = nil
+		s.lastTry = time.Now() // the gap runs from the end of an attempt
 		close(done)
 		switch {
 		case err != nil:
 			s.lastErr = err
-			if ctx.Err() != nil {
-				// A caller leaving is not a server failure; others need not wait a second.
-				s.lastTry = time.Time{}
-			}
 		case s.closed:
 			err = errClosed
 		default:
@@ -178,7 +175,9 @@ func (s *Store) connect(ctx context.Context, done chan struct{}) (client, error)
 }
 
 func (s *Store) dialChecked(ctx context.Context) (client, error) {
-	dctx, cancel := s.callCtx(ctx)
+	// The dial is shared by every waiting caller, so it must not die with
+	// the first caller's deadline; callers only stop waiting.
+	dctx, cancel := s.callCtx(context.WithoutCancel(ctx))
 	defer cancel()
 	dctx, stop := context.WithCancel(dctx)
 	defer stop()

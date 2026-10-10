@@ -3,6 +3,8 @@ package valkey
 import (
 	"context"
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 
 	"github.com/valkey-io/valkey-go"
@@ -72,7 +74,14 @@ func (v valkeyClient) policies(ctx context.Context) (map[string]string, error) {
 // checkPolicy refuses a server that may evict keys without a TTL: epoch
 // state has none, and a lost epoch is a missed purge (T-29, 05 §7).
 func checkPolicy(policies map[string]string) error {
-	for addr, p := range policies {
+	if len(policies) == 0 {
+		return fmt.Errorf("store: valkey: %w: no node reported maxmemory-policy; set SkipPolicyCheck if the service hides it", errPolicy)
+	}
+	for _, addr := range slices.Sorted(maps.Keys(policies)) {
+		p := policies[addr]
+		if p == "" {
+			return fmt.Errorf("store: valkey: %w: node %s reported no maxmemory-policy; set SkipPolicyCheck if the service hides it", errPolicy, addr)
+		}
 		if strings.HasPrefix(p, "allkeys-") {
 			return fmt.Errorf("store: valkey: %w: node %s has maxmemory-policy %q, which can evict epoch keys; use volatile-lfu or noeviction (or set SkipPolicyCheck)", errPolicy, addr, p)
 		}

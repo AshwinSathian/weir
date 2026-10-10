@@ -77,6 +77,7 @@ func okClient() *fakeClient {
 }
 
 // FR-STF-2, 05 §7: a bad config fails New; nothing connects.
+// FR-STF-2.
 func TestNewBadConfigFails(t *testing.T) {
 	_, err := New(Config{})
 	if !errors.Is(err, weir.ErrInvalidConfig) {
@@ -143,7 +144,7 @@ func TestReconnectRateLimited(t *testing.T) {
 	})
 }
 
-// A successful connect is kept: later calls do not dial again.
+// FR-STF-2: a successful connect is kept: later calls do not dial again.
 func TestConnectOnce(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		d := &fakeDialer{cl: okClient()}
@@ -161,7 +162,7 @@ func TestConnectOnce(t *testing.T) {
 	})
 }
 
-// Concurrent callers share one dial (single flight, P8).
+// FR-STF-2, P8: concurrent callers share one dial (single flight).
 func TestConcurrentCallersShareDial(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		d := &fakeDialer{cl: okClient(), block: make(chan struct{})}
@@ -180,6 +181,7 @@ func TestConcurrentCallersShareDial(t *testing.T) {
 	})
 }
 
+// FR-STF-2, S-2: a remote store gets the store breaker and timeout.
 func TestInfo(t *testing.T) {
 	s := newFake(t, nil, &fakeDialer{})
 	defer s.Close()
@@ -188,6 +190,7 @@ func TestInfo(t *testing.T) {
 	}
 }
 
+// FR-LCY-2.
 func TestCloseTwice(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		d := &fakeDialer{cl: okClient()}
@@ -295,6 +298,8 @@ func TestPolicyCheck(t *testing.T) {
 		{"standalone allkeys-lfu fails", map[string]string{a: "allkeys-lfu"}, false, true},
 		{"cluster all nodes volatile passes", map[string]string{a: "volatile-lfu", b: "noeviction"}, false, false},
 		{"cluster one allkeys node fails", map[string]string{a: "volatile-lfu", b: "allkeys-lru"}, false, true},
+		{"no nodes reported fails", map[string]string{}, false, true},
+		{"empty policy fails", map[string]string{a: ""}, false, true},
 		{"SkipPolicyCheck accepts allkeys-lfu", map[string]string{a: "allkeys-lfu"}, true, false},
 	}
 	for _, tc := range cases {
@@ -353,4 +358,56 @@ func TestClientOption(t *testing.T) {
 	if clientOption(cfg).ForceSingleClient {
 		t.Fatal("Cluster must not force a single client")
 	}
+}
+
+// FR-LCY-2, 05 §7: a Close that lands while a dial is returning closes the
+// client just built; the waiting caller sees ErrUnavailable.
+func TestCloseClosesClientBuiltDuringConnect(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		cl := okClient()
+		s := newFake(t, nil, &fakeDialer{})
+		release := make(chan struct{})
+		s.dial = func(context.Context, Config) (client, error) {
+			<-release // ignores ctx, like a dial that already finished
+			return cl, nil
+		}
+		errc := make(chan error, 1)
+		go func() {
+			_, err := s.Get(t.Context(), store.Key{})
+			errc <- err
+		}()
+		synctest.Wait()
+		go func() { _ = s.Close() }()
+		synctest.Wait() // Close has set closed and waits for the dial
+		close(release)
+		if err := <-errc; !errors.Is(err, store.ErrUnavailable) {
+			t.Fatalf("err = %v, want ErrUnavailable", err)
+		}
+		synctest.Wait()
+		if cl.closed.Load() != 1 {
+			t.Fatalf("client closed %d times, want 1", cl.closed.Load())
+		}
+	})
+}
+
+// FR-STF-2: the shared dial survives the first caller's short deadline.
+func TestShortDeadlineCallerDoesNotCancelSharedDial(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		d := &fakeDialer{cl: okClient(), block: make(chan struct{})}
+		s := newFake(t, nil, d)
+		defer s.Close()
+		short, cancel := context.WithTimeout(t.Context(), time.Second)
+		defer cancel()
+		if _, err := s.Get(short, store.Key{}); !errors.Is(err, store.ErrUnavailable) {
+			t.Fatalf("err = %v", err)
+		}
+		close(d.block)
+		synctest.Wait()
+		if _, err := s.acquire(t.Context()); err != nil {
+			t.Fatalf("shared dial was cancelled: %v", err)
+		}
+		if d.count() != 1 {
+			t.Fatalf("dials = %d, want 1", d.count())
+		}
+	})
 }

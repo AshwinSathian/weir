@@ -2,11 +2,11 @@
 
 Updated: 2026-10-10
 Phase: 1
-Current card: P25-01b
-Card state: in-progress
+Current card: none
+Card state: awaiting-merge
 Branch: claude/brave-hamilton-yomx12
-PR: none yet (code done; /handoff not run: review, card mark and PR still to do)
-Next card: P25-01b
+PR: PENDING
+Next card: P25-02
 
 ## Waiting on Ashwin
 
@@ -77,6 +77,9 @@ Ashwin delegated "take decisions on all items"; "Waiting on Ashwin" was empty. A
 Ashwin delegated "take decisions on all items"; "Waiting on Ashwin" was empty. An independent agent attacked the PR; no must-fix. Decisions: empty `Prefix`/`HashTag` mean the default (card test list reworded); config errors wrap `weir.ErrInvalidConfig` (no new sentinel); upper bounds added (MaxRetention 10 y, MaxClockSkew 1 h, MaxHardEpochs 1e6, key parts 64 bytes); `HardEpochWait` whole ms and below `CallTimeout`; `Addrs` must be unique `host:port`. Fixed: `Validate` copy aliased `Addrs`/`TLS`, returns the zero Config on error; JSON marshalling leaked the password (now redacted); `mapError` leaves wrapped `valkey.Nil` and `ErrNotFound` alone. Written into 05 §7.
 
 ## Notes for the next session
+
+- P25-01b done: `valkey.New` returns `*Store` (as `memory.New`); `acquire(ctx)` hands out the `client` seam (`policies`, `close`) that P25-02 extends with the real commands. The shared dial runs under `CallTimeout`, not the caller's deadline. Policy check fails closed. `go.work` now includes `./store/valkey`. Errors use `store: valkey:` (card note reconciled).
+- Container lint workaround for the root `make check`: `make -o lint check` after running golangci-lint with `GOTOOLCHAIN=go1.27.0`; the `modules` target also hits the Go 1.25 binary, so run each submodule by hand. CI must confirm.
 
 - P25-01 done: `store/valkey` module (Config, Validate, redaction, `mapError`). `Validate` returns a defaults-filled copy; `mapError(valkey.Nil)` returns Nil unchanged, so `Get` (P25-01b onward) maps it to `ErrNotFound`. `store/valkey` is not in `go.work` yet (the card left it out); add it with P25-01b if tooling needs it.
 - Lint for submodules: run golangci-lint v2.14.0 with `GOTOOLCHAIN=go1.27.0` and `GOWORK=off` inside the module.
