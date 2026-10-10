@@ -161,7 +161,8 @@ func TestVaryCASStoreError(t *testing.T) {
 		o := testorigin.NewChecked(t, 64, 16)
 		o.Default(varyBody("Accept-Language", 0))
 		cfg := cacheCfg
-		cfg.Store = failingVary{mem}
+		var calls atomic.Int32
+		cfg.Store = failingVary{mem, &calls}
 		cfg.Forward.Allow = []string{"Accept-Language"}
 		e := newEngine(t, cfg)
 		defer closeEngine(t, e)
@@ -170,11 +171,18 @@ func TestVaryCASStoreError(t *testing.T) {
 		if resp, _ := serve(t, e, varyReq("/v", "Accept-Language", "en"), o); resp.Cache.Hit {
 			t.Fatal("a variant whose spec write failed was served as a hit")
 		}
+		if n := calls.Load(); n != 2 {
+			t.Fatalf("SetVarySpec calls = %d, want 2 (one per request: an error is not retried)", n)
+		}
 	})
 }
 
-type failingVary struct{ *memory.Store }
+type failingVary struct {
+	*memory.Store
+	calls *atomic.Int32
+}
 
-func (failingVary) SetVarySpec(context.Context, store.Key, *store.Entry, *store.Entry) (bool, error) {
+func (f failingVary) SetVarySpec(context.Context, store.Key, *store.Entry, *store.Entry) (bool, error) {
+	f.calls.Add(1)
 	return false, store.ErrUnavailable
 }

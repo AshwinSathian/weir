@@ -478,11 +478,27 @@ func (e *Engine) setVariant(ctx context.Context, c *keys.Classified, vk store.Ke
 }
 
 // setVariantCAS is setVariant for a store with store.VarySetter. The variant
-// is written once, before the first swap. A writer that finds the spec full
-// at a later attempt deletes its variant again: left in place it would be
-// found by variant key although no spec lists it, and the cap would not hold.
-func (e *Engine) setVariantCAS(ctx context.Context, c *keys.Classified, vk store.Key, ent *store.Entry) bool {
+// is written once, before the first swap. Whenever the variant ends up not
+// listed (the spec is full, a store call failed, 16 swaps were lost), it is
+// deleted again, best effort: left in place it would be found by variant key
+// although no spec lists it, and the cap would not hold. The delete can remove
+// a record that a concurrent writer of the same variant has since listed; the
+// spec then lists a ref without a record, which the reclaim path (D37) frees
+// and a request turns into one extra miss.
+//
+// ponytail: the reclaim reads in nextSpec repeat on every attempt, so a full
+// spec costs up to 16 * MaxVariants reads; the ceiling is ctx, and the upgrade
+// is to reclaim on the first attempt only.
+func (e *Engine) setVariantCAS(ctx context.Context, c *keys.Classified, vk store.Key, ent *store.Entry) (stored bool) {
 	written := false
+	defer func() {
+		if written && !stored {
+			// The caller's context may be the reason for the failure.
+			dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), e.cfg.Timeouts.Store)
+			defer cancel()
+			_ = e.sg.del(dctx, vk)
+		}
+	}()
 	for range varyCASAttempts {
 		cur, err := e.sg.get(ctx, c.Primary)
 		if err != nil && !errors.Is(err, store.ErrNotFound) {
@@ -490,9 +506,6 @@ func (e *Engine) setVariantCAS(ctx context.Context, c *keys.Classified, vk store
 		}
 		spec := e.nextSpec(ctx, c, vk, ent, cur)
 		if spec == nil {
-			if written {
-				_ = e.sg.del(ctx, vk)
-			}
 			return false
 		}
 		if !written {
@@ -501,13 +514,15 @@ func (e *Engine) setVariantCAS(ctx context.Context, c *keys.Classified, vk store
 			}
 			written = true
 		}
-		if swapped, err := e.sg.setVarySpec(ctx, c.Primary, cur, spec); err != nil {
+		swapped, err := e.sg.setVarySpec(ctx, c.Primary, cur, spec)
+		if err != nil {
 			return false
-		} else if swapped {
+		}
+		if swapped {
 			return true
 		}
 	}
-	return false // ponytail: 16 lost swaps in a row; the variant stays unlisted until it expires
+	return false
 }
 
 // nextSpec builds the vary spec that lists ent's variant on top of cur, the

@@ -1616,3 +1616,11 @@ Entry template:
 - Deviations: 04 §6.7 and 05 §7 note rewritten for the capability; the decision (capability over `Entry` field) was delegated to the agent by Ashwin.
 - Follow-ups: P25-05b (Valkey script); the Valkey store keeps the old bound until then.
 - Context: medium
+
+## 2026-10-10 · P25-04b + P25-05 · review-fixes
+- Branch / PR: claude/amazing-galileo-2z89q7 / https://github.com/AshwinSathian/weir/pull/91
+- Done: adversarial reviews (two agents) of the scenarios and of the compare-and-set. Scenarios: `PurgeDuringInflightFetch` waits 3 s (the old pause let a request time taken at completion pass, confirmed by mutation), flood test warms up, Warm lower bound dropped. CAS: an unlisted variant is deleted on every failure exit with a context detached from the caller; docs 04 §6.7 and 05 V-1 say best effort and name the same-variant race; `TestVaryCASStoreError` counts calls (an error is not retried); the quota-refusal caveat is in V-1; a `ponytail:` note on the reclaim reads.
+- Tests: TestVary*, TestSetVarySpec*, TestEngine* pass with `-race`; no must-fix from either review.
+- Deviations: none beyond the notes above.
+- Follow-ups: P25-05b (Valkey script); CI Valkey 8.1 run.
+- Context: medium
