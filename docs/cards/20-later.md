@@ -139,7 +139,7 @@ These phases start from draft specs. Each begins with one planning card that ver
 - AC: soft and invalid epochs raise `d = 2` cells per 05 §7; `NewestEpochShared` implemented (`store.SharedTagEpochs`), one round trip, never reads the invalid plane for shared tags; positions use `SHA-256(seed || tag)` computed in Go; the 16-byte seed comes from `crypto/rand`, is stored with `HSETNX` and shared by all nodes; scripts check the seed id and reply `SEED_CHANGED`
 - Notes: valkey-go auto-pipelines concurrent callers, which is why the property test gets `Parallel`; if 200 000 epochs still takes more than a few minutes, stop and ask before shrinking the count (docs/07 criterion).
 
-### [ ] P25-04 Engine suite against Valkey
+### [x] P25-04 Engine suite against Valkey
 - Plan: 2.5.2 · Size: M · Depends on: P25-03b
 - Read: 07 §1, §6 (T6.x matrix); engine test helpers; hard rule 6 (real clock only under `integration`)
 - Touch: engine test files in store/valkey (build tag `integration`), small test-helper changes in the root package only if an engine test hard-codes the memory store
@@ -147,6 +147,15 @@ These phases start from draft specs. Each begins with one planning card that ver
 - AC: all selected scenarios pass in the CI `valkey` job within a 15-minute job timeout; any failure is fixed in 05 first, then in code; the excluded scenarios and why are listed in the LOG entry
 - Out of scope: new scenarios; weakening a test to pass
 - Notes: root-module tests may not import valkey-go, so the suite lives in the `store/valkey` module and imports the engine.
+
+### [ ] P25-04b Remaining engine scenarios against Valkey
+- Plan: 2.5.2 · Size: S · Depends on: P25-04
+- Read: 07 §6 (T6.x matrix); `store/valkey/engine_integration_test.go`; purge_test.go and vary_test.go in the root package
+- Touch: `store/valkey/engine_integration_test.go` (or a second file), docs/05 only if a test finds an interface bug
+- Tests: Valkey-backed versions of `TestUnsafeMethodInvalidates` and `TestSharedTagsKeepURIInvalidation` (the `Invalid` epoch mode and `NewestEpochShared`), `TestGlobalEpochSoft`, `TestSoftAfterHardStaysHard`, `TestGroupInvalidationIsSoft`, `TestPurgeDuringInflightFetch`, a Vary-variant case through the codec (`TestVaryFollowersRecoalesce` shape), `TestMustRevalidate504`, `TestCoalesceCreatorCancel`, `TestWarm`; also a measurement of lookup cost under an invalidation flood (P25-03b note)
+- AC: the scenarios pass in the CI `valkey` job on Valkey 8.1 within the 15-minute budget; PLAN 2.5.2 is ticked only when P25-04 and P25-04b are done and the job has run
+- Out of scope: new scenarios beyond the list; weakening a test to pass
+- Notes: P25-04 covered the card's required list; the adversarial review of PR 90 found these uncovered. The suite sets `Timeouts.Store` to 2 s on purpose (the 50 ms default flaked under starvation).
 
 ### [ ] P25-05 Vary-spec compare-and-set: interface and memory store
 - Plan: 2.5.3 · Size: M · Depends on: P25-04
