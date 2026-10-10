@@ -22,7 +22,8 @@ import (
 
 	"github.com/AshwinSathian/weir"
 	"github.com/AshwinSathian/weir/internal/keys"
-	"github.com/AshwinSathian/weir/store/memory"
+	"github.com/AshwinSathian/weir/store"
+	"github.com/AshwinSathian/weir/store/valkey"
 	"github.com/AshwinSathian/weir/weirhttp"
 )
 
@@ -49,6 +50,10 @@ type Handler struct {
 	// TLS. It turns on the per-host fairness caps at 25% (FR-FAIR-3) and is
 	// part of the store identity (08 §3, §4b).
 	MultiHost bool `json:"multi_host,omitempty"`
+	// Store, when set, replaces the memory store with a shared one (08 §2).
+	// max_bytes and snapshot_dir belong to the memory store and are refused
+	// with it.
+	Store *StoreConfig `json:"store,omitempty"`
 
 	engine *weir.Engine
 	// pool and release are set by a successful Provision and not changed
@@ -107,11 +112,23 @@ func (h *Handler) Provision(ctx caddy.Context) (err error) {
 	}()
 	cfg.Observer = fanout{tap, ms.obs}
 	load := any(reg)
-	keyGen := keyGenHash(cfg)
+	spec := h.storeSpec()
+	fwdHash := keyGenHash(cfg)
+	keyGen := keyGenHashFor(cfg, spec.valkey)
 	var built bool // the pool called the constructor: a new store, not a reuse
-	p, keyChanged, err := stores.acquire(load, h.storeSpec(), keyGen,
-		func(sink *evictSink) (*memory.Store, int64, error) {
+	p, keyChanged, err := stores.acquire(load, spec, keyGen,
+		func(sink *evictSink) (store.Store, int64, error) {
 			built = true
+			if h.Store != nil {
+				// The client connects on first use, so an unreachable server
+				// opens the store breaker instead of failing the load
+				// (FR-STF-2).
+				st, err := valkey.New(h.Store.valkeyConfig(h.Name))
+				if err != nil {
+					return nil, 0, err
+				}
+				return st, 0, nil
+			}
 			size := int64(h.MaxBytes)
 			if size == 0 {
 				size = stores.autoSize(debug.SetMemoryLimit(-1), cfg.Logger, h.Name)
@@ -122,8 +139,18 @@ func (h *Handler) Provision(ctx caddy.Context) (err error) {
 	if err != nil {
 		return err
 	}
-	if built {
+	if built && h.Store == nil {
 		stores.checkOvercommit(cfg.Logger, h.Name)
+	}
+	for _, w := range h.storeWarnings() {
+		cfg.Logger.Warn(w, "name", h.Name)
+	}
+	if built && h.Store != nil {
+		// A new pool entry on a shared server: compare the forwarding rules
+		// with the engine it replaces (R-3, 08 §3).
+		if prev, ok := stores.liveFwd(h.Name, p); ok && prev != fwdHash {
+			keyChanged = true
+		}
 	}
 	release := func() error {
 		p.dropHolder(h)
@@ -154,7 +181,7 @@ func (h *Handler) Provision(ctx caddy.Context) (err error) {
 	}
 	// Record the hash only now: a Provision that failed above must not
 	// make a retry of the same config skip the purge.
-	p.commitKeyGen(h, keyGen)
+	p.commitKeyGen(h, keyGen, fwdHash)
 	h.engine, h.pool, h.release, h.closed = e, p, release, new(atomic.Bool)
 	h.log, h.chainOnce = cfg.Logger, new(sync.Once)
 	h.firstHost, h.warnedHosts = new(atomic.Pointer[string]), new(atomic.Bool)
@@ -172,6 +199,14 @@ func (h *Handler) Provision(ctx caddy.Context) (err error) {
 func (h *Handler) Validate() error {
 	if err := validateName(h.Name); err != nil {
 		return err
+	}
+	if h.Store != nil {
+		if h.MaxBytes != 0 || h.SnapshotDir != "" {
+			return errors.New("weir: max_bytes and snapshot_dir size and persist the memory store; they cannot be combined with a store block")
+		}
+		if err := h.Store.validate(h.Name); err != nil {
+			return err
+		}
 	}
 	if h.MaxBytes != 0 && h.MaxBytes < minStoreBytes {
 		return fmt.Errorf("weir: max_bytes must be at least %d MiB (the largest cacheable object is 10%% of a shard)", minStoreBytes>>20)

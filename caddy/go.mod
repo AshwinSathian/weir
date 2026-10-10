@@ -5,6 +5,7 @@ go 1.27.0
 require (
 	github.com/AshwinSathian/weir v0.0.0
 	github.com/AshwinSathian/weir/observe/prom v0.0.0
+	github.com/AshwinSathian/weir/store/valkey v0.0.0
 	github.com/caddyserver/caddy/v2 v2.11.7
 	github.com/prometheus/client_golang v1.24.1
 	github.com/prometheus/client_model v0.6.3
@@ -115,6 +116,7 @@ require (
 	github.com/tailscale/go-winio v0.0.0-20231025203758-c4f33415bf55 // indirect
 	github.com/tailscale/tscert v0.0.0-20251216020129-aea342f6d747 // indirect
 	github.com/urfave/cli v1.22.17 // indirect
+	github.com/valkey-io/valkey-go v1.0.78 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	github.com/yuin/goldmark v1.8.6 // indirect
 	github.com/yuin/goldmark-highlighting/v2 v2.0.0-20230729083705-37449abec8cc // indirect
@@ -179,3 +181,5 @@ require (
 replace github.com/AshwinSathian/weir => ..
 
 replace github.com/AshwinSathian/weir/observe/prom => ../observe/prom
+
+replace github.com/AshwinSathian/weir/store/valkey => ../store/valkey

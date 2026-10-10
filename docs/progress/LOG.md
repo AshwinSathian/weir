@@ -1664,3 +1664,19 @@ Entry template:
 - Deviations: none beyond 05 §7.
 - Follow-ups: engine scrub deadline (new card); CI run on Valkey 8.1; MOVED handling in P25-07.
 - Context: medium
+
+## 2026-10-11 · P25-07 · done
+- Branch / PR: claude/gracious-brown-acmyd0 / https://github.com/AshwinSathian/weir/pull/94
+- Done: `store valkey { ... }` in Caddyfile and JSON (`caddy/valkeystore.go`, `caddyfile.go`); pool key and key-generation hash carry a SHA-256 digest of the store settings; `pooledStore` holds a `store.Store`; credentials never reach errors or logs; unreachable server leaves Provision alone and opens the store breaker; CI xcaddy gains `--with` for `store/valkey` and a Valkey `caddy validate` step.
+- Tests: TestStoreValkeyJSONMapsEveryField, TestStoreValkeyValidation, TestStoreConfigRedacts, TestPoolKeyIncludesStoreSettings, TestCaddyfileStoreValkey, TestValkeyStoreOutageOpensBreaker; caddy and root tests pass with `-race`; lint not run here.
+- Deviations: 08 §2 and §3 updated (store block, pool key, no server-side key-generation record). Block shape approved by Ashwin.
+- Follow-ups: P25-07b; persisted key-generation hash in Valkey (needs approval).
+- Context: medium; size M was right.
+
+## 2026-10-11 · P25-07 · review-fixes
+- Branch / PR: claude/gracious-brown-acmyd0 / https://github.com/AshwinSathian/weir/pull/94
+- Done: adversarial review (agent), decisions delegated by Ashwin. Hard epoch on store-change plus forward-change reloads; prefix defaults to the site name; digest over effective settings; `{env.VAR}` secrets; quiet Caddyfile secret errors; deadline-aware Valkey close; multi_host warning; lifecycle and digest-coverage tests.
+- Tests: new caddy tests pass with `-race`; mutation check on the purge fix; lint not run here.
+- Deviations: 08 §2, §3, §4b updated.
+- Follow-ups: P25-07c (server-side key-generation record, needs approval); CI run.
+- Context: medium

@@ -234,7 +234,7 @@ func TestStoreEvictionReachesMetric(t *testing.T) {
 func TestPoolKeepsTheSinkItBuiltWith(t *testing.T) {
 	r := newStoreRegistry()
 	var built *evictSink
-	build := func(s *evictSink) (*memory.Store, int64, error) {
+	build := func(s *evictSink) (store.Store, int64, error) {
 		built = s
 		st, err := memory.New(memory.Config{OnEvict: s.emit})
 		return st, 0, err

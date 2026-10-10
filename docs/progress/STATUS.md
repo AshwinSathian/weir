@@ -1,19 +1,29 @@
 # Status
 
-Updated: 2026-10-10
+Updated: 2026-10-11
 Phase: 1
 Current card: none
 Card state: awaiting-merge
-Branch: card/P25-06-scrubber-scan (pushed as claude/serene-dirac-0yagok)
-PR: https://github.com/AshwinSathian/weir/pull/93
-Next card: P25-07
+Branch: claude/gracious-brown-acmyd0 (session branch, not card/*)
+PR: https://github.com/AshwinSathian/weir/pull/94
+Next card: P25-07b
 
-## Notes for the next session (P25-06)
+## Decided 2026-10-11 (P25-07, adversarial review of PR 94)
 
-- Review (card-reviewer): one must-fix (CI `docker ps --filter publish=` cannot tell the two Valkey services apart; the step now uses `job.services.<id>.id`), fixed but unproven until CI runs. Fixed too: busy-loop reader replaced by a channel, the poll names its real-clock exception, empty-tag `Scrub` no longer dials. Hot-key hit counts in the storm test are logged, not asserted (09 §7 says so).
-- Open: the engine bounds the whole `Scrub` by `Timeouts.Store` (50 ms default, remote), so an eager purge on a real keyspace times out. Needs its own scrub deadline in the engine (new card or P25-07). In 05 §7 and 09 §7.
-- A failed command inside a `getMulti`/`delMulti` pipeline (for example MOVED during resharding) fails the scrub with `ErrUnavailable`; P25-07 decides whether that needs handling.
-- golangci-lint cannot run here (Go 1.25 build); CI must confirm lint, the second Valkey service on 6380, and the storm on Valkey 8.1. PLAN 2.5.4 is ticked on the strength of local redis 7.0.15 runs; PLAN 2.5.2 still waits on the CI run.
+Ashwin delegated "take decisions on all items"; "Waiting on Ashwin" was empty. An independent agent attacked the PR. Decisions, all implemented and written into 08:
+
+- Must-fix: a store-setting change plus a `forward` change in one reload skipped the hard epoch (new pool entry on the same server). The registry now compares the forwarding hash with the live engine of the same name and purges (`TestStoreChangeWithForwardChangePurges`).
+- The default `prefix` is the site name (two sites on one server shared a keyspace and epochs). The pool key digest uses the config after defaults, so explicit defaults equal unset.
+- `username` and `password` accept `{env.VAR}`, resolved at Provision; `{$VAR}` still works but puts the secret in the adapted JSON and autosave (documented). Caddyfile errors for secrets and flags no longer quote tokens.
+- `closeStore` honors the caller's deadline for Valkey. `multi_host` with Valkey logs a warning. Tests added for pool sharing, close on last release, every-field digest coverage.
+- Declined as code: persisting the key-generation hash in Valkey (changes purge semantics): new card P25-07c, ask first. Restart after tightening `forward` stays documented in 08 §3.
+
+## Notes for the next session (P25-07)
+
+- golangci-lint cannot run here (Go 1.25 build); CI must confirm lint, the xcaddy `--with` and the Valkey `caddy validate` step.
+- Unknown-key errors in the store block still quote the key (a mis-nested secret on its own line would be echoed); accepted.
+- MOVED during resharding still fails a scrub; the engine scrub deadline card is still open.
+- P25-07b needs Ashwin's approval to lift D17 and a two-process harness (caddytest fixes ports 2999 and 9080); P25-07c needs approval too.
 
 ## Decided 2026-10-10 (P25-06, adversarial review of PR 93)
 

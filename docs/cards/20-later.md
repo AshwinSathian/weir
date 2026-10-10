@@ -181,7 +181,7 @@ These phases start from draft specs. Each begins with one planning card that ver
 - AC: `Scrubber` implemented as in 05 §7 (synchronous, `ponytail:` ceiling stated); storm results (hit ratio before and after, epoch keys intact) written up in 09; 05 §7 revised if the storm finds a gap
 - Out of scope: multi-node wiring (P25-07)
 
-### [ ] P25-07 Adapter wiring for the Valkey store
+### [x] P25-07 Adapter wiring for the Valkey store
 - Plan: 2.5.5 · Size: M · Depends on: P25-05b, P25-06
 - Read: 08 §2, §3, §4b; caddy/pool.go, caddy/config.go, caddy/caddyfile.go
 - Touch: caddy/{config.go,caddyfile.go,pool.go}, caddy/go.mod (requires `store/valkey`), caddy tests, docs/08
@@ -200,6 +200,16 @@ These phases start from draft specs. Each begins with one planning card that ver
 - Notes: the caddytest harness fixes ports 2999 and 9080, so two instances need two processes or a second harness; settle that first and split if it grows. Lifting D17 needs the user's approval.
 
 ## Phase 3: Experiment dimensions
+
+
+### [ ] P25-07c Server-side key-generation record for the Valkey store
+- Plan: 2.5.5 · Size: S · Depends on: P25-07
+- Read: 08 §3; 05 §7; 06 R-3
+- Touch: caddy/pool.go, caddy/module.go, store/valkey (a record key), docs/05 §7, docs/08 §3
+- Tests: `TestValkeyKeyGenRecord` (a restart with a tightened `forward` writes the hard epoch; an unchanged config does not; a password rotation alone does not)
+- AC: the forwarding hash (without the store digest) is stored under `<prefix>:keygen` with SET NX and compared when a store is built; a mismatch writes the hard epoch and logs a warning; the 08 §3 restart limitation is removed
+- Out of scope: the two-node test and the guide (P25-07b)
+- Notes: ASK THE USER FIRST: it changes purge semantics and adds a store record (CLAUDE.md "When to stop and ask"). Two nodes with different forwarding settings would purge each other on every restart; the warning must say so.
 
 ### [ ] P3-00 Finalize the experiments spec and write its cards
 - Plan: Phase 3 · Size: S · Depends on: Phase 2.5 cards done

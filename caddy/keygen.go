@@ -16,6 +16,13 @@ import (
 // Settings that only change which key a request maps to, and host lists,
 // are left out on purpose, so adding a domain never purges the cache.
 func keyGenHash(cfg weir.Config) [sha256.Size]byte {
+	return keyGenHashFor(cfg, [sha256.Size]byte{})
+}
+
+// keyGenHashFor also covers the store block's digest (08 §3). A zero digest,
+// the memory store, adds nothing, so the hash of an existing memory site is
+// unchanged and an upgrade does not drop its snapshot.
+func keyGenHashFor(cfg weir.Config, storeDigest [sha256.Size]byte) [sha256.Size]byte {
 	allow := make([]string, 0, len(cfg.Forward.Allow))
 	for _, n := range cfg.Forward.Allow {
 		allow = append(allow, http.CanonicalHeaderKey(n))
@@ -37,6 +44,10 @@ func keyGenHash(cfg weir.Config) [sha256.Size]byte {
 		h.Write([]byte{1})
 	} else {
 		h.Write([]byte{0})
+	}
+	if storeDigest != ([sha256.Size]byte{}) {
+		h.Write([]byte("store\x00"))
+		h.Write(storeDigest[:])
 	}
 	var out [sha256.Size]byte
 	h.Sum(out[:0])
