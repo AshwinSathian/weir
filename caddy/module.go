@@ -167,12 +167,21 @@ func (h *Handler) Provision(ctx caddy.Context) (err error) {
 	if err != nil {
 		return err // already prefixed "weir:"
 	}
+	pctx, cancel := context.WithTimeout(context.Background(), closeTimeout)
+	defer cancel()
+	// The server's record covers what the in-process hashes cannot: a restart
+	// after forward was tightened (R-3, 08 §3). It runs on every Provision of a
+	// Valkey site, so a reload also refreshes the record.
+	if h.Store != nil && syncKeyGen(pctx, p.store, fwdHash, cfg.Logger, h.Name) {
+		keyChanged = true
+	}
 	if keyChanged {
 		// R-3: serve nothing stored under the old forwarding rules. Failing
 		// Provision is the safe side if the epoch cannot be written.
-		pctx, cancel := context.WithTimeout(context.Background(), closeTimeout)
-		defer cancel()
 		if perr := e.Purge(pctx, weir.Purge{All: true, Mode: weir.PurgeHard}); perr != nil {
+			if h.Store != nil {
+				markKeyGenPending(pctx, p.store)
+			}
 			cctx, ccancel := context.WithTimeout(context.Background(), closeTimeout)
 			defer ccancel()
 			_ = e.Close(cctx)

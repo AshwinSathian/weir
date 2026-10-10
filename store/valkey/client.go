@@ -23,6 +23,9 @@ type client interface {
 	// set stores val at key until the Unix millisecond pxat.
 	set(ctx context.Context, key string, val []byte, pxat int64) error
 	del(ctx context.Context, key string) error
+	// swapString stores val at key with no expiry and returns the value that
+	// was there (SET ... GET); the error is valkey.Nil when there was none.
+	swapString(ctx context.Context, key string, val []byte) ([]byte, error)
 	// primaries returns the address of every primary node (the only nodes a
 	// scrub may SCAN without visiting each key twice or sending DEL to a
 	// replica), sorted.
@@ -102,6 +105,10 @@ func (v valkeyClient) get(ctx context.Context, key string) ([]byte, error) {
 
 func (v valkeyClient) set(ctx context.Context, key string, val []byte, pxat int64) error {
 	return v.c.Do(ctx, v.c.B().Set().Key(key).Value(string(val)).PxatMillisecondsTimestamp(pxat).Build()).Error()
+}
+
+func (v valkeyClient) swapString(ctx context.Context, key string, val []byte) ([]byte, error) {
+	return v.c.Do(ctx, v.c.B().Set().Key(key).Value(string(val)).Get().Build()).AsBytes()
 }
 
 func (v valkeyClient) del(ctx context.Context, key string) error {

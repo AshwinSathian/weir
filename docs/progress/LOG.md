@@ -1696,3 +1696,11 @@ Entry template:
 - Deviations: CLAUDE.md rule 6 and docs/07 §1 wording.
 - Follow-ups: P25-07c (needs approval); CI run on Valkey 8.1.
 - Context: medium
+
+## 2026-10-11 · P25-07c · blocked
+- Branch / PR: card/P25-07c-keygen-record / none yet (pushed to claude/beautiful-keller-9d29y4)
+- Done: `valkey.Store.RecordKeyGen` (`SET <prefix>:keygen <hash> GET`, no TTL); adapter `syncKeyGen` on every Valkey Provision writes the hard epoch on a mismatch and marks the record pending if the purge fails; 05 §7, 08 §3 and runbook 8.6/8.7 updated.
+- Tests: `TestRecordKeyGen*`, `TestSyncKeyGen*`, `TestMarkKeyGenPendingNeverMatches`, `TestRecordedHashExcludesStoreSettings`, integration `TestValkeyKeyGenRecord` (fails with the check disabled); pass with `-race` on redis 7.0.15. `make check`, lint and the card-reviewer pass not run yet.
+- Deviations: server unreachable at start skips the check with a warning (FR-STF-2) instead of failing Provision; a first record writes no purge.
+- Follow-ups: Ashwin runs `/handoff` (make check, review, card mark, PR); confirm the outage decision; CI on Valkey 8.1; then tick PLAN 2.5.5.
+- Context: medium; size S was right.
