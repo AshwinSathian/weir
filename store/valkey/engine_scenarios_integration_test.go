@@ -139,12 +139,13 @@ func TestEngineGroupInvalidationIsSoft(t *testing.T) {
 	waitFor(t, "the refreshes of /a and /b", func() bool { return o.Calls("/a") == 2 && o.Calls("/b") == 2 })
 }
 
-// T-29, 05 E-12: with the store's NewestEpochShared, a POST to the entry's own
-// URI still revalidates it, and a flood of POSTs to other URIs does not make a
-// group's entries read as invalidated. The lookup cost under the flood is
-// logged: every lookup is GET newest plus a script (P25-03b), and a newest
+// T-29, 05 E-12: after a flood of POSTs to other URIs a group's entries are
+// still fresh hits, and a POST to an entry's own URI still revalidates it. A
+// sketch collision with the group tag is unlikely at this flood size, so the
+// shared-tag rule itself is pinned by the store conformance suite, not here.
+// The lookup cost under the flood is logged: every lookup is GET newest plus a script (P25-03b), and a newest
 // cache is the upgrade if this number turns out to matter.
-func TestEngineSharedTagsUnderFlood(t *testing.T) {
+func TestEngineInvalidationFlood(t *testing.T) {
 	t.Parallel()
 	o := testorigin.NewChecked(t, 64, 16)
 	o.Default(grouped(`"g"`, nil))
@@ -152,7 +153,7 @@ func TestEngineSharedTagsUnderFlood(t *testing.T) {
 
 	engineServe(t, e, "/a", o)
 	engineServe(t, e, "/b", o)
-	time.Sleep(time.Second)
+	time.Sleep(time.Second) // entries must be older than the epoch second
 
 	lookups := func() time.Duration {
 		const n = 200
@@ -187,18 +188,21 @@ func TestEngineGlobalEpochSoft(t *testing.T) {
 	t.Parallel()
 	const n = 10
 	o := testorigin.NewChecked(t, 64, 16)
-	o.Default(cc(200, "max-age=60, stale-while-revalidate=3", "v"))
+	o.Default(cc(200, "max-age=60, stale-while-revalidate=5", "v"))
 	e := engineWith(t, weir.Config{})
 
 	path := func(i int) string { return "/k" + strconv.Itoa(i) }
 	for i := range n {
 		engineServe(t, e, path(i), o)
 	}
-	time.Sleep(time.Second)
+	time.Sleep(time.Second) // entries must be older than the epoch second
 	if err := e.Purge(t.Context(), weir.Purge{All: true}); err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(1100 * time.Millisecond) // the epoch is now or in the past; the 3 s window is still open
+	// The epoch is ceil(server now), and a response fetched before it is purged
+	// again (E-7), so the refreshes below must start after it. The 5 s window
+	// is measured from the epoch and is still open then.
+	time.Sleep(2100 * time.Millisecond)
 
 	for i := range n / 2 {
 		if resp, _ := engineServe(t, e, path(i), o); resp.Cache.Stale != weir.StaleWhileRevalidate {
@@ -208,7 +212,7 @@ func TestEngineGlobalEpochSoft(t *testing.T) {
 	for i := range n / 2 {
 		waitFor(t, "the refresh of "+path(i), func() bool { return o.Calls(path(i)) == 2 })
 	}
-	time.Sleep(4 * time.Second) // past the 3 s window measured from the purge
+	time.Sleep(4500 * time.Millisecond) // 6.6 s after the purge: past the window even if the epoch was a second later
 	for i := n / 2; i < n; i++ {
 		if resp, _ := engineServe(t, e, path(i), o); resp.Cache.Stale != weir.StaleNone {
 			t.Fatalf("%s: served stale (%v) past the window", path(i), resp.Cache.Stale)
@@ -232,7 +236,7 @@ func TestEngineSoftAfterHardStaysHard(t *testing.T) {
 
 	engineServe(t, e, "/a", o)
 	engineServe(t, e, "/down", o)
-	time.Sleep(time.Second)
+	time.Sleep(time.Second) // entries must be older than the epoch second
 	urls := []string{"https://example.com/a", "https://example.com/down"}
 	if err := e.Purge(t.Context(), weir.Purge{Mode: weir.PurgeHard, URLs: urls}); err != nil {
 		t.Fatal(err)
@@ -482,7 +486,9 @@ func TestEngineWarm(t *testing.T) {
 	o.Default(b)
 	o.Route("/no-store", testorigin.Behavior{Header: http.Header{"Cache-Control": {"no-store"}}})
 	o.Route("/down", testorigin.Behavior{Err: errors.New("refused")})
-	e := engineWith(t, weir.Config{})
+	cfg := weir.Config{}
+	cfg.Warm.Concurrency = 4
+	e := engineWith(t, cfg)
 
 	var paths []string
 	for i := range 40 {
@@ -495,8 +501,8 @@ func TestEngineWarm(t *testing.T) {
 	if want := (weir.WarmStats{Fetched: 40, NotStored: 1, Failed: 1}); st != want {
 		t.Fatalf("stats = %+v, want %+v", st, want)
 	}
-	if n := o.MaxInflight(); n > 4 {
-		t.Fatalf("origin max in-flight = %d, want at most Warm.Concurrency (4)", n)
+	if n := o.MaxInflight(); n < 2 || n > 4 {
+		t.Fatalf("origin max in-flight = %d, want 2 to 4 (Warm.Concurrency is 4)", n)
 	}
 	for _, p := range paths {
 		if resp, body := engineServe(t, e, p, o); !resp.Cache.Hit || body != "v" {

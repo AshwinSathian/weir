@@ -2,17 +2,23 @@
 
 Updated: 2026-10-10
 Phase: 1
-Current card: P25-04b
-Card state: in-progress
+Current card: none
+Card state: awaiting-merge
 Branch: claude/amazing-galileo-2z89q7
-PR: none yet (P25-04 PR 90 merged)
-Next card: P25-04b (P25-05 is blocked on the question below)
+PR: pending (P25-04b)
+Next card: P25-05 (blocked on the question below)
 
 ## Waiting on Ashwin
 
 - P25-05 (does not block P25-04b): how the engine updates a vary spec atomically. (a) optional capability `VarySetter` (public API addition, leaves the codec alone; recommended) or (b) a version field on `store.Entry` (public type change touching memory store and codec). Not decided: it is a public API choice, not covered by the delegation on PR 90.
 
 Earlier decisions: none open. Decided 2026-10-10 (P2-03b, review of PR 79; Ashwin delegated "take decisions on all items"): caddytest e2e files are a named exception to the real-clock rule (CLAUDE.md rule 6, docs/07 §1) instead of a build tag, because a tag would stop CI running them; a skip outside `-short` fails the test; the test site binds 127.0.0.1; the herd test uses a 2 s client timeout so a hard purge reports counts. Also decided (P2-02): multi-host is an explicit `multi_host` key; scanning the http app was rejected (handler cannot find its own route; global scan would cap unrelated sites and flush their stores). Documented in 08 §2/§3/§4b.
+
+## Notes for the next session (P25-04b)
+
+- PLAN 2.5.2 stays unticked until the CI `valkey` job has run both engine files on Valkey 8.1 (card AC).
+- Measured on redis 7.0.15: a hit costs about 0.27-0.32 ms before and 0.46-0.51 ms after 300 invalidations (lookup is GET newest plus a script). A newest cache is the upgrade only if this matters; no change made.
+- Epoch tests must start a refresh after `ceil(purge time)`: a response fetched before the epoch second is purged again (E-7). `TestEngineGlobalEpochSoft` waits 2.1 s for that.
 
 ## Decided 2026-10-10 (P25-04, adversarial review of PR 90)
 

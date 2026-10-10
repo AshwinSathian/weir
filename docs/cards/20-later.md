@@ -148,7 +148,7 @@ These phases start from draft specs. Each begins with one planning card that ver
 - Out of scope: new scenarios; weakening a test to pass
 - Notes: root-module tests may not import valkey-go, so the suite lives in the `store/valkey` module and imports the engine.
 
-### [ ] P25-04b Remaining engine scenarios against Valkey
+### [x] P25-04b Remaining engine scenarios against Valkey
 - Plan: 2.5.2 · Size: S · Depends on: P25-04
 - Read: 07 §6 (T6.x matrix); `store/valkey/engine_integration_test.go`; purge_test.go and vary_test.go in the root package
 - Touch: `store/valkey/engine_integration_test.go` (or a second file), docs/05 only if a test finds an interface bug

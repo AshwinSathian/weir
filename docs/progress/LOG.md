@@ -1600,3 +1600,11 @@ Entry template:
 - Deviations: none. The earlier excluded-scenario list was incomplete: Invalid epoch, global soft, Vary variants, MustRevalidate, Warm and creator cancel could run on Valkey; they are P25-04b.
 - Follow-ups: P25-05 API decision waits on Ashwin; Valkey 8.1 CI job still not run.
 - Context: low
+
+## 2026-10-10 · P25-04b · done
+- Branch / PR: claude/amazing-galileo-2z89q7 / pending
+- Done: `store/valkey/engine_scenarios_integration_test.go` (tag `integration`): unsafe-method and group invalidation (invalid mode, shared tags), invalidation flood with a logged lookup-cost measurement, global soft epoch, soft after hard, purge during an in-flight fetch, Vary followers through the codec, must-revalidate 504, creator cancel, Warm.
+- Tests: TestEngineUnsafeMethodInvalidates, GroupInvalidationIsSoft, InvalidationFlood, GlobalEpochSoft, SoftAfterHardStaysHard, PurgeDuringInflightFetch, VaryFollowersRecoalesce, MustRevalidate504, CoalesceCreatorCancel, Warm. All TestEngine* pass 3 of 3 runs with `-race` on redis 7.0.15 (about 32 s). Root `make check` passes except `lint`/`modules`, which stop on the container's Go 1.25 golangci-lint (CI must confirm).
+- Deviations: none. Review: card-reviewer found `TestEngineGlobalEpochSoft` failing (refresh started before the epoch second, so purged again); fixed with a 2.1 s wait and a 5 s window. Also set Warm.Concurrency explicitly and asserted 2..4 in flight, renamed the flood test to claim only what it shows (the shared-tag rule is pinned by storetest).
+- Follow-ups: CI Valkey 8.1 run still pending; PLAN 2.5.2 unticked until then. P25-05 waits on Ashwin.
+- Context: low; size S was right.
