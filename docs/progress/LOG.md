@@ -1452,6 +1452,7 @@ Entry template:
 - Branch / PR: claude/nice-rubin-sw5o8p (session-designated, not card/*) / not opened yet
 - Done: docs/runbook.md section 7 (single-node Caddy deployment guide, all AC items); 08 §5 now records that `rate_limit` is ordered before `basic_auth` (checked in caddy-ratelimit's caddyfile.go) and Caddy v2.11.7's default order puts `encode` ahead of `weir`.
 - Tests: none (docs only); `make check` stops at lint (container golangci-lint built with Go 1.25), CI must confirm.
-- Deviations: none. Card mark and PLAN checkbox left for `/handoff`, which the Skill tool refused to run.
-- Follow-ups: run `/handoff` for P2-07; the runbook's Caddyfile examples were not run through `caddy adapt`.
+- Deviations: none. Card marked and PLAN 2.4 ticked at /handoff.
+- Review: card-reviewer found one must-fix (inner `encode` example listed `br` that `encode` cannot produce; now `zstd gzip` both sides) and six should-fix (shutdown budget wording, `.keygen` file, `max_bytes` below 160 MiB is rejected, `bypass` wording, metrics wiring, ratelimit source version); all fixed.
+- Follow-ups: run the runbook's Caddyfile examples through `caddy adapt`; Phase 2 cards are done, next is P25-00.
 - Context: low; size S was right.

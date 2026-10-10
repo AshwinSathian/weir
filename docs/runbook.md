@@ -144,14 +144,15 @@ example.com {
 - `name` is required. It is the store identity across reloads, the `name` metric label, the admin URL segment and the snapshot file name, so pick it once and keep it.
 - `request_body { max_size }` and the server `read_body` timeout are required on Weir routes (FR-LIM-7, T-39). Weir bounds origin concurrency, but a slow or oversized upload still holds a slot from the upload pool until it finishes. Size the limit to your largest legitimate upload.
 - `snapshot_dir` must be absolute, owned by the Caddy user and not writable by group or others. Weir creates it with mode 0700 and refuses a shared one (a planted snapshot would be served as trusted cache content). The file is `<snapshot_dir>/<name>.weir`, written when the store closes and read at the next start. Without `snapshot_dir` every restart is a cold cache.
-- The snapshot is written during shutdown, so give Caddy time: `grace_period` is the time Caddy waits for requests to drain before it stops, and closing the store takes up to its snapshot timeout (5 s) after that. A service manager that kills the process sooner (`TimeoutStopSec` in systemd, `terminationGracePeriodSeconds` in Kubernetes) loses the snapshot. Set it above `grace_period` plus about 10 s. A reload that replaces a large store can also wait about 10 s for the old config to stop (08 §3).
+- The snapshot is written during shutdown, so give Caddy time: `grace_period` is the time Caddy waits for requests to drain before it stops, and the engine close and the store close can each take up to the 5 s snapshot timeout after that, so about 10 s more. A service manager that kills the process sooner (`TimeoutStopSec` in systemd, `terminationGracePeriodSeconds` in Kubernetes) loses the snapshot: set its stop timeout above `grace_period` plus 10 s. A reload that replaces a large store waits about as long for the old config to stop (08 §3).
+- `snapshot_dir` also holds `<name>.weir.keygen`, a 32-byte record of the forwarding settings the snapshot was stored under. Do not delete it as debris: without it the next start discards the snapshot. A start after a change to `forward` or `Storable.StripSetCookie` discards it too, on purpose (08 §3).
 
 ### 7.3 Order of handlers
 
 Caddy sorts directives inside a site block by a fixed order, not by where you wrote them. In v2.11.7 `weir` sits directly before `reverse_proxy` and after `encode`, `request_header`, `basic_auth`, `forward_auth`, `handle` and `route`. Anything that must see a request before the cache does is therefore already outside it. Anything you want inside it needs a `route` block with an explicit order. If `reverse_proxy` is inside `handle { }` or `route { }`, put `weir` in the same block.
 
-- **Auth before `weir`.** `basic_auth`, `forward_auth` and any identity handler must run before the cache, and a route that needs per-user responses should be bypassed (`bypass`) or rely on `Authorization` handling (FR-STO-5). The handler behind Weir sees the creating request's context values (T-45), so a variable that an auth handler put there can shape a response that is then stored and shared. Weir cannot key what it cannot see. Derive per-user output only from the forwarded request, or keep the route out of the cache (06 R-6).
-- **`rate_limit` before `weir`.** This is the answer to distinct-path floods (06 R-2). The third-party `caddy-ratelimit` module registers its directive with the default order `before basic_auth` (its `caddyfile.go`), so it is outside `weir` without any setting. Do not move it with a global `order` directive to after `weir`: a limiter behind the cache never sees hits and so cannot count them, and a flood of misses would be limited only after Weir had queued them. Verify the result on your build, not on this page:
+- **Auth before `weir`.** `basic_auth`, `forward_auth` and any identity handler must run before the cache, and a route that needs per-user responses should list its session cookie or header under `bypass { cookies ... }` (or `headers`) or rely on `Authorization` handling (FR-STO-5). The handler behind Weir sees the creating request's context values (T-45), so a variable that an auth handler put there can shape a response that is then stored and shared. Weir cannot key what it cannot see. Derive per-user output only from the forwarded request, or keep the route out of the cache (06 R-6).
+- **`rate_limit` before `weir`.** This is the answer to distinct-path floods (06 R-2). The third-party `caddy-ratelimit` module registers its directive with the default order `before basic_auth` (its `caddyfile.go` on `master`, read 2026-10-10; check the version you build), so it is outside `weir` without any setting. Do not move it with a global `order` directive to after `weir`: a limiter behind the cache never sees hits and so cannot count them, and a flood of misses would be limited only after Weir had queued them. Verify the result on your build, not on this page:
 
   ```sh
   caddy adapt --config Caddyfile --pretty | grep -n '"handler"'
@@ -177,7 +178,7 @@ Caddy sorts directives inside a site block by a fixed order, not by where you wr
   	route {
   		weir {
   			name site-a
-  			key { accept_encoding br gzip }
+  			key { accept_encoding zstd gzip }
   		}
   		encode zstd gzip
   		reverse_proxy app:8080
@@ -198,7 +199,7 @@ The same holds for Caddy placeholders in any handler after `weir`. The request c
 Stores without `max_bytes` share 40% of the memory limit (`GOMEMLIMIT`, which the `caddy` binary derives from the cgroup or system memory at start). Caddy provisions handlers one at a time and gives no look-ahead, so the split is uneven: each new auto-sized store takes half of what the live auto-sized stores have not claimed, with a floor of 160 MiB and a warning. One auto-sized site gets half of the budget (20% of the limit). The share is fixed for the store's life. A reload that adds an auto-sized site can push the total above 40% until the next restart, and `Provision` logs a warning when it does.
 
 - Single-site node that wants more than 20%: set `max_bytes`.
-- Several sites, or a BYOD control plane that adds sites by reload: set `max_bytes` on every site (T-43). The floor is 160 MiB, because the largest cacheable object is 10% of a shard.
+- Several sites, or a BYOD control plane that adds sites by reload: set `max_bytes` on every site (T-43). The floor is 160 MiB, because the largest cacheable object is 10% of a shard. An explicit `max_bytes` below it is not clamped: `caddy validate` rejects it.
 - A custom `main` that skips the memory-limit setup falls back to 256 MiB per store with a warning.
 
 ### 7.6 Hosts that share a site
@@ -237,7 +238,7 @@ curl -s -X POST localhost:2019/weir/site-a/mode \
 curl -s localhost:2019/weir/site-a/stats
 ```
 
-A purge body that names nothing is a 400. A reply of 202 means the epochs are written and the entries are unreachable; `eager` adds the number of records scrubbed. A name with no live engine is a 404. Soft and hard are explained in 4.3, and modes in 4.1 and 4.2. Metrics are on Caddy's registry under `/metrics` with a `name` label on every `weir_*` series (section 2).
+A purge body that names nothing is a 400. A reply of 202 means the epochs are written and the entries are unreachable; `eager` adds the number of records scrubbed. A name with no live engine is a 404. Soft and hard are explained in 4.3, and modes in 4.1 and 4.2. The `caddy` module registers the `observe/prom` metrics (section 2) on Caddy's own registry (08 §8), with a `name` label on every `weir_*` series. They are served by Caddy's `metrics` handler or the admin endpoint's `/metrics`.
 
 ### 7.8 Before you go live
 

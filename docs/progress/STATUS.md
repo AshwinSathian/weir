@@ -2,11 +2,11 @@
 
 Updated: 2026-10-10
 Phase: 1
-Current card: P2-07
-Card state: in-progress
+Current card: none
+Card state: awaiting-merge
 Branch: claude/nice-rubin-sw5o8p
-PR: none yet (run /handoff)
-Next card: P2-07
+PR: (filled after push)
+Next card: P25-00
 
 ## Waiting on Ashwin
 
@@ -60,6 +60,8 @@ Ashwin delegated "take decisions on all items"; "Waiting on Ashwin" was empty. A
 "Waiting on Ashwin" was empty. No must-fix. Decided: sub-block keys (`key`, `forward`, `bypass`, `limiter`, `stale`) with no block or empty braces are an error; repeated keys stay an error and 08 §2 now says so; the `weir <matcher>` form is supported and documented; runtime placeholders (`{env.X}`, `{host}`) are not expanded, only parse-time `{$VAR}`, documented in 08 §2; the `name` error points at the `name` line. Tests added for repeated sub-block keys, negative durations, directive arguments, bare and empty sub-blocks, the matcher form. Kept: duplicate `name` handling in P2-02, the non-`card/*` branch, `RegisterDirectiveOrder` (TestDirectiveOrder fails loudly on a Caddy bump).
 
 ## Notes for the next session
+
+- P2-07 done: runbook section 7. Not yet run through `caddy adapt`; the examples were read against Caddy v2.11.7 source only. caddy-ratelimit order was read on `master` (no tag).
 
 - CI's xcaddy step needs one `--with <module>=<path>` per unreleased module the `caddy` module requires (root, `caddy`, `observe/prom`); add one when another sub-module becomes a dependency.
 
