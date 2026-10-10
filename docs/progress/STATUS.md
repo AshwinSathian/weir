@@ -2,11 +2,11 @@
 
 Updated: 2026-10-10
 Phase: 1
-Current card: P2-02 (store pool and key-generation hash)
-Card state: in-progress
+Current card: none
+Card state: awaiting-merge
 Branch: claude/peaceful-mccarthy-b9uz60
-PR: none (PR 76 merged)
-Next card: P2-02
+PR: PENDING
+Next card: P2-03 (nextOrigin, errors and upgrades)
 
 ## Waiting on Ashwin
 
@@ -461,3 +461,11 @@ The cards' Notes give the reasons and the options rejected. All three come befor
 - M1-17 review nits left open: an origin-form `//x` target through `RequestFrom`'s `RequestURI` branch is untested (needs a raw connection; the test's `//` case goes absolute-form); a nil `TransportOrigin.Target` panics (documented contract).
 - weirhttp `HandlerOrigin` (M1-17b): enforces a declared `Content-Length` like net/http's server (short body reads fail with `io.ErrUnexpectedEOF`, so fetch.go never stores it), refuses 204/304 bodies, discards HEAD bodies, recovers panics and `runtime.Goexit` as `ErrOrigin`. A handler that ignores its context and never writes outlives `Close` (04 §10). The Caddy `nextOrigin` should reuse this writer rather than copy it.
 - Threat-model gap for the Caddy card: an in-process origin sees the creator request's context values (FR-COA-9: Caddy vars, auth identity set by upstream middleware). Those are unkeyed input `TransportOrigin` never exposes; 06 T-45 and R-6 cover it, and P2-00 carries the placement rule.
+
+## Notes for P2-03 and later (from P2-02)
+
+- `multi_host` is an explicit key (08 §2). P2-03 should log one warning when one engine sees a second distinct host while `multi_host` is off (bounded: count to 2).
+- `max_bytes` below about 160 MiB fails Provision: the engine's largest object is 10% of a shard and defaults to 1 MiB, and the adapter has no `Storable.MaxObjectBytes` key. Add the key or clamp in a later card.
+- The key-generation hash guards in-process reloads only; persisting it with the snapshot is a follow-up (08 §3). `Forward.Mode` and `Storable.StripSetCookie` have no JSON form yet, so only `forward.allow` feeds it.
+- Shard count is not in the pool key (no setting); add it with the setting. `defaultShards` and `defaultStoreBytes` in caddy/pool.go duplicate memory defaults; P2-04 replaces the size with auto-sizing.
+- Caddy lint here: `cd caddy && GOWORK=off GOTOOLCHAIN=go1.27.0 go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0 run`. `make check` lint fails in this container (Go 1.25 build); CI must confirm.

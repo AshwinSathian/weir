@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"sync/atomic"
 
@@ -28,8 +29,9 @@ var stores = newStoreRegistry()
 
 // storeSpec is the pool key (08 §3): everything fixed when a store is built.
 // The shard count is not a key yet: no setting changes it, so every store
-// uses the memory default (16). ownerCap is FR-FAIR-3 "more than one host or on-demand TLS". snapshotDir is part of the
-// key so a changed directory builds a store that loads from it.
+// uses the memory default (16). ownerCap is FR-FAIR-3, "more than one host or
+// on-demand TLS". snapshotDir is part of the key so a changed directory
+// builds a store that loads from it.
 type storeSpec struct {
 	name        string
 	maxBytes    int64
@@ -85,9 +87,12 @@ func (p *pooledStore) Destruct() error {
 type storeRegistry struct {
 	pool *caddy.UsagePool
 
-	mu     sync.Mutex
-	latest map[string]*pooledStore // newest store per name
-	loads  map[any]map[string]*claim
+	mu sync.Mutex
+	// live holds the stores alive per name, most recently acquired last. The
+	// last one is the live writer; the others are superseded. When it goes
+	// away (a reload rolled back) the previous one becomes the writer again.
+	live  map[string][]*pooledStore
+	loads map[any]map[string]*claim
 }
 
 // claim records what one config load has said about a name, so a second site
@@ -100,9 +105,9 @@ type claim struct {
 
 func newStoreRegistry() *storeRegistry {
 	return &storeRegistry{
-		pool:   caddy.NewUsagePool(),
-		latest: map[string]*pooledStore{},
-		loads:  map[any]map[string]*claim{},
+		pool:  caddy.NewUsagePool(),
+		live:  map[string][]*pooledStore{},
+		loads: map[any]map[string]*claim{},
 	}
 }
 
@@ -128,11 +133,8 @@ func (r *storeRegistry) acquire(load any, spec storeSpec, keyGen [sha256.Size]by
 	p = v.(*pooledStore)
 
 	r.mu.Lock()
-	if prev := r.latest[spec.name]; prev != nil && prev != p {
-		prev.superseded.Store(true)
-	}
-	p.superseded.Store(false)
-	r.latest[spec.name] = p
+	r.live[spec.name] = append(slices.DeleteFunc(r.live[spec.name], func(q *pooledStore) bool { return q == p }), p)
+	r.markWriter(spec.name)
 	r.mu.Unlock()
 
 	if loaded {
@@ -152,8 +154,21 @@ func (r *storeRegistry) release(load any, p *pooledStore) error {
 func (r *storeRegistry) forget(p *pooledStore) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.latest[p.spec.name] == p {
-		delete(r.latest, p.spec.name)
+	name := p.spec.name
+	r.live[name] = slices.DeleteFunc(r.live[name], func(q *pooledStore) bool { return q == p })
+	if len(r.live[name]) == 0 {
+		delete(r.live, name)
+		return
+	}
+	r.markWriter(name)
+}
+
+// markWriter flags every live store of name except the newest as superseded.
+// Caller holds r.mu.
+func (r *storeRegistry) markWriter(name string) {
+	l := r.live[name]
+	for i, q := range l {
+		q.superseded.Store(i != len(l)-1)
 	}
 }
 

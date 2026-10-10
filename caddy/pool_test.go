@@ -147,6 +147,27 @@ func TestPoolResizeReloadAllowed(t *testing.T) {
 	}
 }
 
+// FR-SNP-1: when a reload rolls back and the newer store goes away, the older
+// store is the writer again.
+func TestRolledBackReloadRestoresSnapshotWriter(t *testing.T) {
+	dir := t.TempDir()
+	snap := filepath.Join(dir, "back.weir")
+	old := mustLoad(t, newCtx(t), `{"name":"back","max_bytes":"200MiB","snapshot_dir":"`+dir+`"}`)
+	neu := mustLoad(t, newCtx(t), `{"name":"back","max_bytes":"400MiB","snapshot_dir":"`+dir+`"}`)
+	if err := neu.Cleanup(); err != nil {
+		t.Fatal(err)
+	}
+	if old.pool.superseded.Load() {
+		t.Fatal("old store still flagged superseded")
+	}
+	if err := old.Cleanup(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(snap); err != nil {
+		t.Fatalf("no snapshot after rollback: %v", err)
+	}
+}
+
 // 08 §3: the pooled value closes with the last release.
 func TestPoolDestructsOnLastRelease(t *testing.T) {
 	h1 := mustLoad(t, newCtx(t), `{"name":"last","max_bytes":"200MiB"}`)

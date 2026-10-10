@@ -40,7 +40,8 @@ type Handler struct {
 	MultiHost bool `json:"multi_host,omitempty"`
 
 	engine *weir.Engine
-	// pool and release are set by a successful Provision. release gives back
+	// pool and release are set by a successful Provision (Caddy calls
+	// Provision and Cleanup serially, so no lock). release gives back
 	// the one store reference and is called at most once.
 	pool    *pooledStore
 	release func() error
