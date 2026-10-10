@@ -1,7 +1,7 @@
 # Weir testing strategy
 
 Status: v1.0
-Date: 2026-10-09
+Date: 2026-10-10
 Depends on: [01-technical-spec.md](01-technical-spec.md), [06-threat-model.md](06-threat-model.md)
 Seed name: `03-testing-strategy.md` (renumbered, see [docs/README.md](README.md))
 
@@ -11,6 +11,7 @@ The seed scattered a test strategy under each failure mode. This document turns 
 
 1. Every requirement ID in the spec (`FR-*`, `NFR-*`) and every invariant (`INV-*`) is cited by at least one test, in a comment on the line above the test function: `// FR-COA-4, T-19`. A script (`scripts/trace.sh`, added in Phase 0) lists requirement IDs with no citing test; Phase 1 is not done while the list is non-empty.
 2. Tests that involve time, timeouts, tickers or concurrency run inside `synctest.Test`. No unit or component test calls `time.Sleep` on the real clock or relies on wall-clock timing to pass. Engines, stores, test origins and test servers are created inside the bubble (channels and timers created outside a bubble panic when used inside it), and closed before the bubble function returns.
+   Exception: the `caddytest` end-to-end files in `caddy/` start a real in-process Caddy with real listeners, which a synctest bubble cannot hold. They use the real clock without a build tag (so `make check` and CI run them), wait by polling observable state, and name each fixed pause in a comment. They skip under `-short`; a skip outside `-short` (the harness could not start its admin port) is turned into a failure so CI cannot pass with no coverage. They bind to 127.0.0.1 and use the fixed ports 2999 (admin) and 9080, so no other caddytest package may run in parallel.
 3. Every test run uses `-race`. CI also runs with `-shuffle=on` and `-count=1`.
 4. Randomness in the code under test comes from `Config.Rand`. Tests that assert on distributions inject a seeded `math/rand/v2` PCG source wrapped in a mutex (`Config.Rand` is called concurrently); tests that assert exact behavior inject a scripted sequence, also mutex-guarded.
 5. A bug fix starts with a failing test that reproduces it.
