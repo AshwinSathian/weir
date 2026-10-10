@@ -10,7 +10,7 @@ endif
 # leans on an unpublished sibling by accident (docs/02 §3.2).
 SUBMODULES := $(patsubst ./%/go.mod,%,$(shell find . -mindepth 2 -name go.mod -not -path './testdata/*' -not -path './.claude/*' -not -path './.git/*' | sort))
 
-.PHONY: test-valkey check fmt-check vet lint test modules test-short trace trace-strict fuzz-short bench load cache-tests vuln card next
+.PHONY: check fmt-check vet lint test modules test-short trace trace-strict fuzz-short bench load cache-tests vuln card next test-valkey
 
 ## check: everything a card must pass before handoff (CI runs the same)
 check: fmt-check vet lint test modules trace-strict

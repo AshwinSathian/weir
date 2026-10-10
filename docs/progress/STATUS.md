@@ -4,9 +4,9 @@ Updated: 2026-10-10
 Phase: 1
 Current card: none
 Card state: awaiting-merge
-Branch: claude/brave-hamilton-yomx12
-PR: https://github.com/AshwinSathian/weir/pull/86
-Next card: P25-02
+Branch: claude/blissful-pascal-4l6ag2
+PR: pending
+Next card: P25-03
 
 ## Waiting on Ashwin
 
@@ -81,6 +81,8 @@ Ashwin delegated "take decisions on all items"; "Waiting on Ashwin" was empty. A
 Ashwin delegated "take decisions on all items"; "Waiting on Ashwin" was empty. An independent agent attacked the PR; no must-fix. Decisions: empty `Prefix`/`HashTag` mean the default (card test list reworded); config errors wrap `weir.ErrInvalidConfig` (no new sentinel); upper bounds added (MaxRetention 10 y, MaxClockSkew 1 h, MaxHardEpochs 1e6, key parts 64 bytes); `HardEpochWait` whole ms and below `CallTimeout`; `Addrs` must be unique `host:port`. Fixed: `Validate` copy aliased `Addrs`/`TLS`, returns the zero Config on error; JSON marshalling leaked the password (now redacted); `mapError` leaves wrapped `valkey.Nil` and `ErrNotFound` alone. Written into 05 §7.
 
 ## Notes for the next session
+
+- P25-02 done: `Get`/`Set`/`Delete` in `store/valkey/entries.go`; the `client` seam gained `get`, `set`, `del` (P25-03 adds script calls). `Set` declines (nil) a record `store.Encode` rejects. `Decode` is bounded by `maxValueBytes` (512 MiB, the server's limit), not a Weir cap; confirm the engine's body cap is far below it. Integration tests need `WEIR_VALKEY_ADDR` (`make test-valkey`); only `redis-server` 7.0 was available here, so the CI job on `valkey/valkey:8.1` has not run. The job sets `volatile-lfu` with `docker exec ... valkey-cli config set` (service containers take no command); it is a new required job in the aggregate `check`.
 
 - P25-01b done: `valkey.New` returns `*Store` (as `memory.New`); `acquire(ctx)` hands out the `client` seam (`policies`, `close`) that P25-02 extends with the real commands. The shared dial runs under `CallTimeout`, not the caller's deadline. Policy check fails closed. `go.work` now includes `./store/valkey`. Errors use `store: valkey:` (card note reconciled).
 - Container lint workaround for the root `make check`: `make -o lint check` after running golangci-lint with `GOTOOLCHAIN=go1.27.0`; the `modules` target also hits the Go 1.25 binary, so run each submodule by hand. CI must confirm.

@@ -120,7 +120,7 @@ jobs:
             **/go.sum
       - name: set the eviction policy
         run: |
-          docker exec "$(docker ps -q --filter ancestor=valkey/valkey:8.1)" valkey-cli config set maxmemory-policy volatile-lfu
+          docker exec "$(docker ps -q --filter publish=6379)" valkey-cli config set maxmemory-policy volatile-lfu
       - name: integration tests
         env:
           WEIR_VALKEY_ADDR: localhost:6379

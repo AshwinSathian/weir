@@ -83,7 +83,7 @@ func testEntry(now time.Time) *store.Entry {
 	}
 }
 
-// 05 §7: the key layout is part of the format; operators run two
+// S-2, INV-1, 05 §7: the key layout is part of the format; operators run two
 // deployments on one server by prefix, and cluster mode needs the hash tag
 // to co-locate entries with epochs.
 func TestKeyLayout(t *testing.T) {
