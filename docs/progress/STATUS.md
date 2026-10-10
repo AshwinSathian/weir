@@ -5,7 +5,7 @@ Phase: 1
 Current card: none
 Card state: awaiting-merge
 Branch: claude/youthful-ride-2vosqo
-PR: PENDING
+PR: https://github.com/AshwinSathian/weir/pull/92
 Next card: P25-06
 
 ## Waiting on Ashwin
