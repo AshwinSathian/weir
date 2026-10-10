@@ -2,10 +2,10 @@
 
 Updated: 2026-10-10
 Phase: 1
-Current card: none
-Card state: awaiting-merge
-Branch: claude/peaceful-mccarthy-b9uz60
-PR: https://github.com/AshwinSathian/weir/pull/77
+Current card: P2-03
+Card state: in-progress
+Branch: claude/funny-bohr-vcgmor
+PR: none yet
 Next card: P2-03 (nextOrigin, errors and upgrades)
 
 ## Waiting on Ashwin

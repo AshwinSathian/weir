@@ -6,7 +6,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
+	"strconv"
+	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -14,7 +18,9 @@ import (
 	"github.com/caddyserver/caddy/v2/modules/caddyhttp"
 
 	"github.com/AshwinSathian/weir"
+	"github.com/AshwinSathian/weir/internal/keys"
 	"github.com/AshwinSathian/weir/store/memory"
+	"github.com/AshwinSathian/weir/weirhttp"
 )
 
 func init() { caddy.RegisterModule(&Handler{}) }
@@ -48,6 +54,14 @@ type Handler struct {
 	pool    *pooledStore
 	release func() error
 	closed  *atomic.Bool // set by Provision; a pointer so Handler stays copyable
+
+	// Serving state, set by Provision. firstHost is the only host the handler
+	// remembers (NFR-3); warnedHosts makes the multi_host warning one-shot.
+	log         *slog.Logger
+	httpApp     func() (any, error)
+	chainOnce   *sync.Once
+	firstHost   *atomic.Pointer[string]
+	warnedHosts *atomic.Bool
 }
 
 // CaddyModule implements caddy.Module.
@@ -115,6 +129,9 @@ func (h *Handler) Provision(ctx caddy.Context) (err error) {
 	// make a retry of the same config skip the purge.
 	p.commitKeyGen(h, keyGen)
 	h.engine, h.pool, h.release, h.closed = e, p, release, new(atomic.Bool)
+	h.log, h.chainOnce = cfg.Logger, new(sync.Once)
+	h.firstHost, h.warnedHosts = new(atomic.Pointer[string]), new(atomic.Bool)
+	h.httpApp = func() (any, error) { return ctx.App("http") }
 	return nil
 }
 
@@ -145,11 +162,75 @@ func (h *Handler) Cleanup() error {
 	return errors.Join(err, h.release())
 }
 
-// ServeHTTP implements caddyhttp.MiddlewareHandler. Serving arrives with
-// P2-03; until then the handler passes every request to the next handler so
-// a provisioned module never blocks traffic.
+// ServeHTTP implements caddyhttp.MiddlewareHandler (08 §4). CONNECT and
+// upgrades go to next without touching the engine (FR-UPG-1). Engine errors
+// come back as caddyhttp errors so the operator's handle_errors routes run
+// (D34).
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyhttp.Handler) error {
-	return next.ServeHTTP(w, r)
+	if keys.IsUpgrade(r.Method, r.Header) {
+		return next.ServeHTTP(w, r)
+	}
+	h.chainOnce.Do(h.warnChain)
+	h.noteHost(r.Host)
+	resp, err := h.engine.Serve(r.Context(), weirhttp.RequestFrom(r), nextOrigin{next: next, base: r})
+	if err != nil {
+		return serveError(w, err)
+	}
+	_ = weirhttp.WriteResponse(w, resp) // the client is gone; nothing left to tell it
+	return nil
+}
+
+// serveError sets Retry-After before returning the error: Caddy's error
+// path writes the status on the same ResponseWriter, so the header survives
+// (08 §4 step 4).
+func serveError(w http.ResponseWriter, err error) error {
+	if d, ok := weir.RetryAfter(err); ok {
+		w.Header().Set("Retry-After", strconv.FormatInt(int64(d/time.Second), 10))
+	}
+	return caddyhttp.Error(weir.StatusCode(err), err)
+}
+
+// noteHost warns once when a second distinct Host arrives while multi_host is
+// off (FR-FAIR-3): the per-host caps would be missing on a shared cache. Only
+// the first host is kept, so request input never grows a set.
+func (h *Handler) noteHost(host string) {
+	if h.MultiHost {
+		return
+	}
+	first := h.firstHost.Load()
+	if first == nil {
+		if h.firstHost.CompareAndSwap(nil, &host) {
+			return
+		}
+		first = h.firstHost.Load()
+	}
+	if !strings.EqualFold(*first, host) && !h.warnedHosts.Swap(true) {
+		h.log.Warn("weir: requests for more than one host reach this handler; set multi_host to enable the per-host fairness caps (docs/08 §2)",
+			"name", h.Name)
+	}
+}
+
+// warnChain logs the one-time 08 §6 warnings for the handlers behind weir.
+// It runs on the first request because the route that holds this handler
+// exists only after the http app finished provisioning.
+func (h *Handler) warnChain() {
+	if h.httpApp == nil {
+		return
+	}
+	// Best effort (08 §6): a context without a config, as unit tests build,
+	// makes ctx.App panic, and a warning must never fail a request.
+	defer func() { _ = recover() }()
+	v, err := h.httpApp()
+	if err != nil {
+		return
+	}
+	app, ok := v.(*caddyhttp.App)
+	if !ok {
+		return
+	}
+	for _, msg := range appWarnings(app, h) {
+		h.log.Warn(msg)
+	}
 }
 
 // Interface guards.
