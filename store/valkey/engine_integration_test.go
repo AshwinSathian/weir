@@ -117,12 +117,6 @@ func (l *eventLog) Observe(ev weir.Event) {
 	l.n[ev.Kind.String()+"/"+ev.Reason]++
 }
 
-func (l *eventLog) count(key string) int {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	return l.n[key]
-}
-
 // waitFor polls cond; a refresh in the background has no other signal on the
 // real clock.
 func waitFor(t *testing.T, what string, cond func() bool) {
@@ -158,7 +152,7 @@ func TestEngineCoalesceColdKey(t *testing.T) {
 			}
 			b, _ := io.ReadAll(resp.Body)
 			resp.Body.Close()
-			if resp.StatusCode != 200 || string(b) != "x" {
+			if resp.StatusCode != http.StatusOK || string(b) != "x" {
 				bad.Add(1)
 			}
 		}()
@@ -334,7 +328,7 @@ func TestEngineNegativeCache(t *testing.T) {
 	engineServe(t, e, "/a", o)
 	for range 20 {
 		resp, body := engineServe(t, e, "/a", o)
-		if resp.StatusCode != 503 || resp.Cache.Detail != "negative" || body != "" || resp.Header.Get("X-Origin") != "" || resp.Header.Get("Retry-After") != "7" {
+		if resp.StatusCode != http.StatusServiceUnavailable || resp.Cache.Detail != "negative" || body != "" || resp.Header.Get("X-Origin") != "" || resp.Header.Get("Retry-After") != "7" {
 			t.Fatalf("negative hit: %d detail=%q body=%q header=%v", resp.StatusCode, resp.Cache.Detail, body, resp.Header)
 		}
 	}
