@@ -16,6 +16,12 @@ type client interface {
 	// policies returns maxmemory-policy for every node the client knows
 	// (all primaries and replicas in cluster mode), keyed by address.
 	policies(ctx context.Context) (map[string]string, error)
+	// get returns the value at key, or an error for which valkey.IsValkeyNil
+	// is true when the key is absent.
+	get(ctx context.Context, key string) ([]byte, error)
+	// set stores val at key until the Unix millisecond pxat.
+	set(ctx context.Context, key string, val []byte, pxat int64) error
+	del(ctx context.Context, key string) error
 	close()
 }
 
@@ -61,6 +67,18 @@ func dialValkey(_ context.Context, cfg Config) (client, error) {
 }
 
 func (v valkeyClient) close() { v.c.Close() }
+
+func (v valkeyClient) get(ctx context.Context, key string) ([]byte, error) {
+	return v.c.Do(ctx, v.c.B().Get().Key(key).Build()).AsBytes()
+}
+
+func (v valkeyClient) set(ctx context.Context, key string, val []byte, pxat int64) error {
+	return v.c.Do(ctx, v.c.B().Set().Key(key).Value(string(val)).PxatMillisecondsTimestamp(pxat).Build()).Error()
+}
+
+func (v valkeyClient) del(ctx context.Context, key string) error {
+	return v.c.Do(ctx, v.c.B().Del().Key(key).Build()).Error()
+}
 
 func (v valkeyClient) policies(ctx context.Context) (map[string]string, error) {
 	out := make(map[string]string)

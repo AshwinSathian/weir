@@ -95,10 +95,6 @@ func (s *Store) callCtx(ctx context.Context) (context.Context, context.CancelFun
 // flag before it dials, dials at most once per reconnectEvery, and lets one
 // caller dial while the others wait on a channel, so no lock is held across
 // the dial or the policy check (P8).
-//
-// ponytail: the client result is unused until Get and Set arrive (P25-02).
-//
-//nolint:unparam // see above
 func (s *Store) acquire(ctx context.Context) (client, error) {
 	for {
 		if err := ctx.Err(); err != nil {
@@ -210,37 +206,11 @@ func (s *Store) dialChecked(ctx context.Context) (client, error) {
 	return cl, nil
 }
 
-// errNotYet marks calls that arrive with the next cards (P25-02 onward).
+// errNotYet marks calls that arrive with the next cards (P25-03 onward).
 var errNotYet = fmt.Errorf("store: valkey: %w: not implemented", store.ErrUnavailable)
 
-// ponytail: Get, Set, Delete and the epoch methods are placeholders until
-// P25-02 and P25-03; they already honor the connect path so its behavior is
-// testable.
-
-// Get is not implemented yet (P25-02).
-func (s *Store) Get(ctx context.Context, _ store.Key) (*store.Entry, error) {
-	_, err := s.acquire(ctx)
-	if err == nil {
-		err = errNotYet
-	}
-	return nil, err
-}
-
-// Set is not implemented yet (P25-02).
-func (s *Store) Set(ctx context.Context, _ store.Key, _ *store.Entry) error {
-	if _, err := s.acquire(ctx); err != nil {
-		return err
-	}
-	return errNotYet
-}
-
-// Delete is not implemented yet (P25-02).
-func (s *Store) Delete(ctx context.Context, _ store.Key) error {
-	if _, err := s.acquire(ctx); err != nil {
-		return err
-	}
-	return errNotYet
-}
+// ponytail: the epoch methods are placeholders until P25-03; they already
+// honor the connect path so its behavior is testable.
 
 // SetEpoch is not implemented yet (P25-03).
 func (s *Store) SetEpoch(ctx context.Context, _ store.Tag, _ store.Epoch) error {

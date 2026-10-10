@@ -1531,3 +1531,20 @@ Entry template:
 - Deviations: 05 §7 as above.
 - Follow-ups: none.
 - Context: low
+
+## 2026-10-10 · P25-02 · done
+- Branch / PR: claude/blissful-pascal-4l6ag2 / https://github.com/AshwinSathian/weir/pull/87
+- Done: `Get`, `Set`, `Delete` for `store/valkey` (entries.go); key layout `<prefix>:<hex>` or `<prefix>:{tag}:<hex>`; `Set` clamps to RequestTime + MaxRetention (E-11); `make test-valkey`; CI job `valkey` (valkey/valkey:8.1, volatile-lfu), added to the aggregate `check`.
+- Tests: TestKeyLayout, TestSetClampsToMaxRetention, TestGetDecodeFailureIsUnavailable, TestEntryCommandErrors; integration `TestStoreConformance` (WithoutEpochs) passes against redis-server 7.0.15 with ExpiredIsNotFound run, not skipped; `make check` passes with the go1.27 lint workaround.
+- Deviations: none. An unencodable record is declined with nil (S-4); the card was silent.
+- Review: card-reviewer, no must-fix. Fixed: CI policy step selects the container by published port, not image string; TestKeyLayout cites IDs; `.PHONY` order. Left: extra copy in `Value(string(val))` (nit); server-size error on a near-512 MiB value feeds the breaker (depends on the engine body cap).
+- Follow-ups: CI job unproven until the PR runs.
+- Context: low; size M was right.
+
+## 2026-10-10 · P25-02 · review-fixes
+- Branch / PR: claude/blissful-pascal-4l6ag2 / https://github.com/AshwinSathian/weir/pull/87
+- Done: adversarial review (agent) of PR 87; decisions in STATUS. Unencodable `Set` deletes the old record; `Get` checks `Expires`; 05 §7 gained the entry-read/write bullet.
+- Tests: TestGetPastExpiresIsNotFound, unencodable-replaces row, tightened future-RequestTime row, integration TestSetTTLIsClamped; module lint 0 issues, race tests pass, integration passes on redis-server 7.0.15.
+- Deviations: 05 §7 as above.
+- Follow-ups: CI job still unproven until the PR runs; a `MaxValueBytes` config field needs approval if wanted.
+- Context: low

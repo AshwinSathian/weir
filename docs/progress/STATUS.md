@@ -4,9 +4,9 @@ Updated: 2026-10-10
 Phase: 1
 Current card: none
 Card state: awaiting-merge
-Branch: claude/brave-hamilton-yomx12
-PR: https://github.com/AshwinSathian/weir/pull/86
-Next card: P25-02
+Branch: claude/blissful-pascal-4l6ag2
+PR: https://github.com/AshwinSathian/weir/pull/87
+Next card: P25-03
 
 ## Waiting on Ashwin
 
@@ -72,6 +72,17 @@ Ashwin delegated "take decisions on all items"; "Waiting on Ashwin" was empty. A
 
 "Waiting on Ashwin" was empty. No must-fix. Decided: sub-block keys (`key`, `forward`, `bypass`, `limiter`, `stale`) with no block or empty braces are an error; repeated keys stay an error and 08 §2 now says so; the `weir <matcher>` form is supported and documented; runtime placeholders (`{env.X}`, `{host}`) are not expanded, only parse-time `{$VAR}`, documented in 08 §2; the `name` error points at the `name` line. Tests added for repeated sub-block keys, negative durations, directive arguments, bare and empty sub-blocks, the matcher form. Kept: duplicate `name` handling in P2-02, the non-`card/*` branch, `RegisterDirectiveOrder` (TestDirectiveOrder fails loudly on a Caddy bump).
 
+## Decided 2026-10-10 (P25-02, adversarial review of PR 87)
+
+Ashwin delegated "take decisions on all items"; "Waiting on Ashwin" was empty. An independent agent attacked the PR; no must-fix. Decisions, written into 05 §7:
+
+- A `Set` the codec rejects now deletes the record at the key and returns nil (S-4: new record or nothing, as the memory store does for oversized records). A past-expiry or clamped-away `Set` keeps the older record (05 §2.3 literal).
+- `Get` returns `ErrNotFound` for a record past its `Expires` (05 §2.2), since the server clock differs.
+- `Decode` stays bounded by the 512 MiB server limit; no new config field (needs approval). The residual download-per-`Get` from a planted value needs server write access and is documented. A `MaxValueBytes` field can be proposed later.
+- Documented: same `Prefix` with different `HashTag` is a silent missed purge; the scrubber must read only 64-hex suffix keys; poisoned keys can open the store breaker.
+- Tests: vacuous future-RequestTime case fixed (bounds the PXAT); integration `TestSetTTLIsClamped` checks PTTL on a real server.
+- Kept: floating `valkey/valkey:8.1` tag (the minor was left to this card), `Value(string(val))` copy, error text prefixes.
+
 ## Decided 2026-10-10 (P25-01b, adversarial review of PR 86)
 
 Ashwin delegated "take decisions on all items"; "Waiting on Ashwin" was empty. An independent agent attacked the PR; no must-fix. Decisions, written into 05 §7: standalone mode (`Cluster` false) takes exactly one address (valkey-go uses only the first; `Validate` rejects more, a config-behavior change inside the approved Config); the policy check is an allowlist (`noeviction`, `volatile-*`); `Close` waits for a real dial, and the doc no longer claims a single `CallTimeout` bound; a second `Close` waits for the first. Fixed: the watcher goroutine joins `wg`, a failed single-client dial is closed, `lastErr` is set when closed. Tests added for failing-dial fan-in, the end-of-attempt gap, second `Close`, standalone addresses. Kept: no recheck of the policy after connect (documented).
@@ -81,6 +92,8 @@ Ashwin delegated "take decisions on all items"; "Waiting on Ashwin" was empty. A
 Ashwin delegated "take decisions on all items"; "Waiting on Ashwin" was empty. An independent agent attacked the PR; no must-fix. Decisions: empty `Prefix`/`HashTag` mean the default (card test list reworded); config errors wrap `weir.ErrInvalidConfig` (no new sentinel); upper bounds added (MaxRetention 10 y, MaxClockSkew 1 h, MaxHardEpochs 1e6, key parts 64 bytes); `HardEpochWait` whole ms and below `CallTimeout`; `Addrs` must be unique `host:port`. Fixed: `Validate` copy aliased `Addrs`/`TLS`, returns the zero Config on error; JSON marshalling leaked the password (now redacted); `mapError` leaves wrapped `valkey.Nil` and `ErrNotFound` alone. Written into 05 §7.
 
 ## Notes for the next session
+
+- P25-02 done: `Get`/`Set`/`Delete` in `store/valkey/entries.go`; the `client` seam gained `get`, `set`, `del` (P25-03 adds script calls). `Set` declines (nil) a record `store.Encode` rejects. `Decode` is bounded by `maxValueBytes` (512 MiB, the server's limit), not a Weir cap; confirm the engine's body cap is far below it. Integration tests need `WEIR_VALKEY_ADDR` (`make test-valkey`); only `redis-server` 7.0 was available here, so the CI job on `valkey/valkey:8.1` has not run. The job sets `volatile-lfu` with `docker exec ... valkey-cli config set` (service containers take no command); it is a new required job in the aggregate `check`.
 
 - P25-01b done: `valkey.New` returns `*Store` (as `memory.New`); `acquire(ctx)` hands out the `client` seam (`policies`, `close`) that P25-02 extends with the real commands. The shared dial runs under `CallTimeout`, not the caller's deadline. Policy check fails closed. `go.work` now includes `./store/valkey`. Errors use `store: valkey:` (card note reconciled).
 - Container lint workaround for the root `make check`: `make -o lint check` after running golangci-lint with `GOTOOLCHAIN=go1.27.0`; the `modules` target also hits the Go 1.25 binary, so run each submodule by hand. CI must confirm.

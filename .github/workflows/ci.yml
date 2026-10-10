@@ -94,11 +94,43 @@ jobs:
           cat caddy.log >&2
           exit 1
 
+  # P25-02: the Valkey store against a real server. Not multiplied by the Go
+  # version matrix. The policy is the one 05 §7 requires; the store refuses
+  # allkeys-* on connect. Valkey 7 or later is required.
+  valkey:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      valkey:
+        image: valkey/valkey:8.1
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "valkey-cli ping"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: store/valkey/go.mod
+          cache: true
+          cache-dependency-path: |
+            go.mod
+            **/go.sum
+      - name: set the eviction policy
+        run: |
+          docker exec "$(docker ps -q --filter publish=6379)" valkey-cli config set maxmemory-policy volatile-lfu
+      - name: integration tests
+        env:
+          WEIR_VALKEY_ADDR: localhost:6379
+        run: make test-valkey
+
   # Keeps a stable required-check name (`check`) however many Go versions the
   # matrix holds.
   check:
     if: always()
-    needs: [check-go, caddy-build]
+    needs: [check-go, caddy-build, valkey]
     runs-on: ubuntu-latest
     steps:
-      - run: test "${{ needs.check-go.result }}" = success -a "${{ needs.caddy-build.result }}" = success
+      - run: test "${{ needs.check-go.result }}" = success -a "${{ needs.caddy-build.result }}" = success -a "${{ needs.valkey.result }}" = success

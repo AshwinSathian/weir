@@ -112,7 +112,7 @@ These phases start from draft specs. Each begins with one planning card that ver
 - Out of scope: Get, Set, Delete and epochs
 - Notes: the policy check cannot run inside `New` because `New` does not connect (05 §7); until it passes, calls return `ErrUnavailable` and an error prefixed `store: valkey:` naming the policy (the store package's prefix).
 
-### [ ] P25-02 Get, Set, Delete and the CI Valkey job
+### [x] P25-02 Get, Set, Delete and the CI Valkey job
 - Plan: 2.5.1 · Size: M · Depends on: P25-01b
 - Read: 05 §2.2 to §2.4, §3 (codec), §8 (`ExpiredIsNotFound`, `ContextCanceled`, `ClosedStore`); store/codec.go API; .github/workflows/ci.yml
 - Touch: store/valkey/{entries.go,entries_test.go,integration_test.go}, .github/workflows/ci.yml, Makefile (target `test-valkey`, which also runs `go vet -tags integration`)
