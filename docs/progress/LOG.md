@@ -1506,3 +1506,11 @@ Entry template:
 - Deviations: 05 §7 gets a config-validation bullet; card P25-01 test list reworded for the empty-means-default rule.
 - Follow-ups: P25-01b adds `./store/valkey` to `go.work`.
 - Context: low
+
+## 2026-10-10 · P25-01b · blocked
+- Branch / PR: claude/brave-hamilton-yomx12 / none yet
+- Done: `store/valkey` Store skeleton (store.go, client.go): `New` validates only, lazy single-flight connect at most once per second, `CallTimeout` default, closed/ctx checks before dialing, policy check on every node, `go.work` entry. Get/Set/Delete/epochs are placeholders returning `ErrUnavailable`.
+- Tests: TestNewBadConfigFails, TestNewUnreachableServerSucceeds, TestReconnectRateLimited, TestInfo, TestCloseTwice, TestCloseDuringConnect, TestNoDialAfterClose, TestCanceledContextDoesNotDial, TestPolicyCheck and others; module lint, vet, race tests pass (go1.27 toolchain); trace-strict passes.
+- Deviations: `New` returns `*Store` (as `memory.New`), not `store.Store`; errors use the `store: valkey:` prefix, not `weir:`.
+- Follow-ups: waiting on the user to run `/handoff` (review, card mark, PR); the skill is user-invocable only.
+- Context: low; size M was right.

@@ -2,10 +2,10 @@
 
 Updated: 2026-10-10
 Phase: 1
-Current card: none
-Card state: awaiting-merge
-Branch: claude/nice-goodall-atnlor
-PR: https://github.com/AshwinSathian/weir/pull/85
+Current card: P25-01b
+Card state: in-progress
+Branch: claude/brave-hamilton-yomx12
+PR: none yet (code done; /handoff not run: review, card mark and PR still to do)
 Next card: P25-01b
 
 ## Waiting on Ashwin
