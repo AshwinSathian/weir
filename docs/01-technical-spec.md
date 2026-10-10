@@ -66,7 +66,7 @@ These were settled with the project owner on 2026-09-27 and are not reopened by 
 | D14 | Phase order after Phase 1: Caddy adapter (2), then Valkey store (2.5). |
 | D15 | Graceful-shutdown snapshot of the memory store, loaded as soft-stale (M13). |
 | D16 | Per-host fairness: limiter per-host cap and memory-store per-owner byte quota (M14), off by default in the library, on in the Caddy adapter for multi-host sites. |
-| D17 | Phase 2 runs a single Caddy node; multi-node waits for the Valkey store. |
+| D17 | Phase 2 runs a single Caddy node; multi-node waits for the Valkey store. Lifted 2026-10-11 (P25-07b): several Caddy nodes may share one cache through the `store valkey` block, under the rules in runbook §8. A memory-store site is still one node per cache. |
 | D18 | Hard purge is lazy; `Purge.Eager` additionally deletes matching records now (M15). |
 | D19 | Remote-store epoch lookups fail open with an event (T-9). |
 | D20 | `Cache-Status` on by default with minimal parameters. |

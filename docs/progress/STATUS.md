@@ -2,11 +2,11 @@
 
 Updated: 2026-10-11
 Phase: 1
-Current card: none
-Card state: awaiting-merge
-Branch: claude/gracious-brown-acmyd0 (session branch, not card/*)
-PR: https://github.com/AshwinSathian/weir/pull/94
-Next card: P25-07b
+Current card: P25-07b
+Card state: in-progress (implemented, waiting for the user to run /handoff)
+Branch: card/P25-07b-two-node-purge (pushed to claude/dreamy-dijkstra-egbmbq)
+PR: none yet
+Next card: P25-07c (needs approval)
 
 ## Decided 2026-10-11 (P25-07, adversarial review of PR 94)
 
@@ -17,6 +17,11 @@ Ashwin delegated "take decisions on all items"; "Waiting on Ashwin" was empty. A
 - `username` and `password` accept `{env.VAR}`, resolved at Provision; `{$VAR}` still works but puts the secret in the adapted JSON and autosave (documented). Caddyfile errors for secrets and flags no longer quote tokens.
 - `closeStore` honors the caller's deadline for Valkey. `multi_host` with Valkey logs a warning. Tests added for pool sharing, close on last release, every-field digest coverage.
 - Declined as code: persisting the key-generation hash in Valkey (changes purge semantics): new card P25-07c, ask first. Restart after tightening `forward` stays documented in 08 §3.
+
+## Notes for P25-07b
+
+- Implemented under delegated decisions: D17 lifted for Valkey only; two-process harness (`caddy/internal/e2enode`); `integration` tag, run by `make test-valkey`. Needs review: CLAUDE.md rule 6 exception.
+- Not done: card mark, PLAN 2.5.5 tick, `make check`, `card-reviewer`, PR (all `/handoff`). CI must confirm lint and the test on Valkey 8.1.
 
 ## Notes for the next session (P25-07)
 

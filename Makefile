@@ -34,10 +34,12 @@ modules:
 	  (cd $$m && GOWORK=off go vet ./... && GOWORK=off $(GOLANGCI) run && GOWORK=off go test -race -shuffle=on -count=1 ./...) || exit 1; \
 	done
 
-## test-valkey: integration tests against a real server (WEIR_VALKEY_ADDR, default 127.0.0.1:6379; start Valkey with --maxmemory-policy volatile-lfu; WEIR_VALKEY_STORM_ADDR, a throwaway server with --maxmemory 16mb, enables the eviction storm)
+## test-valkey: integration tests (store/valkey, and the two-node Caddy test in caddy/) against a real server (WEIR_VALKEY_ADDR, default 127.0.0.1:6379; start Valkey with --maxmemory-policy volatile-lfu; WEIR_VALKEY_STORM_ADDR, a throwaway server with --maxmemory 16mb, enables the eviction storm)
 test-valkey:
 	cd store/valkey && GOWORK=off go vet -tags integration ./...
 	cd store/valkey && GOWORK=off WEIR_VALKEY_ADDR=$${WEIR_VALKEY_ADDR:-127.0.0.1:6379} WEIR_VALKEY_STORM_ADDR=$${WEIR_VALKEY_STORM_ADDR:-} go test -race -tags integration -count=1 ./...
+	cd caddy && GOWORK=off go vet -tags integration ./...
+	cd caddy && GOWORK=off WEIR_VALKEY_ADDR=$${WEIR_VALKEY_ADDR:-127.0.0.1:6379} go test -tags integration -run TestE2ETwoNode -count=1 ./...
 
 ## test-short: fast loop while writing code
 test-short:

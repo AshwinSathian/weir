@@ -1680,3 +1680,11 @@ Entry template:
 - Deviations: 08 §2, §3, §4b updated.
 - Follow-ups: P25-07c (server-side key-generation record, needs approval); CI run.
 - Context: medium
+
+## 2026-10-11 · P25-07b · blocked
+- Branch / PR: card/P25-07b-two-node-purge / none yet
+- Done: `TestE2ETwoNodePurge` (two Caddy processes, one Valkey; `caddy/twonode_integration_test.go`, `caddy/internal/e2enode`); runbook §8; D17 lifted for Valkey (01, 06 T-38, 08 §4a); `make test-valkey` runs it; CLAUDE.md rule 6 and 07 §1 name the exception.
+- Tests: passes 3 of 3 on redis 7.0.15; `make check` and lint not run.
+- Deviations: CLAUDE.md rule 6 widened to the two-node test (delegated decision, needs review).
+- Follow-ups: user runs /handoff (review, card mark, PR); CI run on Valkey 8.1.
+- Context: medium; size M was right.
