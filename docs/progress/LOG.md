@@ -1558,3 +1558,11 @@ Entry template:
 - Follow-ups: replica wait test does not run in CI; P25-03b next.
 - Context: medium; size M was right.
 
+## 2026-10-10 · P25-03 · review-fixes
+- Branch / PR: claude/vigilant-goodall-bdmimx / https://github.com/AshwinSathian/weir/pull/88
+- Done: adversarial review (agent) of PR 88; decisions in STATUS. Corrected the WAIT-with-no-replica claim in code and 05 §7; documented identical-settings, stale-persistence, far-future-At and pre-P25-03b wiring limits; `ponytail:` note on the dedicated connection wait.
+- Tests: TestSetEpochWaitPathRetriesOnce, tightened and un-vacuous cancel case, healthy-replica timing and link wait in TestHardEpochWaitWaitsForReplica; unit and integration (master plus replica, redis 7.0.15) pass, module lint 0 issues.
+- Deviations: 05 §7 as above.
+- Follow-ups: none.
+- Context: low
+

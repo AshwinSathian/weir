@@ -97,6 +97,10 @@ func (v valkeyClient) evalRead(ctx context.Context, keys, args []string) ([]int6
 }
 
 func (v valkeyClient) evalWriteWait(ctx context.Context, keys, args []string, replicas, ms int64) error {
+	// ponytail: valkey-go's Dedicated waits for a pooled connection without
+	// honoring ctx, so a saturated pool delays a hard purge past its deadline.
+	// Only hard writes with HardEpochWait take this path; the upgrade is a
+	// separate small pool with a bounded wait.
 	return v.c.Dedicated(func(dc valkey.DedicatedClient) error {
 		// EVAL, not EVALSHA: a dedicated connection cannot fall back from
 		// NOSCRIPT, and hard epochs are rare. The first command carries keys,

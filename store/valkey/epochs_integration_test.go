@@ -8,6 +8,7 @@ import (
 	"math"
 	"os"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -373,6 +374,27 @@ func TestHardEpochWaitWaitsForReplica(t *testing.T) {
 	}
 	defer r.Close()
 	rc := raw(t, r)
+	// A fresh replica needs a moment to sync; a real-clock poll is right here
+	// because it is another process (CLAUDE.md rule 6, integration tag).
+	for i := 0; ; i++ {
+		info, err := rc.Do(t.Context(), rc.B().Info().Section("replication").Build()).ToString()
+		if err == nil && strings.Contains(info, "master_link_status:up") {
+			break
+		}
+		if i == 100 {
+			t.Fatalf("replica link did not come up: %v", err)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	// Healthy replica first: WAIT returns at the acknowledgement, not at the
+	// timeout, so the option is not a fixed delay per hard write.
+	start := time.Now()
+	if err := s.SetEpoch(t.Context(), tag(2), hardAt(whole(time.Minute))); err != nil {
+		t.Fatal(err)
+	}
+	if took := time.Since(start); took > wait/2 {
+		t.Fatalf("SetEpoch with a healthy replica took %v, want well under %v", took, wait)
+	}
 	// Pause the replica's command loop so it cannot acknowledge.
 	done := make(chan struct{})
 	go func() {
@@ -380,7 +402,7 @@ func TestHardEpochWaitWaitsForReplica(t *testing.T) {
 		_ = rc.Do(context.Background(), rc.B().Arbitrary("DEBUG", "SLEEP").Args("1.5").Build()).Error()
 	}()
 	time.Sleep(100 * time.Millisecond) // real clock: the replica is another process
-	start := time.Now()
+	start = time.Now()
 	if err := s.SetEpoch(t.Context(), tag(1), hardAt(whole(time.Minute))); err != nil {
 		t.Fatal(err)
 	}

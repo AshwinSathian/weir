@@ -22,7 +22,10 @@ func unavailable(format string, args ...any) error {
 // epoch on a tag lives in one pruned sorted set capped at MaxHardEpochs (E-6);
 // the global tag keeps all three modes exactly (E-5). Soft and invalid on any
 // other tag need the sketch, which arrives in P25-03b, and are refused with
-// ErrUnavailable until then; Purge reports it (FR-STF-2, T-29).
+// ErrUnavailable until then; Purge reports it (FR-STF-2, T-29). Do not wire
+// this store into an engine before P25-03b: the engine's own invalidation
+// writes (RFC 9111 4.4) are invalid-mode writes on URI tags, would be refused
+// and counted toward the store breaker.
 func (s *Store) SetEpoch(ctx context.Context, t store.Tag, ep store.Epoch) error {
 	if ep.Mode < store.EpochSoft || ep.Mode > store.EpochHard {
 		return unavailable("invalid epoch mode %d", ep.Mode)
@@ -39,9 +42,11 @@ func (s *Store) SetEpoch(ctx context.Context, t store.Tag, ep store.Epoch) error
 	defer cancel()
 	args := s.writeArgs(ep.Mode, global, t, ep.At, false)
 	if ep.Mode == store.EpochHard && s.cfg.HardEpochWait > 0 {
-		// The replica count is not checked: with no replica WAIT answers 0 at
-		// once, and a replica that misses the deadline is the trade-off
-		// HardEpochWait names (05 §7, Replication).
+		// The replica count is not checked. WAIT returns early only once a
+		// replica has acknowledged; with none (single node, replica down) it
+		// blocks for the whole HardEpochWait, so each hard write then costs
+		// that long. That is the price of the option, which is off by
+		// default (05 §7, Replication).
 		return s.retryOnce(ctx, func() error {
 			return cl.evalWriteWait(ctx, s.ekeys, args, 1, s.cfg.HardEpochWait.Milliseconds())
 		})

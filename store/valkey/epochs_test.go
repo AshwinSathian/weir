@@ -26,6 +26,7 @@ type fakeEp struct {
 	readRes  [][]int64 // popped one per evalRead
 	readErr  error
 	waitErr  error
+	onWrite  func() // runs inside the first evalWrite (a context that ends mid-call)
 }
 
 type scriptCall struct {
@@ -36,6 +37,9 @@ func (f *fakeClient) evalWrite(_ context.Context, keys, args []string) error {
 	f.ep.mu.Lock()
 	defer f.ep.mu.Unlock()
 	f.ep.writes = append(f.ep.writes, scriptCall{keys, args})
+	if f.ep.onWrite != nil {
+		f.ep.onWrite()
+	}
 	if len(f.ep.writeErr) == 0 {
 		return nil
 	}
@@ -239,13 +243,25 @@ func TestSetEpochRetriesOnceOnNetworkError(t *testing.T) {
 	t.Run("ended context is not retried", func(t *testing.T) {
 		s, cl := connected(t, nil)
 		ctx, cancel := context.WithCancel(t.Context())
-		cl.ep.writeErr = []error{context.Canceled}
-		cancel()
+		cl.ep.writeErr = []error{io.EOF, io.EOF}
+		cl.ep.onWrite = cancel // the context ends during the first call
 		_ = s.SetEpoch(ctx, tag(1), hardAt(time.Now()))
-		if w, _, _ := cl.counts(); w > 1 {
-			t.Errorf("script calls = %d, want at most 1", w)
+		if w, _, _ := cl.counts(); w != 1 {
+			t.Errorf("script calls = %d, want exactly 1", w)
 		}
 	})
+}
+
+// The retry also covers the combined write-and-WAIT call.
+func TestSetEpochWaitPathRetriesOnce(t *testing.T) {
+	s, cl := connected(t, func(c *Config) { c.HardEpochWait = 50 * time.Millisecond })
+	cl.ep.writeErr = []error{io.EOF}
+	if err := s.SetEpoch(t.Context(), tag(1), hardAt(time.Now())); err != nil {
+		t.Fatal(err)
+	}
+	if w, _, _ := cl.counts(); w != 2 {
+		t.Fatalf("calls = %d, want 2", w)
+	}
 }
 
 // 05 §7 (Replication): with HardEpochWait a hard write and its WAIT go out
