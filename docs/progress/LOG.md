@@ -1464,3 +1464,28 @@ Entry template:
 - Deviations: 08 §2 and §5 reworded to match observed behavior.
 - Follow-ups: 06 T-45/R-6 per-client placeholder case at its next revision; the 5xx mapping from P2-03; STATUS still says Phase 1 (unchanged).
 - Context: low
+
+## 2026-10-10 · P25-00 · done
+- Branch / PR: claude/nice-davinci-rh3zjh (session-designated, not card/*) / https://github.com/AshwinSathian/weir/pull/84
+- Done: client chosen with Ashwin via question (valkey-go v1.0.78); 05 §7 and §4.3 updated (Lua epoch scripts, pruned sorted set for the hard-epoch cap, `SpreadEntries`, Unix-second epochs, server-side sketch seed, vary CAS mechanism left to P25-05); 04 §6.7 note aligned; cards P25-01 to P25-07b written in docs/cards/20-later.md.
+- Tests: none (docs only); `go vet`, gofmt, `make trace-strict`, short race tests pass; `make check` stops at lint (container golangci-lint built with Go 1.25), CI must confirm.
+- Deviations: none.
+- Review: card-reviewer found two must-fix (a counter cannot track hard-epoch expiry; P25-03 needed a storetest option) and seven should-fix (card sizes, hash-tag contradiction, vary CAS wording, dangling 4.3 reference, AC/Out of scope gaps). All fixed.
+- Follow-ups: P25-05 and P25-07/07b need Ashwin's approval first; P25-06 decides epoch-key eviction policy.
+- Context: low; size S was right.
+
+## 2026-10-10 · P25-00 · review-fixes
+- Branch / PR: claude/nice-davinci-rh3zjh / https://github.com/AshwinSathian/weir/pull/84
+- Done: adversarial review (agent) of PR 84; "Waiting on Ashwin" was empty, decisions in STATUS. 05 §7 rewritten (non-evictable epoch state, hard epochs in a sorted set, loss detection, lazy connect, error mapping, Scrub contract, cluster and replication notes); 05 §8 gets `EpochModes` and `Parallel`; cards P25-01 to P25-07b re-cut.
+- Tests: none (docs only); vet, gofmt, trace-strict pass.
+- Deviations: reverted three old LOG entries that my earlier global sed pointed at PR 84; the P25-00 entry's branch deviation is the session-designated branch.
+- Follow-ups: P25-05 and P25-07/07b need Ashwin first.
+- Context: low
+
+## 2026-10-10 · P25-00 · review-fixes
+- Branch / PR: claude/nice-davinci-rh3zjh / https://github.com/AshwinSathian/weir/pull/84
+- Done: second adversarial pass. Fixed: loss repair is now a write (the global hard epoch path) and reads stay read-only; empty `hardidx` is not loss; seed from `crypto/rand` with SHA-256 in Go (Lua has neither); `NoClockSkew`; cluster-wide policy check; lazy-connect rules; key declaration; skew formula; card sizes. Earlier LOG entries named `SpreadEntries`; the field is `CoLocateEntries`.
+- Tests: none (docs only); vet and trace-strict pass.
+- Deviations: none.
+- Follow-ups: P25-05, P25-07/07b need Ashwin first.
+- Context: low
