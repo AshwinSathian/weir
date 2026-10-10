@@ -1269,3 +1269,25 @@ Entry template:
 - Deviations: OQ-C1 amended (hard epoch instead of soft) by Ashwin's delegation; PLAN 2.2 reworded to match.
 - Follow-ups: 06 T-45/R-6 gain the placeholder case at the next revision.
 - Context: low.
+
+## 2026-10-09 · P2-01 · done
+- Branch / PR: card/P2-01-module-skeleton (remote branch claude/epic-maxwell-jkv0at) / see STATUS
+- Done: `caddy/` module (`weircaddy`): `http.handlers.weir` with strict JSON config, required `name` charset check, `ByteSize` parsing, mapping to `weir.Config`, Provision/Validate/Cleanup (idempotent), interface guards, pass-through ServeHTTP. `go.work` includes `./caddy`; root `go.mod` still has no `require`. docs/08 §2 key table lists every block key.
+- Tests: `TestConfigFromJSON`, `TestProvisionReportsBadConfig`, `TestInternalKeysImport`. `make check` passes with the pinned golangci-lint run under Go 1.27; trace 146/146.
+- Deviations: none from normative text; five keys added beyond the 08 example, recorded in the 08 table. `max_bytes`/`snapshot_dir` parsed but applied by P2-02. `internal/keys.IsUpgrade` imports across modules, so no `weirhttp.IsUpgrade` fallback.
+- Review: card-reviewer, no must-fix. Fixed: invalid T-45 citation dropped, exact int parsing for byte sizes (no exponent or hex forms), 08 says P2-02 owns `snapshot_dir` validation. Open: Cleanup clears `h.engine` without a lock, revisit in P2-03 when serving reads it.
+- Context: low; size M was right.
+
+## 2026-10-09 · P2-01 · review-fixes
+- Branch / PR: card/P2-01-module-skeleton (remote branch claude/epic-maxwell-jkv0at) / https://github.com/AshwinSathian/weir/pull/74
+- Done: adversarial review of PR 74 (agent), no must-fix, nothing was waiting on Ashwin. Applied: dot-leading names rejected (08 §2), 1 PiB cap on `max_bytes`, warning when `max_bytes`/`snapshot_dir` are set, second `Provision` refused, stricter byte-size grammar, `null` no-op, doubled error prefix, real newline test case.
+- Tests: added cases in TestConfigFromJSON and TestProvisionReportsBadConfig; `make check` passes with the pinned lint under Go 1.27.
+- Deviations: 08 §2 `name` rule gained "no leading dot" (delegated decision, recorded in STATUS).
+- Follow-ups: xcaddy resolution of the root module (P2-01c), `Cleanup` vs `ServeHTTP` on `h.engine` (P2-03).
+
+## 2026-10-09 · P2-01 · review-fixes
+- Branch / PR: card/P2-01-module-skeleton / https://github.com/AshwinSathian/weir/pull/74
+- Done: CI `make vuln` failed on caddy/: Caddy v2.11.7 pulls golang.org/x/net v0.59.0, which has 5 reachable advisories (HTTP/2, fixed in v0.60.0). Bumped x/net to v0.60.0 in caddy/go.mod and go.sum.
+- Tests: caddy builds and tests pass with and without the workspace; govulncheck cannot reach vuln.go.dev from the container (403), CI must confirm.
+- Deviations: none.
+- Follow-ups: P2-01c CI should keep `make vuln` on caddy/; later Caddy bumps may need the same x/net floor.

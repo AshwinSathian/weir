@@ -4,9 +4,9 @@ Updated: 2026-10-09
 Phase: 1
 Current card: none
 Card state: awaiting-merge
-Branch: card/P2-00-caddy-spec
-PR: https://github.com/AshwinSathian/weir/pull/73
-Next card: P2-01 (Module skeleton and Caddyfile)
+Branch: card/P2-01-module-skeleton
+PR: https://github.com/AshwinSathian/weir/pull/74
+Next card: P2-01b (Caddyfile parsing and directive order)
 
 ## Waiting on Ashwin
 
@@ -41,7 +41,21 @@ Ashwin delegated "take decisions on all items"; "Waiting on Ashwin" was empty. A
 - Snapshots: the superseded store skips its snapshot; `name` is restricted to `[A-Za-z0-9._-]{1,64}`; config keys table added to 08 §2.
 - Cards: P2-01 split into P2-01, P2-01b (Caddyfile), P2-01c (xcaddy CI); `TestRetryAfterSurvivesHandleErrors` moved to P2-03b (needs caddytest).
 
+## Decided 2026-10-09 (P2-01, review of PR 74)
+
+Ashwin delegated "take decisions on all items"; "Waiting on Ashwin" was empty. An independent agent attacked the PR; no must-fix. Decisions:
+
+- `name` may not start with a dot (admin URL `/weir/../purge` collapses). Changes the 08 §2 charset rule; 08 updated.
+- `max_bytes` is capped at 1 PiB at parse time (later budget sums cannot overflow); `Provision` warns when `max_bytes` or `snapshot_dir` is set, since P2-02 applies them.
+- A second `Provision` on a provisioned `Handler` fails instead of leaking the first engine. Byte sizes accept digits and one decimal point only; JSON `null` is a no-op; doubled `weir:` error prefix removed.
+- Risk for P2-01c: `caddy/go.mod` uses `replace => ..`, which importers ignore; `xcaddy build --with .../weir/caddy` outside the repo may not resolve the root module until it has a tag. P2-01c must test this.
+- P2-03: `Cleanup` clears `h.engine` without a lock; `ServeHTTP` must read it safely (atomic pointer or the engine registry).
+
 ## Notes for the next session
+
+- P2-01: Go package in `caddy/` is named `weircaddy`. `Handler.weirConfig()` maps adapter settings to `weir.Config`; `Provision` builds the engine with `weir.New` (default store). `max_bytes` and `snapshot_dir` are parsed and validated but not applied: P2-02 builds the pooled store and must pass it as `Config.Store`. `ServeHTTP` is a pass-through until P2-03.
+- P2-01: `decodeStrict` in caddy/config.go mirrors Caddy's strict module decoding; P2-01b's Caddyfile `UnmarshalCaddyfile` must fill the same `Handler` fields and reject unknown subdirectives. Added keys beyond the 08 example (documented in the 08 §2 table): `query_keep`, `normalize_path`, `bypass.headers`, `max_queue`, `while_revalidate`.
+- P2-01: lint for submodules ran with `GOTOOLCHAIN=go1.27.0 make check GOLANGCI="go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0"`; this passes in the container.
 
 - P2-00: 08 is v1.0 (Caddy v2.11.7, §11). P2-01 must prove `internal/keys.IsUpgrade` imports from the `caddy` module; if not, stop and ask (fallback is an exported `weirhttp.IsUpgrade`, public API). Admin routes need a package-level engine registry; metrics collectors are per registry. Cards P2-01b, P2-01c and P2-03b were added to fit size M.
 

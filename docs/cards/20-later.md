@@ -11,7 +11,7 @@ These phases start from draft specs. Each begins with one planning card that ver
 - AC: every Caddy API named in 08 checked at the pinned release with file and line; 08 marked v1.0; Phase 2 split into S/M cards (expected: module skeleton and Caddyfile, store pool and key-generation hash, nextOrigin and upgrades, errors and memory split, admin API purge/mode/stats, metrics, deployment guide)
 - Notes: 08 is v1.0 against Caddy v2.11.7 (§11 has file and line for each API). Cards P2-01 to P2-07 (with P2-01b, P2-01c and P2-03b) below replace the placeholder; the plan items 2.2 to 2.4 are split across them.
 
-### [ ] P2-01 Module skeleton and JSON config
+### [x] P2-01 Module skeleton and JSON config
 - Plan: 2.2 · Size: M · Depends on: P2-00
 - Read: 08 §1, §2, §11; 04 §1 (Config); 01 FR-LCY-2
 - Touch: caddy/go.mod (new, requires caddy v2.11.7 and the root module with a `replace` for local work), caddy/module.go, caddy/config.go (adapter-side config struct, name validation, byte sizes, mapping to `weir.Config`), caddy/module_test.go, go.work (add `./caddy`)
