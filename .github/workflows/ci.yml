@@ -109,6 +109,15 @@ jobs:
           --health-interval 2s
           --health-timeout 3s
           --health-retries 15
+      # P25-06: the eviction storm needs a server that runs out of memory.
+      valkey-storm:
+        image: valkey/valkey:8.1
+        ports: ["6380:6379"]
+        options: >-
+          --health-cmd "valkey-cli ping"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 15
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -119,11 +128,20 @@ jobs:
             go.mod
             **/go.sum
       - name: set the eviction policy
+        # The service container IDs come from the job context: both services
+        # listen on 6379 inside their containers, so a port filter would match
+        # both or neither.
+        env:
+          MAIN_ID: ${{ job.services.valkey.id }}
+          STORM_ID: ${{ job.services.valkey-storm.id }}
         run: |
-          docker exec "$(docker ps -q --filter publish=6379)" valkey-cli config set maxmemory-policy volatile-lfu
+          docker exec "$MAIN_ID" valkey-cli config set maxmemory-policy volatile-lfu
+          docker exec "$STORM_ID" valkey-cli config set maxmemory-policy volatile-lfu
+          docker exec "$STORM_ID" valkey-cli config set maxmemory 16mb
       - name: integration tests
         env:
           WEIR_VALKEY_ADDR: localhost:6379
+          WEIR_VALKEY_STORM_ADDR: localhost:6380
         run: make test-valkey
 
   # Keeps a stable required-check name (`check`) however many Go versions the

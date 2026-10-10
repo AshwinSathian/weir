@@ -30,6 +30,7 @@ type Store struct {
 	cfg   Config
 	dial  dialFunc
 	ekeys []string                      // epoch keys in KEYS order (meta.go)
+	eprfx string                        // every entry key starts with this (entryKey, scrub.go)
 	seed  atomic.Pointer[[seedLen]byte] // cached sketch seed; nil until fetched (sketch.go)
 
 	closing chan struct{}  // closed by Close so a dial in flight stops early
@@ -55,7 +56,11 @@ func newStore(cfg Config, dial dialFunc) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Store{cfg: cfg, dial: dial, ekeys: epochKeys(cfg.Prefix, cfg.HashTag), closing: make(chan struct{})}, nil
+	eprfx := cfg.Prefix + ":"
+	if cfg.CoLocateEntries {
+		eprfx += "{" + cfg.HashTag + "}:"
+	}
+	return &Store{cfg: cfg, dial: dial, ekeys: epochKeys(cfg.Prefix, cfg.HashTag), eprfx: eprfx, closing: make(chan struct{})}, nil
 }
 
 // Info reports a remote store, so the engine applies Timeouts.Store and the

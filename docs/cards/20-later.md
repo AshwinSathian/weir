@@ -173,7 +173,7 @@ These phases start from draft specs. Each begins with one planning card that ver
 - Tests: integration `TestVaryCASConcurrentWriters` (64 concurrent writers against Valkey never exceed `MaxVariants`)
 - AC: as the test; the script touches the single spec key, so it works in cluster mode and with or without `CoLocateEntries`
 
-### [ ] P25-06 Eviction-storm review and Scrubber via SCAN
+### [x] P25-06 Eviction-storm review and Scrubber via SCAN
 - Plan: 2.5.4 · Size: M · Depends on: P25-04
 - Read: 07 T6.11, 00 T6.11; 05 §5.3 Scrubber note, §7 (Scrub), 04 §13.5; valkey-go `NewScanner`, `Client.Nodes`
 - Touch: store/valkey/{scrub.go,scrub_test.go}, docs/09-research-notes.md, docs/05

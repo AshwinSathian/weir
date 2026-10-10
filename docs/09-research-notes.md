@@ -1,7 +1,7 @@
 # Weir research notes
 
 Status: living document
-Date of this pass: 2026-09-27
+Date of this pass: 2026-10-10
 
 This is the evidence behind the decisions in 01–08. Each claim lists where it was checked and when, so a later reader can tell a verified fact from something carried over from the seed. Claims marked "seed, not re-verified" were not independently checked in this pass.
 
@@ -106,3 +106,26 @@ Numbered against [00-design-doc.md](00-design-doc.md). None of these change the 
 | §1 | "no obvious collision in the Go proxy space" | `tidb-incubator/weir` is a Go database proxy, inactive since January 2022. Low risk; noted. |
 | §9 Phase 0 | license MIT | Apache-2.0 (D41), for the explicit patent grant; changed before any outside contribution. |
 | §11 | document names `02-storage-interface-spec.md`, `03-testing-strategy.md`, `04-caddy-adapter-spec.md` | renumbered to make room for architecture, HLD, LLD and threat model; mapping in [README.md](README.md). |
+
+## 7. Valkey eviction storm (P25-06)
+
+Seed T6.11 asks that the storage interface not assume one eviction policy. For the Valkey store the question is narrower: can a flood of cheap entries make the server evict the epoch keys, and so turn a purge into a no-op (T-29)?
+
+Setup. `TestEvictionStormEngineStaysCorrect` (store/valkey, tag `integration`) runs against a throwaway server with `maxmemory 16mb` and `maxmemory-policy volatile-lfu`, set by CI on a second Valkey 8.1 service (port 6380) and by the developer for a local run (`WEIR_VALKEY_STORM_ADDR`). The test refuses a server with no `maxmemory` or more than 64 MiB, because it runs `FLUSHALL`. The engine caches 40 hot paths (1 KiB bodies, `max-age=3600`) and one victim path. Eight writers then store 30 000 one-hit entries of about 2 KiB straight into the store while a reader keeps requesting the hot paths through the engine. A third of the way in, the origin changes the victim to `v2` and the engine hard-purges its URL; a second reader requests the victim for the rest of the flood and counts every `v1` it receives.
+
+Result, one local run (redis-server 7.0.15, not Valkey; the CI run on Valkey 8.1 is the one that counts). No CI result is quoted yet. The test asserts the epoch keys, the purge, the engine errors, that evictions happened and that some hot key is still cached; it re-fetches the victim and requires a hit just before the purge, so the stale-body check cannot pass because the victim was already evicted (without the `Purge` call the test fails every time, 3 runs of 3). The exact hot-key hit counts are logged, not asserted, because they depend on the reader keeping the counters warm:
+
+| Measure | Value |
+|---|---|
+| keys evicted by the flood (`evicted_keys` delta) | 26 469 of 30 000 |
+| failed `Set` calls | 0 |
+| hot-key hits before the flood, after it | 40 of 40, 40 of 40 |
+| `meta`, `global`, both sketch planes, `hardidx` after the flood | all present |
+| `v1` bodies served after the purge | 0 |
+| engine errors or non-200 responses during the flood | 0 |
+
+What it shows. With `volatile-lfu` the server picks its victims among keys that have a TTL, which is every entry and no epoch key. The server evicted 26 469 keys and the epoch state was untouched. The hot keys survived with a reader keeping their access counters up; a run without that reader was not made, so the test says nothing about hot keys that nobody requests during the flood. The purge held through the flood because the victim was either evicted (a miss) or caught by the hard epoch, never served.
+
+What it does not show. It did not run `allkeys-lfu` to watch an epoch key disappear: the store refuses that policy on connect (`TestAllKeysPolicyRefused`, now against a real server for `allkeys-lfu`, `allkeys-lru` and `allkeys-random`, then accepted once the policy is `volatile-lfu`), and a run with `SkipPolicyCheck` was not made. It also did not fill the server with TTL-less keys from another application, which 05 §7 names as a way to defeat the guarantee, or run against a cluster.
+
+Gap found, not fixed here: the engine bounds the whole `Scrub` call by `Timeouts.Store`, so an eager purge over a large keyspace times out (05 §7, Scrub). It needs its own deadline in the engine.

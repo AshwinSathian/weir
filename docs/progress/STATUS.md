@@ -4,9 +4,28 @@ Updated: 2026-10-10
 Phase: 1
 Current card: none
 Card state: awaiting-merge
-Branch: claude/youthful-ride-2vosqo
-PR: https://github.com/AshwinSathian/weir/pull/92
-Next card: P25-06
+Branch: card/P25-06-scrubber-scan (pushed as claude/serene-dirac-0yagok)
+PR: https://github.com/AshwinSathian/weir/pull/93
+Next card: P25-07
+
+## Notes for the next session (P25-06)
+
+- Review (card-reviewer): one must-fix (CI `docker ps --filter publish=` cannot tell the two Valkey services apart; the step now uses `job.services.<id>.id`), fixed but unproven until CI runs. Fixed too: busy-loop reader replaced by a channel, the poll names its real-clock exception, empty-tag `Scrub` no longer dials. Hot-key hit counts in the storm test are logged, not asserted (09 §7 says so).
+- Open: the engine bounds the whole `Scrub` by `Timeouts.Store` (50 ms default, remote), so an eager purge on a real keyspace times out. Needs its own scrub deadline in the engine (new card or P25-07). In 05 §7 and 09 §7.
+- A failed command inside a `getMulti`/`delMulti` pipeline (for example MOVED during resharding) fails the scrub with `ErrUnavailable`; P25-07 decides whether that needs handling.
+- golangci-lint cannot run here (Go 1.25 build); CI must confirm lint, the second Valkey service on 6380, and the storm on Valkey 8.1. PLAN 2.5.4 is ticked on the strength of local redis 7.0.15 runs; PLAN 2.5.2 still waits on the CI run.
+
+## Decided 2026-10-10 (P25-06, adversarial review of PR 93)
+
+Ashwin delegated "take decisions on all items"; "Waiting on Ashwin" was empty. An independent agent attacked the PR. Decisions, all implemented:
+
+- `Scrub` with no primary node returns `ErrUnavailable` (fail closed) instead of `0, nil`; `TestScrubOnReplicaIsUnavailable` needs `WEIR_VALKEY_REPLICA_ADDR` and skips without it (CI does not run it).
+- A `WRONGTYPE` key under the prefix is skipped, not a failed scrub; `delMulti` sums the whole pipeline before returning its first error.
+- GET pipelines are chunked at 100 keys (P5); 05 §7 states the bound. Other failed commands (MOVED during resharding) still fail the scrub: left to P25-07.
+- 05 §7 no longer says scrub failures count toward the store breaker (they do not, `storeGuard.scrub`); an open breaker refuses the scrub.
+- Filter tests plant decodable records with the scrubbed tag under every foreign key and compare the keys read with a literal list; mutations of `isEntryKey` now fail. The storm test requires a cache hit on the victim right before the purge (dropping `Purge` fails it 3 of 3) and that some hot key is still cached.
+- Declined: asserting exact hot-key hit counts (depends on LFU); a tag index (stays the `ponytail:` ceiling); changing the `CI`-without-address failure (same rule as `serverAddr`).
+- Still open, not in this PR: an engine deadline for `Scrub` separate from `Timeouts.Store`; it deserves its own card.
 
 ## Waiting on Ashwin
 

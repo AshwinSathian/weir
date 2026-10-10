@@ -23,6 +23,18 @@ type client interface {
 	// set stores val at key until the Unix millisecond pxat.
 	set(ctx context.Context, key string, val []byte, pxat int64) error
 	del(ctx context.Context, key string) error
+	// primaries returns the address of every primary node (the only nodes a
+	// scrub may SCAN without visiting each key twice or sending DEL to a
+	// replica), sorted.
+	primaries(ctx context.Context) ([]string, error)
+	// scanNode runs one SCAN step on the node at addr and returns the keys
+	// and the next cursor (0 when done).
+	scanNode(ctx context.Context, addr string, cursor uint64, match string, count int64) ([]string, uint64, error)
+	// getMulti returns the value at each key, nil where a key is absent. Keys
+	// may span cluster slots.
+	getMulti(ctx context.Context, keys []string) ([][]byte, error)
+	// delMulti deletes keys (any slots) and returns how many existed.
+	delMulti(ctx context.Context, keys []string) (int64, error)
 	// evalVarySet stores val at key until pxat if the value there is prev
 	// (hasPrev false: if there is none) and reports whether it did, in one
 	// server-side step (05 V-1).
@@ -94,6 +106,83 @@ func (v valkeyClient) set(ctx context.Context, key string, val []byte, pxat int6
 
 func (v valkeyClient) del(ctx context.Context, key string) error {
 	return v.c.Do(ctx, v.c.B().Del().Key(key).Build()).Error()
+}
+
+func (v valkeyClient) primaries(ctx context.Context) ([]string, error) {
+	var out []string
+	for addr, n := range v.c.Nodes() {
+		arr, err := n.Do(ctx, n.B().Role().Build()).ToArray()
+		if err != nil {
+			return nil, fmt.Errorf("role on %s: %w", addr, err)
+		}
+		if len(arr) == 0 {
+			continue
+		}
+		if role, err := arr[0].ToString(); err == nil && role == "master" {
+			out = append(out, addr)
+		}
+	}
+	slices.Sort(out)
+	return out, nil
+}
+
+func (v valkeyClient) scanNode(ctx context.Context, addr string, cursor uint64, match string, count int64) ([]string, uint64, error) {
+	n, ok := v.c.Nodes()[addr]
+	if !ok {
+		return nil, 0, fmt.Errorf("node %s left the cluster", addr)
+	}
+	e, err := n.Do(ctx, n.B().Scan().Cursor(cursor).Match(match).Count(count).Build()).AsScanEntry()
+	return e.Elements, e.Cursor, err
+}
+
+func (v valkeyClient) getMulti(ctx context.Context, keys []string) ([][]byte, error) {
+	cmds := make(valkey.Commands, len(keys))
+	for i, k := range keys {
+		cmds[i] = v.c.B().Get().Key(k).Build()
+	}
+	out := make([][]byte, len(keys))
+	for i, r := range v.c.DoMulti(ctx, cmds...) {
+		b, err := r.AsBytes()
+		switch {
+		case err == nil:
+			out[i] = b
+		case valkey.IsValkeyNil(err):
+			// deleted or expired since the scan
+		case isWrongType(err):
+			// Another application's key under our prefix: not an entry.
+		default:
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+func (v valkeyClient) delMulti(ctx context.Context, keys []string) (int64, error) {
+	cmds := make(valkey.Commands, len(keys))
+	for i, k := range keys {
+		cmds[i] = v.c.B().Del().Key(k).Build()
+	}
+	// Every reply is read: the pipeline ran in full, so the count must include
+	// the DELs after a failed one.
+	var total int64
+	var first error
+	for _, r := range v.c.DoMulti(ctx, cmds...) {
+		n, err := r.AsInt64()
+		if err != nil {
+			if first == nil {
+				first = err
+			}
+			continue
+		}
+		total += n
+	}
+	return total, first
+}
+
+// isWrongType reports the server's reply to GET on a key holding another type.
+func isWrongType(err error) bool {
+	ve, ok := valkey.IsValkeyErr(err)
+	return ok && strings.HasPrefix(ve.Error(), "WRONGTYPE")
 }
 
 func (v valkeyClient) evalVarySet(ctx context.Context, key string, prev []byte, hasPrev bool, val []byte, pxat int64) (bool, error) {

@@ -1640,3 +1640,27 @@ Entry template:
 - Deviations: none beyond 05 §7.
 - Follow-ups: whether `Get` should treat an undecodable spec as a miss so the engine can overwrite it (T-21 trade-off) is not decided; CI Valkey 8.1 run.
 - Context: low
+
+## 2026-10-10 · P25-06 · in-progress
+- Branch / PR: card/P25-06-scrubber-scan / none yet
+- Done: `store/valkey/scrub.go` (`Scrub` via ROLE, per-primary SCAN loop, GET/DEL pipelines, entry-key filter); client seam methods; second CI Valkey service for the storm; docs 05 §7 and 09 §7.
+- Tests: TestScrub* (fake), TestScrubByTag, TestScrubCancelled, TestEngineEagerHardPurgeScrubs, TestEvictionStormEngineStaysCorrect, TestAllKeysPolicyRefused (integration, pass with `-race` on redis 7.0.15); trace 146/146; lint not run (Go 1.25 build).
+- Deviations: manual SCAN loop instead of `valkey.NewScanner` (per-call timeouts); Touch list short by client.go, store.go, CI, Makefile, engine_integration_test.go.
+- Follow-ups: run `/handoff` (review, tick card, PR); engine scrub deadline; CI Valkey 8.1 storm run.
+- Context: medium
+
+## 2026-10-10 · P25-06 · done
+- Branch / PR: card/P25-06-scrubber-scan / https://github.com/AshwinSathian/weir/pull/93
+- Done: handoff. card-reviewer found one must-fix (CI container lookup; now `job.services.<id>.id`) and three should-fix (storm reader busy loop, unnamed poll, empty-tag Scrub dialing), all fixed; hit counts stay logged, not asserted, and 09 §7 says so. Card and PLAN 2.5.4 ticked.
+- Tests: Scrub unit and integration tests, storm and policy tests pass with `-race` on redis 7.0.15; trace 146/146; lint not run here.
+- Deviations: none beyond the first entry.
+- Follow-ups: engine scrub deadline; CI run on Valkey 8.1.
+- Context: medium
+
+## 2026-10-10 · P25-06 · review-fixes
+- Branch / PR: card/P25-06-scrubber-scan / https://github.com/AshwinSathian/weir/pull/93
+- Done: adversarial review (agent), decisions delegated by Ashwin. No-primary scrub fails closed; WRONGTYPE keys skipped; DEL counts summed over the pipeline; GET pipelines chunked at 100; filter and storm tests made non-vacuous (mutation checked); 05 §7 breaker claim corrected, 09 §7 reworded.
+- Tests: Scrub unit tests, integration suite pass with `-race` on redis 7.0.15 (replica case run against a local replica); trace 146/146; lint not run here.
+- Deviations: none beyond 05 §7.
+- Follow-ups: engine scrub deadline (new card); CI run on Valkey 8.1; MOVED handling in P25-07.
+- Context: medium

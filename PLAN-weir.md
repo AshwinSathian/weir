@@ -197,7 +197,7 @@ Goal: prove the store interface has no in-process assumptions and unlock multi-n
 - [ ] 2.5.1 `store/valkey` module per [05 §7](docs/05-storage-interface-spec.md). AC: `storetest.Run` passes against Valkey in Docker in CI.
 - [ ] 2.5.2 Engine test suite (T6.x matrix) re-run with the Valkey store, real time, via a build tag. AC: all pass; any failure is an interface bug fixed in [05](docs/05-storage-interface-spec.md) first.
 - [x] 2.5.3 Vary-spec compare-and-set via Lua. AC: 64 concurrent variant writers never exceed `MaxVariants`.
-- [ ] 2.5.4 Eviction-storm review (seed T6.11) with a Valkey `maxmemory` experiment; `Scrubber` via background `SCAN`. AC: written up in `docs/09-research-notes.md`.
+- [x] 2.5.4 Eviction-storm review (seed T6.11) with a Valkey `maxmemory` experiment; `Scrubber` via background `SCAN`. AC: written up in `docs/09-research-notes.md`.
 - [ ] 2.5.5 Multi-node Caddy guide (lifts D17). AC: purge on one node is observed on another in an integration test.
 
 ### Phase 3: Experiment dimensions (~4 weeks, after Phase 2.5)

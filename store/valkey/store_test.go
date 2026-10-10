@@ -21,6 +21,7 @@ type fakeClient struct {
 	kv     fakeKV   // the entry commands (entries_test.go)
 	ep     fakeEp   // the epoch scripts (epochs_test.go)
 	vary   fakeVary // hooks for the vary compare-and-set (vary_test.go)
+	scan   fakeScan // the scrub commands (scrub_test.go)
 }
 
 func (f *fakeClient) policies(context.Context) (map[string]string, error) { return f.pol, f.polErr }
