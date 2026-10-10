@@ -155,7 +155,7 @@ func TestProvisionReportsBadConfig(t *testing.T) {
 	}
 
 	t.Run("good config provisions an engine and cleanup closes it", func(t *testing.T) {
-		h, err := load(t, `{"name":"ok","max_bytes":"8MiB"}`)
+		h, err := load(t, `{"name":"ok","max_bytes":"200MiB"}`)
 		if err != nil {
 			t.Fatal(err)
 		}

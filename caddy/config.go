@@ -2,6 +2,7 @@ package weircaddy
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -177,7 +178,7 @@ func validateName(name string) error {
 // weirConfig maps the adapter settings onto weir.Config. Rand, Observer,
 // Logger and Store have no JSON form; the caller sets them.
 func (h *Handler) weirConfig() weir.Config {
-	return weir.Config{
+	cfg := weir.Config{
 		Key: weir.KeyConfig{
 			QueryDrop: h.Key.QueryDrop, QueryKeep: h.Key.QueryKeep, QuerySort: h.Key.QuerySort,
 			NormalizePath: h.Key.NormalizePath, Headers: h.Key.Headers, Cookies: h.Key.Cookies,
@@ -195,4 +196,13 @@ func (h *Handler) weirConfig() weir.Config {
 			DefaultStaleIfError:         time.Duration(h.Stale.IfError),
 		},
 	}
+	if h.MultiHost {
+		// FR-FAIR-3: 25% of MaxConcurrent, at least 1.
+		cfg.Limiter.MaxPerHost = max(1, cmp.Or(h.Limiter.MaxConcurrent, defaultMaxConcurrent)/4)
+	}
+	return cfg
 }
+
+// defaultMaxConcurrent mirrors weir.LimiterConfig.MaxConcurrent's default
+// (0: 64), which the fairness cap is a share of.
+const defaultMaxConcurrent = 64

@@ -1323,3 +1323,36 @@ Entry template:
 - Tests: smoke step re-run locally under `bash -ex` (second poll served `ok`, process alive); YAML parses.
 - Deviations: none. Declined: SHA-pinning actions (matches the other jobs), `[ ] && [ ]` instead of `-a` (works in bash and dash).
 - Follow-ups: flip the root `=.` to the tag after the next root release (in STATUS).
+
+## 2026-10-10 · P2-02 · blocked
+- Branch / PR: claude/peaceful-mccarthy-b9uz60 / none
+- Done: read 08 §3, §4b, FR-FAIR-3, FR-SNP-1, Caddy's UsagePool and memory.Config. No code written.
+- Tests: none.
+- Deviations: none.
+- Follow-ups: question under "Waiting on Ashwin" in STATUS (multi-host detection source).
+- Context: low.
+
+## 2026-10-10 · P2-02 · done
+- Branch / PR: claude/peaceful-mccarthy-b9uz60 (session branch, not card/*) / https://github.com/AshwinSathian/weir/pull/77
+- Done: caddy/pool.go (UsagePool-backed registry, load-scoped name claims, superseded-store snapshot skip with rollback re-election), caddy/keygen.go (hash of forward mode, allow, set-cookie stripping), hard epoch on hash change, `multi_host` key (FR-FAIR-3 caps at 25%), snapshot_dir validation and mkdir.
+- Tests: TestCleanupDeletesOnce, TestPoolSharesStoreAcrossReload, TestPoolSettingsMismatchFailsProvision, TestPoolResizeReloadAllowed, TestPoolDestructsOnLastRelease, TestSupersededStoreSkipsSnapshot, TestRolledBackReloadRestoresSnapshotWriter, TestKeyGenHashChangeWritesHardEpoch, TestKeyGenHashIgnoresHostAndKeyRules, TestMultiHostEnablesFairnessCaps, TestSingleToMultiHostStartsNewStore. Caddy race tests and caddy lint pass; root `make check` lint cannot run here (Go 1.25 build), trace 146/146.
+- Deviations: new `multi_host` key approved by Ashwin in session (scanning the http app was rejected, see 08 §2); `snapshot_dir` added to the pool key; shard count left out (no setting). 08 §2, §3, §4b updated.
+- Review: card-reviewer, no must-fix. Fixed: stale superseded flag after rollback, test name and cites. Documented: hash is in-process only, rollback keeps the new hash. Not done: Destruct timing assertion (store close is bounded by closeTimeout, not unit-tested).
+- Follow-ups: see STATUS notes (host warning, MaxObjectBytes key, persisted hash).
+- Context: medium; size M was right.
+
+## 2026-10-10 · P2-02 · review-fixes
+- Branch / PR: claude/peaceful-mccarthy-b9uz60 / https://github.com/AshwinSathian/weir/pull/77
+- Done: adversarial review (agent), delegated decisions by Ashwin ("take decisions on all items"). Must-fix: key-generation hash is now recorded only after weir.New and the purge succeed (retry of a failed Provision still purges). Fixed: hash persisted beside the snapshot (`<name>.weir.keygen`, stale snapshot deleted on mismatch, covers restart and hash-plus-spec changes); `Cleanup` no longer nils `engine`; `max_bytes` under 160 MiB rejected in `Validate`; `snapshot_dir` must be absolute, is cleaned, and refused when group/other-writable; `Destruct` reads the superseded flag and retires under one lock; FR-FAIR-3 amended to the `multi_host` key.
+- Tests: TestKeyGenHashRetryAfterFailedProvisionStillPurges, TestSnapshotKeyGenReconcile, TestKeyGenRecordFollowsLoad, TestMaxBytesBelowMinimumRejectedEarly, TestSnapshotDirSafety, TestRegistryConcurrentAcquireRelease; caddy race tests and lint pass.
+- Deviations: docs/01 FR-FAIR-3 reworded (requirement change, delegated); 08 §2/§3 updated.
+- Declined: warning on on-demand TLS without `multi_host` (needs the global scan already rejected); per-name closing gate in acquire (Caddy serializes loads; ponytail comment records it).
+- Follow-ups: STATUS notes (host warning in P2-03, `Storable.MaxObjectBytes` key).
+
+## 2026-10-10 · P2-02 · review-fixes
+- Branch / PR: claude/peaceful-mccarthy-b9uz60 / https://github.com/AshwinSathian/weir/pull/77
+- Done: round 3 adversarial review (agent) on the round 2 fixes and every open item. Fixed: a rolled-back reload no longer leaves its hash behind (holder list, hash returns to the older engine, so re-applying purges again); the hash record is rewritten by the final snapshot writer so it always matches the snapshot; snapshot_dir must be owned by the Caddy user (unix); `Destruct` split into `destruct(ctx)` with a deadline test; memory defaults the adapter copies are pinned by a test. Reverted stray `go.work.sum` churn from local runs.
+- Tests: TestRolledBackReloadRestoresKeyGen, TestSnapshotRecordMatchesFinalWriter, TestDestructBoundedBySnapshotDeadline, TestMemoryDefaultsPinned; caddy race tests and lint pass.
+- Deviations: none beyond 08 §2/§3 wording.
+- Declined: warning for on-demand TLS without `multi_host`; per-name closing gate; docs/07 adapter rows (no adapter table exists, add with P2-03b); a crash-leftover temp sweep (bounded by crashes, safe side).
+- Follow-ups: P2-03 card now has the multi-host warning test and the ErrClosed 503; P2-04 card has the 160 MiB floor AC.
