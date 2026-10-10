@@ -106,22 +106,32 @@ type reply struct {
 	body   string
 }
 
-func get(t *testing.T, c *http.Client, path string, hdr ...string) reply {
-	t.Helper()
+// getErr is get without the test failure, safe to call from other goroutines
+// (t.Fatal there would only end that goroutine).
+func getErr(t *testing.T, c *http.Client, path string, hdr ...string) (reply, error) {
 	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://localhost:9080"+path, nil)
 	if err != nil {
-		t.Fatal(err)
+		return reply{}, err
 	}
 	for i := 0; i+1 < len(hdr); i += 2 {
 		req.Header.Set(hdr[i], hdr[i+1])
 	}
 	resp, err := c.Do(req)
 	if err != nil {
-		t.Fatalf("GET %s: %v", path, err)
+		return reply{}, fmt.Errorf("GET %s: %w", path, err)
 	}
 	defer resp.Body.Close()
 	b, _ := io.ReadAll(resp.Body)
-	return reply{resp.StatusCode, resp.Header, string(b)}
+	return reply{resp.StatusCode, resp.Header, string(b)}, nil
+}
+
+func get(t *testing.T, c *http.Client, path string, hdr ...string) reply {
+	t.Helper()
+	r, err := getErr(t, c, path, hdr...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return r
 }
 
 func eventually(t *testing.T, what string, cond func() bool) {
@@ -134,7 +144,7 @@ func eventually(t *testing.T, what string, cond func() bool) {
 	t.Fatalf("timed out waiting for %s", what)
 }
 
-// 08 §3, OQ-C1, R-3 (no FR covers reloads): a reload that changes only the limiter keeps the
+// 08 §3, OQ-C1 (no FR covers reloads): a reload that changes only the limiter keeps the
 // store, so 100 warm keys stay hits. A forward.allow change alters what an
 // unchanged key means, so the same keys miss once (hard epoch, R-3). Adding a
 // host to a site that is already multi_host changes nothing.
@@ -194,8 +204,9 @@ func TestReloadKeepsWarmKeys(t *testing.T) {
 
 // FR-COA-1, T6.2: a cold hot key reaches the origin once however many clients
 // ask while it is in flight, and every client gets the body. The pause lets
-// the followers reach Caddy before the gate opens; a late one becomes a hit,
-// which keeps the origin count at 1 either way.
+// the followers reach Caddy before the gate opens. A late one becomes a hit,
+// so the origin count stays 1 either way; only that count and one collapsed
+// response are asserted, because how many followers join depends on load.
 func TestE2ECoalesceColdKey(t *testing.T) {
 	o := newE2EOrigin(t, cacheableBody)
 	gate := make(chan struct{})
@@ -211,7 +222,10 @@ func TestE2ECoalesceColdKey(t *testing.T) {
 	results := make(chan result, clients)
 	for range clients {
 		go func() {
-			r := get(t, tester.Client, "/hot")
+			r, err := getErr(t, tester.Client, "/hot")
+			if err != nil {
+				t.Error(err)
+			}
 			results <- result{r.code, r.body, r.header.Get("Cache-Status")}
 		}()
 	}
@@ -232,8 +246,8 @@ func TestE2ECoalesceColdKey(t *testing.T) {
 	if n := o.calls.Load(); n != 1 {
 		t.Fatalf("%d origin calls for one cold key, want 1", n)
 	}
-	if collapsed < clients/2 {
-		t.Fatalf("only %d of %d responses report collapsed", collapsed, clients)
+	if collapsed < 1 {
+		t.Fatalf("%d of %d responses report collapsed, want at least one", collapsed, clients)
 	}
 }
 
@@ -299,7 +313,7 @@ func TestE2EOriginOutage(t *testing.T) {
 	}
 }
 
-// FR-LIM-5, FR-CB-1, D34: Retry-After set before the error is returned survives the
+// FR-CB-1, D34: Retry-After set before the error is returned survives the
 // operator's handle_errors route, which writes its own body.
 func TestRetryAfterSurvivesHandleErrors(t *testing.T) {
 	o := newE2EOrigin(t, cacheableBody)
@@ -345,7 +359,7 @@ func TestE2EPurgeHerd(t *testing.T) {
 		get(t, c, "/k"+strconv.Itoa(i))
 	}
 
-	// Epochs have a one-second grain: an entry stored in the same second as
+	// Epochs have a one-second grain (05 E-7, rounded up): an entry stored in the same second as
 	// the invalidation is not older than it.
 	time.Sleep(1100 * time.Millisecond)
 	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, "http://localhost:9080/post", strings.NewReader("x"))
@@ -369,7 +383,11 @@ func TestE2EPurgeHerd(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			resp := get(t, c, "/k"+strconv.Itoa(i))
+			resp, err := getErr(t, c, "/k"+strconv.Itoa(i))
+			if err != nil {
+				t.Error(err)
+				return
+			}
 			if resp.code == http.StatusOK && resp.body == "body /k"+strconv.Itoa(i) &&
 				strings.Contains(resp.header.Get("Cache-Status"), "detail=stale-while-revalidate") {
 				stale.Add(1)

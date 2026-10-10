@@ -4,9 +4,9 @@ Updated: 2026-10-10
 Phase: 1
 Current card: none
 Card state: awaiting-merge
-Branch: claude/funny-bohr-vcgmor
-PR: https://github.com/AshwinSathian/weir/pull/78
-Next card: P2-03b (End-to-end scenarios under caddytest)
+Branch: claude/lucid-wright-8y0epq
+PR: PR_URL
+Next card: P2-04 (Memory budget split and memory sizing)
 
 ## Waiting on Ashwin
 
@@ -57,8 +57,9 @@ Ashwin delegated "take decisions on all items"; "Waiting on Ashwin" was empty. A
 
 ## Notes for the next session
 
-- P2-03b: `nextOrigin` maps a 4xx from `next` to a response and other errors to a fixed-text 502. 5xx statuses chosen by `next` (a dial error from `reverse_proxy`) are still 502 with no body; check with caddytest that `handle_errors` output is right.
-- The route warnings (`X-Forwarded-For`, per-client placeholders) run on the first request via `ctx.App("http")`; verify them against a real config in caddytest. Unit tests cover only the pure scan.
-- The multi-host warning remembers one host (port stripped). Host case and port variants are treated as one site.
+- P2-03b ran the T6.12 scenario through a POST with `Cache-Group-Invalidation`; the admin purge endpoint does not exist yet, so P2-05 should add an end-to-end purge case (`fwd=stale` on the next `Cache-Status`).
+- caddytest tests use the real clock (two named pauses: 300 ms for followers, 1.1 s for the epoch second) and skip under `-short`. Ports 2999 (admin) and 9080 are fixed by the harness; do not run two caddytest packages in parallel.
+- Still open from P2-03: 5xx statuses chosen by `next` (a dial error from `reverse_proxy`) become 502 with no body. The outage test confirms 502 reaches the client and trips the breaker; no custom mapping was added.
 - Follow-up for 06 T-45/R-6: add the per-client placeholder case at its next revision.
 - P2-01c: root `=.` replace stays until the next root release tag.
+- `caddy/go.mod` gained indirect requirements from `caddytest` only.

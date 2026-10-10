@@ -48,7 +48,7 @@ These phases start from draft specs. Each begins with one planning card that ver
 - Tests: `TestUpgradeAndConnectBypassEngine`, `TestNextOriginUsesDetachedContext`, `TestErrorsReturnHandlerError`, `TestForwardedForWarning`, `TestPlaceholderHeaderWarning` (08 §6: `header_up` with a per-client placeholder after `weir` logs a one-time warning), `TestSecondHostWithoutMultiHostWarnsOnce` (a second distinct host while `multi_host` is off logs one warning naming `multi_host`; the engine remembers at most two hosts, never a set keyed by request input)
 - AC: all listed tests pass; `Fetch` after the request finished never touches the original `ResponseWriter`; the one-time `X-Forwarded-For` warning appears for `reverse_proxy` without `header_up -X-Forwarded-For`; the multi-host warning appears once (P2-02 decided `multi_host` is operator-stated, so this is its only safety net); a request on a handler whose engine is closed (`ErrClosed`, `h.engine` stays set after `Cleanup`) gets a 503; `Origin.Fetch` is still called only in `(*Engine).fetch`
 
-### [ ] P2-03b End-to-end scenarios under caddytest
+### [x] P2-03b End-to-end scenarios under caddytest
 - Plan: 2.2, 2.3 · Size: S · Depends on: P2-03, P2-01c
 - Read: 07 T6.2, T6.6, T6.12; 08 §9
 - Touch: caddy/e2e_test.go
