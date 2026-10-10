@@ -1375,7 +1375,7 @@ Entry template:
 - Follow-ups: STATUS notes (5xx statuses from `next`, caddytest).
 
 ## 2026-10-10 · P2-03b · done
-- Branch / PR: claude/lucid-wright-8y0epq / PR_URL
+- Branch / PR: claude/lucid-wright-8y0epq / https://github.com/AshwinSathian/weir/pull/79
 - Done: `caddy/e2e_test.go`: real in-process Caddy via caddytest in front of a counting origin; reload, coalescing, outage and purge-herd scenarios, `Retry-After` through `handle_errors`.
 - Tests: TestReloadKeepsWarmKeys, TestE2ECoalesceColdKey, TestE2EOriginOutage, TestRetryAfterSurvivesHandleErrors, TestE2EPurgeHerd; `make check` passes (lint run with the pinned v2.14.0 under Go 1.27).
 - Deviations: none in docs. T6.12 uses a POST group invalidation because the admin purge API is P2-05. Review (card-reviewer): no must-fix; fixed t.Fatal from goroutines, loosened the collapsed assertion to at least one (load-dependent), added the 05 E-7 citation, corrected two requirement citations.

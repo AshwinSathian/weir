@@ -5,7 +5,7 @@ Phase: 1
 Current card: none
 Card state: awaiting-merge
 Branch: claude/lucid-wright-8y0epq
-PR: PR_URL
+PR: https://github.com/AshwinSathian/weir/pull/79
 Next card: P2-04 (Memory budget split and memory sizing)
 
 ## Waiting on Ashwin
