@@ -190,7 +190,7 @@ These phases start from draft specs. Each begins with one planning card that ver
 - Out of scope: the two-node test and the guide (P25-07b)
 - Notes: likely to split on overrun (config and Caddyfile vs pool wiring). ASK THE USER FIRST: a new Caddy config block (CLAUDE.md "When to stop and ask").
 
-### [ ] P25-07b Two-node test and the multi-node guide
+### [x] P25-07b Two-node test and the multi-node guide
 - Plan: 2.5.5 · Size: M · Depends on: P25-07
 - Read: 01 D17 (line 69) and FR-STF-2; 06 T-38; 08 line 111; docs/runbook.md section 7; caddytest harness
 - Touch: caddy e2e test files, docs/runbook.md (new section 8; section 7 gets a pointer), docs/01 (D17 lifted), docs/06 (T-38), docs/08

@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -46,17 +47,36 @@ func buildNode(t *testing.T) string {
 	return bin
 }
 
+// lockedBuf is a log sink that exec's copy goroutine and the test can use at
+// the same time.
+type lockedBuf struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (l *lockedBuf) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.Write(p)
+}
+
+func (l *lockedBuf) String() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.String()
+}
+
 // node is one running Caddy process.
 type node struct {
 	site, admin int
-	log         *bytes.Buffer
+	log         *lockedBuf
 }
 
 // startNode runs the binary with a Caddyfile that shares one Valkey keyspace
 // (same prefix) with its sibling and proxies to origin.
 func startNode(t *testing.T, bin, origin, valkeyAddr, prefix string) *node {
 	t.Helper()
-	n := &node{site: freePort(t), admin: freePort(t), log: &bytes.Buffer{}}
+	n := &node{site: freePort(t), admin: freePort(t), log: &lockedBuf{}}
 	cf := fmt.Sprintf(`{
 	admin 127.0.0.1:%d
 	auto_https off

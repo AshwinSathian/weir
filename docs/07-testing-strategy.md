@@ -1,7 +1,7 @@
 # Weir testing strategy
 
 Status: v1.0
-Date: 2026-10-10
+Date: 2026-10-11
 Depends on: [01-technical-spec.md](01-technical-spec.md), [06-threat-model.md](06-threat-model.md)
 Seed name: `03-testing-strategy.md` (renumbered, see [docs/README.md](README.md))
 

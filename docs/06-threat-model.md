@@ -1,7 +1,7 @@
 # Weir threat model
 
 Status: v1.0
-Date: 2026-10-10
+Date: 2026-10-11
 Depends on: [01-technical-spec.md](01-technical-spec.md), [02-architecture.md](02-architecture.md)
 
 The seed's §7.3 makes the cache key a security boundary. This document says what that boundary protects, from whom, how each known attack class is answered, and what remains the operator's problem. Every threat has an ID so tests and code comments can cite it (`// T-3: ...`).

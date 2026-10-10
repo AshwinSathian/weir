@@ -1,6 +1,6 @@
 # Runbook
 
-Updated: 2026-10-10
+Updated: 2026-10-11
 
 For the person running Weir in front of an origin. It covers first deployment, the signals to watch and what to do when each one fires. Setting names are in [01 §6](01-technical-spec.md); the reasoning behind the defaults is in [06](06-threat-model.md). This is not a design document: when it disagrees with 01 to 07, they win.
 
@@ -295,7 +295,7 @@ After a failover, or after restoring Valkey from a backup, assume purges were lo
 
 ### 8.5 Cluster mode and slot concentration
 
-With `cluster`, entry keys spread over all slots by default and only the epoch keys share one hash tag (`hash_tag`, default `e`), so one script touches one slot. All epoch traffic, which every lookup reads, therefore lands on the primary that owns that slot. `co_locate_entries` puts the entries in the same slot: lookups need fewer round trips, but the whole cache then lives on one primary, which limits its size to that node's memory and its throughput to that node. Leave it off for caches that outgrow one primary. Whichever you pick, set it identically on all nodes. Changing it later makes the old entries unreachable (they age out).
+With `cluster`, entry keys spread over all slots by default and only the epoch keys share one hash tag (`hash_tag`, default `e`), so one script touches one slot. All epoch traffic, which every lookup reads, therefore lands on the primary that owns that slot. `co_locate_entries` puts the entries in the same slot: the cache's keys then share one slot, but the whole cache then lives on one primary, which limits its size to that node's memory and its throughput to that node. Leave it off for caches that outgrow one primary. Whichever you pick, set it identically on all nodes. Changing it later makes the old entries unreachable (they age out).
 
 ### 8.6 Settings that must match on every node
 
@@ -314,7 +314,7 @@ Watch the `weir_store_*` series (section 2) and alert on a store breaker that st
 
 ### 8.8 Shutdown order
 
-A node closes its store when Caddy stops it, and it does not touch other nodes' data: a restart of one node must not flush the shared cache, and it does not. Stop or drain Caddy nodes first, then Valkey. Stopping Valkey first only opens the breakers and slows shutdown by the `call_timeout`. On a rolling restart, take nodes out of the load balancer, restart one at a time and check `Cache-Status: Weir; hit` before the next. There is no snapshot with a Valkey store: the cache is the server's.
+A node closes its store when Caddy stops it, and it does not touch other nodes' data: a restart of one node must not flush the shared cache, and it does not. Stop or drain Caddy nodes first, then Valkey. Stopping Valkey first only opens the breakers while the nodes drain, and requests in that time go to the origin. On a rolling restart, take nodes out of the load balancer, restart one at a time and check `Cache-Status: Weir; hit` before the next. There is no snapshot with a Valkey store: the cache is the server's.
 
 ### 8.9 Before you go live
 

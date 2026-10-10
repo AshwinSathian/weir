@@ -2,11 +2,11 @@
 
 Updated: 2026-10-11
 Phase: 1
-Current card: P25-07b
-Card state: in-progress (implemented, waiting for the user to run /handoff)
+Current card: none
+Card state: awaiting-merge
 Branch: card/P25-07b-two-node-purge (pushed to claude/dreamy-dijkstra-egbmbq)
-PR: none yet
-Next card: P25-07c (needs approval)
+PR: pending
+Next card: P25-07c (needs Ashwin's approval: persisted key-generation hash changes purge semantics)
 
 ## Decided 2026-10-11 (P25-07, adversarial review of PR 94)
 
@@ -18,10 +18,12 @@ Ashwin delegated "take decisions on all items"; "Waiting on Ashwin" was empty. A
 - `closeStore` honors the caller's deadline for Valkey. `multi_host` with Valkey logs a warning. Tests added for pool sharing, close on last release, every-field digest coverage.
 - Declined as code: persisting the key-generation hash in Valkey (changes purge semantics): new card P25-07c, ask first. Restart after tightening `forward` stays documented in 08 §3.
 
-## Notes for P25-07b
+## Notes for the next session (P25-07b)
 
-- Implemented under delegated decisions: D17 lifted for Valkey only; two-process harness (`caddy/internal/e2enode`); `integration` tag, run by `make test-valkey`. Needs review: CLAUDE.md rule 6 exception.
-- Not done: card mark, PLAN 2.5.5 tick, `make check`, `card-reviewer`, PR (all `/handoff`). CI must confirm lint and the test on Valkey 8.1.
+- Decided under delegation (Ashwin: "decide and proceed"): D17 lifted for Valkey only; two-process harness; `integration` tag run by `make test-valkey`. Ashwin should confirm D17 and the CLAUDE.md rule 6 exception at review.
+- PLAN 2.5.5 stays unticked: P25-07c is also mapped to it. CI must still run lint and the test on Valkey 8.1.
+- The test sends SIGKILL at cleanup, so graceful shutdown with a Valkey store is not exercised; runbook 8.8 describes it from the design.
+- `freePort` has a small bind race on busy runners.
 
 ## Notes for the next session (P25-07)
 

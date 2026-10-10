@@ -1,7 +1,7 @@
 # Weir technical specification
 
 Status: v1.0, approved for Phase 0 and Phase 1 implementation
-Date: 2026-10-10
+Date: 2026-10-11
 Owner: Ashwin Sathian
 Module: `github.com/AshwinSathian/weir`
 Supersedes: the interface sketch in [00-design-doc.md §7.2](00-design-doc.md)
