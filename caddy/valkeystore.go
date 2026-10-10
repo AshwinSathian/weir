@@ -4,9 +4,10 @@ import (
 	"crypto/sha256"
 	"crypto/tls"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"log/slog"
+	"net"
+	"strconv"
 	"strings"
 	"time"
 
@@ -67,9 +68,14 @@ func (s *StoreConfig) validate() error {
 	if s.Type != "valkey" {
 		return fmt.Errorf("weir: unknown store type %q (only \"valkey\")", s.Type)
 	}
-	for _, a := range s.Addrs {
-		if strings.Contains(a, "@") || strings.Contains(a, "://") {
-			return errors.New("weir: store addrs take host:port only; put credentials in username and password")
+	// valkey.Config.Validate quotes a bad address, and an operator can paste a
+	// secret into addrs (user:pass, a URL, a mis-nested line). Check the shape
+	// here and name the index only.
+	for i, a := range s.Addrs {
+		host, port, err := net.SplitHostPort(a)
+		n, perr := strconv.Atoi(port)
+		if err != nil || host == "" || perr != nil || n < 1 || n > 65535 || strings.ContainsAny(a, "@/ \t\r\n") {
+			return fmt.Errorf("weir: store addrs[%d] must be host:port (credentials go in username and password)", i)
 		}
 	}
 	_, err := s.valkeyConfig().Validate()

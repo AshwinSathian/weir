@@ -181,7 +181,7 @@ These phases start from draft specs. Each begins with one planning card that ver
 - AC: `Scrubber` implemented as in 05 §7 (synchronous, `ponytail:` ceiling stated); storm results (hit ratio before and after, epoch keys intact) written up in 09; 05 §7 revised if the storm finds a gap
 - Out of scope: multi-node wiring (P25-07)
 
-### [ ] P25-07 Adapter wiring for the Valkey store
+### [x] P25-07 Adapter wiring for the Valkey store
 - Plan: 2.5.5 · Size: M · Depends on: P25-05b, P25-06
 - Read: 08 §2, §3, §4b; caddy/pool.go, caddy/config.go, caddy/caddyfile.go
 - Touch: caddy/{config.go,caddyfile.go,pool.go}, caddy/go.mod (requires `store/valkey`), caddy tests, docs/08

@@ -2,18 +2,19 @@
 
 Updated: 2026-10-11
 Phase: 1
-Current card: P25-07
-Card state: in-progress
+Current card: none
+Card state: awaiting-merge
 Branch: claude/gracious-brown-acmyd0 (session branch, not card/*)
-PR: none yet
-Next card: P25-07
+PR: PR_URL
+Next card: P25-07b
 
-## Notes for the next session (P25-06)
+## Notes for the next session (P25-07)
 
-- Review (card-reviewer): one must-fix (CI `docker ps --filter publish=` cannot tell the two Valkey services apart; the step now uses `job.services.<id>.id`), fixed but unproven until CI runs. Fixed too: busy-loop reader replaced by a channel, the poll names its real-clock exception, empty-tag `Scrub` no longer dials. Hot-key hit counts in the storm test are logged, not asserted (09 §7 says so).
-- Open: the engine bounds the whole `Scrub` by `Timeouts.Store` (50 ms default, remote), so an eager purge on a real keyspace times out. Needs its own scrub deadline in the engine (new card or P25-07). In 05 §7 and 09 §7.
-- A failed command inside a `getMulti`/`delMulti` pipeline (for example MOVED during resharding) fails the scrub with `ErrUnavailable`; P25-07 decides whether that needs handling.
-- golangci-lint cannot run here (Go 1.25 build); CI must confirm lint, the second Valkey service on 6380, and the storm on Valkey 8.1. PLAN 2.5.4 is ticked on the strength of local redis 7.0.15 runs; PLAN 2.5.2 still waits on the CI run.
+- Review (card-reviewer): no must-fix. Fixed: addresses are shape-checked in the adapter and never quoted (`user:pass`, bare secrets, URLs); test cites corrected. Documented in 08 §3: no key-generation record on the Valkey server (restart after tightening `forward` keeps old entries servable; purge by hand), and a reload that changes the hash needs the server up. Not coded: warning for `multi_host` losing the per-owner store cap on Valkey; digest differs for explicit defaults versus unset (benign); the outage test uses the real breaker window (20 requests, 5-10 store errors), could flake on a very slow runner.
+- Decision for Ashwin if wanted: persist the key-generation hash in Valkey and write an epoch on mismatch (changes purge semantics, so not done).
+- MOVED during resharding still fails a scrub (left from P25-06); the engine scrub deadline card is still open.
+- golangci-lint cannot run here (Go 1.25 build); CI must confirm lint, the xcaddy `--with` and the Valkey `caddy validate` step.
+- P25-07b needs Ashwin's approval to lift D17 and a two-process harness (caddytest fixes ports 2999 and 9080).
 
 ## Decided 2026-10-10 (P25-06, adversarial review of PR 93)
 

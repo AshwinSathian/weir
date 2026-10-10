@@ -30,7 +30,7 @@ func fullStore() *StoreConfig {
 	}
 }
 
-// FR-STF-2 (docs/05 §7), 08 §2: every approved store/valkey field has a JSON
+// docs/05 §7, 08 §2: every approved store/valkey field has a JSON
 // key and reaches valkey.Config.
 func TestStoreValkeyJSONMapsEveryField(t *testing.T) {
 	raw := `{"name":"a","store":{"type":"valkey","addrs":["10.0.0.1:6379","10.0.0.2:6379"],"username":"weir",
@@ -56,8 +56,8 @@ func TestStoreValkeyJSONMapsEveryField(t *testing.T) {
 	}
 }
 
-// 08 §2: a bad store block fails Provision (and so `caddy validate`), and no
-// error carries the password.
+// docs/05 §7, 08 §2: a bad store block fails Provision (and so `caddy validate`),
+// and no error carries the password, whatever shape a pasted secret takes.
 func TestStoreValkeyValidation(t *testing.T) {
 	bad := map[string]string{
 		"missing type":          `{"addrs":["h:1"]}`,
@@ -68,6 +68,8 @@ func TestStoreValkeyValidation(t *testing.T) {
 		"bad prefix":            `{"type":"valkey","addrs":["h:1"],"prefix":"a:b"}`,
 		"url address":           `{"type":"valkey","addrs":["valkey://u:` + secretPW + `@h:1"]}`,
 		"userinfo address":      `{"type":"valkey","addrs":["u:` + secretPW + `@h:1"]}`,
+		"user:pass address":     `{"type":"valkey","addrs":["u:` + secretPW + `"]}`,
+		"bare secret address":   `{"type":"valkey","addrs":["` + secretPW + `"]}`,
 		"skew conflict":         `{"type":"valkey","addrs":["h:1"],"no_clock_skew":true,"max_clock_skew":"1s"}`,
 	}
 	for name, st := range bad {
@@ -91,7 +93,7 @@ func TestStoreValkeyValidation(t *testing.T) {
 	})
 }
 
-// FR-STF-2: Config.String and slog redact the credentials.
+// docs/05 §7: String, GoString and slog redact the credentials.
 func TestStoreConfigRedacts(t *testing.T) {
 	s := fullStore()
 	for _, got := range []string{s.String(), s.GoString(), fmt.Sprintf("%v %+v %#v", s, s, s), s.LogValue().String()} {
