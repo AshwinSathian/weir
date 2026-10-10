@@ -1428,7 +1428,7 @@ Entry template:
 - Declined: checking count limits before decode (bounded by the 1 MiB cap); hiding which names exist from a prober (admin API is operator-only); an integration test for an origin group invalidation during an eager purge (the tap is unit-tested on the event reason).
 
 ## 2026-10-10 · P2-06 · done
-- Branch / PR: claude/inspiring-galileo-j1jrdh / none yet (the session did not open one)
+- Branch / PR: claude/inspiring-galileo-j1jrdh / https://github.com/AshwinSathian/weir/pull/82
 - Done: `caddy/metrics.go`: collector set per (registry, name) wrapping `observe/prom` with a constant `name` label, aggregating gauges over same-name engines, `evictSink` that fans the pooled store's evictions to the newest live set; `fanout` observer after `purgeTap`; Provision/Cleanup wiring; `caddy/go.mod` requires `observe/prom` and `client_golang`.
 - Tests: TestMetricsNamesAndNameLabel, TestMetricsRegisteredOncePerRegistry, TestEvictionSinkRepointsOnReload, TestMetricsSurviveReload, TestMetricsGaugesAcrossEngines, TestSiblingCleanupKeepsEvictionSink, TestFailedLoadCleanupKeepsOlderSink, TestProvisionFailureReleasesMetricSetOnce. Race and shuffle tests pass in all three modules, `make trace-strict` passes; `make check` stops at the Go 1.25 golangci-lint binary (known), lint not run.
 - Deviations: 08 §8 records the wrap decision and the sink/set design.

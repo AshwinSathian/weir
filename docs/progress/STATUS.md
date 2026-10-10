@@ -5,7 +5,7 @@ Phase: 1
 Current card: none
 Card state: awaiting-merge
 Branch: claude/inspiring-galileo-j1jrdh
-PR: none yet (P2-06 pushed; Ashwin opens it or asks for it)
+PR: https://github.com/AshwinSathian/weir/pull/82
 Next card: P2-07
 
 ## Waiting on Ashwin
