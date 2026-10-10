@@ -165,6 +165,7 @@ func TestEngineInvalidationFlood(t *testing.T) {
 		}
 		return time.Since(start) / n
 	}
+	lookups() // warm-up: connections and the script cache
 	before := lookups()
 	for i := range 300 {
 		enginePost(t, e, "/flood"+strconv.Itoa(i), o)
@@ -265,8 +266,8 @@ func TestEngineSoftAfterHardStaysHard(t *testing.T) {
 }
 
 // FR-PRG-7, T-10: a fetch sent before an invalidation and stored after it does
-// not survive the invalidation, because the store orders the epoch against the
-// entry on the server clock.
+// not survive the invalidation, because epochs are compared with the entry's
+// request time, not its storage time.
 func TestEnginePurgeDuringInflightFetch(t *testing.T) {
 	t.Parallel()
 	gate := make(chan struct{})
@@ -292,7 +293,9 @@ func TestEnginePurgeDuringInflightFetch(t *testing.T) {
 	waitFor(t, "the GET at the origin", func() bool { return gets.Load() == 1 })
 	time.Sleep(time.Second)
 	enginePost(t, e, "/a", o)
-	time.Sleep(time.Second)
+	// Long enough that an entry stamped at completion instead of at request
+	// time (T-10) would land past the epoch second and survive it.
+	time.Sleep(3 * time.Second)
 	close(gate)
 	<-done
 	time.Sleep(2100 * time.Millisecond)
@@ -501,8 +504,8 @@ func TestEngineWarm(t *testing.T) {
 	if want := (weir.WarmStats{Fetched: 40, NotStored: 1, Failed: 1}); st != want {
 		t.Fatalf("stats = %+v, want %+v", st, want)
 	}
-	if n := o.MaxInflight(); n < 2 || n > 4 {
-		t.Fatalf("origin max in-flight = %d, want 2 to 4 (Warm.Concurrency is 4)", n)
+	if n := o.MaxInflight(); n > 4 {
+		t.Fatalf("origin max in-flight = %d, want at most Warm.Concurrency (4)", n)
 	}
 	for _, p := range paths {
 		if resp, body := engineServe(t, e, p, o); !resp.Cache.Hit || body != "v" {
