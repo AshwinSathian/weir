@@ -1293,7 +1293,7 @@ Entry template:
 - Follow-ups: P2-01c CI should keep `make vuln` on caddy/; later Caddy bumps may need the same x/net floor.
 
 ## 2026-10-10 · P2-01b · done
-- Branch / PR: claude/adoring-curie-pvckor (session branch, not card/*) / not opened
+- Branch / PR: claude/adoring-curie-pvckor (session branch, not card/*) / https://github.com/AshwinSathian/weir/pull/75
 - Done: `caddy/caddyfile.go`: `UnmarshalCaddyfile` for every 08 §2 key, nested blocks, line-numbered errors; directive and order registered in `init`.
 - Tests: `TestCaddyfileParse` (08 example and literal 08 §2 text vs hand-written JSON, bad input with line numbers), `TestDirectiveOrder` (site, handle, route, encode). Caddy lint under Go 1.27 clean, root checks and trace pass.
 - Deviations: none. No docs/01 or docs/06 ID covers Caddyfile syntax; tests say so.

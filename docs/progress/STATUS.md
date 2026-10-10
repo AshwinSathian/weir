@@ -5,7 +5,7 @@ Phase: 1
 Current card: none
 Card state: awaiting-merge
 Branch: claude/adoring-curie-pvckor
-PR: not opened (session rules forbid opening a PR unasked; branch pushed)
+PR: https://github.com/AshwinSathian/weir/pull/75
 Next card: P2-01c (CI for the Caddy module)
 
 ## Waiting on Ashwin
