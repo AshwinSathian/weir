@@ -20,7 +20,7 @@ These phases start from draft specs. Each begins with one planning card that ver
 - Out of scope: Caddyfile parsing (P2-01b), CI job (P2-01c), the store pool (P2-02), serving (P2-03)
 - Notes: go.work exists since M10-02; extend it. The Makefile finds submodules itself, so `make check` covers `caddy/` as soon as its `go.mod` exists. The `internal/keys` import compiles across modules by path (checked with a throwaway two-module build at P2-00); if it fails here, stop and ask: the fallback is an exported `weirhttp.IsUpgrade`, a public API change.
 
-### [ ] P2-01b Caddyfile parsing and directive order
+### [x] P2-01b Caddyfile parsing and directive order
 - Plan: 2.2 · Size: S · Depends on: P2-01
 - Read: 08 §1, §2, §5; `caddyconfig/httpcaddyfile` at v2.11.7 (08 §11)
 - Touch: caddy/caddyfile.go, caddy/caddyfile_test.go

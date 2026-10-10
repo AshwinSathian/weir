@@ -169,6 +169,7 @@ func flag(d *caddyfile.Dispenser, dst *bool) error {
 	return nil
 }
 
+// ponytail: only the sign is checked here; upper bounds are weir.New's job at Provision (08 §2).
 func intArg(d *caddyfile.Dispenser, dst *int) error {
 	key := d.Val()
 	var s string

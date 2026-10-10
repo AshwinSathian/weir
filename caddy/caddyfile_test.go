@@ -3,7 +3,6 @@ package weircaddy
 import (
 	"bytes"
 	"encoding/json"
-	"reflect"
 	"strings"
 	"testing"
 
@@ -48,6 +47,20 @@ func weirHandlers(t *testing.T, adapted string) []Handler {
 	return out
 }
 
+// sameJSON compares the canonical marshalled form, so a divergence in how
+// Handler marshals is caught, not only in its decoded fields.
+func sameJSON(t *testing.T, got, want Handler) {
+	t.Helper()
+	g, err1 := json.Marshal(got)
+	w, err2 := json.Marshal(want)
+	if err1 != nil || err2 != nil {
+		t.Fatal(err1, err2)
+	}
+	if !bytes.Equal(g, w) {
+		t.Fatalf("adapted != hand-written\n got: %s\nwant: %s", g, w)
+	}
+}
+
 func collectWeir(t *testing.T, raw json.RawMessage, out *[]Handler) {
 	t.Helper()
 	var v any
@@ -80,8 +93,9 @@ func collectWeir(t *testing.T, raw json.RawMessage, out *[]Handler) {
 	walk(v)
 }
 
-// FR-LCY-2: the 08 §2 example adapts to the same module config as the
-// hand-written JSON, and bad input fails with the line number.
+// No docs/01 or docs/06 ID covers Caddyfile syntax; the contract is 08 §1 and
+// §2: the example adapts to the same module JSON as the hand-written
+// equivalent, and bad input fails with the Caddyfile line.
 func TestCaddyfileParse(t *testing.T) {
 	const full = `example.com {
 	weir {
@@ -141,9 +155,58 @@ func TestCaddyfileParse(t *testing.T) {
 		if err := decodeStrict([]byte(raw), &want); err != nil {
 			t.Fatal(err)
 		}
-		if !reflect.DeepEqual(got[0], want) {
-			t.Fatalf("adapted != hand-written\n got: %+v\nwant: %+v", got[0], want)
+		sameJSON(t, got[0], want)
+	})
+
+	t.Run("literal 08 section 2 example", func(t *testing.T) {
+		const lit = `example.com {
+	weir {
+		name       site-a
+		max_bytes  512MiB
+		key {
+			query_drop utm_* fbclid gclid
+			query_sort
+			headers    Accept-Language
+			cookies    currency
+			accept_encoding br gzip
 		}
+		forward {
+			allow X-Request-Id
+		}
+		bypass {
+			cookies session_id
+		}
+		limiter {
+			max_concurrent    128
+			max_per_partition 16
+			max_queue_wait    2s
+		}
+		stale {
+			if_error 5m
+		}
+	}
+	reverse_proxy app:8080
+}
+`
+		out, err := adapt(t, lit)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := weirHandlers(t, out)
+		var want Handler
+		const raw = `{"name": "site-a", "max_bytes": "512MiB",
+			"key": {"query_drop": ["utm_*", "fbclid", "gclid"], "query_sort": true,
+				"headers": ["Accept-Language"], "cookies": ["currency"], "accept_encoding": ["br", "gzip"]},
+			"forward": {"allow": ["X-Request-Id"]}, "bypass": {"cookies": ["session_id"]},
+			"limiter": {"max_concurrent": 128, "max_queue_wait": "2s", "max_per_partition": 16},
+			"stale": {"if_error": "5m"}}`
+		if err := decodeStrict([]byte(raw), &want); err != nil {
+			t.Fatal(err)
+		}
+		if len(got) != 1 {
+			t.Fatalf("want one weir handler, got %d", len(got))
+		}
+		sameJSON(t, got[0], want)
 	})
 
 	t.Run("name alone is a valid block", func(t *testing.T) {
@@ -168,23 +231,23 @@ func TestCaddyfileParse(t *testing.T) {
 	})
 
 	errs := []struct {
-		name, body, want string
+		name, body, want, line string
 	}{
-		{"missing name", "\tweir {\n\t\tmax_bytes 1MiB\n\t}\n", "name is required"},
-		{"empty block", "\tweir\n", "name is required"},
-		{"bad name charset", "\tweir {\n\t\tname a/b\n\t}\n", "outside [A-Za-z0-9._-]"},
-		{"unknown key", "\tweir {\n\t\tname a\n\t\tbogus 1\n\t}\n", `unknown key "bogus"`},
-		{"unknown key in nested block", "\tweir {\n\t\tname a\n\t\tkey {\n\t\t\tquery_dorp x\n\t\t}\n\t}\n", `unknown key "query_dorp"`},
-		{"duplicate name", "\tweir {\n\t\tname a\n\t\tname b\n\t}\n", `"name" is set twice`},
-		{"name without value", "\tweir {\n\t\tname\n\t}\n", "argument"},
-		{"name with two values", "\tweir {\n\t\tname a b\n\t}\n", "argument"},
-		{"bad byte size", "\tweir {\n\t\tname a\n\t\tmax_bytes lots\n\t}\n", "invalid byte size"},
-		{"byte size above cap", "\tweir {\n\t\tname a\n\t\tmax_bytes 2PiB\n\t}\n", "above 1 PiB"},
-		{"bad duration", "\tweir {\n\t\tname a\n\t\tstale {\n\t\t\tif_error soon\n\t\t}\n\t}\n", "duration"},
-		{"bad integer", "\tweir {\n\t\tname a\n\t\tlimiter {\n\t\t\tmax_concurrent many\n\t\t}\n\t}\n", "max_concurrent"},
-		{"negative integer", "\tweir {\n\t\tname a\n\t\tlimiter {\n\t\t\tmax_queue -1\n\t\t}\n\t}\n", "max_queue"},
-		{"list key without values", "\tweir {\n\t\tname a\n\t\tkey {\n\t\t\theaders\n\t\t}\n\t}\n", "argument"},
-		{"flag key with a value", "\tweir {\n\t\tname a\n\t\tkey {\n\t\t\tquery_sort yes\n\t\t}\n\t}\n", "argument"},
+		{"missing name", "\tweir {\n\t\tmax_bytes 1MiB\n\t}\n", "name is required", "Caddyfile:2"},
+		{"empty block", "\tweir\n", "name is required", "Caddyfile:2"},
+		{"bad name charset", "\tweir {\n\t\tname a/b\n\t}\n", "outside [A-Za-z0-9._-]", ""},
+		{"unknown key", "\tweir {\n\t\tname a\n\t\tbogus 1\n\t}\n", `unknown key "bogus"`, "Caddyfile:4"},
+		{"unknown key in nested block", "\tweir {\n\t\tname a\n\t\tkey {\n\t\t\tquery_dorp x\n\t\t}\n\t}\n", `unknown key "query_dorp"`, "Caddyfile:5"},
+		{"duplicate name", "\tweir {\n\t\tname a\n\t\tname b\n\t}\n", `"name" is set twice`, ""},
+		{"name without value", "\tweir {\n\t\tname\n\t}\n", "argument", ""},
+		{"name with two values", "\tweir {\n\t\tname a b\n\t}\n", "argument", ""},
+		{"bad byte size", "\tweir {\n\t\tname a\n\t\tmax_bytes lots\n\t}\n", "invalid byte size", ""},
+		{"byte size above cap", "\tweir {\n\t\tname a\n\t\tmax_bytes 2PiB\n\t}\n", "above 1 PiB", ""},
+		{"bad duration", "\tweir {\n\t\tname a\n\t\tstale {\n\t\t\tif_error soon\n\t\t}\n\t}\n", "duration", ""},
+		{"bad integer", "\tweir {\n\t\tname a\n\t\tlimiter {\n\t\t\tmax_concurrent many\n\t\t}\n\t}\n", "max_concurrent", ""},
+		{"negative integer", "\tweir {\n\t\tname a\n\t\tlimiter {\n\t\t\tmax_queue -1\n\t\t}\n\t}\n", "max_queue", ""},
+		{"list key without values", "\tweir {\n\t\tname a\n\t\tkey {\n\t\t\theaders\n\t\t}\n\t}\n", "argument", ""},
+		{"flag key with a value", "\tweir {\n\t\tname a\n\t\tkey {\n\t\t\tquery_sort yes\n\t\t}\n\t}\n", "argument", ""},
 	}
 	for _, tc := range errs {
 		t.Run(tc.name, func(t *testing.T) {
@@ -197,15 +260,20 @@ func TestCaddyfileParse(t *testing.T) {
 				t.Fatalf("error %q does not contain %q", msg, tc.want)
 			}
 			// 08 §2: errors name the Caddyfile line.
-			if !strings.Contains(msg, "Caddyfile:") {
-				t.Fatalf("error %q does not name the line", msg)
+			line := tc.line
+			if line == "" {
+				line = "Caddyfile:"
+			}
+			if !strings.Contains(msg, line) {
+				t.Fatalf("error %q does not name %s", msg, line)
 			}
 		})
 	}
 }
 
-// 08 §1: the directive sorts before reverse_proxy without a global order
-// option, also inside handle and route blocks (08 §5).
+// No docs/01 or docs/06 ID covers directive order; the contract is 08 §1 and
+// §5: the directive sorts before reverse_proxy without a global order
+// option, also inside handle blocks, and route keeps the written order.
 func TestDirectiveOrder(t *testing.T) {
 	const w = "weir {\n name a\n }\n"
 	cases := []struct {
@@ -214,7 +282,7 @@ func TestDirectiveOrder(t *testing.T) {
 		{"site block, weir written after reverse_proxy", "example.com {\n reverse_proxy app:8080\n " + w + "}\n"},
 		{"handle block", "example.com {\n handle /x/* {\n reverse_proxy app:8080\n " + w + " }\n}\n"},
 		// route keeps the written order (Caddy docs), so weir goes first here.
-		{"route block, written in order", "example.com {\n route {\n " + w + " reverse_proxy app:8080\n }\n}\n"},
+		{"route block, weir written first", "example.com {\n route {\n " + w + " reverse_proxy app:8080\n }\n}\n"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -232,6 +300,18 @@ func TestDirectiveOrder(t *testing.T) {
 			}
 		})
 	}
+
+	// route keeps the written order, so reverse_proxy first stays first. This
+	// pins the behaviour 08 §5 relies on: weir must be written in the block.
+	t.Run("route does not reorder", func(t *testing.T) {
+		out, err := adapt(t, "example.com {\n route {\n reverse_proxy app:8080\n "+w+" }\n}\n")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Index(out, `"handler":"reverse_proxy"`) > strings.Index(out, `"handler":"weir"`) {
+			t.Fatalf("route reordered handlers: %s", out)
+		}
+	})
 
 	// 08 §5: encode stays outer by default, weir sits between encode and
 	// reverse_proxy.
