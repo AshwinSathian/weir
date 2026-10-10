@@ -1,7 +1,7 @@
 # Weir threat model
 
 Status: v1.0
-Date: 2026-10-09
+Date: 2026-10-10
 Depends on: [01-technical-spec.md](01-technical-spec.md), [02-architecture.md](02-architecture.md)
 
 The seed's §7.3 makes the cache key a security boundary. This document says what that boundary protects, from whom, how each known attack class is answered, and what remains the operator's problem. Every threat has an ID so tests and code comments can cite it (`// T-3: ...`).
@@ -78,7 +78,7 @@ Each row: the attack, where it comes from, Weir's answer, the requirement or ADR
 | T-40 | Trace-header echo: an origin reflects `X-Request-Id` or `traceparent` into a cacheable body, making it an unkeyed input | forwarded by default for tracing; validated format, length and byte set (letters, digits and `-_.:/=+@,;*~!|`), at most 32 `tracestate` lines, none empty, no `..`, so neither field can carry a payload or a field count that a WAF or origin would reject onto the shared key (T-31); documented as origin misuse; operators can set `Forward.NoTraceHeaders` | FR-FWD-6 | `TestTraceparentValidated` |
 | T-41 | Drip-feeding origin: an origin (or something in front of it) sends a cacheable body one byte at a time to hold limiter slots | buffered body reads stay under the total origin timeout | FR-TMO-1 | `TestDripOriginReleasesSlot` |
 | T-42 | Forgotten incident mode: `ModeStaleOnError` or `ModeBypass` left on for days | mandatory expiry of at most 24 h; modes not persisted; events and logs on every change | FR-MODE-1 | `TestModeExpires` |
-| T-43 | Memory overcommit: several default-sized stores in one process each take 40% of `GOMEMLIMIT` | the Caddy adapter splits the budget across stores; library users constructing several engines are warned in docs | FR-MEM-1 | `TestMemorySizingSplit` (Caddy) |
+| T-43 | Memory overcommit: several default-sized stores in one process each take 40% of `GOMEMLIMIT` | the Caddy adapter splits the budget across stores (each new one takes half of the unclaimed part, not an even share); library users constructing several engines are warned in docs | FR-MEM-1 | `TestMemorySizingSplit` (Caddy) |
 | T-44 | Upgrade smuggling: a WebSocket over HTTP/2 extended CONNECT carries no `Upgrade` header and slips past upgrade detection | `CONNECT` in any form is rejected by `Serve` and routed around by adapters. The one `Upgrade` served normally is a lone `h2c` token; `Upgrade` and `HTTP2-Settings` are hop-by-hop, so the origin sees a plain request and key and forward stay equal. `h2c` with any other token is still an upgrade | FR-UPG-1 | `TestConnectRejected`, `TestH2CUpgradeServedNormally`, `TestH2CKeyedLikePlainRequest` |
 | T-24 | Unbounded host keyspace: arbitrary `Host` values create entries | adapter routes by host before Weir (Caddy site blocks); inside Weir, new keys land in the small S3-FIFO queue and churn only it | ADR-6 | covered by T-11 tests |
 | T-28 | Group-invalidation amplification: attacker makes cheap unsafe requests whose responses carry `Cache-Group-Invalidation` for a large, hot group, forcing every entry in it to revalidate before it can be served | grouped invalidation is applied as a soft purge, so SWR and SIE windows still apply and revalidation is background where the origin allows it; revalidations are coalesced and limiter-bound. This covers invalidation by the field; the URI flood of T-29 cannot make a group revalidate on a store with `SharedTagEpochs` (05 E-12) | FR-INV-2 | `TestGroupInvalidationIsSoft` |

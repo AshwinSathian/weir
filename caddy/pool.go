@@ -55,8 +55,8 @@ type pooledStore struct {
 	// the final snapshot writer is the live store (08 §3).
 	superseded atomic.Bool
 
-	// size is the byte budget the store was built with when max_bytes was
-	// unset (08 §7); zero for explicit sizes, which spec.maxBytes holds.
+	// size is the byte budget the store was built with (08 §7), fixed for
+	// its life.
 	size atomic.Int64
 
 	mu      sync.Mutex
@@ -167,7 +167,6 @@ type claim struct {
 	spec   storeSpec
 	keyGen [sha256.Size]byte
 	refs   int
-	size   int64 // bytes an auto-sized store of this name holds (memory.go)
 }
 
 func newStoreRegistry() *storeRegistry {
@@ -182,16 +181,18 @@ func newStoreRegistry() *storeRegistry {
 // when no live handler has it. keyChanged is true when a store that other
 // handlers already used was last used with a different key-generation hash.
 func (r *storeRegistry) acquire(load any, spec storeSpec, keyGen [sha256.Size]byte,
-	build func() (*memory.Store, error)) (p *pooledStore, keyChanged bool, err error) {
+	build func() (*memory.Store, int64, error)) (p *pooledStore, keyChanged bool, err error) {
 	if err := r.claimName(load, spec, keyGen); err != nil {
 		return nil, false, err
 	}
 	v, loaded, err := r.pool.LoadOrNew(spec, func() (caddy.Destructor, error) {
-		st, err := build()
+		st, size, err := build()
 		if err != nil {
 			return nil, err
 		}
-		return &pooledStore{spec: spec, store: st, reg: r, keyGen: keyGen}, nil
+		ps := &pooledStore{spec: spec, store: st, reg: r, keyGen: keyGen}
+		ps.size.Store(size)
+		return ps, nil
 	})
 	if err != nil {
 		r.unclaimName(load, spec.name)

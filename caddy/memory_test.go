@@ -17,6 +17,16 @@ func setLimit(t *testing.T, n int64) {
 	t.Cleanup(func() { debug.SetMemoryLimit(old) })
 }
 
+// isolateStores gives the test its own registry: stores that earlier tests
+// (and the caddytest instance) left live would otherwise count against the
+// budget. Handlers provisioned here keep a pointer to it via pooledStore.reg.
+func isolateStores(t *testing.T) {
+	t.Helper()
+	old := stores
+	stores = newStoreRegistry()
+	t.Cleanup(func() { stores = old })
+}
+
 func logTo(buf *bytes.Buffer) *slog.Logger { return slog.New(slog.NewTextHandler(buf, nil)) }
 
 // FR-MEM-1, T-43: auto-sized stores of one load share the 40% budget, stores
@@ -31,6 +41,7 @@ func TestMemorySizingSplit(t *testing.T) {
 
 	t.Run("each auto-sized store takes half of what the load has not granted", func(t *testing.T) {
 		setLimit(t, limit)
+		isolateStores(t)
 		ctx := newCtx(t)
 		a := mustLoad(t, ctx, `{"name":"split-a"}`)
 		x := mustLoad(t, ctx, `{"name":"split-x","max_bytes":"200MiB"}`)
@@ -40,8 +51,8 @@ func TestMemorySizingSplit(t *testing.T) {
 		if sa != budget/2 || sb != (budget-sa)/2 || sc != (budget-sa-sb)/2 {
 			t.Fatalf("sizes %d, %d, %d for budget %d", sa, sb, sc, budget)
 		}
-		if x.pool.size.Load() != 0 {
-			t.Fatal("an explicit max_bytes store was counted against the budget")
+		if x.pool.size.Load() != 200<<20 {
+			t.Fatalf("explicit store size = %d, want its max_bytes", x.pool.size.Load())
 		}
 		if sa+sb+sc > budget {
 			t.Fatalf("auto-sized stores sum to %d, above %d", sa+sb+sc, budget)
@@ -51,10 +62,11 @@ func TestMemorySizingSplit(t *testing.T) {
 	t.Run("the 160 MiB floor raises a share and warns", func(t *testing.T) {
 		var buf bytes.Buffer
 		r := newStoreRegistry()
-		load := new(int)
-		r.loads[load] = map[string]*claim{"big": {size: 300 << 20}}
+		p := &pooledStore{spec: storeSpec{name: "big"}}
+		p.size.Store(300 << 20)
+		r.live["big"] = []*pooledStore{p}
 		// 409 MiB budget, 300 MiB granted: half of the rest is 54 MiB.
-		got := r.autoSize(load, 1<<30, logTo(&buf), "small")
+		got := r.autoSize(1<<30, logTo(&buf), "small")
 		if got != minStoreBytes || !strings.Contains(buf.String(), "floor") {
 			t.Fatalf("size %d, log %q", got, buf.String())
 		}
@@ -64,7 +76,7 @@ func TestMemorySizingSplit(t *testing.T) {
 		var buf bytes.Buffer
 		r := newStoreRegistry()
 		for range 2 {
-			if got := r.autoSize(new(int), math.MaxInt64, logTo(&buf), "n"); got != 256<<20 {
+			if got := r.autoSize(math.MaxInt64, logTo(&buf), "n"); got != 256<<20 {
 				t.Fatalf("size = %d, want 256 MiB", got)
 			}
 		}
@@ -77,10 +89,11 @@ func TestMemorySizingSplit(t *testing.T) {
 	})
 }
 
-// 08 §7: the store interface has no resize, so a later load that adds a site
+// FR-MEM-1, T-43, 08 §7: the store interface has no resize, so a later load that adds a site
 // leaves existing stores at the size and contents they had.
 func TestMemoryShareFixedAfterBuild(t *testing.T) {
 	setLimit(t, 4<<30)
+	isolateStores(t)
 	a1 := mustLoad(t, newCtx(t), `{"name":"fixed-a"}`)
 	size := a1.pool.size.Load()
 	st := a1.pool.store
@@ -94,7 +107,7 @@ func TestMemoryShareFixedAfterBuild(t *testing.T) {
 	if got := a2.pool.size.Load(); got != size {
 		t.Fatalf("existing store resized from %d to %d", size, got)
 	}
-	// The reused store counts against its new load, so b gets half the rest.
+	// The reused store counts against the budget, so b gets half the rest.
 	budget, _ := memoryBudget(4 << 30)
 	if want := (budget - size) / 2; b.pool.size.Load() != want {
 		t.Fatalf("new store = %d, want %d", b.pool.size.Load(), want)
@@ -104,9 +117,10 @@ func TestMemoryShareFixedAfterBuild(t *testing.T) {
 // T-43: live auto-sized stores summing above 40% log a warning that names
 // max_bytes.
 func TestMemoryOvercommitWarns(t *testing.T) {
-	setLimit(t, 4<<30)
-	// Three loads, each adding a site while the earlier ones are still live
-	// (a reload overlap that never cleaned up): 3 x 800 MiB-ish > 40%.
+	// 1 GiB limit: 409 MiB budget. The first store takes 204 MiB, the next
+	// two are raised to the 160 MiB floor: 524 MiB live > 409 MiB.
+	setLimit(t, 1<<30)
+	isolateStores(t)
 	for _, n := range []string{"over-a", "over-b", "over-c"} {
 		mustLoad(t, newCtx(t), `{"name":"`+n+`"}`)
 	}
@@ -121,4 +135,26 @@ func TestMemoryOvercommitWarns(t *testing.T) {
 			t.Fatal("empty registry reported overcommit")
 		}
 	})
+}
+
+// T-43: a new site listed before the reused ones still sees their grants, so
+// the load stays under 40% whatever the provision order.
+func TestMemoryShareNewSiteFirst(t *testing.T) {
+	setLimit(t, 4<<30)
+	isolateStores(t)
+	budget, _ := memoryBudget(4 << 30)
+	ctx1 := newCtx(t)
+	a := mustLoad(t, ctx1, `{"name":"nf-a"}`)
+	b := mustLoad(t, ctx1, `{"name":"nf-b"}`)
+
+	ctx2 := newCtx(t)
+	n := mustLoad(t, ctx2, `{"name":"nf-n"}`)
+	a2 := mustLoad(t, ctx2, `{"name":"nf-a"}`)
+	b2 := mustLoad(t, ctx2, `{"name":"nf-b"}`)
+	if a2.pool != a.pool || b2.pool != b.pool {
+		t.Fatal("reused sites built new stores")
+	}
+	if sum := n.pool.size.Load() + a.pool.size.Load() + b.pool.size.Load(); sum > budget {
+		t.Fatalf("load holds %d, above the %d budget", sum, budget)
+	}
 }

@@ -404,7 +404,7 @@ func TestRegistryConcurrentAcquireRelease(t *testing.T) {
 	r := newStoreRegistry()
 	spec := storeSpec{name: "conc", maxBytes: 0}
 	var kg [sha256.Size]byte
-	build := func() (*memory.Store, error) { return memory.New(memory.Config{}) }
+	build := func() (*memory.Store, int64, error) { st, err := memory.New(memory.Config{}); return st, 0, err }
 	var wg sync.WaitGroup
 	for range 16 {
 		wg.Add(1)

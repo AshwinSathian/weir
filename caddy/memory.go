@@ -10,8 +10,8 @@ import (
 // Memory sizing (08 §7, FR-MEM-1, T-43). Stores without max_bytes share 40%
 // of the memory limit. Provision sees one handler at a time and Caddy gives
 // it no look-ahead, so an even split needs a count nobody has. Instead the
-// k-th new auto-sized store of a load takes half of the part of the budget
-// the load has not granted yet (20%, 10%, 5% of the limit). The sum stays
+// k-th new auto-sized store takes half of the part of the budget
+// has not been granted yet (20%, 10%, 5% of the limit). The sum stays
 // under 40% by construction until the 160 MiB floor binds.
 const (
 	budgetPercent = 40
@@ -43,9 +43,9 @@ func nextShare(budget, granted int64) (size int64, floored bool) {
 
 // autoSize picks the size for a store about to be built for h in load, which
 // has no max_bytes. limit is debug.SetMemoryLimit(-1). It is called from the
-// pool's constructor, so the grants it reads are those of the stores built
-// or reused earlier in the same load (noteSize).
-func (r *storeRegistry) autoSize(load any, limit int64, log *slog.Logger, name string) int64 {
+// pool's constructor, before the new store is live, so the grants it reads
+// are those of the stores that already exist (autoGranted).
+func (r *storeRegistry) autoSize(limit int64, log *slog.Logger, name string) int64 {
 	budget, limited := memoryBudget(limit)
 	if !limited {
 		if r.warnedNoLimit.CompareAndSwap(false, true) {
@@ -54,12 +54,7 @@ func (r *storeRegistry) autoSize(load any, limit int64, log *slog.Logger, name s
 		}
 		return defaultStoreBytes
 	}
-	r.mu.Lock()
-	var granted int64
-	for _, c := range r.loads[load] {
-		granted += c.size
-	}
-	r.mu.Unlock()
+	granted := r.autoGranted()
 	size, floored := nextShare(budget, granted)
 	if floored {
 		log.Warn("weir: the auto-sized memory share is below the 160 MiB floor and was raised; set max_bytes on the sites that need more or fewer bytes (docs/08 §7)",
@@ -68,18 +63,14 @@ func (r *storeRegistry) autoSize(load any, limit int64, log *slog.Logger, name s
 	return size
 }
 
-// noteSize records on the load's claim for p's name how many bytes an
-// auto-sized store holds, so the next autoSize in the same load subtracts it.
-// A store reused from an earlier load counts at the size it was built with.
-func (r *storeRegistry) noteSize(load any, p *pooledStore) {
-	if p.spec.maxBytes != 0 {
-		return
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if c := r.loads[load][p.spec.name]; c != nil {
-		c.size = p.size.Load()
-	}
+// autoGranted is the bytes held by every live auto-sized store, reused or
+// built earlier in this load and those of an older load still live during a
+// reload overlap. Counting live stores instead of this load's own claims keeps
+// the 40% bound whatever order the sites provision in: a new site listed
+// before the reused ones still sees them (T-43).
+func (r *storeRegistry) autoGranted() int64 {
+	sum, _, _ := r.overcommit(math.MaxInt64)
+	return sum
 }
 
 // overcommit sums the live auto-sized stores of every load (a reload that

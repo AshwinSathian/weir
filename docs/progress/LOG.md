@@ -1388,3 +1388,11 @@ Entry template:
 - Tests: e2e tests unchanged in scope; `make check` passes.
 - Deviations: CLAUDE.md rule 6 and docs/07 §1 amended (docs/07 date bumped); this changes a project rule under the delegation.
 - Declined: subtest independence in the reload test (nit), a pinned reserve in the herd test (no config key; the comment ties it to the FR-LIM-4 default), the T6.6 t=80 s case (needs a clock; the engine test covers it).
+
+## 2026-10-10 · P2-04 · done
+- Branch / PR: claude/focused-dijkstra-cr32by / none opened
+- Done: caddy/memory.go (budget, share, overcommit warning); `pooledStore.size` set at build; auto-sized stores take half of the unclaimed 40% budget, 256 MiB with one warning when no limit is set.
+- Tests: TestMemorySizingSplit, TestMemoryShareFixedAfterBuild, TestMemoryOvercommitWarns, TestMemoryShareNewSiteFirst (added after review); lint, shuffled race tests and trace-strict pass (golangci-lint run with Go 1.27 per Blockers).
+- Deviations: card said "evenly"; no look-ahead exists, so Ashwin chose the halving rule. FR-MEM-1 (01), 08 §7 and T-43 (06) reworded.
+- Follow-ups: deployment guide sentence on single-site `max_bytes`. Review found an order dependence (new site listed before reused ones) and fixed it by counting all live auto-sized stores.
+- Context: low; size S was right.

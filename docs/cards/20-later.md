@@ -55,7 +55,7 @@ These phases start from draft specs. Each begins with one planning card that ver
 - Tests: `caddytest` scenarios for T6.2, T6.6 and T6.12; `TestRetryAfterSurvivesHandleErrors` (needs a full Caddyfile with `handle_errors`); `TestReloadKeepsWarmKeys` (100 keys survive a limiter change; a `forward.allow` change makes them misses; adding a host to an already multi-host site changes nothing)
 - AC: all pass under the race detector
 
-### [ ] P2-04 Memory budget split and memory sizing
+### [x] P2-04 Memory budget split and memory sizing
 - Plan: 2.3 · Size: S · Depends on: P2-02
 - Read: 08 §3, §7 (Memory); 01 FR-MEM-1; 06 T-43
 - Touch: caddy/memory.go, caddy/memory_test.go
