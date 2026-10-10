@@ -110,7 +110,7 @@ func TestMetricsNamesAndNameLabel(t *testing.T) {
 	}
 }
 
-// 08 §8: two handlers in one load, with the same name or different ones, do
+// FR-OBS-4, 08 §8: two handlers in one load, with the same name or different ones, do
 // not collide on the pedantic registry. Same-name handlers share a set.
 func TestMetricsRegisteredOncePerRegistry(t *testing.T) {
 	ctx, a, b := newCtx(t), metricName(), metricName()
@@ -143,15 +143,15 @@ func TestMetricsRegisteredOncePerRegistry(t *testing.T) {
 	if f := gather(t, ctx)["weir_requests_total"]; f != nil && value(t, ctx, "weir_requests_total", a, "", "") != 0 {
 		t.Error("series of a released set are still registered")
 	}
-	metrics.mu.Lock()
-	_, left := metrics.sets[metricKey{ctx.GetMetricsRegistry(), a}]
-	metrics.mu.Unlock()
+	metricSets.mu.Lock()
+	_, left := metricSets.sets[metricKey{ctx.GetMetricsRegistry(), a}]
+	metricSets.mu.Unlock()
 	if left {
 		t.Error("metrics set not dropped with its last user")
 	}
 }
 
-// 08 §8: the pooled store outlives the registry; each Provision repoints the
+// FR-OBS-4, 08 §8: the pooled store outlives the registry; each Provision repoints the
 // eviction sink, and Cleanup of the older load does not undo the new target.
 func TestEvictionSinkRepointsOnReload(t *testing.T) {
 	old, fresh, name := newCtx(t), newCtx(t), metricName()
@@ -185,7 +185,7 @@ func TestEvictionSinkRepointsOnReload(t *testing.T) {
 	}
 }
 
-// 08 §8: a reload gets a fresh registry, hence fresh collectors and counters
+// FR-OBS-4, 08 §8: a reload gets a fresh registry, hence fresh collectors and counters
 // at zero, without a duplicate-registration panic.
 func TestMetricsSurviveReload(t *testing.T) {
 	old, fresh, name := newCtx(t), newCtx(t), metricName()
@@ -212,7 +212,7 @@ func TestMetricsSurviveReload(t *testing.T) {
 	}
 }
 
-// The gauges aggregate the engines that share a name in one load.
+// FR-OBS-4: the gauges aggregate the engines that share a name in one load.
 func TestMetricsGaugesAcrossEngines(t *testing.T) {
 	ctx, name := newCtx(t), metricName()
 	raw := fmt.Sprintf(`{"name":%q,"max_bytes":"200MiB"}`, name)
@@ -228,4 +228,72 @@ func TestMetricsGaugesAcrossEngines(t *testing.T) {
 		t.Errorf("breaker state = %v, want 0", got)
 	}
 	_ = h2
+}
+
+// FR-OBS-4, FR-OBS-2: cleaning up one of two same-name handlers keeps the
+// shared set and the eviction sink alive for the one still serving.
+func TestSiblingCleanupKeepsEvictionSink(t *testing.T) {
+	ctx, name := newCtx(t), metricName()
+	raw := fmt.Sprintf(`{"name":%q,"max_bytes":"200MiB"}`, name)
+	h1, h2 := mustLoad(t, ctx, raw), mustLoad(t, ctx, raw)
+	if err := h1.Cleanup(); err != nil {
+		t.Fatal(err)
+	}
+	h2.pool.sink.emit("small", 4)
+	if got := value(t, ctx, "weir_evictions_total", name, "queue", "small"); got != 4 {
+		t.Errorf("evictions after sibling Cleanup = %v, want 4", got)
+	}
+}
+
+// FR-OBS-4: a load that fails after it attached to the pooled store must not
+// silence the load that still serves (08 §8: a failed load overlaps).
+func TestFailedLoadCleanupKeepsOlderSink(t *testing.T) {
+	old, failed, name := newCtx(t), newCtx(t), metricName()
+	raw := fmt.Sprintf(`{"name":%q,"max_bytes":"200MiB"}`, name)
+	h1 := mustLoad(t, old, raw)
+	h2 := mustLoad(t, failed, raw)
+	if err := h2.Cleanup(); err != nil { // the failed load cleans up its handlers
+		t.Fatal(err)
+	}
+	h1.pool.sink.emit("main", 2)
+	if got := value(t, old, "weir_evictions_total", name, "queue", "main"); got != 2 {
+		t.Errorf("older load evictions = %v, want 2", got)
+	}
+}
+
+// 08 §8: a Provision that fails after the metrics were acquired gives the
+// reference back once and leaves a sibling holder of the set working.
+func TestProvisionFailureReleasesMetricSetOnce(t *testing.T) {
+	ctx, name := newCtx(t), metricName()
+	h1 := mustLoad(t, ctx, fmt.Sprintf(`{"name":%q,"max_bytes":"200MiB"}`, name))
+	// Same name, different store settings in one load: stores.acquire fails.
+	if _, err := loadIn(t, ctx, fmt.Sprintf(`{"name":%q,"max_bytes":"300MiB"}`, name)); err == nil {
+		t.Fatal("conflicting store settings provisioned")
+	}
+	k := metricKey{ctx.GetMetricsRegistry(), name}
+	metricSets.mu.Lock()
+	refs := metricSets.sets[k].refs
+	metricSets.mu.Unlock()
+	if refs != 1 {
+		t.Fatalf("set refs after failed Provision = %d, want 1", refs)
+	}
+	serveOne(t, h1, "/f")
+	if got := value(t, ctx, "weir_requests_total", name, "", ""); got != 1 {
+		t.Errorf("sibling requests = %v, want 1", got)
+	}
+	// Cleanup is idempotent and a handler that never provisioned is a no-op.
+	for range 2 {
+		if err := h1.Cleanup(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := new(Handler).Cleanup(); err != nil {
+		t.Fatal(err)
+	}
+	metricSets.mu.Lock()
+	_, left := metricSets.sets[k]
+	metricSets.mu.Unlock()
+	if left {
+		t.Error("set left behind after the last Cleanup")
+	}
 }

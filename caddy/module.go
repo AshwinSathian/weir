@@ -96,13 +96,13 @@ func (h *Handler) Provision(ctx caddy.Context) (err error) {
 	cfg.Logger = ctx.Slogger()
 	tap := newPurgeTap()
 	reg := ctx.GetMetricsRegistry()
-	ms, err := metrics.acquire(reg, h.Name)
+	ms, err := metricSets.acquire(reg, h.Name)
 	if err != nil {
 		return fmt.Errorf("weir: register metrics: %w", err)
 	}
 	defer func() {
 		if err != nil {
-			metrics.release(reg, h.Name, ms)
+			metricSets.release(reg, h.Name, ms)
 		}
 	}()
 	cfg.Observer = fanout{tap, ms.obs}
@@ -162,7 +162,7 @@ func (h *Handler) Provision(ctx caddy.Context) (err error) {
 	h.admin = &adminEntry{engine: e, tap: tap}
 	h.metrics, h.metricsReg = ms, reg
 	ms.addEngine(e)
-	p.sink.target.Store(ms)
+	p.sink.attach(ms)
 	engines.add(h.Name, h.admin)
 	return nil
 }
@@ -192,11 +192,10 @@ func (h *Handler) Cleanup() error {
 	ctx, cancel := context.WithTimeout(context.Background(), closeTimeout)
 	defer cancel()
 	err := h.engine.Close(ctx)
-	// Stop feeding this load's collectors; a newer load's Provision has
-	// already repointed the sink, and then this is a no-op.
-	h.pool.sink.target.CompareAndSwap(h.metrics, nil)
 	h.metrics.removeEngine(h.engine)
-	metrics.release(h.metricsReg, h.Name, h.metrics)
+	if metricSets.release(h.metricsReg, h.Name, h.metrics) {
+		h.pool.sink.detach(h.metrics) // the set's last user: stop feeding its collectors
+	}
 	return errors.Join(err, h.release())
 }
 

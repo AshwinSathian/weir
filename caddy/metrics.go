@@ -1,8 +1,8 @@
 package weircaddy
 
 import (
+	"slices"
 	"sync"
-	"sync/atomic"
 
 	"github.com/prometheus/client_golang/prometheus"
 
@@ -48,7 +48,7 @@ type metricsRegistry struct {
 	sets map[metricKey]*metricSet
 }
 
-var metrics = &metricsRegistry{sets: make(map[metricKey]*metricSet)}
+var metricSets = &metricsRegistry{sets: make(map[metricKey]*metricSet)}
 
 // acquire returns the set for (reg, name), registering its collectors when it
 // is the first user. The caller must release it exactly once.
@@ -79,18 +79,19 @@ func (m *metricsRegistry) acquire(reg *prometheus.Registry, name string) (*metri
 }
 
 // release gives back one reference and unregisters the collectors with the
-// last one, so a registry that outlives its handlers (a failed load keeps
+// last one and reports it, so a registry that outlives its handlers (a failed load keeps
 // the previous registry) holds no dead collectors.
-func (m *metricsRegistry) release(reg *prometheus.Registry, name string, s *metricSet) {
+func (m *metricsRegistry) release(reg *prometheus.Registry, name string, s *metricSet) (last bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if s.refs--; s.refs > 0 {
-		return
+		return false
 	}
 	for _, c := range s.cols {
 		s.regr.Unregister(c)
 	}
 	delete(m.sets, metricKey{reg, name})
+	return true
 }
 
 func (s *metricSet) addEngine(e *weir.Engine) {
@@ -116,9 +117,10 @@ func (s *metricSet) removeEngine(e *weir.Engine) {
 // report, not the sum; a negative value means no engine can report it.
 func (s *metricSet) Stats() weir.EngineStats {
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	engines := slices.Clone(s.engines)
+	s.mu.Unlock() // Engine.Stats calls into the limiter, breaker and store (P8)
 	out := weir.EngineStats{StoreBytes: -1}
-	for _, e := range s.engines {
+	for _, e := range engines {
 		st := e.Stats()
 		out.Inflight += st.Inflight
 		out.Queued += st.Queued
@@ -129,13 +131,46 @@ func (s *metricSet) Stats() weir.EngineStats {
 }
 
 // evictSink forwards a pooled store's eviction counts to the metric set of the
-// newest load. The store outlives every registry (08 §3), and
+// newest live load. The store outlives every registry (08 §3), and
 // memory.Config.OnEvict is fixed at construction, so the callback points at
-// this sink and each Provision repoints it.
-type evictSink struct{ target atomic.Pointer[metricSet] }
+// this sink. Each Provision attaches its set and Cleanup detaches it when the
+// set's last user goes. Keeping every live set, not one pointer, means a
+// sibling handler or a failed load that cleans up cannot silence the load
+// that still serves.
+//
+// Bound (rule 5): one entry per live set that uses the store, so at most one
+// per live load.
+type evictSink struct {
+	mu   sync.RWMutex
+	sets []*metricSet // oldest first
+}
 
+func (k *evictSink) attach(s *metricSet) {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	if !slices.Contains(k.sets, s) {
+		k.sets = append(k.sets, s)
+	}
+}
+
+func (k *evictSink) detach(s *metricSet) {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	k.sets = slices.DeleteFunc(slices.Clone(k.sets), func(x *metricSet) bool { return x == s })
+}
+
+// emit counts n evictions in the newest attached set. A nil sink drops them.
 func (k *evictSink) emit(queue string, n int) {
-	if s := k.target.Load(); s != nil {
+	if k == nil {
+		return
+	}
+	k.mu.RLock()
+	var s *metricSet
+	if len(k.sets) > 0 {
+		s = k.sets[len(k.sets)-1]
+	}
+	k.mu.RUnlock()
+	if s != nil {
 		s.obs.Observe(weir.Event{Kind: weir.EvEvict, Reason: queue, Status: n})
 	}
 }

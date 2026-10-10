@@ -1426,3 +1426,12 @@ Entry template:
 - Tests: TestAdminPurgeReachesEveryStoreInOverlap, TestAdminPurgeSkipsClosedEngine (now checks fwd=stale), TestPurgeTapWaitHonoursContext, TestAdminConcurrentEagerPurgeCounts, TestAdminRacesWithCleanup, TestPurgeErrorWordsPartialScrub, TestAdminBodyEdges, TestAdminModeNormalIgnoresTTL; e2e now checks the cached entry survives a site-listener purge attempt. Race and shuffle tests and lint on Go 1.27 pass.
 - Deviations: 08 §7 reworded (purge through every engine, semaphore, partial-failure wording, ttl for normal).
 - Declined: checking count limits before decode (bounded by the 1 MiB cap); hiding which names exist from a prober (admin API is operator-only); an integration test for an origin group invalidation during an eager purge (the tap is unit-tested on the event reason).
+
+## 2026-10-10 · P2-06 · done
+- Branch / PR: claude/inspiring-galileo-j1jrdh / none yet (the session did not open one)
+- Done: `caddy/metrics.go`: collector set per (registry, name) wrapping `observe/prom` with a constant `name` label, aggregating gauges over same-name engines, `evictSink` that fans the pooled store's evictions to the newest live set; `fanout` observer after `purgeTap`; Provision/Cleanup wiring; `caddy/go.mod` requires `observe/prom` and `client_golang`.
+- Tests: TestMetricsNamesAndNameLabel, TestMetricsRegisteredOncePerRegistry, TestEvictionSinkRepointsOnReload, TestMetricsSurviveReload, TestMetricsGaugesAcrossEngines, TestSiblingCleanupKeepsEvictionSink, TestFailedLoadCleanupKeepsOlderSink, TestProvisionFailureReleasesMetricSetOnce. Race and shuffle tests pass in all three modules, `make trace-strict` passes; `make check` stops at the Go 1.25 golangci-lint binary (known), lint not run.
+- Deviations: 08 §8 records the wrap decision and the sink/set design.
+- Review (card-reviewer): must-fix fixed (a sibling Cleanup cleared the shared sink; the sink now keeps all live sets, which also covers a failed load). Stats() now calls engines outside the lock; nil sink is safe; package var renamed `metricSets`. Not done: a test that a Provision failing in `weir.New` releases the set (the store-conflict failure path is tested).
+- Follow-ups: none. P2-07 is next.
+- Context: medium; size S was right.

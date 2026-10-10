@@ -71,7 +71,7 @@ These phases start from draft specs. Each begins with one planning card that ver
 - AC: routes `POST /weir/<name>/purge`, `GET /weir/<name>/stats` (JSON array, one entry per live engine), `POST /weir/<name>/mode` (applied to every live engine of the name) exist under `admin.api.weir`; the registry holds a set of engines per name and removes by identity, so a failed load leaves the serving engine registered; bodies are capped at 1 MiB, 1000 URLs and 100 groups (08 §7); `ErrClosed` maps to 503; no purge route is added to site listeners
 - Out of scope: remote admin access control (documented in P2-07)
 
-### [ ] P2-06 Prometheus metrics on Caddy's registry
+### [x] P2-06 Prometheus metrics on Caddy's registry
 - Plan: 2.3 · Size: S · Depends on: P2-03
 - Read: 08 §8; 04 §9.3; context.go `GetMetricsRegistry` at v2.11.7
 - Touch: caddy/metrics.go, caddy/metrics_test.go
