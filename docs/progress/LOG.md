@@ -1640,3 +1640,11 @@ Entry template:
 - Deviations: none beyond 05 §7.
 - Follow-ups: whether `Get` should treat an undecodable spec as a miss so the engine can overwrite it (T-21 trade-off) is not decided; CI Valkey 8.1 run.
 - Context: low
+
+## 2026-10-10 · P25-06 · in-progress
+- Branch / PR: card/P25-06-scrubber-scan / none yet
+- Done: `store/valkey/scrub.go` (`Scrub` via ROLE, per-primary SCAN loop, GET/DEL pipelines, entry-key filter); client seam methods; second CI Valkey service for the storm; docs 05 §7 and 09 §7.
+- Tests: TestScrub* (fake), TestScrubByTag, TestScrubCancelled, TestEngineEagerHardPurgeScrubs, TestEvictionStormEngineStaysCorrect, TestAllKeysPolicyRefused (integration, pass with `-race` on redis 7.0.15); trace 146/146; lint not run (Go 1.25 build).
+- Deviations: manual SCAN loop instead of `valkey.NewScanner` (per-call timeouts); Touch list short by client.go, store.go, CI, Makefile, engine_integration_test.go.
+- Follow-ups: run `/handoff` (review, tick card, PR); engine scrub deadline; CI Valkey 8.1 storm run.
+- Context: medium

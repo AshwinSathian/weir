@@ -2,11 +2,17 @@
 
 Updated: 2026-10-10
 Phase: 1
-Current card: none
-Card state: awaiting-merge
-Branch: claude/youthful-ride-2vosqo
-PR: https://github.com/AshwinSathian/weir/pull/92
-Next card: P25-06
+Current card: P25-06
+Card state: in-progress
+Branch: card/P25-06-scrubber-scan (pushed as claude/serene-dirac-0yagok)
+PR: none yet
+Next card: P25-07
+
+## Notes from P25-06 (pending /handoff)
+
+- Code, tests and docs are written and pass on redis 7.0.15 (full integration suite with `-race`); `/handoff` has not run: no card-reviewer pass, card and PLAN 2.5.4 not ticked, no PR. golangci-lint cannot run here; CI must confirm.
+- Gap, not fixed: the engine bounds the whole `Scrub` by `Timeouts.Store` (50 ms default, remote), so an eager purge on a real keyspace times out. Needs its own scrub deadline (new card or P25-07). Documented in 05 §7 and 09 §7.
+- CI now needs a second Valkey service on 6380 (`WEIR_VALKEY_STORM_ADDR`, maxmemory 16mb); first CI run unverified.
 
 ## Waiting on Ashwin
 

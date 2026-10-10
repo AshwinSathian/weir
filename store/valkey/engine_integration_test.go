@@ -41,7 +41,13 @@ import (
 // here, and a skew would stretch the wait.
 func engineStore(t *testing.T) *Store {
 	t.Helper()
-	s, err := New(Config{Addrs: []string{serverAddr(t)}, NoClockSkew: true, Prefix: "e" + strconv.FormatInt(time.Now().UnixNano(), 36) + sanitize(t.Name())})
+	return engineStoreAt(t, serverAddr(t))
+}
+
+// engineStoreAt is engineStore against the server at addr.
+func engineStoreAt(t *testing.T, addr string) *Store {
+	t.Helper()
+	s, err := New(Config{Addrs: []string{addr}, NoClockSkew: true, Prefix: "e" + strconv.FormatInt(time.Now().UnixNano(), 36) + sanitize(t.Name())})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,7 +60,9 @@ func engineStore(t *testing.T) *Store {
 
 func engineWith(t *testing.T, cfg weir.Config) *weir.Engine {
 	t.Helper()
-	cfg.Store = engineStore(t)
+	if cfg.Store == nil {
+		cfg.Store = engineStore(t)
+	}
 	cfg.Freshness.NoJitter = true
 	// The 50 ms production default for remote stores is not under test here: a
 	// 200-goroutine burst on a starved CI runner exceeds it, opens the store
