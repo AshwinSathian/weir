@@ -1447,3 +1447,20 @@ Entry template:
 - Branch / PR: claude/inspiring-galileo-j1jrdh / https://github.com/AshwinSathian/weir/pull/82
 - Done: CI `caddy-build` failed because xcaddy cannot resolve `observe/prom` (an unreleased module; a `replace` in `caddy/go.mod` is ignored by importers). The job now passes `--with github.com/AshwinSathian/weir/observe/prom=./observe/prom`. Verified locally with xcaddy v0.4.5 against Caddy v2.11.7 (build complete).
 - Follow-ups: any later module the `caddy` module requires needs its own `--with` until root and sub-modules have release tags.
+
+## 2026-10-10 · P2-07 · done
+- Branch / PR: claude/nice-rubin-sw5o8p (session-designated, not card/*) / not opened yet
+- Done: docs/runbook.md section 7 (single-node Caddy deployment guide, all AC items); 08 §5 now records that `rate_limit` is ordered before `basic_auth` (checked in caddy-ratelimit's caddyfile.go) and Caddy v2.11.7's default order puts `encode` ahead of `weir`.
+- Tests: none (docs only); `make check` stops at lint (container golangci-lint built with Go 1.25), CI must confirm.
+- Deviations: none. Card marked and PLAN 2.4 ticked at /handoff.
+- Review: card-reviewer found one must-fix (inner `encode` example listed `br` that `encode` cannot produce; now `zstd gzip` both sides) and six should-fix (shutdown budget wording, `.keygen` file, `max_bytes` below 160 MiB is rejected, `bypass` wording, metrics wiring, ratelimit source version); all fixed.
+- Follow-ups: run the runbook's Caddyfile examples through `caddy adapt`; Phase 2 cards are done, next is P25-00.
+- Context: low; size S was right.
+
+## 2026-10-10 · P2-07 · review-fixes
+- Branch / PR: claude/nice-rubin-sw5o8p / https://github.com/AshwinSathian/weir/pull/83 (corrects the earlier entry: it was opened at /handoff; the branch is not `card/*`)
+- Done: adversarial review, built a real Caddy v2.11.7 and ran `adapt`/`validate` and the curl examples. Fixed: the inner `encode` example used a one-line `key { }` block (invalid Caddyfile); the group-purge example needed `origin` as `scheme://host` (was a 400); `caddy validate` builds the store and touches `snapshot_dir` (runbook 7.8, 08 §2, comment in caddy/pool.go were wrong or silent); outer `encode` stores compressed bodies when the origin compresses (runbook, 08 §5); admin API has no auth and `Origin` is checked only when sent (unix socket advice); packaged `TimeoutStopSec=5s`; purge check waits 2 s; `StripSetCookie` has no Caddy key; extra placeholders; bold limit; GOMEMLIMIT cross-reference.
+- Tests: none (docs and one comment); `go vet` for caddy module passes.
+- Deviations: 08 §2 and §5 reworded to match observed behavior.
+- Follow-ups: 06 T-45/R-6 per-client placeholder case at its next revision; the 5xx mapping from P2-03; STATUS still says Phase 1 (unchanged).
+- Context: low

@@ -78,7 +78,7 @@ These phases start from draft specs. Each begins with one planning card that ver
 - Tests: `TestEvictionSinkRepointsOnReload` (pooled store's evictions reach the new registry), `TestMetricsRegisteredOncePerRegistry` (two handlers in one load do not collide), `TestMetricsNamesAndNameLabel`, `TestMetricsSurviveReload` (new registry gets fresh collectors, no panic)
 - AC: metric names match 04 §9.3 plus a `name` label; a pedantic registry accepts them; no collector is attached to a pooled store (its eviction sink is repointed each `Provision`); the card chooses between wrapping `observe/prom` and hand-rolled collectors and records why; the dependency is declared in `caddy/go.mod`
 
-### [ ] P2-07 Single-node deployment guide
+### [x] P2-07 Single-node deployment guide
 - Plan: 2.4 · Size: S · Depends on: P2-05, P2-06
 - Read: 08 §4a, §4b, §5, §6, §7; 06 T-38, T-45, R-6; docs/runbook.md
 - Touch: docs/runbook.md
