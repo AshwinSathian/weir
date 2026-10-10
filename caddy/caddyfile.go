@@ -47,14 +47,18 @@ func (h *Handler) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 		return d.ArgErr() // the block is the only form; a shorthand would hide keys
 	}
 	seen := map[string]bool{}
+	nameFile, nameLine := file, line
 	for d.NextBlock(0) {
 		key := d.Val()
+		if key == "name" {
+			nameFile, nameLine = d.File(), d.Line()
+		}
 		if err := h.blockKey(d, key, seen); err != nil {
 			return err
 		}
 	}
 	if err := validateName(h.Name); err != nil {
-		return fmt.Errorf("%w, at %s:%d", err, file, line)
+		return fmt.Errorf("%w, at %s:%d", err, nameFile, nameLine)
 	}
 	return nil
 }
@@ -118,12 +122,14 @@ func (h *Handler) blockKey(d *caddyfile.Dispenser, key string, seen map[string]b
 // subBlock parses the nested block of one key. A block key is set once, and
 // so is each key inside it.
 func subBlock(d *caddyfile.Dispenser, name string, keys map[string]func() error) error {
-	if d.CountRemainingArgs() > 0 && d.NextArg() && d.Val() != "{" {
+	if d.NextArg() {
 		return d.ArgErr()
 	}
 	seen := map[string]bool{}
 	nest := d.Nesting()
+	empty := true
 	for d.NextBlock(nest) {
+		empty = false
 		k := d.Val()
 		fn, ok := keys[k]
 		if !ok {
@@ -136,6 +142,11 @@ func subBlock(d *caddyfile.Dispenser, name string, keys map[string]func() error)
 		if err := fn(); err != nil {
 			return err
 		}
+	}
+	// A bare "key" or "key {}" is a typo or a forgotten brace; it would
+	// otherwise parse as a silent no-op.
+	if empty {
+		return d.Errf("%s requires a block with at least one key", name)
 	}
 	return nil
 }

@@ -219,6 +219,18 @@ func TestCaddyfileParse(t *testing.T) {
 		}
 	})
 
+	// 08 §2: a matcher token after the directive limits which requests go
+	// through the cache; the handler config is unchanged.
+	t.Run("matcher token is accepted", func(t *testing.T) {
+		out, err := adapt(t, "example.com {\n\tweir /api/* {\n\t\tname a\n\t}\n\treverse_proxy app:8080\n}\n")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := weirHandlers(t, out); len(got) != 1 || got[0].Name != "a" || !strings.Contains(out, "/api/*") {
+			t.Fatalf("got %+v in %s", got, out)
+		}
+	})
+
 	t.Run("byte sizes and durations", func(t *testing.T) {
 		out, err := adapt(t, "example.com {\n\tweir {\n\t\tname a\n\t\tmax_bytes 1500000\n\t\tlimiter {\n\t\t\tmax_queue_wait 1d\n\t\t}\n\t}\n}\n")
 		if err != nil {
@@ -233,6 +245,12 @@ func TestCaddyfileParse(t *testing.T) {
 	errs := []struct {
 		name, body, want, line string
 	}{
+		{"repeated key in a sub-block", "\tweir {\n\t\tname a\n\t\tforward {\n\t\t\tallow A\n\t\t\tallow B\n\t\t}\n\t}\n", `"allow" is set twice in forward block`, "Caddyfile:6"},
+		{"negative duration", "\tweir {\n\t\tname a\n\t\tstale {\n\t\t\tif_error -5m\n\t\t}\n\t}\n", "must not be negative", "Caddyfile:5"},
+		{"argument on the directive line", "\tweir foo {\n\t\tname a\n\t}\n", "wrong argument count", "Caddyfile:2"},
+		{"sub-block key without a block", "\tweir {\n\t\tname a\n\t\tkey\n\t\tmax_bytes 1MiB\n\t}\n", "key requires a block with at least one key", "Caddyfile:4"},
+		{"sub-block key with empty braces", "\tweir {\n\t\tname a\n\t\tlimiter {\n\t\t}\n\t}\n", "limiter requires a block with at least one key", "Caddyfile:5"},
+		{"bad name reports the name line", "\tweir {\n\t\tmax_bytes 1MiB\n\t\tname a/b\n\t}\n", "outside [A-Za-z0-9._-]", "Caddyfile:4"},
 		{"missing name", "\tweir {\n\t\tmax_bytes 1MiB\n\t}\n", "name is required", "Caddyfile:2"},
 		{"empty block", "\tweir\n", "name is required", "Caddyfile:2"},
 		{"bad name charset", "\tweir {\n\t\tname a/b\n\t}\n", "outside [A-Za-z0-9._-]", ""},

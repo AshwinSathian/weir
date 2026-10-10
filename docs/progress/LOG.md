@@ -1300,3 +1300,10 @@ Entry template:
 - Review: card-reviewer, no must-fix. Fixed: traceability comments, exact line asserts, JSON-level comparison, route negative test, intArg comment.
 - Follow-ups: duplicate `name` across handlers (P2-02/P2-03).
 - Context: low; size S was right.
+
+## 2026-10-10 · P2-01b · review-fixes
+- Branch / PR: claude/adoring-curie-pvckor / https://github.com/AshwinSathian/weir/pull/75
+- Done: adversarial review of PR 75 (agent), no must-fix, nothing waiting on Ashwin. Applied: bare or empty sub-block keys rejected, precise `name` error line, tests for the three unpinned paths and the matcher form, 08 §2 gained the Caddyfile rules (one occurrence per key, matcher token, `{$VAR}` only, block required). 08 date bumped.
+- Tests: new cases in TestCaddyfileParse; caddy lint (Go 1.27) clean, race tests pass with GOWORK=off.
+- Deviations: 08 §2 text added; no requirement, default or signature changed.
+- Follow-ups: P2-02 placeholders in `snapshot_dir` and duplicate-name test (in STATUS).

@@ -1,7 +1,7 @@
 # Weir Caddy adapter specification
 
 Status: v1.0. Phase 2. Finalized by P2-00 against the Caddy release current at the start of Phase 2; every Caddy API named here is checked with file and line in §11.
-Date: 2026-10-09
+Date: 2026-10-10
 Depends on: [01-technical-spec.md](01-technical-spec.md), [04-lld.md §10](04-lld.md)
 Seed name: `04-caddy-adapter-spec.md` (renumbered, see [docs/README.md](README.md))
 Verified against: Caddy v2.11.7 (released 2026-10-03, `go 1.26.0` in its `go.mod`). Weir requires Go 1.27, so `xcaddy` builds that include it need a Go 1.27 toolchain; Go's toolchain directive downloads it automatically when `GOTOOLCHAIN=auto`.
@@ -65,6 +65,8 @@ Keys the cards implement (a card that needs another key adds it here in the same
 | `stale` | `while_revalidate`, `if_error` (operator defaults, off unless set; D6) |
 
 `max_bytes` takes a number of bytes or a string such as `512MiB` (P2-01 parses it, up to 1 PiB; P2-02 applies it, and also owns validating `snapshot_dir`; until then `Provision` logs a warning when either is set). Unknown keys fail the load, because Caddy decodes module config strictly.
+
+Caddyfile rules (P2-01b): the `weir` directive takes a block and no arguments, and an optional matcher token (`weir /api/* { … }`) limits which requests go through the cache. Each key may appear once per block, so list values go on one line; a repeat is an error, never a silent overwrite. `key`, `forward`, `bypass`, `limiter` and `stale` need a block with at least one key (a bare key or empty braces is a typo, not a no-op). Values are read as written: `{$VAR}` is expanded by Caddy's lexer before parsing, but runtime placeholders such as `{env.X}` or `{host}` are not expanded, so `name` rejects them and `snapshot_dir` would keep them literally (P2-02 either rejects braces there or expands them). Errors name the Caddyfile line; a missing `name` is reported at the directive, an invalid one at the `name` line.
 
 Keys and blocks map through an adapter-side struct, not straight onto `weir.Config`, whose `Rand`, `Observer`, `Logger` and `Store` fields have no JSON form. The adapter sets those itself.
 
