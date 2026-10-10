@@ -2,10 +2,10 @@
 
 Updated: 2026-10-10
 Phase: 1
-Current card: none
-Card state: awaiting-merge
-Branch: claude/optimistic-mendel-k6iji6
-PR: https://github.com/AshwinSathian/weir/pull/90
+Current card: P25-04b
+Card state: in-progress
+Branch: claude/amazing-galileo-2z89q7
+PR: none yet (P25-04 PR 90 merged)
 Next card: P25-04b (P25-05 is blocked on the question below)
 
 ## Waiting on Ashwin
