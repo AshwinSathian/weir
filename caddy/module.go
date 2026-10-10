@@ -167,17 +167,20 @@ func (h *Handler) Provision(ctx caddy.Context) (err error) {
 	if err != nil {
 		return err // already prefixed "weir:"
 	}
-	if keyChanged {
-		// R-3: serve nothing stored under the old forwarding rules. Failing
-		// Provision is the safe side if the epoch cannot be written.
-		pctx, cancel := context.WithTimeout(context.Background(), closeTimeout)
-		defer cancel()
-		if perr := e.Purge(pctx, weir.Purge{All: true, Mode: weir.PurgeHard}); perr != nil {
-			cctx, ccancel := context.WithTimeout(context.Background(), closeTimeout)
-			defer ccancel()
+	// The server's record covers what the in-process hashes cannot: a restart
+	// after forward was tightened (R-3, 08 §3). Failing Provision is the safe
+	// side if a purge that is needed cannot be written.
+	purge := func(ctx context.Context) error {
+		if perr := e.Purge(ctx, weir.Purge{All: true, Mode: weir.PurgeHard}); perr != nil {
+			cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), closeTimeout)
+			defer cancel()
 			_ = e.Close(cctx)
 			return fmt.Errorf("weir: key-generation change: %w", perr)
 		}
+		return nil
+	}
+	if err = reconcileServerKeyGen(p.store, fwdHash, keyChanged, purge, cfg.Logger, h.Name); err != nil {
+		return err
 	}
 	// Record the hash only now: a Provision that failed above must not
 	// make a retry of the same config skip the purge.

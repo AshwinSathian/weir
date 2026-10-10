@@ -1696,3 +1696,27 @@ Entry template:
 - Deviations: CLAUDE.md rule 6 and docs/07 §1 wording.
 - Follow-ups: P25-07c (needs approval); CI run on Valkey 8.1.
 - Context: medium
+
+## 2026-10-11 · P25-07c · blocked
+- Branch / PR: card/P25-07c-keygen-record / none yet (pushed to claude/beautiful-keller-9d29y4)
+- Done: `valkey.Store.RecordKeyGen` (`SET <prefix>:keygen <hash> GET`, no TTL); adapter `syncKeyGen` on every Valkey Provision writes the hard epoch on a mismatch and marks the record pending if the purge fails; 05 §7, 08 §3 and runbook 8.6/8.7 updated.
+- Tests: `TestRecordKeyGen*`, `TestSyncKeyGen*`, `TestMarkKeyGenPendingNeverMatches`, `TestRecordedHashExcludesStoreSettings`, integration `TestValkeyKeyGenRecord` (fails with the check disabled); pass with `-race` on redis 7.0.15. `make check`, lint and the card-reviewer pass not run yet.
+- Deviations: server unreachable at start skips the check with a warning (FR-STF-2) instead of failing Provision; a first record writes no purge.
+- Follow-ups: Ashwin runs `/handoff` (make check, review, card mark, PR); confirm the outage decision; CI on Valkey 8.1; then tick PLAN 2.5.5.
+- Context: medium; size S was right.
+
+## 2026-10-11 · P25-07c · done
+- Branch / PR: card/P25-07c-keygen-record / https://github.com/AshwinSathian/weir/pull/96
+- Done: `valkey.Store.CheckKeyGen` (GET) and `RecordKeyGen` (SET, no TTL) at `<prefix>:keygen`; adapter reads the record on every Valkey Provision, purges on a mismatch, writes the record only after the purge. Reviewer's must-fix applied (the first version replaced the record before the purge). 05 §7, 08 §3, runbook 8.6/8.7 updated; PLAN 2.5.5 ticked.
+- Tests: `TestRecordKeyGen*`, `TestSyncKeyGen*`, `TestRecordedHashExcludesStoreSettings`, integration `TestValkeyKeyGenRecord` (fails with the check disabled). gofmt, vet, `go test -race` in all three modules and trace 146/146 pass; integration tests pass on redis 7.0.15. `make check` stops at golangci-lint (built with Go 1.25 here).
+- Deviations: card said SET NX; a read then a write after the purge is crash-safe. Outage at start skips the check with a warning (FR-STF-2).
+- Follow-ups: CI on Valkey 8.1; Provision-level unit test needs a store seam (not added).
+- Context: medium; size S was right.
+
+## 2026-10-11 · P25-07c · review-fixes
+- Branch / PR: card/P25-07c-keygen-record / https://github.com/AshwinSathian/weir/pull/96
+- Done: adversarial review (agent), decisions delegated by Ashwin. A failed check no longer writes the record; an existing prefix with no record is a change; bounded `GETRANGE` read and plain `SET` write; the check, purge, record order is `reconcileServerKeyGen` (replaces `syncKeyGen` and the pending marker named in the earlier entry); runbook 8.6 asks for a final manual purge; card P25-07d (retry after an outage) added; PLAN 2.5.5 unticked.
+- Tests: `TestReconcileServerKeyGen*`, `TestCheckKeyGen*` (fake and real server), `TestCheckKeyGenPlantedAndExisting`; pass with `-race`, integration on redis 7.0.15; lint not run here.
+- Deviations: 05 §7, 08 §3 (new bullet), runbook 8.6/8.7, card AC wording.
+- Follow-ups: P25-07d; CI on Valkey 8.1, then tick PLAN 2.5.5.
+- Context: medium
