@@ -5,7 +5,7 @@ Phase: 1
 Current card: none
 Card state: awaiting-merge
 Branch: claude/vigilant-goodall-bdmimx
-PR: none
+PR: https://github.com/AshwinSathian/weir/pull/88
 Next card: P25-03b
 
 ## Waiting on Ashwin

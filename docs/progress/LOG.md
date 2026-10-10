@@ -1550,7 +1550,7 @@ Entry template:
 - Context: low
 
 ## 2026-10-10 · P25-03 · done
-- Branch / PR: claude/vigilant-goodall-bdmimx / see STATUS
+- Branch / PR: claude/vigilant-goodall-bdmimx / https://github.com/AshwinSathian/weir/pull/88
 - Done: hard and global epochs for `store/valkey` (epochs.go, scripts.go, meta.go): one write script (prune by server TIME, cap, max), one read-only script, `GET newest` fast path, loss repair by global hard write, one retry on network errors, `HardEpochWait` via `EVAL`+`WAIT` on a dedicated connection. `storetest.EpochModes` added.
 - Tests: TestSaturatingWrite, TestSoftEpochBeforeSketchIsUnavailable, TestHardEpochCap, TestAbsentNewestIsNotNoEpochs, TestAbsentNewestWithMetaPresent, TestMetaLossRepairs, TestEmptyHardidxIsNotLoss, TestSkewAddsConservatively, TestGlobalTagKeepsAllModes, TestHardEpochWaitWaitsForReplica, fake-client unit tests; storetest TestRunEpochModes(None); integration conformance passes on redis 7.0.15; module lint 0 issues; root `make check` lint needs the go1.27 workaround.
 - Deviations: 05 §7 note: any write that finds `meta` absent repairs the loss; `HardEpochWait` mechanism; refusals. docs/07 Conformance row mentions `EpochModes`.
