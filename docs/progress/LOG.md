@@ -1333,7 +1333,7 @@ Entry template:
 - Context: low.
 
 ## 2026-10-10 · P2-02 · done
-- Branch / PR: claude/peaceful-mccarthy-b9uz60 (session branch, not card/*) / PENDING
+- Branch / PR: claude/peaceful-mccarthy-b9uz60 (session branch, not card/*) / https://github.com/AshwinSathian/weir/pull/77
 - Done: caddy/pool.go (UsagePool-backed registry, load-scoped name claims, superseded-store snapshot skip with rollback re-election), caddy/keygen.go (hash of forward mode, allow, set-cookie stripping), hard epoch on hash change, `multi_host` key (FR-FAIR-3 caps at 25%), snapshot_dir validation and mkdir.
 - Tests: TestCleanupDeletesOnce, TestPoolSharesStoreAcrossReload, TestPoolSettingsMismatchFailsProvision, TestPoolResizeReloadAllowed, TestPoolDestructsOnLastRelease, TestSupersededStoreSkipsSnapshot, TestRolledBackReloadRestoresSnapshotWriter, TestKeyGenHashChangeWritesHardEpoch, TestKeyGenHashIgnoresHostAndKeyRules, TestMultiHostEnablesFairnessCaps, TestSingleToMultiHostStartsNewStore. Caddy race tests and caddy lint pass; root `make check` lint cannot run here (Go 1.25 build), trace 146/146.
 - Deviations: new `multi_host` key approved by Ashwin in session (scanning the http app was rejected, see 08 §2); `snapshot_dir` added to the pool key; shard count left out (no setting). 08 §2, §3, §4b updated.

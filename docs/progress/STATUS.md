@@ -5,7 +5,7 @@ Phase: 1
 Current card: none
 Card state: awaiting-merge
 Branch: claude/peaceful-mccarthy-b9uz60
-PR: PENDING
+PR: https://github.com/AshwinSathian/weir/pull/77
 Next card: P2-03 (nextOrigin, errors and upgrades)
 
 ## Waiting on Ashwin
