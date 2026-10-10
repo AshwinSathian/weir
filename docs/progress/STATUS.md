@@ -5,7 +5,7 @@ Phase: 1
 Current card: none
 Card state: awaiting-merge
 Branch: claude/amazing-galileo-2z89q7
-PR: pending (P25-04b)
+PR: https://github.com/AshwinSathian/weir/pull/91
 Next card: P25-05 (blocked on the question below)
 
 ## Waiting on Ashwin
