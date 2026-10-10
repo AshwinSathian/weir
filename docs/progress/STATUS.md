@@ -5,7 +5,7 @@ Phase: 1
 Current card: none
 Card state: awaiting-merge
 Branch: claude/funny-bohr-vcgmor
-PR: none yet
+PR: https://github.com/AshwinSathian/weir/pull/78
 Next card: P2-03b (End-to-end scenarios under caddytest)
 
 ## Waiting on Ashwin

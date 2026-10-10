@@ -1358,7 +1358,7 @@ Entry template:
 - Follow-ups: P2-03 card now has the multi-host warning test and the ErrClosed 503; P2-04 card has the 160 MiB floor AC.
 
 ## 2026-10-10 · P2-03 · done
-- Branch / PR: claude/funny-bohr-vcgmor / PR pending (branch name set by the environment, not `card/*`)
+- Branch / PR: claude/funny-bohr-vcgmor / https://github.com/AshwinSathian/weir/pull/78 (branch name set by the environment, not `card/*`)
 - Done: caddy/module.go `ServeHTTP` (upgrade bypass, engine call, `serveError` with Retry-After, ErrClosed 503), caddy/origin.go `nextOrigin` on `weirhttp.HandlerOrigin`, caddy/warn.go (route scan on first request: X-Forwarded-For and per-client placeholder warnings; one-host memory for the multi_host warning). The card's Touch list named `serve.go`; the code lives in `module.go`, `origin.go` and `warn.go`.
 - Tests: TestUpgradeAndConnectBypassEngine, TestNextOriginUsesDetachedContext, TestNextOriginForwardsKeyedRequest, TestNextOriginErrorIsOriginError, TestErrorsReturnHandlerError, TestServeCachesThroughNext, TestForwardedForWarning, TestPlaceholderHeaderWarning, TestRouteScanFindsHandler, TestSecondHostWithoutMultiHostWarnsOnce. Root race tests, caddy race tests and lint (via `go run` v2.14.0) pass; `make check` lint step cannot run here (Go 1.25 build); trace 146/146.
 - Deviations: docs/08 §6 reworded, warnings run on the first request, not at provision time (the route does not hold the handler until the http app provisions). Not a requirement change.
