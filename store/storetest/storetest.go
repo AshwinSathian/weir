@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -28,6 +29,7 @@ type options struct {
 	modesSet bool              // EpochModes() with no modes means none
 	synctest bool
 	hardCap  int
+	parallel int
 }
 
 // WithoutEpochs skips the epoch cases, for stores that do not implement
@@ -53,6 +55,13 @@ func Synctest() Option { return func(o *options) { o.synctest = true } }
 // can fill it. Without it that case is skipped. Stores built by newStore
 // should use a small cap here.
 func HardEpochCap(n int) Option { return func(o *options) { o.hardCap = n } }
+
+// Parallel makes EpochNeverUnderInvalidates issue its SetEpoch and
+// NewestEpoch calls from n goroutines. A remote client that pipelines
+// concurrent callers (valkey-go does) reorders and batches them, which a
+// serial loop never exercises; it also keeps 200 000 round trips short.
+// n of 1 or less keeps the loop serial.
+func Parallel(n int) Option { return func(o *options) { o.parallel = n } }
 
 // Run runs every conformance case against stores built by newStore. Each
 // case gets a fresh store, closed by t.Cleanup (inside the bubble under
@@ -565,14 +574,42 @@ func testEpochNeverUnderInvalidates(t *testing.T, newStore func(*testing.T) stor
 	at := make([]time.Time, n)
 	for i := range n {
 		at[i] = base.Add(time.Duration(rng.Int64N(int64(time.Hour))))
-		mustSetEpoch(t, s, tag(i), at[i], store.EpochSoft+store.EpochMode(i%2))
 	}
-	for i := range n {
-		ep, ok, err := s.NewestEpoch(t.Context(), []store.Tag{tag(i)}, at[i])
-		if err != nil || !ok || ep.At.Before(at[i]) || ep.Mode < store.EpochSoft+store.EpochMode(i%2) {
-			t.Fatalf("tag %d: NewestEpoch = %+v, %v, %v; want at least %v", i, ep, ok, err, at[i])
+	// each runs f(i) for every i, from o.parallel goroutines; f reports a
+	// failure with t.Errorf, since Fatalf is not allowed off the test goroutine.
+	each := func(f func(i int)) {
+		w := max(o.parallel, 1)
+		var wg sync.WaitGroup
+		for g := range w {
+			wg.Go(func() {
+				for i := g; i < n; i += w {
+					f(i)
+				}
+			})
 		}
+		wg.Wait()
 	}
+	each(func(i int) {
+		own := store.EpochSoft + store.EpochMode(i%2) //nolint:gosec // i%2 is 0 or 1
+		if err := s.SetEpoch(t.Context(), tag(i), store.Epoch{At: at[i], Mode: own}); err != nil {
+			t.Errorf("SetEpoch %d: %v", i, err)
+		}
+	})
+	if t.Failed() {
+		return
+	}
+	var bad atomic.Int32
+	each(func(i int) {
+		own := store.EpochSoft + store.EpochMode(i%2) //nolint:gosec // i%2 is 0 or 1
+		ep, ok, err := s.NewestEpoch(t.Context(), []store.Tag{tag(i)}, at[i])
+		// A more severe mode is another tag's epoch that collided in the
+		// other plane; E-3 ranks severity first, and a store that adds clock
+		// skew (4.3) may report it up to the skew before at[i]. Only the
+		// tag's own mode must reach its own time.
+		if (err != nil || !ok || ep.Mode < own || (ep.Mode == own && ep.At.Before(at[i]))) && bad.Add(1) <= 5 {
+			t.Errorf("tag %d: NewestEpoch = %+v, %v, %v; want at least %v", i, ep, ok, err, at[i])
+		}
+	})
 }
 
 // FR-PRG-3, NFR-3, E-6: a new hard tag beyond the cap fails with ErrUnavailable; tags

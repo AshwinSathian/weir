@@ -2,11 +2,11 @@
 
 Updated: 2026-10-10
 Phase: 1
-Current card: none
-Card state: awaiting-merge
-Branch: claude/vigilant-goodall-bdmimx
-PR: https://github.com/AshwinSathian/weir/pull/88
-Next card: P25-03b
+Current card: P25-03b
+Card state: in-progress
+Branch: claude/compassionate-pasteur-k8ueay
+PR: none yet
+Next card: P25-04
 
 ## Waiting on Ashwin
 

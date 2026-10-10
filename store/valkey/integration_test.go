@@ -26,8 +26,13 @@ func serverAddr(t *testing.T) string {
 	return a
 }
 
+// maxHardForConformance is the hard-epoch cap the conformance stores use, so
+// EpochHardCap fills it quickly.
+const maxHardForConformance = 20
+
 // FR-STF-2, S-1..S-4, 05 §8: the conformance suite against a real server.
-// Epochs run in hard mode only until the sketch lands (P25-03b). ExpiredIsNotFound runs here on the real clock
+// Every epoch mode runs, EpochNeverUnderInvalidates from 64 goroutines (valkey-go
+// pipelines concurrent callers). ExpiredIsNotFound runs here on the real clock
 // because the server expires keys on its own clock (CLAUDE.md hard rule 6).
 func TestStoreConformance(t *testing.T) {
 	addr := serverAddr(t)
@@ -37,12 +42,12 @@ func TestStoreConformance(t *testing.T) {
 	n := 0
 	storetest.Run(t, func(t *testing.T) store.Store {
 		n++
-		s, err := New(Config{Addrs: []string{addr}, Prefix: "t" + run + "x" + strconv.Itoa(n)})
+		s, err := New(Config{Addrs: []string{addr}, Prefix: "t" + run + "x" + strconv.Itoa(n), MaxHardEpochs: maxHardForConformance})
 		if err != nil {
 			t.Fatal(err)
 		}
 		return s
-	}, storetest.EpochModes(store.EpochHard))
+	}, storetest.HardEpochCap(maxHardForConformance), storetest.Parallel(64))
 }
 
 // E-11: the clamped expiry reaches the server as a TTL no longer than

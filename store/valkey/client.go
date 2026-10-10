@@ -26,6 +26,9 @@ type client interface {
 	// read-only lookup script and returns its integer array reply.
 	evalWrite(ctx context.Context, keys, args []string) error
 	evalRead(ctx context.Context, keys, args []string) ([]int64, error)
+	// seed stores fresh at meta.seed unless a seed is already there and
+	// returns the stored one: HSETNX then HGET in one round trip (05 §7).
+	seed(ctx context.Context, key string, fresh []byte) ([]byte, error)
 	// evalWriteWait runs the write script and then WAIT replicas ms on the
 	// same connection: WAIT only covers writes made on its own connection,
 	// and the shared multiplexed one gives no such guarantee.
@@ -89,11 +92,27 @@ func (v valkeyClient) del(ctx context.Context, key string) error {
 }
 
 func (v valkeyClient) evalWrite(ctx context.Context, keys, args []string) error {
-	return writeEpochScript.Exec(ctx, v.c, keys, args).Error()
+	err := writeEpochScript.Exec(ctx, v.c, keys, args).Error()
+	if ve, ok := valkey.IsValkeyErr(err); ok && strings.HasPrefix(ve.Error(), "SEED_CHANGED") {
+		return errSeedChanged
+	}
+	return err
 }
 
 func (v valkeyClient) evalRead(ctx context.Context, keys, args []string) ([]int64, error) {
 	return readEpochScript.Exec(ctx, v.c, keys, args).AsIntSlice()
+}
+
+func (v valkeyClient) seed(ctx context.Context, key string, fresh []byte) ([]byte, error) {
+	res := v.c.DoMulti(ctx,
+		v.c.B().Hsetnx().Key(key).Field(fieldSeed).Value(string(fresh)).Build(),
+		v.c.B().Hget().Key(key).Field(fieldSeed).Build())
+	for _, r := range res {
+		if err := r.Error(); err != nil {
+			return nil, err
+		}
+	}
+	return res[1].AsBytes()
 }
 
 func (v valkeyClient) evalWriteWait(ctx context.Context, keys, args []string, replicas, ms int64) error {
