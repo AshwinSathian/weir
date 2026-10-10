@@ -5,7 +5,7 @@ Phase: 1
 Current card: none
 Card state: awaiting-merge
 Branch: card/P25-07b-two-node-purge (pushed to claude/dreamy-dijkstra-egbmbq)
-PR: pending
+PR: https://github.com/AshwinSathian/weir/pull/95
 Next card: P25-07c (needs Ashwin's approval: persisted key-generation hash changes purge semantics)
 
 ## Decided 2026-10-11 (P25-07, adversarial review of PR 94)
