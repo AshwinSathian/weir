@@ -1323,3 +1323,11 @@ Entry template:
 - Tests: smoke step re-run locally under `bash -ex` (second poll served `ok`, process alive); YAML parses.
 - Deviations: none. Declined: SHA-pinning actions (matches the other jobs), `[ ] && [ ]` instead of `-a` (works in bash and dash).
 - Follow-ups: flip the root `=.` to the tag after the next root release (in STATUS).
+
+## 2026-10-10 · P2-02 · blocked
+- Branch / PR: claude/peaceful-mccarthy-b9uz60 / none
+- Done: read 08 §3, §4b, FR-FAIR-3, FR-SNP-1, Caddy's UsagePool and memory.Config. No code written.
+- Tests: none.
+- Deviations: none.
+- Follow-ups: question under "Waiting on Ashwin" in STATUS (multi-host detection source).
+- Context: low.
