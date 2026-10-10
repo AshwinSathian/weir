@@ -16,12 +16,12 @@ Next card: see `make next`
 - The first record on a prefix that already has a `meta` key counts as a change, so an upgrade rolled out with a tighter `forward` purges once.
 - The record is read with `GETRANGE 0 64` and written with a plain `SET`; a record of another type or an oversized one is a change, and the write repairs it.
 - Runbook 8.6 again asks for one manual hard purge after the last node is rolled (old-rules nodes keep storing after the first node's purge).
-- The ordering (check, purge, record) moved into `reconcileServerKeyGen` with unit tests for the order, a failed purge and a failed check. PLAN 2.5.5 is unticked until CI is green on Valkey 8.1.
+- The ordering (check, purge, record) moved into `reconcileServerKeyGen` with unit tests for the order, a failed purge and a failed check. PLAN 2.5.5 was unticked until CI went green on Valkey 8.1 (it did, on 4d9500f; ticked).
 - Accepted: a rolled-back reload leaves the new record in place (08 §3); nodes sharing a prefix with different `forward` purge each other on each start or reload.
 
 ## Notes for the next session (P25-07c)
 
-- Lint cannot run here (Go 1.25 build); CI must confirm lint and the integration tests on Valkey 8.1, then tick PLAN 2.5.5.
+- CI is green on 4d9500f (lint, tests, Valkey 8.1 integration); PLAN 2.5.5 ticked.
 - `TestValkeyKeyGenRecord` and the store integration tests run under `make test-valkey`.
 
 ## Decided 2026-10-11 (P25-07, adversarial review of PR 94)
