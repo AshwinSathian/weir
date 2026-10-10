@@ -9,6 +9,8 @@ import (
 	"slices"
 	"time"
 
+	"github.com/valkey-io/valkey-go"
+
 	"github.com/AshwinSathian/weir/store"
 )
 
@@ -47,6 +49,11 @@ func (s *Store) getSeed(ctx context.Context, cl client) (*[seedLen]byte, error) 
 		return nil, unavailable("seed: %v", err)
 	}
 	b, err := cl.seed(ctx, s.ekeys[keyMeta], fresh[:])
+	if valkey.IsValkeyNil(err) {
+		// A flush landed between HSETNX and HGET: the seed is gone, not an
+		// error the caller can tell from an outage (T-29: fail closed).
+		return nil, unavailable("sketch seed vanished while it was being stored")
+	}
 	if err != nil {
 		return nil, mapError(err)
 	}

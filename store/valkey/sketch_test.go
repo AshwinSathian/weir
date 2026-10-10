@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/valkey-io/valkey-go"
+
 	"github.com/AshwinSathian/weir/store"
 )
 
@@ -144,6 +146,16 @@ func TestSeedChangedRetriesOnce(t *testing.T) {
 	t.Run("seed fetch failure is reported", func(t *testing.T) {
 		s, cl := connected(t, nil)
 		cl.ep.seedErr = errors.New("connection reset")
+		if err := s.SetEpoch(t.Context(), tag(1), softAt(time.Now())); !errors.Is(err, store.ErrUnavailable) {
+			t.Fatalf("SetEpoch = %v, want ErrUnavailable", err)
+		}
+		if _, _, err := s.NewestEpoch(t.Context(), []store.Tag{tag(1)}, time.Unix(1, 0)); !errors.Is(err, store.ErrUnavailable) {
+			t.Fatalf("NewestEpoch = %v, want ErrUnavailable", err)
+		}
+	})
+	t.Run("a seed that vanishes between HSETNX and HGET is unavailable", func(t *testing.T) {
+		s, cl := connected(t, nil)
+		cl.ep.seedErr = valkey.Nil
 		if err := s.SetEpoch(t.Context(), tag(1), softAt(time.Now())); !errors.Is(err, store.ErrUnavailable) {
 			t.Fatalf("SetEpoch = %v, want ErrUnavailable", err)
 		}

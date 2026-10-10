@@ -655,7 +655,7 @@ func TestSketchPlaneLossRepairs(t *testing.T) {
 				if err := s.SetEpoch(t.Context(), tag(1), softAt(whole(-2*time.Second))); err != nil {
 					t.Fatal(err)
 				}
-				del(t, s, s.ekeys[plane], s.ekeys[keyGlobal], s.ekeys[keyNewest])
+				del(t, s, s.ekeys[plane]) // only the plane: meta.v, global and newest survive
 				if via == "write" {
 					if err := s.SetEpoch(t.Context(), tag(2), softAt(whole(time.Minute))); err != nil {
 						t.Fatal(err)
@@ -672,5 +672,53 @@ func TestSketchPlaneLossRepairs(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// IDs: E-7, FR-PRG-2, T-29
+// 05 §7: a client writes meta.seed first, so meta can exist without its field
+// v. That is still a loss: the first soft write or lookup creates v and the
+// planes and raises the global hard epoch, so an epoch lost with the flush is
+// covered.
+func TestSeedWithoutVersionIsLoss(t *testing.T) {
+	for _, via := range []string{"lookup", "write"} {
+		t.Run(via, func(t *testing.T) {
+			s := newEpochStore(t, nil)
+			fetched := whole(-5 * time.Second)
+			if _, err := s.getSeed(t.Context(), mustClient(t, s)); err != nil { // HSETNX only
+				t.Fatal(err)
+			}
+			if exists(t, s, s.ekeys[keySketchSoft]) {
+				t.Fatal("test setup: planes should not exist yet")
+			}
+			if via == "write" {
+				if err := s.SetEpoch(t.Context(), tag(1), softAt(whole(time.Minute))); err != nil {
+					t.Fatal(err)
+				}
+			}
+			ep, ok := epochAt(t, s, []store.Tag{store.TagGlobal(), tag(2)}, fetched)
+			if !ok || ep.Mode != store.EpochHard || ep.At.Before(fetched) {
+				t.Fatalf("after the first use: %+v, %v; want a hard epoch at or after the fetch time", ep, ok)
+			}
+			if !exists(t, s, s.ekeys[keySketchSoft]) || !exists(t, s, s.ekeys[keySketchInvalid]) {
+				t.Fatal("planes were not created")
+			}
+		})
+	}
+}
+
+// IDs: E-12, T-29
+// A lookup with shared tags after plane loss repairs and answers like any
+// other: the shared flag does not skip the loss check.
+func TestSharedLookupAfterPlaneLoss(t *testing.T) {
+	s := newEpochStore(t, nil)
+	fetched := whole(-5 * time.Second)
+	if err := s.SetEpoch(t.Context(), tag(1), softAt(whole(-2*time.Second))); err != nil {
+		t.Fatal(err)
+	}
+	del(t, s, s.ekeys[keySketchInvalid])
+	ep, ok, err := s.NewestEpochShared(t.Context(), []store.Tag{store.TagGlobal()}, []store.Tag{tag(1)}, fetched)
+	if err != nil || !ok || ep.Mode != store.EpochHard {
+		t.Fatalf("NewestEpochShared = %+v, %v, %v; want the repair's hard epoch", ep, ok, err)
 	}
 }

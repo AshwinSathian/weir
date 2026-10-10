@@ -12,12 +12,22 @@ Next card: P25-04
 
 none. Decided 2026-10-10 (P2-03b, review of PR 79; Ashwin delegated "take decisions on all items"): caddytest e2e files are a named exception to the real-clock rule (CLAUDE.md rule 6, docs/07 §1) instead of a build tag, because a tag would stop CI running them; a skip outside `-short` fails the test; the test site binds 127.0.0.1; the herd test uses a 2 s client timeout so a hard purge reports counts. Also decided (P2-02): multi-host is an explicit `multi_host` key; scanning the http app was rejected (handler cannot find its own route; global scan would cap unrelated sites and flush their stores). Documented in 08 §2/§3/§4b.
 
+## Decided 2026-10-10 (P25-03b, adversarial review of PR 89)
+
+"Waiting on Ashwin" was empty. An independent agent attacked the PR (including a 16-goroutine chaos run with FLUSHALL every 40 ms: no lost purge; at 3 ms it fails closed with `ErrUnavailable`); no must-fix. Decisions:
+
+- `EpochNeverUnderInvalidates` was too loose for 3.8% of tags. It now runs a strict soft phase and a strict invalid phase (100 000 tags each, fresh stores, exact mode and time) plus a 20 000-tag mixed phase with the loosened rule. 05 §8 updated.
+- `getSeed` maps a nil `HGET` (flush between `HSETNX` and `HGET`) to `ErrUnavailable` instead of leaking `valkey.Nil`.
+- New tests: seed written without `meta.v` counts as loss (lookup and write), shared lookup after plane loss, nil seed; `TestSketchPlaneLossRepairs` now deletes only the plane.
+- Documented, not coded: under an invalidation flood every lookup is `GET newest` plus a script (two round trips), a `newest` cache is the upgrade if P25-04 measures a problem; no single-flight on the seed fetch (bounded, convergent). 05 E-7 and the `Parallel` line corrected; stale breaker-hazard line below marked resolved.
+- Declined: a flush-between-repair-and-reseed integration test (not deterministic; the unit test pins the one-retry caps).
+
 ## Decided 2026-10-10 (P25-03, adversarial review of PR 88)
 
 Ashwin delegated "take decisions on all items"; "Waiting on Ashwin" was empty. An independent agent attacked the PR; no must-fix.
 
 - `WAIT` blocks the full `HardEpochWait` when no replica acknowledges (single node, replica down), so a hard `Purge` over N tags costs N times that. The code comment and 05 §7 were wrong; both corrected, option stays off by default. Test now also checks a healthy replica returns well under the wait.
-- Breaker hazard: until P25-03b the store refuses invalid-mode writes that the engine's RFC 9111 4.4 invalidation makes, and the guard counts them. Not reachable (P25-07 wiring depends on P25-03b through P25-06); documented in 05 §7 and on `SetEpoch` rather than coded around.
+- Breaker hazard (resolved by P25-03b, which accepts invalid-mode writes on URI tags): the store used to refuse the engine's RFC 9111 4.4 invalidation writes and the guard counted them.
 - 05 §7 now says: stores sharing a `Prefix` must use identical `MaxRetention` and `MaxClockSkew`; stale persistence (old RDB/AOF, lagging failover) is a known T-29 residual risk; a far-future hard `At` holds a cap slot.
 - Declined as code: bounding `readArgs` (engine caller bounds it), a bounded wait for the dedicated connection (`ponytail:` note added). Test fixes: retry on the WAIT path, a vacuous cancel test now cancels mid-call, replica test waits for the link.
 

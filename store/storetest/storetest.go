@@ -568,16 +568,10 @@ func testEpochsMaxAcrossTags(t *testing.T, newStore func(*testing.T) store.Store
 // never reports less than its own epoch, in either sketch mode.
 func testEpochNeverUnderInvalidates(t *testing.T, newStore func(*testing.T) store.Store, o options) {
 	o.need(t, store.EpochSoft, store.EpochInvalid)
-	s, base := epochBase(t, newStore)
 	rng := rand.New(rand.NewPCG(1, 2)) //nolint:gosec // reproducible test data
-	const n = 200_000
-	at := make([]time.Time, n)
-	for i := range n {
-		at[i] = base.Add(time.Duration(rng.Int64N(int64(time.Hour))))
-	}
-	// each runs f(i) for every i, from o.parallel goroutines; f reports a
+	// each runs f(i) for i in [0, n), from o.parallel goroutines; f reports a
 	// failure with t.Errorf, since Fatalf is not allowed off the test goroutine.
-	each := func(f func(i int)) {
+	each := func(n int, f func(i int)) {
 		w := max(o.parallel, 1)
 		var wg sync.WaitGroup
 		for g := range w {
@@ -589,27 +583,44 @@ func testEpochNeverUnderInvalidates(t *testing.T, newStore func(*testing.T) stor
 		}
 		wg.Wait()
 	}
-	each(func(i int) {
-		own := store.EpochSoft + store.EpochMode(i%2) //nolint:gosec // i%2 is 0 or 1
-		if err := s.SetEpoch(t.Context(), tag(i), store.Epoch{At: at[i], Mode: own}); err != nil {
-			t.Errorf("SetEpoch %d: %v", i, err)
+	// phase writes n tags on a fresh store, tag i in mode modeOf(i), then
+	// looks each up at its own time. strict phases hold one mode only, so the
+	// reported mode must be that mode and its time must reach the tag's own: a
+	// sketch cell is never below the tag's epoch, and with no other mode in
+	// the store nothing more severe can collide in. The mixed phase may see
+	// another tag's more severe epoch (E-3 ranks severity first, and 4.3 skew
+	// can place it before at[i]), so it checks the time only for the tag's own
+	// mode.
+	phase := func(n int, modeOf func(i int) store.EpochMode, strict bool) {
+		s, base := epochBase(t, newStore)
+		at := make([]time.Time, n)
+		for i := range n {
+			at[i] = base.Add(time.Duration(rng.Int64N(int64(time.Hour))))
 		}
-	})
-	if t.Failed() {
-		return
+		each(n, func(i int) {
+			if err := s.SetEpoch(t.Context(), tag(i), store.Epoch{At: at[i], Mode: modeOf(i)}); err != nil {
+				t.Errorf("SetEpoch %d: %v", i, err)
+			}
+		})
+		if t.Failed() {
+			return
+		}
+		var bad atomic.Int32
+		each(n, func(i int) {
+			own := modeOf(i)
+			ep, ok, err := s.NewestEpoch(t.Context(), []store.Tag{tag(i)}, at[i])
+			fail := err != nil || !ok || ep.Mode < own || (ep.Mode == own && ep.At.Before(at[i])) ||
+				(strict && ep.Mode != own)
+			if fail && bad.Add(1) <= 5 {
+				t.Errorf("tag %d: NewestEpoch = %+v, %v, %v; want mode %d at least %v", i, ep, ok, err, own, at[i])
+			}
+		})
 	}
-	var bad atomic.Int32
-	each(func(i int) {
-		own := store.EpochSoft + store.EpochMode(i%2) //nolint:gosec // i%2 is 0 or 1
-		ep, ok, err := s.NewestEpoch(t.Context(), []store.Tag{tag(i)}, at[i])
-		// A more severe mode is another tag's epoch that collided in the
-		// other plane; E-3 ranks severity first, and a store that adds clock
-		// skew (4.3) may report it up to the skew before at[i]. Only the
-		// tag's own mode must reach its own time.
-		if (err != nil || !ok || ep.Mode < own || (ep.Mode == own && ep.At.Before(at[i]))) && bad.Add(1) <= 5 {
-			t.Errorf("tag %d: NewestEpoch = %+v, %v, %v; want at least %v", i, ep, ok, err, at[i])
-		}
-	})
+	const n = 100_000
+	for _, m := range []store.EpochMode{store.EpochSoft, store.EpochInvalid} {
+		phase(n, func(int) store.EpochMode { return m }, true)
+	}
+	phase(n/5, func(i int) store.EpochMode { return store.EpochSoft + store.EpochMode(i%2) }, false) //nolint:gosec // i%2 is 0 or 1
 }
 
 // FR-PRG-3, NFR-3, E-6: a new hard tag beyond the cap fails with ErrUnavailable; tags

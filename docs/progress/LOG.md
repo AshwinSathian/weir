@@ -1575,3 +1575,11 @@ Entry template:
 - Review: card-reviewer, no must-fix. Fixed both should-fix (the BITFIELD `SET` now uses the same `at` it compared; requirement IDs on the new tests) and the upgrade note. Left: O(n²) duplicate check in `readArgs` (bounded by the caller).
 - Follow-ups: none. The CI Valkey job has still not run.
 - Context: medium; size M was right.
+
+## 2026-10-10 · P25-03b · review-fixes
+- Branch / PR: claude/compassionate-pasteur-k8ueay / https://github.com/AshwinSathian/weir/pull/89
+- Done: adversarial review (agent) of PR 89; decisions in STATUS. Strict single-mode phases for `EpochNeverUnderInvalidates`; nil seed no longer leaks `valkey.Nil`; docs 05 E-7, §8 and the flood-cost note.
+- Tests: TestSeedWithoutVersionIsLoss, TestSharedLookupAfterPlaneLoss, nil-seed unit case, plane-only deletion in TestSketchPlaneLossRepairs; unit and integration (redis 7.0.15) pass, module and storetest lint 0 issues.
+- Deviations: 05 §7 and §8 as above.
+- Follow-ups: measure the two-round-trip lookup under a flood in P25-04; the CI Valkey job has still not run.
+- Context: low
