@@ -12,6 +12,18 @@ Next card: P25-01
 
 none. Decided 2026-10-10 (P2-03b, review of PR 79; Ashwin delegated "take decisions on all items"): caddytest e2e files are a named exception to the real-clock rule (CLAUDE.md rule 6, docs/07 §1) instead of a build tag, because a tag would stop CI running them; a skip outside `-short` fails the test; the test site binds 127.0.0.1; the herd test uses a 2 s client timeout so a hard purge reports counts. Also decided (P2-02): multi-host is an explicit `multi_host` key; scanning the http app was rejected (handler cannot find its own route; global scan would cap unrelated sites and flush their stores). Documented in 08 §2/§3/§4b.
 
+## Decided 2026-10-10 (P25-00, adversarial review of PR 84)
+
+Ashwin delegated "take decisions on all items"; "Waiting on Ashwin" was empty. An independent agent attacked the PR. Decisions, written into 05 §7/§8 and the cards:
+
+- Epoch state must never be evictable: epoch keys have no TTL, the server policy is `volatile-lfu` (or `noeviction`); the store refuses `allkeys-*` on connect (`SkipPolicyCheck` for managed services). Hard epochs live in one pruned sorted set (no per-tag keys); an absent `newest` key is never "no epochs"; a lost `meta`/sketch reports a hard epoch at now. This replaces the earlier `allkeys-lfu` recommendation.
+- Connection: `New` validates config but does not connect; an unreachable server opens the store breaker (FR-STF-2). `Cluster` is an explicit setting. Replica reads off.
+- New config fields approved for `store/valkey`: `Prefix`, `HashTag`, `CoLocateEntries` (entries omit the hash tag by default), `Cluster`, `MaxRetention`, `MaxClockSkew`, `MaxHardEpochs`, `CallTimeout`, `HardEpochWait`, `SkipPolicyCheck`.
+- Skew: accept the up to `MaxClockSkew` + 1 s re-purge window and document it; single-clock operators set skew 0.
+- Scrubber stays synchronous (SCAN per node, `ponytail:` ceiling O(keyspace)).
+- Cards re-cut: P25-01 split into P25-01 and P25-01b, P25-05 into P25-05 and P25-05b; storetest gets `EpochModes` and `Parallel`. P25-05 (vary CAS mechanism) and P25-07/07b (Caddy `store valkey` block, lifting D17) still need Ashwin's approval when they start.
+- Also fixed: a global sed in my earlier commit had rewritten three old LOG entries to point at PR 84; reverted.
+
 ## Decided 2026-10-10 (P2-04)
 
 Ashwin chose "halve the remainder" (via question) because Caddy gives `Provision` no look-ahead for an even split. Each new auto-sized store takes half of the budget the live auto-sized stores have not claimed (20%, 10%, 5% of the limit), floored at 160 MiB with a warning. A lone site gets 20%, not 40%. FR-MEM-1, 08 §7 and T-43 reworded.
