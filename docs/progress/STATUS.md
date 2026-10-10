@@ -5,7 +5,7 @@ Phase: 1
 Current card: none
 Card state: awaiting-merge
 Branch: claude/compassionate-pasteur-k8ueay
-PR: none yet
+PR: https://github.com/AshwinSathian/weir/pull/89
 Next card: P25-04
 
 ## Waiting on Ashwin
