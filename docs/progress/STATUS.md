@@ -5,7 +5,7 @@ Phase: 1
 Current card: none
 Card state: awaiting-merge
 Branch: claude/blissful-pascal-4l6ag2
-PR: pending
+PR: https://github.com/AshwinSathian/weir/pull/87
 Next card: P25-03
 
 ## Waiting on Ashwin

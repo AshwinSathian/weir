@@ -1533,7 +1533,7 @@ Entry template:
 - Context: low
 
 ## 2026-10-10 · P25-02 · done
-- Branch / PR: claude/blissful-pascal-4l6ag2 / pending
+- Branch / PR: claude/blissful-pascal-4l6ag2 / https://github.com/AshwinSathian/weir/pull/87
 - Done: `Get`, `Set`, `Delete` for `store/valkey` (entries.go); key layout `<prefix>:<hex>` or `<prefix>:{tag}:<hex>`; `Set` clamps to RequestTime + MaxRetention (E-11); `make test-valkey`; CI job `valkey` (valkey/valkey:8.1, volatile-lfu), added to the aggregate `check`.
 - Tests: TestKeyLayout, TestSetClampsToMaxRetention, TestGetDecodeFailureIsUnavailable, TestEntryCommandErrors; integration `TestStoreConformance` (WithoutEpochs) passes against redis-server 7.0.15 with ExpiredIsNotFound run, not skipped; `make check` passes with the go1.27 lint workaround.
 - Deviations: none. An unencodable record is declined with nil (S-4); the card was silent.
