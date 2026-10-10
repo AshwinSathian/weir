@@ -37,25 +37,30 @@ func (s *Store) SetEpoch(ctx context.Context, t store.Tag, ep store.Epoch) error
 	}
 	ctx, cancel := s.callCtx(ctx)
 	defer cancel()
-	if err := s.writeEpoch(ctx, cl, s.writeArgs(ep.Mode, global, t, ep.At, false)); err != nil {
-		return err
-	}
+	args := s.writeArgs(ep.Mode, global, t, ep.At, false)
 	if ep.Mode == store.EpochHard && s.cfg.HardEpochWait > 0 {
-		// The count is not checked: with no replica WAIT answers 0 at once, and
-		// a replica that misses the deadline is the trade-off HardEpochWait
-		// names (05 §7, Replication).
-		return mapError(cl.wait(ctx, 1, s.cfg.HardEpochWait.Milliseconds()))
+		// The replica count is not checked: with no replica WAIT answers 0 at
+		// once, and a replica that misses the deadline is the trade-off
+		// HardEpochWait names (05 §7, Replication).
+		return s.retryOnce(ctx, func() error {
+			return cl.evalWriteWait(ctx, s.ekeys, args, 1, s.cfg.HardEpochWait.Milliseconds())
+		})
 	}
-	return nil
+	return s.writeEpoch(ctx, cl, args)
 }
 
-// writeEpoch runs the write script, once more after a network error. The
-// script is a max or a replace, so running it twice is the same as once. A
-// server reply (including the cap refusal) or an ended context is final.
+// writeEpoch runs the write script.
 func (s *Store) writeEpoch(ctx context.Context, cl client, args []string) error {
-	err := cl.evalWrite(ctx, s.ekeys, args)
+	return s.retryOnce(ctx, func() error { return cl.evalWrite(ctx, s.ekeys, args) })
+}
+
+// retryOnce runs f, and once more after a network error. The script is a max
+// or a replace, so running it twice is the same as once. A server reply
+// (including the cap refusal) or an ended context is final.
+func (s *Store) retryOnce(ctx context.Context, f func() error) error {
+	err := f()
 	if isNetworkError(err) && ctx.Err() == nil {
-		err = cl.evalWrite(ctx, s.ekeys, args)
+		err = f()
 	}
 	return mapError(err)
 }

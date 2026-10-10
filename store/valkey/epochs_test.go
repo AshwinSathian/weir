@@ -59,11 +59,20 @@ func (f *fakeClient) evalRead(_ context.Context, keys, args []string) ([]int64, 
 	return r, nil
 }
 
-func (f *fakeClient) wait(_ context.Context, replicas, ms int64) error {
+func (f *fakeClient) evalWriteWait(_ context.Context, keys, args []string, replicas, ms int64) error {
 	f.ep.mu.Lock()
 	defer f.ep.mu.Unlock()
+	f.ep.writes = append(f.ep.writes, scriptCall{keys, args})
 	f.ep.waits = append(f.ep.waits, [2]int64{replicas, ms})
-	return f.ep.waitErr
+	if f.ep.waitErr != nil {
+		return f.ep.waitErr
+	}
+	if len(f.ep.writeErr) == 0 {
+		return nil
+	}
+	err := f.ep.writeErr[0]
+	f.ep.writeErr = f.ep.writeErr[1:]
+	return err
 }
 
 func (f *fakeClient) counts() (writes, reads, waits int) {
@@ -239,8 +248,8 @@ func TestSetEpochRetriesOnceOnNetworkError(t *testing.T) {
 	})
 }
 
-// 05 §7 (Replication): HardEpochWait issues WAIT after a hard write, and
-// only a hard write.
+// 05 §7 (Replication): with HardEpochWait a hard write and its WAIT go out
+// as one call (one connection), and only a hard write waits.
 func TestHardEpochWaitIssuesWait(t *testing.T) {
 	cfg := func(c *Config) { c.HardEpochWait = 50 * time.Millisecond }
 	t.Run("hard on a tag", func(t *testing.T) {
@@ -250,6 +259,9 @@ func TestHardEpochWaitIssuesWait(t *testing.T) {
 		}
 		if len(cl.ep.waits) != 1 || cl.ep.waits[0] != [2]int64{1, 50} {
 			t.Fatalf("WAIT calls = %v, want one WAIT 1 50", cl.ep.waits)
+		}
+		if w, _, _ := cl.counts(); w != 1 {
+			t.Fatalf("script calls = %d, want the write and WAIT in one", w)
 		}
 	})
 	t.Run("hard on the global tag", func(t *testing.T) {

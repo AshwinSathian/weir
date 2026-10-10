@@ -3,8 +3,10 @@
 package valkey
 
 import (
+	"context"
 	"errors"
 	"math"
+	"os"
 	"strconv"
 	"testing"
 	"time"
@@ -353,11 +355,37 @@ func TestSkewAddsConservatively(t *testing.T) {
 	}
 }
 
-// 05 §7 (Replication): WAIT against a server with no replica returns at
-// once with a count of zero, which is not an error.
-func TestHardEpochWaitAgainstServer(t *testing.T) {
-	s := newEpochStore(t, func(c *Config) { c.HardEpochWait = 20 * time.Millisecond })
-	if err := s.SetEpoch(t.Context(), tag(1), hardAt(whole(time.Minute))); err != nil {
-		t.Fatalf("SetEpoch with HardEpochWait: %v", err)
+// 05 §7 (Replication), T-29: HardEpochWait must wait for a replica. WAIT
+// only covers writes on its own connection, so the script and WAIT share
+// one. The test needs a replica of the test server that it can pause:
+// WEIR_VALKEY_REPLICA_ADDR names one. With none set the test skips, since CI
+// runs a single server.
+func TestHardEpochWaitWaitsForReplica(t *testing.T) {
+	ra := os.Getenv("WEIR_VALKEY_REPLICA_ADDR")
+	if ra == "" {
+		t.Skip("WEIR_VALKEY_REPLICA_ADDR is not set (a replica of WEIR_VALKEY_ADDR)")
 	}
+	const wait = 700 * time.Millisecond
+	s := newEpochStore(t, func(c *Config) { c.HardEpochWait = wait })
+	r, err := New(Config{Addrs: []string{ra}, Prefix: "replica-control", SkipPolicyCheck: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	rc := raw(t, r)
+	// Pause the replica's command loop so it cannot acknowledge.
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_ = rc.Do(context.Background(), rc.B().Arbitrary("DEBUG", "SLEEP").Args("1.5").Build()).Error()
+	}()
+	time.Sleep(100 * time.Millisecond) // real clock: the replica is another process
+	start := time.Now()
+	if err := s.SetEpoch(t.Context(), tag(1), hardAt(whole(time.Minute))); err != nil {
+		t.Fatal(err)
+	}
+	if took := time.Since(start); took < wait-100*time.Millisecond {
+		t.Fatalf("SetEpoch returned after %v with the replica paused, want about %v", took, wait)
+	}
+	<-done
 }

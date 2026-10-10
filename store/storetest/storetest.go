@@ -24,7 +24,8 @@ type Option func(*options)
 
 type options struct {
 	noEpochs bool
-	modes    []store.EpochMode // nil: every mode
+	modes    []store.EpochMode // used only when modesSet
+	modesSet bool              // EpochModes() with no modes means none
 	synctest bool
 	hardCap  int
 }
@@ -37,7 +38,9 @@ func WithoutEpochs() Option { return func(o *options) { o.noEpochs = true } }
 // EpochModes restricts the epoch cases to the given modes, for a store whose
 // soft or invalid support lands in a later card. A case that needs a mode
 // outside the list skips; the others run with the modes they have.
-func EpochModes(m ...store.EpochMode) Option { return func(o *options) { o.modes = slices.Clone(m) } }
+func EpochModes(m ...store.EpochMode) Option {
+	return func(o *options) { o.modes, o.modesSet = slices.Clone(m), true }
+}
 
 // Synctest runs each time-dependent case inside its own synctest bubble, so
 // in-process stores that read time.Now expire records on the fake clock.
@@ -92,7 +95,7 @@ func Run(t *testing.T, newStore func(t *testing.T) store.Store, opts ...Option) 
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if c.epoch && (o.noEpochs || (o.modes != nil && len(o.modes) == 0)) {
+			if c.epoch && (o.noEpochs || (o.modesSet && len(o.modes) == 0)) {
 				t.Skip("store does not support epochs (WithoutEpochs)")
 			}
 			c.f(t, newStore, o)
@@ -433,7 +436,7 @@ func testCodecRoundTrip(t *testing.T, _ func(*testing.T) store.Store, _ options)
 
 // has reports whether the epoch cases may use mode m (EpochModes).
 func (o options) has(m store.EpochMode) bool {
-	return o.modes == nil || slices.Contains(o.modes, m)
+	return !o.modesSet || slices.Contains(o.modes, m)
 }
 
 // need skips the case unless every mode in ms is allowed.
