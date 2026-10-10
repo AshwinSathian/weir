@@ -89,8 +89,10 @@ func (h *Handler) Provision(ctx caddy.Context) (err error) {
 	cfg.Logger = ctx.Slogger()
 	load := any(ctx.GetMetricsRegistry())
 	keyGen := keyGenHash(cfg)
+	var built bool // the pool called the constructor: a new store, not a reuse
 	p, keyChanged, err := stores.acquire(load, h.storeSpec(), keyGen,
 		func() (*memory.Store, int64, error) {
+			built = true
 			size := int64(h.MaxBytes)
 			if size == 0 {
 				size = stores.autoSize(debug.SetMemoryLimit(-1), cfg.Logger, h.Name)
@@ -101,7 +103,9 @@ func (h *Handler) Provision(ctx caddy.Context) (err error) {
 	if err != nil {
 		return err
 	}
-	stores.checkOvercommit(cfg.Logger, h.Name)
+	if built {
+		stores.checkOvercommit(cfg.Logger, h.Name)
+	}
 	release := func() error {
 		p.dropHolder(h)
 		return stores.release(load, p)

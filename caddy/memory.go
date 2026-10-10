@@ -54,7 +54,7 @@ func (r *storeRegistry) autoSize(limit int64, log *slog.Logger, name string) int
 		}
 		return defaultStoreBytes
 	}
-	granted := r.autoGranted()
+	granted := r.autoGranted(name)
 	size, floored := nextShare(budget, granted)
 	if floored {
 		log.Warn("weir: the auto-sized memory share is below the 160 MiB floor and was raised; set max_bytes on the sites that need more or fewer bytes (docs/08 §7)",
@@ -63,13 +63,34 @@ func (r *storeRegistry) autoSize(limit int64, log *slog.Logger, name string) int
 	return size
 }
 
-// autoGranted is the bytes held by every live auto-sized store, reused or
-// built earlier in this load and those of an older load still live during a
-// reload overlap. Counting live stores instead of this load's own claims keeps
+// autoGranted is the bytes held by every live auto-sized store except those
+// named skip: reused ones, ones built earlier in this load and ones of an
+// older load still live during a reload overlap. Counting live stores keeps
 // the 40% bound whatever order the sites provision in: a new site listed
-// before the reused ones still sees them (T-43).
-func (r *storeRegistry) autoGranted() int64 {
-	sum, _, _ := r.overcommit(math.MaxInt64)
+// before the reused ones still sees them (T-43). Stores of the name being
+// built are skipped because the new store replaces them (a changed pool key
+// builds a new store while the old one lives until Cleanup); counting them
+// would shrink the site on every such reload. A renamed or removed site is
+// still counted until its store is destroyed, which errs on the safe side.
+//
+// ponytail: this relies on Caddy provisioning handlers one at a time (loads
+// are serialized and a load provisions its routes in order). Two constructors
+// running at once would read the same total. The upgrade is reserving the
+// grant under r.mu before the build.
+func (r *storeRegistry) autoGranted(skip string) int64 {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var sum int64
+	for name, l := range r.live {
+		if name == skip {
+			continue
+		}
+		for _, p := range l {
+			if p.spec.maxBytes == 0 {
+				sum += p.size.Load()
+			}
+		}
+	}
 	return sum
 }
 

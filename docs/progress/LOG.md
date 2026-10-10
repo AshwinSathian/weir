@@ -1396,3 +1396,10 @@ Entry template:
 - Deviations: card said "evenly"; no look-ahead exists, so Ashwin chose the halving rule. FR-MEM-1 (01), 08 §7 and T-43 (06) reworded.
 - Follow-ups: deployment guide sentence on single-site `max_bytes`. Review found an order dependence (new site listed before reused ones) and fixed it by counting all live auto-sized stores.
 - Context: low; size S was right.
+
+## 2026-10-10 · P2-04 · review-fixes
+- Branch / PR: claude/focused-dijkstra-cr32by / https://github.com/AshwinSathian/weir/pull/80
+- Done: adversarial review (agent), no must-fix; "Waiting on Ashwin" was empty. Fixed: a same-name replacement (changed pool key) no longer counts its predecessor, so it keeps the full first share; overcommit warning only when a store was built; "20%" wording corrected for limits above 20 GiB (budget cap 8 GiB).
+- Tests: TestMemoryShareSameNameReplacement, TestMemoryReleasedStoreStopsCounting, TestMemoryBudgetClamps; TestMemoryShareNewSiteFirst now exact. Lint, shuffled race tests, trace-strict pass.
+- Deviations: 08 §7 states that a renamed or removed site's store counts until destroyed, so a swap-sites reload can shrink the new ones (set `max_bytes`), and that sizing assumes Caddy provisions handlers one at a time (ponytail comment names the upgrade: reserve the grant under `r.mu`).
+- Declined: reserving the grant under a lock now (no concurrent provisioning exists); skipping every superseded store (would let a swap exceed 40% while both live).

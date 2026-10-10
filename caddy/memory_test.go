@@ -137,7 +137,7 @@ func TestMemoryOvercommitWarns(t *testing.T) {
 	})
 }
 
-// T-43: a new site listed before the reused ones still sees their grants, so
+// FR-MEM-1, T-43: a new site listed before the reused ones still sees their grants, so
 // the load stays under 40% whatever the provision order.
 func TestMemoryShareNewSiteFirst(t *testing.T) {
 	setLimit(t, 4<<30)
@@ -154,7 +154,66 @@ func TestMemoryShareNewSiteFirst(t *testing.T) {
 	if a2.pool != a.pool || b2.pool != b.pool {
 		t.Fatal("reused sites built new stores")
 	}
+	if want := (budget - a.pool.size.Load() - b.pool.size.Load()) / 2; n.pool.size.Load() != want {
+		t.Fatalf("new site = %d, want %d", n.pool.size.Load(), want)
+	}
 	if sum := n.pool.size.Load() + a.pool.size.Load() + b.pool.size.Load(); sum > budget {
 		t.Fatalf("load holds %d, above the %d budget", sum, budget)
+	}
+}
+
+// T-43: a pool-key change builds a new store of the same name while the old
+// one is live; the replacement must not be sized against its predecessor.
+func TestMemoryShareSameNameReplacement(t *testing.T) {
+	setLimit(t, 4<<30)
+	isolateStores(t)
+	budget, _ := memoryBudget(4 << 30)
+	a := mustLoad(t, newCtx(t), `{"name":"rep-a"}`)
+	a2 := mustLoad(t, newCtx(t), `{"name":"rep-a","multi_host":true}`)
+	if a2.pool == a.pool {
+		t.Fatal("a changed owner cap reused the store")
+	}
+	if got, want := a2.pool.size.Load(), budget/2; got != want {
+		t.Fatalf("replacement = %d, want %d (the full first share)", got, want)
+	}
+}
+
+// T-43: after a store is destroyed it stops counting against the budget.
+func TestMemoryReleasedStoreStopsCounting(t *testing.T) {
+	setLimit(t, 4<<30)
+	isolateStores(t)
+	a := mustLoad(t, newCtx(t), `{"name":"rel-a"}`)
+	if stores.autoGranted("") == 0 {
+		t.Fatal("a live store is not counted")
+	}
+	if err := a.Cleanup(); err != nil {
+		t.Fatal(err)
+	}
+	if got := stores.autoGranted(""); got != 0 {
+		t.Fatalf("destroyed store still counts %d bytes", got)
+	}
+}
+
+// FR-MEM-1: the budget clamps and cannot overflow at the int64 edges.
+func TestMemoryBudgetClamps(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		limit   int64
+		want    int64
+		limited bool
+	}{
+		{"zero limit hits the 16 MiB floor", 0, 16 << 20, true},
+		{"tiny limit hits the 16 MiB floor", 99, 16 << 20, true},
+		{"1 GiB is 40%", 1 << 30, (1 << 30) / 100 * 40, true},
+		{"above 20 GiB hits the 8 GiB cap", 40 << 30, 8 << 30, true},
+		{"one below MaxInt64 caps without overflow", math.MaxInt64 - 1, 8 << 30, true},
+		{"MaxInt64 means unset", math.MaxInt64, 256 << 20, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, limited := memoryBudget(tc.limit)
+			if got != tc.want || limited != tc.limited {
+				t.Fatalf("memoryBudget(%d) = %d, %v; want %d, %v", tc.limit, got, limited, tc.want, tc.limited)
+			}
+		})
 	}
 }
