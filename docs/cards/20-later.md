@@ -131,7 +131,7 @@ These phases start from draft specs. Each begins with one planning card that ver
 - Notes on size: docs edits count as one file; if the session overruns, split the loss repair into P25-03c.
 - Notes: the option `EpochModes` makes cases skip the modes the store lacks and run the rest, so `EpochHardCap` and `EpochPerModeKept` stay in P25-03b where they can run whole.
 
-### [ ] P25-03b Soft and invalid sketch, shared tags
+### [x] P25-03b Soft and invalid sketch, shared tags
 - Plan: 2.5.1 · Size: M · Depends on: P25-03
 - Read: 05 §4.4 (E-7 to E-9, E-12), §7 (Sketch positions); store/memory/epochs.go; 06 T-29
 - Touch: store/valkey/{sketch.go,sketch_test.go,epochs.go}, store/storetest/storetest.go (option `Parallel`), docs/05 §8, docs/07

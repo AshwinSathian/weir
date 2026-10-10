@@ -20,26 +20,24 @@ func unavailable(format string, args ...any) error {
 
 // SetEpoch raises the epoch for t in ep.Mode to at least ep.At (E-2). A hard
 // epoch on a tag lives in one pruned sorted set capped at MaxHardEpochs (E-6);
-// the global tag keeps all three modes exactly (E-5). Soft and invalid on any
-// other tag need the sketch, which arrives in P25-03b, and are refused with
-// ErrUnavailable until then; Purge reports it (FR-STF-2, T-29). Do not wire
-// this store into an engine before P25-03b: the engine's own invalidation
-// writes (RFC 9111 4.4) are invalid-mode writes on URI tags, would be refused
-// and counted toward the store breaker.
+// the global tag keeps all three modes exactly (E-5); soft and invalid on any
+// other tag raise two cells of a fixed-size sketch plane (E-7, sketch.go). An
+// unknown mode is refused with ErrUnavailable, which Purge reports
+// (FR-STF-2, T-29).
 func (s *Store) SetEpoch(ctx context.Context, t store.Tag, ep store.Epoch) error {
 	if ep.Mode < store.EpochSoft || ep.Mode > store.EpochHard {
 		return unavailable("invalid epoch mode %d", ep.Mode)
 	}
 	global := t == store.TagGlobal()
-	if !global && ep.Mode != store.EpochHard {
-		return unavailable("soft and invalid epochs on a tag need the sketch (not implemented yet)")
-	}
 	cl, err := s.acquire(ctx)
 	if err != nil {
 		return err
 	}
 	ctx, cancel := s.callCtx(ctx)
 	defer cancel()
+	if !global && ep.Mode != store.EpochHard {
+		return s.setSketch(ctx, cl, t, ep)
+	}
 	args := s.writeArgs(ep.Mode, global, t, ep.At, false)
 	if ep.Mode == store.EpochHard && s.cfg.HardEpochWait > 0 {
 		// The replica count is not checked. WAIT returns early only once a
@@ -73,7 +71,7 @@ func (s *Store) retryOnce(ctx context.Context, f func() error) error {
 // isNetworkError reports an error worth one retry: not a server reply, not a
 // context ending, not a closing client.
 func isNetworkError(err error) bool {
-	if err == nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, valkey.ErrClosing) {
+	if err == nil || errors.Is(err, errSeedChanged) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, valkey.ErrClosing) {
 		return false
 	}
 	_, server := valkey.IsValkeyErr(err)
@@ -85,11 +83,15 @@ func isNetworkError(err error) bool {
 // newest key older than since answers "none" with no script (E-10). Anything
 // else, including an absent newest, goes to the read script.
 func (s *Store) NewestEpoch(ctx context.Context, tags []store.Tag, since time.Time) (store.Epoch, bool, error) {
+	return s.newest(ctx, tags, nil, since)
+}
+
+func (s *Store) newest(ctx context.Context, tags, shared []store.Tag, since time.Time) (store.Epoch, bool, error) {
 	cl, err := s.acquire(ctx)
 	if err != nil {
 		return store.Epoch{}, false, err
 	}
-	if len(tags) == 0 {
+	if len(tags) == 0 && len(shared) == 0 {
 		return store.Epoch{}, false, nil
 	}
 	ctx, cancel := s.callCtx(ctx)
@@ -104,16 +106,24 @@ func (s *Store) NewestEpoch(ctx context.Context, tags []store.Tag, since time.Ti
 	case !valkey.IsValkeyNil(err):
 		return store.Epoch{}, false, mapError(err)
 	}
-	return s.lookup(ctx, cl, tags, sinceSec, skew)
+	return s.lookup(ctx, cl, tags, shared, sinceSec, skew)
 }
 
 // lookup runs the read script. A loss reply makes the store repair with a
-// global hard write at server time and look again once; a second loss is an
-// error, not a loop (05 §7).
-func (s *Store) lookup(ctx context.Context, cl client, tags []store.Tag, since, skew int64) (store.Epoch, bool, error) {
-	args := s.readArgs(tags, since, skew)
-	for attempt := 0; ; attempt++ {
-		res, err := cl.evalRead(ctx, s.ekeys, args)
+// global hard write at server time and look again once; a SEED_CHANGED reply
+// makes it refetch the seed and look again once. Each happens at most once
+// per lookup; a second is an error, not a loop (05 §7).
+func (s *Store) lookup(ctx context.Context, cl client, tags, shared []store.Tag, since, skew int64) (store.Epoch, bool, error) {
+	var repaired, reseeded bool
+	for {
+		var sd *[seedLen]byte
+		if needsSeed(tags, shared) {
+			var err error
+			if sd, err = s.getSeed(ctx, cl); err != nil {
+				return store.Epoch{}, false, err
+			}
+		}
+		res, err := cl.evalRead(ctx, s.ekeys, s.readArgs(tags, shared, since, skew, sd))
 		if err != nil {
 			return store.Epoch{}, false, mapError(err)
 		}
@@ -122,12 +132,18 @@ func (s *Store) lookup(ctx context.Context, cl client, tags []store.Tag, since, 
 			return store.Epoch{}, false, nil
 		case len(res) == 2 && res[0] >= int64(store.EpochSoft) && res[0] <= int64(store.EpochHard):
 			return store.Epoch{At: time.Unix(res[1], 0), Mode: store.EpochMode(res[0])}, true, nil //nolint:gosec // res[0] is range-checked in the case above
-		case len(res) == 1 && res[0] == lossReply && attempt == 0:
+		case len(res) == 1 && res[0] == lossReply && !repaired:
+			repaired = true
 			if err := s.repair(ctx, cl); err != nil {
 				return store.Epoch{}, false, err
 			}
 		case len(res) == 1 && res[0] == lossReply:
 			return store.Epoch{}, false, unavailable("epoch state is missing after a repair")
+		case len(res) == 1 && res[0] == seedReply && !reseeded && sd != nil:
+			reseeded = true
+			s.dropSeed(sd)
+		case len(res) == 1 && res[0] == seedReply:
+			return store.Epoch{}, false, unavailable("sketch seed keeps changing")
 		default:
 			return store.Epoch{}, false, unavailable("unexpected epoch script reply %v", res)
 		}
@@ -141,22 +157,4 @@ func (s *Store) lookup(ctx context.Context, cl client, tags []store.Tag, since, 
 // not already count.
 func (s *Store) repair(ctx context.Context, cl client) error {
 	return s.writeEpoch(ctx, cl, s.writeArgs(store.EpochHard, true, store.TagGlobal(), time.Time{}, true))
-}
-
-// readArgs builds the read script's arguments: since, skew, whether the
-// global tag is named, then the other tags raw (E-5). Callers pass at most a
-// handful of tags (the engine: 2 + MaxGroups), so the argument list is
-// bounded by the caller (P5).
-func (s *Store) readArgs(tags []store.Tag, since, skew int64) []string {
-	g := store.TagGlobal()
-	a := make([]string, argFirstTag, argFirstTag+len(tags))
-	a[argSince], a[argSkew], a[argHasGlobal] = itoa(since), itoa(skew), "0"
-	for _, t := range tags {
-		if t == g {
-			a[argHasGlobal] = "1"
-			continue
-		}
-		a = append(a, string(t[:]))
-	}
-	return a
 }

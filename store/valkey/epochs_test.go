@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"math"
+	"slices"
 	"strconv"
 	"sync"
 	"testing"
@@ -27,6 +28,9 @@ type fakeEp struct {
 	readErr  error
 	waitErr  error
 	onWrite  func() // runs inside the first evalWrite (a context that ends mid-call)
+	seedVal  []byte // what meta.seed holds; the first seed call stores its argument
+	seedErr  error
+	seeds    int // seed calls
 }
 
 type scriptCall struct {
@@ -77,6 +81,19 @@ func (f *fakeClient) evalWriteWait(_ context.Context, keys, args []string, repli
 	err := f.ep.writeErr[0]
 	f.ep.writeErr = f.ep.writeErr[1:]
 	return err
+}
+
+func (f *fakeClient) seed(_ context.Context, _ string, fresh []byte) ([]byte, error) {
+	f.ep.mu.Lock()
+	defer f.ep.mu.Unlock()
+	f.ep.seeds++
+	if f.ep.seedErr != nil {
+		return nil, f.ep.seedErr
+	}
+	if f.ep.seedVal == nil {
+		f.ep.seedVal = slices.Clone(fresh)
+	}
+	return slices.Clone(f.ep.seedVal), nil
 }
 
 func (f *fakeClient) counts() (writes, reads, waits int) {
@@ -177,19 +194,18 @@ func equal(a, b []string) bool {
 	return true
 }
 
-// Until the sketch lands (P25-03b) soft and invalid epochs exist only on the
-// global tag; any other tag is refused with ErrUnavailable and nothing is
-// sent (T-29: refusing is safe because Purge reports it, silently dropping
-// the epoch is not). An unknown mode is refused the same way.
-func TestSoftEpochBeforeSketchIsUnavailable(t *testing.T) {
+// Every tag takes every mode once the sketch exists (E-7); only an unknown
+// mode is refused, with ErrUnavailable and nothing sent (T-29: refusing is
+// safe because Purge reports it, silently dropping the epoch is not).
+func TestSetEpochModes(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		tag     store.Tag
 		mode    store.EpochMode
 		refused bool
 	}{
-		{"soft on a URI tag", tag(1), store.EpochSoft, true},
-		{"invalid on a URI tag", tag(1), store.EpochInvalid, true},
+		{"soft on a URI tag", tag(1), store.EpochSoft, false},
+		{"invalid on a URI tag", tag(1), store.EpochInvalid, false},
 		{"soft on the global tag", store.TagGlobal(), store.EpochSoft, false},
 		{"invalid on the global tag", store.TagGlobal(), store.EpochInvalid, false},
 		{"hard on a URI tag", tag(1), store.EpochHard, false},
@@ -392,10 +408,10 @@ func TestNewestEpochScriptArguments(t *testing.T) {
 	if r[0].args[argSince] != "1800000000" || r[0].args[argSkew] != "1" || r[0].args[argHasGlobal] != "1" {
 		t.Errorf("fixed arguments = %q", r[0].args[:3])
 	}
-	if got := r[0].args[3:]; len(got) != 2 || got[0] != string(a[:]) || got[1] != string(b[:]) {
-		t.Errorf("tag arguments = %d, want the two non-global tags", len(got))
+	if got := r[0].args[argFirstTag:]; len(got) != 2*tagStride || got[0] != string(a[:]) || got[tagStride] != string(b[:]) {
+		t.Errorf("tag arguments = %d, want the two non-global tags", len(got)/tagStride)
 	}
-	if r[1].args[argHasGlobal] != "0" || len(r[1].args) != 5 {
+	if r[1].args[argHasGlobal] != "0" || len(r[1].args) != argFirstTag+2*tagStride {
 		t.Errorf("without the global tag: hasGlobal=%q, %d args", r[1].args[argHasGlobal], len(r[1].args))
 	}
 }

@@ -28,6 +28,9 @@ const (
 	argMargin
 	argMaxHard
 	argServerNow
+	argPos1
+	argPos2
+	argSeedID
 )
 
 // Argument positions of the read script, before the tag list.
@@ -35,11 +38,23 @@ const (
 	argSince = iota
 	argSkew
 	argHasGlobal
+	argReadSeed
 	argFirstTag
 )
 
-// lossReply is the read script's answer when meta is absent.
-const lossReply = -1
+// tagStride is the number of arguments per non-global tag in the read
+// script: raw tag, two cell positions, and '1' for a shared tag (E-12).
+const tagStride = 4
+
+// Read script replies that are not an epoch: meta, its version or a plane is
+// absent (loss, 05 §7), or the stored seed differs from the caller's.
+const (
+	lossReply = -1
+	seedReply = -2
+)
+
+// fieldSeed is the meta field holding the sketch seed.
+const fieldSeed = "seed"
 
 // epochKeys lays out the six epoch keys. All carry the hash tag, so one
 // script touches one slot (05 §7).
@@ -77,7 +92,7 @@ func itoa(n int64) string { return strconv.FormatInt(n, 10) }
 // writeArgs builds the write script's arguments. A zero at with serverNow
 // false still sends 1 (epochSeconds), never zero.
 func (s *Store) writeArgs(mode store.EpochMode, global bool, tag store.Tag, at time.Time, serverNow bool) []string {
-	a := make([]string, argServerNow+1)
+	a := make([]string, argSeedID+1)
 	a[argMode] = itoa(int64(mode))
 	a[argGlobal] = "0"
 	if global {
@@ -88,6 +103,7 @@ func (s *Store) writeArgs(mode store.EpochMode, global bool, tag store.Tag, at t
 	a[argMargin] = itoa(wholeSeconds(s.cfg.MaxRetention + s.cfg.MaxClockSkew + time.Second))
 	a[argMaxHard] = strconv.Itoa(s.cfg.MaxHardEpochs)
 	a[argServerNow] = "0"
+	a[argPos1], a[argPos2] = "0", "0"
 	if serverNow {
 		a[argServerNow] = "1"
 	}

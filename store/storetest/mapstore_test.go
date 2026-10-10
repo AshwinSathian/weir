@@ -158,3 +158,9 @@ func (b brokenEpochs) NewestEpoch(ctx context.Context, tags []store.Tag, since t
 func TestRunWithoutEpochs(t *testing.T) {
 	storetest.Run(t, newMapStore, storetest.Synctest(), storetest.WithoutEpochs())
 }
+
+// Parallel runs the sketch property from several goroutines; the map store
+// is safe for that, so every case still passes.
+func TestRunParallel(t *testing.T) {
+	storetest.Run(t, newMapStore, storetest.Synctest(), storetest.Parallel(8))
+}

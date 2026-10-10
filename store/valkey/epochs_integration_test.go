@@ -9,6 +9,8 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -410,4 +412,313 @@ func TestHardEpochWaitWaitsForReplica(t *testing.T) {
 		t.Fatalf("SetEpoch returned after %v with the replica paused, want about %v", took, wait)
 	}
 	<-done
+}
+
+// strlen returns the length of the string at key (the sketch planes, E-9).
+func strlen(t *testing.T, s *Store, key string) int64 {
+	t.Helper()
+	c := raw(t, s)
+	n, err := c.Do(t.Context(), c.B().Strlen().Key(key).Build()).AsInt64()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+// E-9, NFR-3: each plane is created full-size on the first write and never
+// grows, however many tags are written. 100 000 distinct tags, both modes.
+// IDs: E-7, E-9
+func TestSketchStrlenAtMost2MiB(t *testing.T) {
+	s := newEpochStore(t, nil)
+	const want = 2 << 20 // 2^19 cells of 4 bytes
+	if err := s.SetEpoch(t.Context(), tag(0), softAt(whole(time.Minute))); err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range []string{s.ekeys[keySketchSoft], s.ekeys[keySketchInvalid]} {
+		if n := strlen(t, s, k); n != want {
+			t.Fatalf("%s is %d bytes after the first write, want %d", k, n, want)
+		}
+	}
+	at := whole(time.Hour)
+	var wg sync.WaitGroup
+	for g := range 32 {
+		wg.Go(func() {
+			for i := g; i < 100_000; i += 32 {
+				if err := s.SetEpoch(t.Context(), tag(i), store.Epoch{At: at, Mode: store.EpochSoft + store.EpochMode(i%2)}); err != nil {
+					t.Errorf("SetEpoch %d: %v", i, err)
+					return
+				}
+			}
+		})
+	}
+	wg.Wait()
+	for _, k := range []string{s.ekeys[keySketchSoft], s.ekeys[keySketchInvalid]} {
+		if n := strlen(t, s, k); n != want {
+			t.Fatalf("%s is %d bytes after 100 000 tags, want %d", k, n, want)
+		}
+	}
+}
+
+// E-12, T-29: a shared tag is found in the soft plane and the hard table but
+// never in the invalid plane, in one call, and the global tag follows the
+// same rule through its own fields.
+// IDs: E-12, T-29
+func TestSharedTagsSkipInvalidPlane(t *testing.T) {
+	s := newEpochStore(t, func(c *Config) { c.NoClockSkew = true })
+	base := whole(time.Minute)
+	g, grp, uri := store.TagGlobal(), tag(1), tag(2)
+	for _, w := range []struct {
+		t  store.Tag
+		ep store.Epoch
+	}{
+		{grp, store.Epoch{At: base, Mode: store.EpochInvalid}},
+		{uri, store.Epoch{At: base, Mode: store.EpochInvalid}},
+		{g, store.Epoch{At: base, Mode: store.EpochInvalid}},
+	} {
+		if err := s.SetEpoch(t.Context(), w.t, w.ep); err != nil {
+			t.Fatal(err)
+		}
+	}
+	shared := func(plain, sh []store.Tag, since time.Time) (store.Epoch, bool) {
+		t.Helper()
+		ep, ok, err := s.NewestEpochShared(t.Context(), plain, sh, since)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return ep, ok
+	}
+	if ep, ok := shared([]store.Tag{uri}, nil, base); !ok || ep.Mode != store.EpochInvalid {
+		t.Fatalf("plain tag: %+v, %v; want invalid", ep, ok)
+	}
+	if ep, ok := shared(nil, []store.Tag{grp}, base); ok {
+		t.Fatalf("shared tag matched in the invalid plane: %+v", ep)
+	}
+	if ep, ok := shared(nil, []store.Tag{g}, base); ok {
+		t.Fatalf("shared global tag matched its invalid field: %+v", ep)
+	}
+	if ep, ok := shared([]store.Tag{g}, nil, base); !ok || ep.Mode != store.EpochInvalid {
+		t.Fatalf("plain global tag: %+v, %v; want invalid", ep, ok)
+	}
+	// Soft and hard on a shared tag are found as on any tag.
+	if err := s.SetEpoch(t.Context(), grp, softAt(base.Add(time.Minute))); err != nil {
+		t.Fatal(err)
+	}
+	if ep, ok := shared([]store.Tag{uri}, []store.Tag{grp}, base); !ok || ep.Mode != store.EpochInvalid {
+		t.Fatalf("invalid on the plain tag outranks soft on the shared one: %+v, %v", ep, ok)
+	}
+	if ep, ok := shared(nil, []store.Tag{grp}, base); !ok || ep.Mode != store.EpochSoft {
+		t.Fatalf("soft on a shared tag: %+v, %v; want soft", ep, ok)
+	}
+	if err := s.SetEpoch(t.Context(), grp, hardAt(base.Add(2*time.Minute))); err != nil {
+		t.Fatal(err)
+	}
+	if ep, ok := shared(nil, []store.Tag{grp}, base); !ok || ep.Mode != store.EpochHard {
+		t.Fatalf("hard on a shared tag: %+v, %v; want hard", ep, ok)
+	}
+}
+
+// 05 §7 (Sketch positions): a second store on the same server uses the
+// first store's seed, so both compute the same cells and see each other's
+// soft and invalid epochs; the seed is 16 bytes in meta.
+// IDs: E-7, T-29
+func TestSeedSharedAcrossStores(t *testing.T) {
+	a := newEpochStore(t, nil)
+	b, err := New(Config{Addrs: a.cfg.Addrs, Prefix: a.cfg.Prefix})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer b.Close()
+	at := whole(time.Minute)
+	if err := a.SetEpoch(t.Context(), tag(1), softAt(at)); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.SetEpoch(t.Context(), tag(2), store.Epoch{At: at, Mode: store.EpochInvalid}); err != nil {
+		t.Fatal(err)
+	}
+	if *a.seed.Load() != *b.seed.Load() {
+		t.Fatal("the two stores hold different seeds")
+	}
+	if got := hget(t, a, a.ekeys[keyMeta], fieldSeed); len(got) != seedLen || got != string(a.seed.Load()[:]) {
+		t.Fatalf("meta.seed is %d bytes and differs from the cached seed", len(got))
+	}
+	if ep, ok := epochAt(t, b, []store.Tag{tag(1)}, at); !ok || ep.Mode != store.EpochSoft {
+		t.Fatalf("b reads a's soft epoch: %+v, %v", ep, ok)
+	}
+	if ep, ok := epochAt(t, a, []store.Tag{tag(2)}, at); !ok || ep.Mode != store.EpochInvalid {
+		t.Fatalf("a reads b's invalid epoch: %+v, %v", ep, ok)
+	}
+}
+
+// scriptCounter counts script calls to a store's client.
+type scriptCounter struct {
+	client
+	writes, reads atomic.Int32
+}
+
+func (c *scriptCounter) evalWrite(ctx context.Context, keys, args []string) error {
+	c.writes.Add(1)
+	return c.client.evalWrite(ctx, keys, args)
+}
+
+func (c *scriptCounter) evalRead(ctx context.Context, keys, args []string) ([]int64, error) {
+	c.reads.Add(1)
+	return c.client.evalRead(ctx, keys, args)
+}
+
+// instrument wraps the store's client so a test can count script calls.
+func instrument(t *testing.T, s *Store) *scriptCounter {
+	t.Helper()
+	cl, err := s.acquire(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := &scriptCounter{client: cl}
+	s.mu.Lock()
+	s.cl = c
+	s.mu.Unlock()
+	return c
+}
+
+// 05 §7, T-29: after a flush (new seed, empty planes) a store holding the old
+// seed gets SEED_CHANGED, refetches, retries once and writes at the new
+// positions: two script calls, and the epoch is then visible to a store that
+// never saw the old seed.
+// IDs: E-7, T-29
+func TestSeedChangedAfterFlushRetries(t *testing.T) {
+	a := newEpochStore(t, nil)
+	b, err := New(Config{Addrs: a.cfg.Addrs, Prefix: a.cfg.Prefix})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer b.Close()
+	at := whole(time.Minute)
+	if err := a.SetEpoch(t.Context(), tag(1), softAt(at)); err != nil {
+		t.Fatal(err)
+	}
+	old := *a.seed.Load()
+	del(t, a, a.ekeys...) // the flush
+	// b is a fresh process: it draws and stores the new seed.
+	if err := b.SetEpoch(t.Context(), tag(9), hardAt(at)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.getSeed(t.Context(), mustClient(t, b)); err != nil {
+		t.Fatal(err)
+	}
+	if *b.seed.Load() == old {
+		t.Fatal("test setup: the new seed equals the old one")
+	}
+	cnt := instrument(t, a)
+	if err := a.SetEpoch(t.Context(), tag(2), softAt(at)); err != nil {
+		t.Fatalf("SetEpoch with a stale seed = %v", err)
+	}
+	if n := cnt.writes.Load(); n != 2 {
+		t.Fatalf("script calls = %d, want 2 (SEED_CHANGED, then the retry)", n)
+	}
+	if *a.seed.Load() != *b.seed.Load() {
+		t.Fatal("a did not adopt the new seed")
+	}
+	if ep, ok := epochAt(t, b, []store.Tag{tag(2)}, at); !ok || ep.Mode != store.EpochSoft {
+		t.Fatalf("b reads the retried write: %+v, %v", ep, ok)
+	}
+	// The same on the read side: a stale seed costs one extra script call.
+	a.seed.Store(&old)
+	cnt.reads.Store(0)
+	if ep, ok := epochAt(t, a, []store.Tag{tag(2)}, at); !ok || ep.Mode != store.EpochSoft {
+		t.Fatalf("lookup with a stale seed: %+v, %v", ep, ok)
+	}
+	if n := cnt.reads.Load(); n != 2 {
+		t.Fatalf("read script calls = %d, want 2", n)
+	}
+}
+
+func mustClient(t *testing.T, s *Store) client {
+	t.Helper()
+	cl, err := s.acquire(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cl
+}
+
+// 05 §7 (loss detection): a missing plane while meta exists is loss. The
+// read script reports it, the repair writes the global hard epoch and
+// recreates the planes full-size, and the epoch written before the loss is
+// covered by the global hard epoch. A write that finds a plane missing
+// repairs it too.
+// IDs: E-7, FR-PRG-2, T-29
+func TestSketchPlaneLossRepairs(t *testing.T) {
+	for _, plane := range []int{keySketchSoft, keySketchInvalid} {
+		for _, via := range []string{"lookup", "write"} {
+			t.Run(via+" after losing plane "+strconv.Itoa(plane), func(t *testing.T) {
+				s := newEpochStore(t, nil)
+				fetched := whole(-5 * time.Second)
+				if err := s.SetEpoch(t.Context(), tag(1), softAt(whole(-2*time.Second))); err != nil {
+					t.Fatal(err)
+				}
+				del(t, s, s.ekeys[plane]) // only the plane: meta.v, global and newest survive
+				if via == "write" {
+					if err := s.SetEpoch(t.Context(), tag(2), softAt(whole(time.Minute))); err != nil {
+						t.Fatal(err)
+					}
+				}
+				ep, ok := epochAt(t, s, []store.Tag{store.TagGlobal(), tag(1)}, fetched)
+				if !ok || ep.Mode != store.EpochHard || ep.At.Before(fetched) {
+					t.Fatalf("after the loss: %+v, %v; want a hard epoch at or after the fetch time", ep, ok)
+				}
+				for _, k := range []int{keySketchSoft, keySketchInvalid} {
+					if n := strlen(t, s, s.ekeys[k]); n != 2<<20 {
+						t.Errorf("plane %d is %d bytes after repair, want 2 MiB", k, n)
+					}
+				}
+			})
+		}
+	}
+}
+
+// IDs: E-7, FR-PRG-2, T-29
+// 05 §7: a client writes meta.seed first, so meta can exist without its field
+// v. That is still a loss: the first soft write or lookup creates v and the
+// planes and raises the global hard epoch, so an epoch lost with the flush is
+// covered.
+func TestSeedWithoutVersionIsLoss(t *testing.T) {
+	for _, via := range []string{"lookup", "write"} {
+		t.Run(via, func(t *testing.T) {
+			s := newEpochStore(t, nil)
+			fetched := whole(-5 * time.Second)
+			if _, err := s.getSeed(t.Context(), mustClient(t, s)); err != nil { // HSETNX only
+				t.Fatal(err)
+			}
+			if exists(t, s, s.ekeys[keySketchSoft]) {
+				t.Fatal("test setup: planes should not exist yet")
+			}
+			if via == "write" {
+				if err := s.SetEpoch(t.Context(), tag(1), softAt(whole(time.Minute))); err != nil {
+					t.Fatal(err)
+				}
+			}
+			ep, ok := epochAt(t, s, []store.Tag{store.TagGlobal(), tag(2)}, fetched)
+			if !ok || ep.Mode != store.EpochHard || ep.At.Before(fetched) {
+				t.Fatalf("after the first use: %+v, %v; want a hard epoch at or after the fetch time", ep, ok)
+			}
+			if !exists(t, s, s.ekeys[keySketchSoft]) || !exists(t, s, s.ekeys[keySketchInvalid]) {
+				t.Fatal("planes were not created")
+			}
+		})
+	}
+}
+
+// IDs: E-12, T-29
+// A lookup with shared tags after plane loss repairs and answers like any
+// other: the shared flag does not skip the loss check.
+func TestSharedLookupAfterPlaneLoss(t *testing.T) {
+	s := newEpochStore(t, nil)
+	fetched := whole(-5 * time.Second)
+	if err := s.SetEpoch(t.Context(), tag(1), softAt(whole(-2*time.Second))); err != nil {
+		t.Fatal(err)
+	}
+	del(t, s, s.ekeys[keySketchInvalid])
+	ep, ok, err := s.NewestEpochShared(t.Context(), []store.Tag{store.TagGlobal()}, []store.Tag{tag(1)}, fetched)
+	if err != nil || !ok || ep.Mode != store.EpochHard {
+		t.Fatalf("NewestEpochShared = %+v, %v, %v; want the repair's hard epoch", ep, ok, err)
+	}
 }

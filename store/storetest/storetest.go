@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -28,6 +29,7 @@ type options struct {
 	modesSet bool              // EpochModes() with no modes means none
 	synctest bool
 	hardCap  int
+	parallel int
 }
 
 // WithoutEpochs skips the epoch cases, for stores that do not implement
@@ -53,6 +55,13 @@ func Synctest() Option { return func(o *options) { o.synctest = true } }
 // can fill it. Without it that case is skipped. Stores built by newStore
 // should use a small cap here.
 func HardEpochCap(n int) Option { return func(o *options) { o.hardCap = n } }
+
+// Parallel makes EpochNeverUnderInvalidates issue its SetEpoch and
+// NewestEpoch calls from n goroutines. A remote client that pipelines
+// concurrent callers (valkey-go does) reorders and batches them, which a
+// serial loop never exercises; it also keeps 200 000 round trips short.
+// n of 1 or less keeps the loop serial.
+func Parallel(n int) Option { return func(o *options) { o.parallel = n } }
 
 // Run runs every conformance case against stores built by newStore. Each
 // case gets a fresh store, closed by t.Cleanup (inside the bubble under
@@ -559,20 +568,59 @@ func testEpochsMaxAcrossTags(t *testing.T, newStore func(*testing.T) store.Store
 // never reports less than its own epoch, in either sketch mode.
 func testEpochNeverUnderInvalidates(t *testing.T, newStore func(*testing.T) store.Store, o options) {
 	o.need(t, store.EpochSoft, store.EpochInvalid)
-	s, base := epochBase(t, newStore)
 	rng := rand.New(rand.NewPCG(1, 2)) //nolint:gosec // reproducible test data
-	const n = 200_000
-	at := make([]time.Time, n)
-	for i := range n {
-		at[i] = base.Add(time.Duration(rng.Int64N(int64(time.Hour))))
-		mustSetEpoch(t, s, tag(i), at[i], store.EpochSoft+store.EpochMode(i%2))
-	}
-	for i := range n {
-		ep, ok, err := s.NewestEpoch(t.Context(), []store.Tag{tag(i)}, at[i])
-		if err != nil || !ok || ep.At.Before(at[i]) || ep.Mode < store.EpochSoft+store.EpochMode(i%2) {
-			t.Fatalf("tag %d: NewestEpoch = %+v, %v, %v; want at least %v", i, ep, ok, err, at[i])
+	// each runs f(i) for i in [0, n), from o.parallel goroutines; f reports a
+	// failure with t.Errorf, since Fatalf is not allowed off the test goroutine.
+	each := func(n int, f func(i int)) {
+		w := max(o.parallel, 1)
+		var wg sync.WaitGroup
+		for g := range w {
+			wg.Go(func() {
+				for i := g; i < n; i += w {
+					f(i)
+				}
+			})
 		}
+		wg.Wait()
 	}
+	// phase writes n tags on a fresh store, tag i in mode modeOf(i), then
+	// looks each up at its own time. strict phases hold one mode only, so the
+	// reported mode must be that mode and its time must reach the tag's own: a
+	// sketch cell is never below the tag's epoch, and with no other mode in
+	// the store nothing more severe can collide in. The mixed phase may see
+	// another tag's more severe epoch (E-3 ranks severity first, and 4.3 skew
+	// can place it before at[i]), so it checks the time only for the tag's own
+	// mode.
+	phase := func(n int, modeOf func(i int) store.EpochMode, strict bool) {
+		s, base := epochBase(t, newStore)
+		at := make([]time.Time, n)
+		for i := range n {
+			at[i] = base.Add(time.Duration(rng.Int64N(int64(time.Hour))))
+		}
+		each(n, func(i int) {
+			if err := s.SetEpoch(t.Context(), tag(i), store.Epoch{At: at[i], Mode: modeOf(i)}); err != nil {
+				t.Errorf("SetEpoch %d: %v", i, err)
+			}
+		})
+		if t.Failed() {
+			return
+		}
+		var bad atomic.Int32
+		each(n, func(i int) {
+			own := modeOf(i)
+			ep, ok, err := s.NewestEpoch(t.Context(), []store.Tag{tag(i)}, at[i])
+			fail := err != nil || !ok || ep.Mode < own || (ep.Mode == own && ep.At.Before(at[i])) ||
+				(strict && ep.Mode != own)
+			if fail && bad.Add(1) <= 5 {
+				t.Errorf("tag %d: NewestEpoch = %+v, %v, %v; want mode %d at least %v", i, ep, ok, err, own, at[i])
+			}
+		})
+	}
+	const n = 100_000
+	for _, m := range []store.EpochMode{store.EpochSoft, store.EpochInvalid} {
+		phase(n, func(int) store.EpochMode { return m }, true)
+	}
+	phase(n/5, func(i int) store.EpochMode { return store.EpochSoft + store.EpochMode(i%2) }, false) //nolint:gosec // i%2 is 0 or 1
 }
 
 // FR-PRG-3, NFR-3, E-6: a new hard tag beyond the cap fails with ErrUnavailable; tags

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/AshwinSathian/weir/store"
@@ -28,7 +29,8 @@ const reconnectEvery = time.Second
 type Store struct {
 	cfg   Config
 	dial  dialFunc
-	ekeys []string // epoch keys in KEYS order (meta.go)
+	ekeys []string                      // epoch keys in KEYS order (meta.go)
+	seed  atomic.Pointer[[seedLen]byte] // cached sketch seed; nil until fetched (sketch.go)
 
 	closing chan struct{}  // closed by Close so a dial in flight stops early
 	wg      sync.WaitGroup // dial goroutines (FR-LCY-2)
