@@ -5,7 +5,7 @@ Phase: 1
 Current card: none
 Card state: awaiting-merge
 Branch: claude/focused-dijkstra-cr32by
-PR: none opened (branch pushed; session rules forbid a PR unless asked)
+PR: https://github.com/AshwinSathian/weir/pull/80
 Next card: P2-05 (Admin API: purge, mode, stats)
 
 ## Waiting on Ashwin
