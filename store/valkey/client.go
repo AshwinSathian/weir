@@ -22,6 +22,12 @@ type client interface {
 	// set stores val at key until the Unix millisecond pxat.
 	set(ctx context.Context, key string, val []byte, pxat int64) error
 	del(ctx context.Context, key string) error
+	// evalWrite runs the epoch write script (scripts.go); evalRead the
+	// read-only lookup script and returns its integer array reply.
+	evalWrite(ctx context.Context, keys, args []string) error
+	evalRead(ctx context.Context, keys, args []string) ([]int64, error)
+	// wait issues WAIT replicas ms.
+	wait(ctx context.Context, replicas, ms int64) error
 	close()
 }
 
@@ -78,6 +84,18 @@ func (v valkeyClient) set(ctx context.Context, key string, val []byte, pxat int6
 
 func (v valkeyClient) del(ctx context.Context, key string) error {
 	return v.c.Do(ctx, v.c.B().Del().Key(key).Build()).Error()
+}
+
+func (v valkeyClient) evalWrite(ctx context.Context, keys, args []string) error {
+	return writeEpochScript.Exec(ctx, v.c, keys, args).Error()
+}
+
+func (v valkeyClient) evalRead(ctx context.Context, keys, args []string) ([]int64, error) {
+	return readEpochScript.Exec(ctx, v.c, keys, args).AsIntSlice()
+}
+
+func (v valkeyClient) wait(ctx context.Context, replicas, ms int64) error {
+	return v.c.Do(ctx, v.c.B().Wait().Numreplicas(replicas).Timeout(ms).Build()).Error()
 }
 
 func (v valkeyClient) policies(ctx context.Context) (map[string]string, error) {

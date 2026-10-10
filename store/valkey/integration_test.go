@@ -27,7 +27,7 @@ func serverAddr(t *testing.T) string {
 }
 
 // FR-STF-2, S-1..S-4, 05 §8: the conformance suite against a real server.
-// Epochs arrive with P25-03. ExpiredIsNotFound runs here on the real clock
+// Epochs run in hard mode only until the sketch lands (P25-03b). ExpiredIsNotFound runs here on the real clock
 // because the server expires keys on its own clock (CLAUDE.md hard rule 6).
 func TestStoreConformance(t *testing.T) {
 	addr := serverAddr(t)
@@ -42,7 +42,7 @@ func TestStoreConformance(t *testing.T) {
 			t.Fatal(err)
 		}
 		return s
-	}, storetest.WithoutEpochs())
+	}, storetest.EpochModes(store.EpochHard))
 }
 
 // E-11: the clamped expiry reaches the server as a TTL no longer than

@@ -26,8 +26,9 @@ const reconnectEvery = time.Second
 // Store is a store.Store backed by a Valkey server or cluster. It is safe
 // for concurrent use.
 type Store struct {
-	cfg  Config
-	dial dialFunc
+	cfg   Config
+	dial  dialFunc
+	ekeys []string // epoch keys in KEYS order (meta.go)
 
 	closing chan struct{}  // closed by Close so a dial in flight stops early
 	wg      sync.WaitGroup // dial goroutines (FR-LCY-2)
@@ -52,7 +53,7 @@ func newStore(cfg Config, dial dialFunc) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Store{cfg: cfg, dial: dial, closing: make(chan struct{})}, nil
+	return &Store{cfg: cfg, dial: dial, ekeys: epochKeys(cfg.Prefix, cfg.HashTag), closing: make(chan struct{})}, nil
 }
 
 // Info reports a remote store, so the engine applies Timeouts.Store and the
@@ -204,27 +205,4 @@ func (s *Store) dialChecked(ctx context.Context) (client, error) {
 		}
 	}
 	return cl, nil
-}
-
-// errNotYet marks calls that arrive with the next cards (P25-03 onward).
-var errNotYet = fmt.Errorf("store: valkey: %w: not implemented", store.ErrUnavailable)
-
-// ponytail: the epoch methods are placeholders until P25-03; they already
-// honor the connect path so its behavior is testable.
-
-// SetEpoch is not implemented yet (P25-03).
-func (s *Store) SetEpoch(ctx context.Context, _ store.Tag, _ store.Epoch) error {
-	if _, err := s.acquire(ctx); err != nil {
-		return err
-	}
-	return errNotYet
-}
-
-// NewestEpoch is not implemented yet (P25-03).
-func (s *Store) NewestEpoch(ctx context.Context, _ []store.Tag, _ time.Time) (store.Epoch, bool, error) {
-	_, err := s.acquire(ctx)
-	if err == nil {
-		err = errNotYet
-	}
-	return store.Epoch{}, false, err
 }
