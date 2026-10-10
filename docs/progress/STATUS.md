@@ -2,11 +2,11 @@
 
 Updated: 2026-10-10
 Phase: 1
-Current card: none
-Card state: awaiting-merge
-Branch: claude/nice-davinci-rh3zjh
-PR: https://github.com/AshwinSathian/weir/pull/84
-Next card: P25-01
+Current card: P25-01
+Card state: in-progress
+Branch: claude/nice-goodall-atnlor
+PR: none
+Next card: P25-01b
 
 ## Waiting on Ashwin
 
