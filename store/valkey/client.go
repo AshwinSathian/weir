@@ -23,9 +23,15 @@ type client interface {
 	// set stores val at key until the Unix millisecond pxat.
 	set(ctx context.Context, key string, val []byte, pxat int64) error
 	del(ctx context.Context, key string) error
-	// swapString stores val at key with no expiry and returns the value that
-	// was there (SET ... GET); the error is valkey.Nil when there was none.
-	swapString(ctx context.Context, key string, val []byte) ([]byte, error)
+	// setString stores val at key with no expiry, replacing a value of any
+	// type, and returns nothing (plain SET).
+	setString(ctx context.Context, key string, val []byte) error
+	// getRange returns bytes start..end (inclusive) of the string at key: an
+	// empty slice for an absent key, a WRONGTYPE error for another type. It
+	// bounds what a planted value can cost.
+	getRange(ctx context.Context, key string, start, end int64) ([]byte, error)
+	// exists reports whether key exists, of any type.
+	exists(ctx context.Context, key string) (bool, error)
 	// primaries returns the address of every primary node (the only nodes a
 	// scrub may SCAN without visiting each key twice or sending DEL to a
 	// replica), sorted.
@@ -107,8 +113,17 @@ func (v valkeyClient) set(ctx context.Context, key string, val []byte, pxat int6
 	return v.c.Do(ctx, v.c.B().Set().Key(key).Value(string(val)).PxatMillisecondsTimestamp(pxat).Build()).Error()
 }
 
-func (v valkeyClient) swapString(ctx context.Context, key string, val []byte) ([]byte, error) {
-	return v.c.Do(ctx, v.c.B().Set().Key(key).Value(string(val)).Get().Build()).AsBytes()
+func (v valkeyClient) setString(ctx context.Context, key string, val []byte) error {
+	return v.c.Do(ctx, v.c.B().Set().Key(key).Value(string(val)).Build()).Error()
+}
+
+func (v valkeyClient) getRange(ctx context.Context, key string, start, end int64) ([]byte, error) {
+	return v.c.Do(ctx, v.c.B().Getrange().Key(key).Start(start).End(end).Build()).AsBytes()
+}
+
+func (v valkeyClient) exists(ctx context.Context, key string) (bool, error) {
+	n, err := v.c.Do(ctx, v.c.B().Exists().Key(key).Build()).AsInt64()
+	return n > 0, err
 }
 
 func (v valkeyClient) del(ctx context.Context, key string) error {

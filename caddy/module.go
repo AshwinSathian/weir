@@ -168,32 +168,19 @@ func (h *Handler) Provision(ctx caddy.Context) (err error) {
 		return err // already prefixed "weir:"
 	}
 	// The server's record covers what the in-process hashes cannot: a restart
-	// after forward was tightened (R-3, 08 §3). It runs on every Provision of a
-	// Valkey site and is replaced only after the purge below, so a crash in
-	// between purges again. Each call gets its own deadline.
-	if h.Store != nil {
-		cctx, cancel := context.WithTimeout(context.Background(), closeTimeout)
-		defer cancel()
-		if checkKeyGen(cctx, p.store, fwdHash, cfg.Logger, h.Name) {
-			keyChanged = true
-		}
-	}
-	if keyChanged {
-		// R-3: serve nothing stored under the old forwarding rules. Failing
-		// Provision is the safe side if the epoch cannot be written.
-		pctx, cancel := context.WithTimeout(context.Background(), closeTimeout)
-		defer cancel()
-		if perr := e.Purge(pctx, weir.Purge{All: true, Mode: weir.PurgeHard}); perr != nil {
-			cctx, ccancel := context.WithTimeout(context.Background(), closeTimeout)
-			defer ccancel()
+	// after forward was tightened (R-3, 08 §3). Failing Provision is the safe
+	// side if a purge that is needed cannot be written.
+	purge := func(ctx context.Context) error {
+		if perr := e.Purge(ctx, weir.Purge{All: true, Mode: weir.PurgeHard}); perr != nil {
+			cctx, cancel := context.WithTimeout(context.Background(), closeTimeout)
+			defer cancel()
 			_ = e.Close(cctx)
 			return fmt.Errorf("weir: key-generation change: %w", perr)
 		}
+		return nil
 	}
-	if h.Store != nil {
-		rctx, cancel := context.WithTimeout(context.Background(), closeTimeout)
-		defer cancel()
-		recordKeyGen(rctx, p.store, fwdHash, cfg.Logger, h.Name)
+	if err = reconcileServerKeyGen(p.store, fwdHash, keyChanged, purge, cfg.Logger, h.Name); err != nil {
+		return err
 	}
 	// Record the hash only now: a Provision that failed above must not
 	// make a retry of the same config skip the purge.

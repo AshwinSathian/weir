@@ -1,32 +1,50 @@
 package valkey
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"testing"
 
-	"github.com/valkey-io/valkey-go"
-
 	"github.com/AshwinSathian/weir/store"
 )
 
-// swapString is the fake of SET key val GET: it stores val and returns the
-// previous value, or valkey.Nil when there was none.
-func (f *fakeClient) swapString(_ context.Context, key string, val []byte) ([]byte, error) {
+func (f *fakeClient) setString(_ context.Context, key string, val []byte) error {
+	f.kv.mu.Lock()
+	defer f.kv.mu.Unlock()
+	if f.kv.err != nil {
+		return f.kv.err
+	}
+	if f.kv.vals == nil {
+		f.kv.vals, f.kv.pxat = map[string][]byte{}, map[string]int64{}
+	}
+	f.kv.vals[key] = val
+	delete(f.kv.pxat, key)
+	return nil
+}
+
+// getRange fakes GETRANGE: an absent key is empty and the range is clipped.
+func (f *fakeClient) getRange(_ context.Context, key string, start, end int64) ([]byte, error) {
 	f.kv.mu.Lock()
 	defer f.kv.mu.Unlock()
 	if f.kv.err != nil {
 		return nil, f.kv.err
 	}
-	if f.kv.vals == nil {
-		f.kv.vals, f.kv.pxat = map[string][]byte{}, map[string]int64{}
+	v := f.kv.vals[key]
+	if int64(len(v)) > end+1 {
+		v = v[:end+1]
 	}
-	prev, ok := f.kv.vals[key]
-	f.kv.vals[key] = val
-	if !ok {
-		return nil, valkey.Nil
+	return v[min(int64(len(v)), start):], nil
+}
+
+func (f *fakeClient) exists(_ context.Context, key string) (bool, error) {
+	f.kv.mu.Lock()
+	defer f.kv.mu.Unlock()
+	if f.kv.err != nil {
+		return false, f.kv.err
 	}
-	return prev, nil
+	_, ok := f.kv.vals[key]
+	return ok, nil
 }
 
 // R-3, 05 §7: the record sits at <prefix>:keygen; CheckKeyGen only reads, so
@@ -61,6 +79,45 @@ func TestRecordKeyGen(t *testing.T) {
 	record(b)
 	check(b, false)
 	check(a, true)
+}
+
+// R-3, 05 §7: a prefix a Weir without the record has used (its meta key
+// exists) is a change when the record is absent, so an upgrade rolled out with
+// a tighter forward purges once; a fresh or flushed server does not.
+func TestCheckKeyGenExistingPrefixWithoutRecord(t *testing.T) {
+	h := []byte("hash-a-0123456789abcdef0123456789")
+	s, cl := connected(t, func(c *Config) { c.Prefix = "edge" })
+	if got, err := s.CheckKeyGen(t.Context(), h); err != nil || got {
+		t.Fatalf("fresh server: %v, %v; want no change", got, err)
+	}
+	cl.kv.vals = map[string][]byte{"edge:{e}:meta": []byte("x")}
+	if got, err := s.CheckKeyGen(t.Context(), h); err != nil || !got {
+		t.Fatalf("used prefix, no record: %v, %v; want a change", got, err)
+	}
+	if err := s.RecordKeyGen(t.Context(), h); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := s.CheckKeyGen(t.Context(), h); err != nil || got {
+		t.Fatalf("after recording: %v, %v; want no change", got, err)
+	}
+}
+
+// R-3, T-29: an oversized value planted at the record key is a change, the
+// read is bounded, and RecordKeyGen replaces it. Another type (WRONGTYPE) is
+// covered against a real server.
+func TestCheckKeyGenPlantedValues(t *testing.T) {
+	h := []byte("hash-a-0123456789abcdef0123456789")
+	s, cl := connected(t, func(c *Config) { c.Prefix = "edge" })
+	cl.kv.vals = map[string][]byte{"edge:keygen": append(bytes.Clone(h), make([]byte, 1<<20)...)}
+	if got, err := s.CheckKeyGen(t.Context(), h); err != nil || !got {
+		t.Fatalf("oversized value: %v, %v; want a change", got, err)
+	}
+	if err := s.RecordKeyGen(t.Context(), h); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := s.CheckKeyGen(t.Context(), h); err != nil || got {
+		t.Fatalf("after recording: %v, %v; want no change", got, err)
+	}
 }
 
 // R-3, FR-STF-2: a failed call is ErrUnavailable and an empty or oversized

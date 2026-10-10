@@ -45,65 +45,118 @@ func warnLog(sb *strings.Builder) *slog.Logger {
 	return slog.New(slog.NewTextHandler(sb, &slog.HandlerOptions{Level: slog.LevelWarn}))
 }
 
+// runKeyGen drives reconcileServerKeyGen with a purge that records its calls and
+// the record's value when it ran.
+type keyGenRun struct {
+	purges      int
+	recAtPurge  []byte
+	purgeErr    error
+	err         error
+	log         strings.Builder
+	recAfterRun []byte
+}
+
+func runKeyGen(t *testing.T, f *fakeRecorder, h [32]byte, keyChanged bool, purgeErr error) *keyGenRun {
+	t.Helper()
+	r := &keyGenRun{purgeErr: purgeErr}
+	r.err = reconcileServerKeyGen(f, h, keyChanged, func(context.Context) error {
+		r.purges++
+		f.mu.Lock()
+		r.recAtPurge = bytes.Clone(f.rec)
+		f.mu.Unlock()
+		return purgeErr
+	}, warnLog(&r.log), "n")
+	f.mu.Lock()
+	r.recAfterRun = bytes.Clone(f.rec)
+	f.mu.Unlock()
+	return r
+}
+
 // R-3, 08 §3: the record decides, not the process. A first record and an
-// equal one purge nothing; a different one reports a change and warns that
-// nodes sharing the prefix must agree. Checking alone never replaces the
-// record, so a start that dies before its purge repeats it.
-func TestSyncKeyGen(t *testing.T) {
+// equal one purge nothing; a different one purges, warns that nodes sharing
+// the prefix must agree, and replaces the record only after the purge ran.
+func TestReconcileServerKeyGen(t *testing.T) {
 	loose := keyGenHash((&Handler{Name: "n"}).weirConfig())
 	tight := keyGenHash((&Handler{Name: "n", Forward: ForwardConfig{Allow: []string{"X-A"}}}).weirConfig())
 	if loose == tight {
 		t.Fatal("test needs two different hashes")
 	}
 	f := &fakeRecorder{}
-	var sb strings.Builder
-	log := warnLog(&sb)
-	step := func(h [32]byte, want, record bool) {
-		t.Helper()
-		if got := checkKeyGen(t.Context(), f, h, log, "n"); got != want {
-			t.Fatalf("changed = %v, want %v", got, want)
-		}
-		if record {
-			recordKeyGen(t.Context(), f, h, log, "n")
-		}
+	if r := runKeyGen(t, f, loose, false, nil); r.err != nil || r.purges != 0 || !bytes.Equal(r.recAfterRun, loose[:]) {
+		t.Fatalf("first record: %+v", r)
 	}
-	step(loose, false, true)
-	step(loose, false, true)
-	step(tight, true, false) // the purge never finished
-	step(tight, true, true)  // the retry purges again, then records
-	step(tight, false, true)
-	if n := strings.Count(sb.String(), "purge each other"); n != 2 {
-		t.Fatalf("want two warnings naming the shared-prefix rule, got %d in %q", n, sb.String())
+	if r := runKeyGen(t, f, loose, false, nil); r.err != nil || r.purges != 0 {
+		t.Fatalf("equal record purged: %+v", r)
+	}
+	r := runKeyGen(t, f, tight, false, nil)
+	if r.err != nil || r.purges != 1 {
+		t.Fatalf("tighter forward: %+v", r)
+	}
+	if !bytes.Equal(r.recAtPurge, loose[:]) || !bytes.Equal(r.recAfterRun, tight[:]) {
+		t.Fatal("the record must still be the old value while the purge runs and the new one after")
+	}
+	if !strings.Contains(r.log.String(), "purge each other") {
+		t.Fatalf("no shared-prefix warning: %q", r.log.String())
+	}
+	if r := runKeyGen(t, f, tight, false, nil); r.purges != 0 {
+		t.Fatal("the recorded hash purged again")
+	}
+	// An in-process change with an equal record still purges, once.
+	if r := runKeyGen(t, f, tight, true, nil); r.purges != 1 || r.err != nil {
+		t.Fatalf("keyChanged: %+v", r)
 	}
 }
 
-// FR-STF-2: a server that cannot answer neither fails the load nor purges;
-// the skipped check, and a record write that fails, are logged. A memory
-// store has no record and says nothing.
-func TestSyncKeyGenOutageAndMemory(t *testing.T) {
-	var sb strings.Builder
-	f := &fakeRecorder{checkErr: errors.New("down"), writeErr: errors.New("down")}
-	if checkKeyGen(t.Context(), f, [32]byte{1}, warnLog(&sb), "n") {
-		t.Fatal("an unreachable server reported a change")
+// R-3: a failed purge returns the error and leaves the old record, so the
+// next start purges again.
+func TestReconcileServerKeyGenFailedPurgeKeepsRecord(t *testing.T) {
+	loose, tight := [32]byte{1}, [32]byte{2}
+	f := &fakeRecorder{rec: loose[:]}
+	boom := errors.New("boom")
+	r := runKeyGen(t, f, tight, false, boom)
+	if !errors.Is(r.err, boom) || !bytes.Equal(r.recAfterRun, loose[:]) {
+		t.Fatalf("err = %v, record = %x; want the purge error and the old record", r.err, r.recAfterRun)
 	}
-	recordKeyGen(t.Context(), f, [32]byte{1}, warnLog(&sb), "n")
-	for _, want := range []string{"not checked", "not written"} {
-		if !strings.Contains(sb.String(), want) {
-			t.Fatalf("missing %q in %q", want, sb.String())
-		}
+	if r := runKeyGen(t, f, tight, false, nil); r.purges != 1 {
+		t.Fatal("the retry did not purge")
+	}
+}
+
+// FR-STF-2, R-3: a check that cannot be made neither fails the load nor
+// overwrites the record (that would lose the purge for good); a record write
+// that fails is only logged. A memory store has no record and says nothing.
+func TestReconcileServerKeyGenOutageAndMemory(t *testing.T) {
+	loose, tight := [32]byte{1}, [32]byte{2}
+	f := &fakeRecorder{rec: loose[:], checkErr: errors.New("down")}
+	r := runKeyGen(t, f, tight, false, nil)
+	if r.err != nil || r.purges != 0 || !bytes.Equal(r.recAfterRun, loose[:]) {
+		t.Fatalf("check failed: %+v, record %x", r, r.recAfterRun)
+	}
+	if !strings.Contains(r.log.String(), "not checked") {
+		t.Fatalf("skipped check not logged: %q", r.log.String())
+	}
+	// A known change still purges even though the check failed.
+	if r := runKeyGen(t, f, tight, true, nil); r.purges != 1 || !bytes.Equal(r.recAfterRun, loose[:]) {
+		t.Fatalf("keyChanged with a failed check: %+v", r)
+	}
+	f = &fakeRecorder{writeErr: errors.New("down")}
+	if r := runKeyGen(t, f, tight, false, nil); r.err != nil || !strings.Contains(r.log.String(), "not written") {
+		t.Fatalf("write failure: %+v %q", r.err, r.log.String())
 	}
 	mem, err := memory.New(memory.Config{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer mem.Close()
-	sb.Reset()
-	if checkKeyGen(t.Context(), mem, [32]byte{1}, warnLog(&sb), "n") {
-		t.Fatal("memory store reported a change")
+	var sb strings.Builder
+	purges := 0
+	for _, kc := range []bool{false, true} {
+		if err := reconcileServerKeyGen(mem, tight, kc, func(context.Context) error { purges++; return nil }, warnLog(&sb), "n"); err != nil {
+			t.Fatal(err)
+		}
 	}
-	recordKeyGen(t.Context(), mem, [32]byte{1}, warnLog(&sb), "n")
-	if sb.Len() != 0 {
-		t.Fatalf("memory store logged %q", sb.String())
+	if purges != 1 || sb.Len() != 0 {
+		t.Fatalf("memory store: %d purges, log %q", purges, sb.String())
 	}
 }
 

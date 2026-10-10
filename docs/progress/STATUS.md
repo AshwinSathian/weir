@@ -8,12 +8,21 @@ Branch: card/P25-07c-keygen-record (pushed to claude/beautiful-keller-9d29y4)
 PR: https://github.com/AshwinSathian/weir/pull/96
 Next card: see `make next`
 
+## Decided 2026-10-11 (P25-07c, adversarial review of PR 96)
+
+"Waiting on Ashwin" held one item and Ashwin asked for decisions on every item. An independent agent attacked the PR; no must-fix. Decisions, all implemented:
+
+- An unreachable server at start or reload still skips the check (FR-STF-2), but a failed check no longer writes the record (it would have lost the purge for good). Background retry is new card P25-07d.
+- The first record on a prefix that already has a `meta` key counts as a change, so an upgrade rolled out with a tighter `forward` purges once.
+- The record is read with `GETRANGE 0 64` and written with a plain `SET`; a record of another type or an oversized one is a change, and the write repairs it.
+- Runbook 8.6 again asks for one manual hard purge after the last node is rolled (old-rules nodes keep storing after the first node's purge).
+- The ordering (check, purge, record) moved into `reconcileServerKeyGen` with unit tests for the order, a failed purge and a failed check. PLAN 2.5.5 is unticked until CI is green on Valkey 8.1.
+- Accepted: a rolled-back reload leaves the new record in place (08 §3); nodes sharing a prefix with different `forward` purge each other on each start or reload.
+
 ## Notes for the next session (P25-07c)
 
-- The record is read first (`CheckKeyGen`) and written only after the purge (`RecordKeyGen`); a crash in between purges again. Reviewer's must-fix (record replaced before purge) is fixed this way.
-- PLAN 2.5.5 is ticked, but CI must still run lint and the integration tests on Valkey 8.1 (lint cannot run here, Go 1.25 build).
-- No unit test drives `Provision` end to end with a fake recorder (needs a store-injection seam in the pool); `TestValkeyKeyGenRecord` (integration tag, `make test-valkey`) covers the wiring.
-- Nodes that share a `prefix` but differ in `forward` flush the cache on every start or reload; the warning says so.
+- Lint cannot run here (Go 1.25 build); CI must confirm lint and the integration tests on Valkey 8.1, then tick PLAN 2.5.5.
+- `TestValkeyKeyGenRecord` and the store integration tests run under `make test-valkey`.
 
 ## Decided 2026-10-11 (P25-07, adversarial review of PR 94)
 
@@ -64,7 +73,7 @@ Ashwin delegated "take decisions on all items"; "Waiting on Ashwin" was empty. A
 
 ## Waiting on Ashwin
 
-- Confirm at review: a server outage at start or reload skips the key-generation check with a warning instead of failing Provision (FR-STF-2; residual risk in 08 §3).
+Nothing. (The outage-at-start decision was taken under delegation; see above.)
 
 Earlier decisions: none open. Decided 2026-10-10 (P2-03b, review of PR 79; Ashwin delegated "take decisions on all items"): caddytest e2e files are a named exception to the real-clock rule (CLAUDE.md rule 6, docs/07 §1) instead of a build tag, because a tag would stop CI running them; a skip outside `-short` fails the test; the test site binds 127.0.0.1; the herd test uses a 2 s client timeout so a hard purge reports counts. Also decided (P2-02): multi-host is an explicit `multi_host` key; scanning the http app was rejected (handler cannot find its own route; global scan would cap unrelated sites and flush their stores). Documented in 08 §2/§3/§4b.
 

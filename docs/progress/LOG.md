@@ -1712,3 +1712,11 @@ Entry template:
 - Deviations: card said SET NX; a read then a write after the purge is crash-safe. Outage at start skips the check with a warning (FR-STF-2).
 - Follow-ups: CI on Valkey 8.1; Provision-level unit test needs a store seam (not added).
 - Context: medium; size S was right.
+
+## 2026-10-11 · P25-07c · review-fixes
+- Branch / PR: card/P25-07c-keygen-record / https://github.com/AshwinSathian/weir/pull/96
+- Done: adversarial review (agent), decisions delegated by Ashwin. A failed check no longer writes the record; an existing prefix with no record is a change; bounded `GETRANGE` read and plain `SET` write; the check, purge, record order is `reconcileServerKeyGen` (replaces `syncKeyGen` and the pending marker named in the earlier entry); runbook 8.6 asks for a final manual purge; card P25-07d (retry after an outage) added; PLAN 2.5.5 unticked.
+- Tests: `TestReconcileServerKeyGen*`, `TestCheckKeyGen*` (fake and real server), `TestCheckKeyGenPlantedAndExisting`; pass with `-race`, integration on redis 7.0.15; lint not run here.
+- Deviations: 05 §7, 08 §3 (new bullet), runbook 8.6/8.7, card AC wording.
+- Follow-ups: P25-07d; CI on Valkey 8.1, then tick PLAN 2.5.5.
+- Context: medium

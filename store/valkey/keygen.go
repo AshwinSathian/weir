@@ -3,8 +3,6 @@ package valkey
 import (
 	"context"
 	"fmt"
-
-	"github.com/valkey-io/valkey-go"
 )
 
 // maxKeyGenBytes bounds the record a caller may store (P5). The adapter
@@ -17,14 +15,20 @@ const maxKeyGenBytes = 64
 // never reads it (05 §7).
 func (s *Store) keyGenKey() string { return s.cfg.Prefix + ":keygen" }
 
-// CheckKeyGen reports whether the key-generation record holds a value other
-// than hash (R-3, 08 §3). The caller hashes the settings that change what an
-// unchanged key means (forwarding rules); true means entries stored under
-// older rules may still be on the server, and the caller writes the hard
-// epoch and then RecordKeyGen. No record (a fresh server, a flush) is not a
-// change: there is nothing to compare, and a flush took the entries too. It
-// only reads, so a node that dies before its purge leaves the old record and
-// the next start purges again.
+// CheckKeyGen reports whether the cache on this server may hold entries
+// stored under other forwarding rules than hash (R-3, 08 §3). The caller
+// hashes the settings that change what an unchanged key means; true means the
+// caller writes the hard epoch and then RecordKeyGen. It is a change when
+//
+//   - the record holds another value, or a value longer than any hash, or a
+//     key of another type (a planted value must not switch the check off); or
+//   - there is no record but the prefix has been used before (its meta key
+//     exists), which is a cache written by a Weir without this record. A fresh
+//     server or a flushed one has neither key and is not a change.
+//
+// It reads at most maxKeyGenBytes+1 bytes of the record, so a planted huge
+// value costs nothing, and it never writes: a node that dies before its purge
+// leaves the old record and the next start purges again.
 func (s *Store) CheckKeyGen(ctx context.Context, hash []byte) (changed bool, err error) {
 	if err := checkKeyGenLen(hash); err != nil {
 		return false, err
@@ -35,21 +39,29 @@ func (s *Store) CheckKeyGen(ctx context.Context, hash []byte) (changed bool, err
 	}
 	ctx, cancel := s.callCtx(ctx)
 	defer cancel()
-	prev, err := cl.get(ctx, s.keyGenKey())
+	prev, err := cl.getRange(ctx, s.keyGenKey(), 0, maxKeyGenBytes)
 	if err != nil {
-		if valkey.IsValkeyNil(err) {
-			return false, nil
+		if isWrongType(err) {
+			return true, nil
 		}
 		return false, mapError(err)
 	}
-	return string(prev) != string(hash), nil
+	if len(prev) > 0 {
+		return string(prev) != string(hash), nil
+	}
+	used, err := cl.exists(ctx, epochKeys(s.cfg.Prefix, s.cfg.HashTag)[keyMeta])
+	if err != nil {
+		return false, mapError(err)
+	}
+	return used, nil
 }
 
-// RecordKeyGen stores hash as the record, with no expiry. Call it after the
-// purge that CheckKeyGen called for has succeeded. Two nodes that start
-// together may both see a change and both purge: extra work, on the safe
-// side. Each node that disagrees with the record purges on every start or
-// reload (the adapter warns).
+// RecordKeyGen stores hash as the record with a plain SET: no expiry, and it
+// replaces a planted value of any type. Call it after the purge that
+// CheckKeyGen called for has succeeded. Two nodes that start together may both
+// see a change and both purge: extra work, on the safe side. Each node that
+// disagrees with the record purges on every start or reload (the adapter
+// warns).
 func (s *Store) RecordKeyGen(ctx context.Context, hash []byte) error {
 	if err := checkKeyGenLen(hash); err != nil {
 		return err
@@ -60,10 +72,7 @@ func (s *Store) RecordKeyGen(ctx context.Context, hash []byte) error {
 	}
 	ctx, cancel := s.callCtx(ctx)
 	defer cancel()
-	if _, err := cl.swapString(ctx, s.keyGenKey(), hash); err != nil && !valkey.IsValkeyNil(err) {
-		return mapError(err)
-	}
-	return nil
+	return mapError(cl.setString(ctx, s.keyGenKey(), hash))
 }
 
 func checkKeyGenLen(hash []byte) error {
