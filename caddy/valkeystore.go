@@ -45,11 +45,20 @@ type StoreConfig struct {
 	SkipPolicyCheck bool           `json:"skip_policy_check,omitempty"`
 }
 
-// valkeyConfig maps the block onto valkey.Config.
-func (s *StoreConfig) valkeyConfig() valkey.Config {
+// valkeyConfig maps the block onto valkey.Config. Username and password may
+// hold {env.VAR}, resolved here, so the stored config can carry the
+// placeholder instead of the secret. An unset prefix becomes the site name:
+// the library default would put every site on a server into one keyspace, and
+// a purge on one would flush the others.
+func (s *StoreConfig) valkeyConfig(name string) valkey.Config {
+	repl := caddy.NewReplacer()
+	prefix := s.Prefix
+	if prefix == "" {
+		prefix = name
+	}
 	c := valkey.Config{
-		Addrs: s.Addrs, Username: s.Username, Password: s.Password, Cluster: s.Cluster,
-		Prefix: s.Prefix, HashTag: s.HashTag, CoLocateEntries: s.CoLocateEntries,
+		Addrs: s.Addrs, Username: repl.ReplaceAll(s.Username, ""), Password: repl.ReplaceAll(s.Password, ""), Cluster: s.Cluster,
+		Prefix: prefix, HashTag: s.HashTag, CoLocateEntries: s.CoLocateEntries,
 		MaxRetention: time.Duration(s.MaxRetention), MaxClockSkew: time.Duration(s.MaxClockSkew),
 		NoClockSkew: s.NoClockSkew, MaxHardEpochs: s.MaxHardEpochs, CallTimeout: time.Duration(s.CallTimeout),
 		HardEpochWait: time.Duration(s.HardEpochWait), SkipPolicyCheck: s.SkipPolicyCheck,
@@ -64,7 +73,7 @@ func (s *StoreConfig) valkeyConfig() valkey.Config {
 // secret could land in a value the store package echoes is an address, so an
 // address with credentials in it (a URL or user:pass@host) is refused here
 // without being quoted.
-func (s *StoreConfig) validate() error {
+func (s *StoreConfig) validate(name string) error {
 	if s.Type != "valkey" {
 		return fmt.Errorf("weir: unknown store type %q (only \"valkey\")", s.Type)
 	}
@@ -78,20 +87,26 @@ func (s *StoreConfig) validate() error {
 			return fmt.Errorf("weir: store addrs[%d] must be host:port (credentials go in username and password)", i)
 		}
 	}
-	_, err := s.valkeyConfig().Validate()
+	_, err := s.valkeyConfig(name).Validate()
 	return err
 }
 
-// digest identifies the settings for the pool key and the key-generation
-// hash. It covers the password (a changed credential is a different store)
-// but is a hash, so a pool key printed in a log or test failure holds no
-// secret. Every field is length-prefixed, so values cannot run together.
-func (s *StoreConfig) digest() (out [sha256.Size]byte) {
+// digestFor identifies the effective settings for the pool key and the
+// key-generation hash. It hashes the config after defaults are filled in, so an
+// explicit default and an unset field are one store, and it covers the
+// resolved secrets (a changed or rotated credential is a different store). It
+// is a hash, so a pool key printed in a log or test failure holds no secret.
+// Every field is length-prefixed, so values cannot run together.
+func (s *StoreConfig) digestFor(name string) (out [sha256.Size]byte) {
 	if s == nil {
 		return out
 	}
+	vc := s.valkeyConfig(name)
+	if n, err := vc.Validate(); err == nil {
+		vc = n
+	}
 	h := sha256.New()
-	h.Write([]byte("weir/caddy/store/valkey/v1\x00"))
+	h.Write([]byte("weir/caddy/store/valkey/v2\x00"))
 	str := func(v string) {
 		var n [binary.MaxVarintLen64]byte
 		h.Write(n[:binary.PutUvarint(n[:], uint64(len(v)))])
@@ -105,26 +120,34 @@ func (s *StoreConfig) digest() (out [sha256.Size]byte) {
 			h.Write([]byte{0})
 		}
 	}
-	num(int64(len(s.Addrs)))
-	for _, a := range s.Addrs {
+	num(int64(len(vc.Addrs)))
+	for _, a := range vc.Addrs {
 		str(a) // order matters: the first address is the standalone one
 	}
-	str(s.Username)
-	str(s.Password)
-	str(s.Prefix)
-	str(s.HashTag)
-	flag(s.TLS)
-	flag(s.Cluster)
-	flag(s.CoLocateEntries)
-	flag(s.NoClockSkew)
-	flag(s.SkipPolicyCheck)
-	num(int64(s.MaxRetention))
-	num(int64(s.MaxClockSkew))
-	num(int64(s.MaxHardEpochs))
-	num(int64(s.CallTimeout))
-	num(int64(s.HardEpochWait))
+	str(vc.Username)
+	str(vc.Password)
+	str(vc.Prefix)
+	str(vc.HashTag)
+	flag(vc.TLS != nil)
+	flag(vc.Cluster)
+	flag(vc.CoLocateEntries)
+	flag(vc.NoClockSkew)
+	flag(vc.SkipPolicyCheck)
+	num(int64(vc.MaxRetention))
+	num(int64(vc.MaxClockSkew))
+	num(int64(vc.MaxHardEpochs))
+	num(int64(vc.CallTimeout))
+	num(int64(vc.HardEpochWait))
 	h.Sum(out[:0])
 	return out
+}
+
+// storeWarnings lists settings that are accepted but only half apply.
+func (h *Handler) storeWarnings() []string {
+	if h.Store != nil && h.MultiHost {
+		return []string{"weir: multi_host with a store block turns on the per-host limiter cap only; the per-owner store byte cap is a memory-store feature and does not apply to Valkey (docs/08 §4b)"}
+	}
+	return nil
 }
 
 // String describes the block without its credentials.

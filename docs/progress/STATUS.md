@@ -8,13 +8,22 @@ Branch: claude/gracious-brown-acmyd0 (session branch, not card/*)
 PR: https://github.com/AshwinSathian/weir/pull/94
 Next card: P25-07b
 
+## Decided 2026-10-11 (P25-07, adversarial review of PR 94)
+
+Ashwin delegated "take decisions on all items"; "Waiting on Ashwin" was empty. An independent agent attacked the PR. Decisions, all implemented and written into 08:
+
+- Must-fix: a store-setting change plus a `forward` change in one reload skipped the hard epoch (new pool entry on the same server). The registry now compares the forwarding hash with the live engine of the same name and purges (`TestStoreChangeWithForwardChangePurges`).
+- The default `prefix` is the site name (two sites on one server shared a keyspace and epochs). The pool key digest uses the config after defaults, so explicit defaults equal unset.
+- `username` and `password` accept `{env.VAR}`, resolved at Provision; `{$VAR}` still works but puts the secret in the adapted JSON and autosave (documented). Caddyfile errors for secrets and flags no longer quote tokens.
+- `closeStore` honors the caller's deadline for Valkey. `multi_host` with Valkey logs a warning. Tests added for pool sharing, close on last release, every-field digest coverage.
+- Declined as code: persisting the key-generation hash in Valkey (changes purge semantics): new card P25-07c, ask first. Restart after tightening `forward` stays documented in 08 §3.
+
 ## Notes for the next session (P25-07)
 
-- Review (card-reviewer): no must-fix. Fixed: addresses are shape-checked in the adapter and never quoted (`user:pass`, bare secrets, URLs); test cites corrected. Documented in 08 §3: no key-generation record on the Valkey server (restart after tightening `forward` keeps old entries servable; purge by hand), and a reload that changes the hash needs the server up. Not coded: warning for `multi_host` losing the per-owner store cap on Valkey; digest differs for explicit defaults versus unset (benign); the outage test uses the real breaker window (20 requests, 5-10 store errors), could flake on a very slow runner.
-- Decision for Ashwin if wanted: persist the key-generation hash in Valkey and write an epoch on mismatch (changes purge semantics, so not done).
-- MOVED during resharding still fails a scrub (left from P25-06); the engine scrub deadline card is still open.
 - golangci-lint cannot run here (Go 1.25 build); CI must confirm lint, the xcaddy `--with` and the Valkey `caddy validate` step.
-- P25-07b needs Ashwin's approval to lift D17 and a two-process harness (caddytest fixes ports 2999 and 9080).
+- Unknown-key errors in the store block still quote the key (a mis-nested secret on its own line would be echoed); accepted.
+- MOVED during resharding still fails a scrub; the engine scrub deadline card is still open.
+- P25-07b needs Ashwin's approval to lift D17 and a two-process harness (caddytest fixes ports 2999 and 9080); P25-07c needs approval too.
 
 ## Decided 2026-10-10 (P25-06, adversarial review of PR 93)
 

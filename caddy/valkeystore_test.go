@@ -3,15 +3,19 @@ package weircaddy
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/caddyserver/caddy/v2"
+
+	"github.com/AshwinSathian/weir/store"
 )
 
 const secretPW = "s3cr3t-Pw-value"
@@ -41,7 +45,7 @@ func TestStoreValkeyJSONMapsEveryField(t *testing.T) {
 	if err := decodeStrict([]byte(raw), &h); err != nil {
 		t.Fatal(err)
 	}
-	vc := h.Store.valkeyConfig()
+	vc := h.Store.valkeyConfig(h.Name)
 	if len(vc.Addrs) != 2 || vc.Username != "weir" || vc.Password != secretPW || vc.TLS == nil || !vc.Cluster ||
 		vc.Prefix != "site" || vc.HashTag != "tag" || !vc.CoLocateEntries || vc.MaxRetention != 2*time.Hour ||
 		vc.MaxClockSkew != 2*time.Second || vc.MaxHardEpochs != 5 || vc.CallTimeout != 3*time.Second ||
@@ -159,6 +163,9 @@ func TestPoolKeyIncludesStoreSettings(t *testing.T) {
 	}
 }
 
+// Real-clock exception (CLAUDE.md rule 6): the client dials loopback port 1,
+// which refuses at once, and the breaker's open window outlasts the 20
+// requests; a synctest bubble cannot hold a real socket.
 // FR-STF-2, FR-STF-3: an unreachable server does not fail the load; requests
 // fall through to the origin and the store breaker opens (docs/05 §7).
 func TestValkeyStoreOutageOpensBreaker(t *testing.T) {
@@ -237,13 +244,13 @@ func TestCaddyfileStoreValkey(t *testing.T) {
 		"no addresses":        {"store valkey {\n prefix p\n}", "no addresses"},
 		"unknown key":         {"store valkey {\n addrs a:1\n adrs b:1\n}", `unknown key "adrs" in store block`},
 		"repeated key":        {"store valkey {\n addrs a:1\n addrs b:1\n}", `"addrs" is set twice in store block`},
-		"password missing":    {"store valkey {\n addrs a:1\n password\n}", "wrong argument count"},
+		"password missing":    {"store valkey {\n addrs a:1\n password\n}", "takes exactly one argument"},
 		"bad duration":        {"store valkey {\n addrs a:1\n call_timeout soon\n}", "invalid duration"},
 		"negative epochs":     {"store valkey {\n addrs a:1\n max_hard_epochs -1\n}", "non-negative integer"},
 		"repeated store":      {"store valkey {\n addrs a:1\n}\n store valkey {\n addrs b:1\n}", `"store" is set twice`},
 		"max_bytes conflicts": {"max_bytes 200MiB\n store valkey {\n addrs a:1\n}", "max_bytes"},
 		"url address":         {"store valkey {\n addrs valkey://u:" + secretPW + "@h:1\n}", "host:port"},
-		"flag with argument":  {"store valkey {\n addrs a:1\n tls yes\n}", "wrong argument count"},
+		"flag with argument":  {"store valkey {\n addrs a:1\n tls yes\n}", "takes no arguments"},
 	}
 	for name, c := range errCases {
 		t.Run(name, func(t *testing.T) {
@@ -261,5 +268,179 @@ func TestCaddyfileStoreValkey(t *testing.T) {
 				t.Fatalf("error does not name the line: %v", err)
 			}
 		})
+	}
+}
+
+// R-3, 08 §3 (review of PR 94): changing a store setting and tightening
+// forward in one reload builds a new pool entry on the same server, and must
+// still write the hard epoch. A store-only change must not.
+func TestStoreChangeWithForwardChangePurges(t *testing.T) {
+	name := valkeyName()
+	raw := func(timeout, fwd string) string {
+		return fmt.Sprintf(`{"name":%q,"store":{"type":"valkey","addrs":["127.0.0.1:1"],"call_timeout":%q},"forward":{"allow":[%s]}}`,
+			name, timeout, fwd)
+	}
+	mustLoad(t, newCtx(t), raw("1s", `"X-A"`))
+	// Only the store setting changes: no purge, so the dead server is fine.
+	mustLoad(t, newCtx(t), raw("2s", `"X-A"`))
+	// Store setting and forward both change: the purge needs the server.
+	_, err := loadIn(t, newCtx(t), raw("3s", `"X-A","X-B"`))
+	if err == nil || !strings.Contains(err.Error(), "key-generation change") {
+		t.Fatalf("want a key-generation purge error, got %v", err)
+	}
+}
+
+// Review of PR 94: explicit defaults are the same store as unset ones, and the
+// prefix defaults to the site name so two sites on one server do not share
+// entries or epochs.
+func TestStoreDefaultsNormalizeBeforeDigest(t *testing.T) {
+	unset := &Handler{Name: "n1", Store: &StoreConfig{Type: "valkey", Addrs: []string{"h:1"}}}
+	explicit := &Handler{Name: "n1", Store: &StoreConfig{
+		Type: "valkey", Addrs: []string{"h:1"}, Prefix: "n1", HashTag: "e", CallTimeout: caddy.Duration(5 * time.Second),
+		MaxRetention: caddy.Duration(24 * time.Hour), MaxClockSkew: caddy.Duration(time.Second), MaxHardEpochs: 10000,
+	}}
+	if unset.storeSpec() != explicit.storeSpec() {
+		t.Fatal("explicit defaults build a different store than unset ones")
+	}
+	other := &Handler{Name: "n2", Store: unset.Store}
+	if other.storeSpec().valkey == unset.storeSpec().valkey {
+		t.Fatal("two site names default to one prefix")
+	}
+	if got := unset.Store.valkeyConfig(unset.Name).Prefix; got != "n1" {
+		t.Fatalf("default prefix = %q, want the site name", got)
+	}
+	if got := (&StoreConfig{Prefix: "p"}).valkeyConfig("n1").Prefix; got != "p" {
+		t.Fatalf("explicit prefix = %q", got)
+	}
+}
+
+// Review of PR 94: every StoreConfig field except Type reaches the digest, so a
+// field added later and forgotten there fails here.
+func TestStoreDigestCoversEveryField(t *testing.T) {
+	base := fullStore()
+	base.NoClockSkew = false
+	want := base.digestFor("d")
+	typ := reflect.TypeFor[StoreConfig]()
+	for i := range typ.NumField() {
+		f := typ.Field(i)
+		if f.Name == "Type" {
+			continue
+		}
+		c := *base
+		v := reflect.ValueOf(&c).Elem().Field(i)
+		switch v.Kind() {
+		case reflect.String:
+			v.SetString(v.String() + "x")
+		case reflect.Bool:
+			v.SetBool(!v.Bool())
+		case reflect.Int, reflect.Int64:
+			v.SetInt(v.Int() + int64(time.Second)/10)
+		case reflect.Slice:
+			v.Set(reflect.Append(v, reflect.ValueOf("10.0.0.9:6379")))
+		default:
+			t.Fatalf("field %s has an unhandled kind %s", f.Name, v.Kind())
+		}
+		if c.digestFor("d") == want {
+			t.Errorf("field %s does not reach the digest", f.Name)
+		}
+	}
+}
+
+// Review of PR 94: {env.VAR} in username and password is resolved at Provision,
+// so the stored config can hold the placeholder and not the secret; rotating the
+// variable builds a new store.
+func TestStoreSecretsResolveEnvPlaceholders(t *testing.T) {
+	t.Setenv("WEIR_TEST_VK_PW2", secretPW)
+	s := &StoreConfig{Type: "valkey", Addrs: []string{"h:1"}, Username: "{env.WEIR_TEST_VK_PW2}", Password: "{env.WEIR_TEST_VK_PW2}"}
+	vc := s.valkeyConfig("n")
+	if vc.Password != secretPW || vc.Username != secretPW {
+		t.Fatal("placeholders not resolved")
+	}
+	before := s.digestFor("n")
+	t.Setenv("WEIR_TEST_VK_PW2", "rotated")
+	if s.digestFor("n") == before {
+		t.Fatal("a rotated secret keeps the same pool key")
+	}
+}
+
+// Review of PR 94: a Caddyfile error never echoes a token that may be a secret
+// (an unquoted password with spaces, a flag followed by a value).
+func TestCaddyfileStoreErrorsDoNotEchoSecrets(t *testing.T) {
+	for name, line := range map[string]string{
+		"password with spaces": "password my " + secretPW + " pw",
+		"flag with a value":    "tls " + secretPW,
+		"username with spaces": "username a " + secretPW,
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := adapt(t, "example.com {\n weir {\n name s\n store valkey {\n addrs h:1\n "+line+"\n }\n }\n}\n")
+			if err == nil {
+				t.Fatal("want an error")
+			}
+			if strings.Contains(err.Error(), secretPW) {
+				t.Fatalf("error echoes the secret: %v", err)
+			}
+		})
+	}
+}
+
+// Review of PR 94: the pool shares one Valkey store across equal configs and
+// Cleanup closes it when the last user leaves.
+func TestValkeyStorePoolLifecycle(t *testing.T) {
+	raw := fmt.Sprintf(`{"name":%q,"store":{"type":"valkey","addrs":["127.0.0.1:1"]}}`, valkeyName())
+	h1, h2 := mustLoad(t, newCtx(t), raw), mustLoad(t, newCtx(t), raw)
+	if h1.pool != h2.pool {
+		t.Fatal("equal configs do not share a store")
+	}
+	st := h1.pool.store
+	if err := h1.Cleanup(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Get(context.Background(), store.Key{}); strings.Contains(fmt.Sprint(err), "closed") {
+		t.Fatal("store closed while another site still holds it")
+	}
+	if err := h2.Cleanup(); err != nil {
+		t.Fatal(err)
+	}
+	// Closed: the Valkey store refuses with ErrUnavailable and "closed".
+	_, err := st.Get(context.Background(), store.Key{})
+	if !errors.Is(err, store.ErrUnavailable) || !strings.Contains(err.Error(), "closed") {
+		t.Fatalf("store not closed after the last release: %v", err)
+	}
+}
+
+// Review of PR 94: closing a Valkey store never blocks past the caller's
+// deadline, so a reload cannot hang on a blackholed server.
+func TestCloseStoreHonorsContext(t *testing.T) {
+	block := make(chan struct{})
+	defer close(block)
+	p := &pooledStore{store: blockingStore{block: block}}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	if err := p.closeStore(ctx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("closeStore = %v", err)
+	}
+	if time.Since(start) > time.Second {
+		t.Fatal("closeStore ignored the deadline")
+	}
+}
+
+// blockingStore embeds a nil store.Store: only Close is ever called.
+type blockingStore struct {
+	store.Store
+	block chan struct{}
+}
+
+func (b blockingStore) Close() error { <-b.block; return nil }
+
+// Review of PR 94: multi_host loses the per-owner store cap on Valkey, so the
+// operator is told once.
+func TestValkeyMultiHostWarns(t *testing.T) {
+	h := &Handler{Name: "w", MultiHost: true, Store: &StoreConfig{Type: "valkey", Addrs: []string{"h:1"}}}
+	if w := h.storeWarnings(); len(w) != 1 || !strings.Contains(w[0], "multi_host") {
+		t.Fatalf("warnings = %v", w)
+	}
+	if w := (&Handler{Name: "w", Store: h.Store}).storeWarnings(); len(w) != 0 {
+		t.Fatalf("unexpected warnings %v", w)
 	}
 }

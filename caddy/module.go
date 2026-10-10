@@ -113,6 +113,7 @@ func (h *Handler) Provision(ctx caddy.Context) (err error) {
 	cfg.Observer = fanout{tap, ms.obs}
 	load := any(reg)
 	spec := h.storeSpec()
+	fwdHash := keyGenHash(cfg)
 	keyGen := keyGenHashFor(cfg, spec.valkey)
 	var built bool // the pool called the constructor: a new store, not a reuse
 	p, keyChanged, err := stores.acquire(load, spec, keyGen,
@@ -122,8 +123,11 @@ func (h *Handler) Provision(ctx caddy.Context) (err error) {
 				// The client connects on first use, so an unreachable server
 				// opens the store breaker instead of failing the load
 				// (FR-STF-2).
-				st, err := valkey.New(h.Store.valkeyConfig())
-				return st, 0, err
+				st, err := valkey.New(h.Store.valkeyConfig(h.Name))
+				if err != nil {
+					return nil, 0, err
+				}
+				return st, 0, nil
 			}
 			size := int64(h.MaxBytes)
 			if size == 0 {
@@ -137,6 +141,16 @@ func (h *Handler) Provision(ctx caddy.Context) (err error) {
 	}
 	if built && h.Store == nil {
 		stores.checkOvercommit(cfg.Logger, h.Name)
+	}
+	for _, w := range h.storeWarnings() {
+		cfg.Logger.Warn(w, "name", h.Name)
+	}
+	if built && h.Store != nil {
+		// A new pool entry on a shared server: compare the forwarding rules
+		// with the engine it replaces (R-3, 08 §3).
+		if prev, ok := stores.liveFwd(h.Name, p); ok && prev != fwdHash {
+			keyChanged = true
+		}
 	}
 	release := func() error {
 		p.dropHolder(h)
@@ -167,7 +181,7 @@ func (h *Handler) Provision(ctx caddy.Context) (err error) {
 	}
 	// Record the hash only now: a Provision that failed above must not
 	// make a retry of the same config skip the purge.
-	p.commitKeyGen(h, keyGen)
+	p.commitKeyGen(h, keyGen, fwdHash)
 	h.engine, h.pool, h.release, h.closed = e, p, release, new(atomic.Bool)
 	h.log, h.chainOnce = cfg.Logger, new(sync.Once)
 	h.firstHost, h.warnedHosts = new(atomic.Pointer[string]), new(atomic.Bool)
@@ -190,7 +204,7 @@ func (h *Handler) Validate() error {
 		if h.MaxBytes != 0 || h.SnapshotDir != "" {
 			return errors.New("weir: max_bytes and snapshot_dir size and persist the memory store; they cannot be combined with a store block")
 		}
-		if err := h.Store.validate(); err != nil {
+		if err := h.Store.validate(h.Name); err != nil {
 			return err
 		}
 	}

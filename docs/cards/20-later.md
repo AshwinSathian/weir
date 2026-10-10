@@ -201,6 +201,16 @@ These phases start from draft specs. Each begins with one planning card that ver
 
 ## Phase 3: Experiment dimensions
 
+
+### [ ] P25-07c Server-side key-generation record for the Valkey store
+- Plan: 2.5.5 · Size: S · Depends on: P25-07
+- Read: 08 §3; 05 §7; 06 R-3
+- Touch: caddy/pool.go, caddy/module.go, store/valkey (a record key), docs/05 §7, docs/08 §3
+- Tests: `TestValkeyKeyGenRecord` (a restart with a tightened `forward` writes the hard epoch; an unchanged config does not; a password rotation alone does not)
+- AC: the forwarding hash (without the store digest) is stored under `<prefix>:keygen` with SET NX and compared when a store is built; a mismatch writes the hard epoch and logs a warning; the 08 §3 restart limitation is removed
+- Out of scope: the two-node test and the guide (P25-07b)
+- Notes: ASK THE USER FIRST: it changes purge semantics and adds a store record (CLAUDE.md "When to stop and ask"). Two nodes with different forwarding settings would purge each other on every restart; the warning must say so.
+
 ### [ ] P3-00 Finalize the experiments spec and write its cards
 - Plan: Phase 3 · Size: S · Depends on: Phase 2.5 cards done
 - Read: 10 whole; 06 T-35, T-36

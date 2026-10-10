@@ -153,20 +153,20 @@ func (h *Handler) storeBlock(d *caddyfile.Dispenser) error {
 	s := &StoreConfig{Type: "valkey"}
 	err := subBlock(d, "store", map[string]func() error{
 		"addrs":             func() error { return listArg(d, &s.Addrs) },
-		"username":          func() error { return oneArg(d, &s.Username) },
-		"password":          func() error { return oneArg(d, &s.Password) },
-		"tls":               func() error { return flag(d, &s.TLS) },
-		"cluster":           func() error { return flag(d, &s.Cluster) },
+		"username":          func() error { return secretArg(d, &s.Username) },
+		"password":          func() error { return secretArg(d, &s.Password) },
+		"tls":               func() error { return quietFlag(d, &s.TLS) },
+		"cluster":           func() error { return quietFlag(d, &s.Cluster) },
 		"prefix":            func() error { return oneArg(d, &s.Prefix) },
 		"hash_tag":          func() error { return oneArg(d, &s.HashTag) },
-		"co_locate_entries": func() error { return flag(d, &s.CoLocateEntries) },
+		"co_locate_entries": func() error { return quietFlag(d, &s.CoLocateEntries) },
 		"max_retention":     func() error { return durArg(d, &s.MaxRetention) },
 		"max_clock_skew":    func() error { return durArg(d, &s.MaxClockSkew) },
-		"no_clock_skew":     func() error { return flag(d, &s.NoClockSkew) },
+		"no_clock_skew":     func() error { return quietFlag(d, &s.NoClockSkew) },
 		"max_hard_epochs":   func() error { return intArg(d, &s.MaxHardEpochs) },
 		"call_timeout":      func() error { return durArg(d, &s.CallTimeout) },
 		"hard_epoch_wait":   func() error { return durArg(d, &s.HardEpochWait) },
-		"skip_policy_check": func() error { return flag(d, &s.SkipPolicyCheck) },
+		"skip_policy_check": func() error { return quietFlag(d, &s.SkipPolicyCheck) },
 	})
 	if err != nil {
 		return err
@@ -215,6 +215,32 @@ func oneArg(d *caddyfile.Dispenser, dst *string) error {
 	if d.NextArg() {
 		return d.ArgErr()
 	}
+	return nil
+}
+
+// secretArg reads one value that may be a credential. Caddy's ArgErr quotes the
+// last token it saw, which here could be part of a password split by a space,
+// so the message is fixed.
+func secretArg(d *caddyfile.Dispenser, dst *string) error {
+	key := d.Val()
+	if !d.NextArg() {
+		return d.Errf("%s takes exactly one argument (quote values that contain spaces)", key)
+	}
+	*dst = d.Val()
+	if d.NextArg() {
+		return d.Errf("%s takes exactly one argument (quote values that contain spaces)", key)
+	}
+	return nil
+}
+
+// quietFlag is flag without quoting a stray token: in the store block that
+// token may be a mis-nested secret.
+func quietFlag(d *caddyfile.Dispenser, dst *bool) error {
+	key := d.Val()
+	if d.NextArg() {
+		return d.Errf("%s takes no arguments", key)
+	}
+	*dst = true
 	return nil
 }
 

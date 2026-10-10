@@ -77,6 +77,7 @@ type pooledStore struct {
 type holder struct {
 	who  *Handler
 	hash [sha256.Size]byte
+	fwd  [sha256.Size]byte // hash without the store digest (R-3 across stores)
 }
 
 // keyGenChanged reports whether h differs from the hash of the engine that
@@ -91,10 +92,10 @@ func (p *pooledStore) keyGenChanged(h [sha256.Size]byte) bool {
 
 // commitKeyGen records h as the store's hash, held by who, after the engine
 // that carries it is built and the hard epoch is written.
-func (p *pooledStore) commitKeyGen(who *Handler, h [sha256.Size]byte) {
+func (p *pooledStore) commitKeyGen(who *Handler, h, fwd [sha256.Size]byte) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.holders = append(p.holders, holder{who, h})
+	p.holders = append(p.holders, holder{who, h, fwd})
 	p.keyGen = h
 }
 
@@ -159,7 +160,18 @@ func (p *pooledStore) closeStore(ctx context.Context) error {
 	if c, ok := p.store.(interface{ CloseContext(context.Context) error }); ok {
 		return c.CloseContext(ctx)
 	}
-	return p.store.Close()
+	// valkey.Store.Close waits for a dial in flight, bounded only by the
+	// call timeout, so a blackholed server could hold a reload for that long.
+	// ponytail: the goroutine ends when Close returns (a dial timeout away);
+	// the upgrade is a ctx-aware Close in the store package.
+	done := make(chan error, 1)
+	go func() { done <- p.store.Close() }()
+	select {
+	case err := <-done:
+		return err
+	case <-ctx.Done():
+		return fmt.Errorf("weir: closing store: %w", ctx.Err())
+	}
 }
 
 // storeRegistry wraps the UsagePool with the two pieces of state the pool
@@ -315,12 +327,36 @@ func (r *storeRegistry) loadClaims(load any) int {
 	return n
 }
 
+// liveFwd returns the forwarding hash the newest engine of name committed on
+// a store other than except. A store setting change builds a new pool entry
+// on the same Valkey server, so without this a forward change made in the same
+// reload would skip the hard epoch (R-3).
+func (r *storeRegistry) liveFwd(name string, except *pooledStore) (fwd [sha256.Size]byte, ok bool) {
+	r.mu.Lock()
+	live := slices.Clone(r.live[name])
+	r.mu.Unlock()
+	for i := len(live) - 1; i >= 0; i-- {
+		if live[i] == except {
+			continue
+		}
+		live[i].mu.Lock()
+		if n := len(live[i].holders); n > 0 {
+			fwd, ok = live[i].holders[n-1].fwd, true
+		}
+		live[i].mu.Unlock()
+		if ok {
+			return fwd, true
+		}
+	}
+	return fwd, false
+}
+
 // storeSpec derives the pool key from the handler.
 func (h *Handler) storeSpec() storeSpec {
 	if h.Store != nil {
 		// Memory-only settings are refused by Validate, so the key is the name
 		// and the digest (08 §3).
-		return storeSpec{name: h.Name, valkey: h.Store.digest()}
+		return storeSpec{name: h.Name, valkey: h.Store.digestFor(h.Name)}
 	}
 	return storeSpec{
 		name: h.Name, maxBytes: int64(h.MaxBytes), ownerCap: h.MultiHost, snapshotDir: h.snapshotDir(),
