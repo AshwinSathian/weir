@@ -17,7 +17,8 @@ import (
 var perClientPrefixes = []string{
 	"{http.request.header.", "{http.request.cookie.", "{http.request.remote",
 	"{http.request.uri.query", "{http.auth.", "{http.request.tls.client",
-	"{http.request.uri}", "{http.request.orig_uri", "{http.vars.", "{remote", "{client_ip}", "{uri", "{query", "{header.", "{cookie.",
+	"{http.request.uri}", "{http.request.uuid}", "{http.request.proto}", "{http.request.tls.server_name}",
+	"{http.request.tls.version}", "{http.request.tls.cipher_suite}", "{http.request.tls.proto}", "{http.regexp.", "{http.request.orig_uri", "{http.vars.", "{remote", "{client_ip}", "{uri", "{query", "{header.", "{cookie.",
 }
 
 // chainWarnings inspects the handlers that run after self in one route and

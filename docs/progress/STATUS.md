@@ -57,7 +57,7 @@ Ashwin delegated "take decisions on all items"; "Waiting on Ashwin" was empty. A
 
 ## Notes for the next session
 
-- P2-03b: `nextOrigin` turns an error from `next` into a panic that `HandlerOrigin` recovers as `ErrOrigin` (502). `file_server`'s 404 and any status `next` picks are lost, and the error text reaches `{http.error.message}`; decide a mapping with caddytest.
+- P2-03b: `nextOrigin` maps a 4xx from `next` to a response and other errors to a fixed-text 502. 5xx statuses chosen by `next` (a dial error from `reverse_proxy`) are still 502 with no body; check with caddytest that `handle_errors` output is right.
 - The route warnings (`X-Forwarded-For`, per-client placeholders) run on the first request via `ctx.App("http")`; verify them against a real config in caddytest. Unit tests cover only the pure scan.
 - The multi-host warning remembers one host (port stripped). Host case and port variants are treated as one site.
 - Follow-up for 06 T-45/R-6: add the per-client placeholder case at its next revision.

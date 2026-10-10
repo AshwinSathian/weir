@@ -132,7 +132,7 @@ func (h *Handler) Provision(ctx caddy.Context) (err error) {
 	h.engine, h.pool, h.release, h.closed = e, p, release, new(atomic.Bool)
 	h.log, h.chainOnce = cfg.Logger, new(sync.Once)
 	h.firstHost, h.warnedHosts = new(atomic.Pointer[string]), new(atomic.Bool)
-	h.httpApp = func() (any, error) { return ctx.App("http") }
+	h.httpApp = func() (any, error) { return ctx.AppIfConfigured("http") }
 	return nil
 }
 
@@ -173,7 +173,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 	}
 	h.chainOnce.Do(h.warnChain)
 	h.noteHost(r.Host)
-	resp, err := h.engine.Serve(r.Context(), weirhttp.RequestFrom(r), nextOrigin{next: next, base: r})
+	resp, err := h.engine.Serve(r.Context(), requestFor(r), newNextOrigin(next, r, h.log))
 	if err != nil {
 		return serveError(w, err)
 	}
@@ -181,14 +181,32 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 	return nil
 }
 
+// requestFor builds the engine request. It prefers the bytes the client sent
+// (RequestURI, T-6), but a rewrite earlier in the route (rewrite, handle_path,
+// uri strip_prefix) changes only r.URL, and keying or forwarding the old path
+// would undo it. Caddy keeps the unmodified request in the context, so a
+// rewrite is detected by comparing against it.
+func requestFor(r *http.Request) *weir.Request {
+	req := weirhttp.RequestFrom(r)
+	if orig, ok := r.Context().Value(caddyhttp.OriginalRequestCtxKey).(http.Request); ok && orig.URL != nil &&
+		(orig.URL.Path != r.URL.Path || orig.URL.RawPath != r.URL.RawPath || orig.URL.RawQuery != r.URL.RawQuery) {
+		req.Path, req.RawQuery = r.URL.EscapedPath(), r.URL.RawQuery
+	}
+	return req
+}
+
 // serveError sets Retry-After before returning the error: Caddy's error
 // path writes the status on the same ResponseWriter, so the header survives
 // (08 §4 step 4).
 func serveError(w http.ResponseWriter, err error) error {
+	code := weir.StatusCode(err)
+	if code == 499 {
+		return nil // the client is gone: no response, no handle_errors route
+	}
 	if d, ok := weir.RetryAfter(err); ok {
 		w.Header().Set("Retry-After", strconv.FormatInt(int64(d/time.Second), 10))
 	}
-	return caddyhttp.Error(weir.StatusCode(err), err)
+	return caddyhttp.Error(code, err)
 }
 
 // noteHost warns once when a second distinct Host arrives while multi_host is

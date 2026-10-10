@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/caddyserver/caddy/v2/modules/caddyhttp"
@@ -88,6 +89,7 @@ func TestNextOriginUsesDetachedContext(t *testing.T) {
 	type key struct{}
 	baseCtx, cancelBase := context.WithCancel(context.Background())
 	base := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "http://example.com/a", nil).WithContext(baseCtx)
+	base.Header.Set("X-K", "client")
 	cancelBase() // the triggering request has finished
 
 	fetchCtx := context.WithValue(context.WithoutCancel(baseCtx), key{}, "replacer")
@@ -97,6 +99,7 @@ func TestNextOriginUsesDetachedContext(t *testing.T) {
 	next := caddyhttp.HandlerFunc(func(w http.ResponseWriter, r *http.Request) error {
 		seen, live, sawWriter = r.Context().Value(key{}), r.Context().Err(), w
 		w.Header().Set("X-Seen-Path", r.URL.Path)
+		r.Header.Set("X-K", "mutated")
 		_, err := io.WriteString(w, "ok")
 		return err
 	})
@@ -120,7 +123,7 @@ func TestNextOriginUsesDetachedContext(t *testing.T) {
 		t.Fatalf("next got writer %T", sawWriter)
 	}
 	// The clone must not alias the base's mutable state.
-	if base.URL.Path != "/a" || base.Header.Get("X-K") != "" {
+	if base.URL.Path != "/a" || base.Header.Get("X-K") != "client" {
 		t.Fatalf("base request changed: %v %v", base.URL, base.Header)
 	}
 }
@@ -289,6 +292,8 @@ func TestPlaceholderHeaderWarning(t *testing.T) {
 		{"client cookie in header_up", &headers.HeaderOps{Delete: strip, Set: http.Header{"X-Foo": {"{http.request.header.Cookie}"}}}, true},
 		{"shortcut placeholder in Add", &headers.HeaderOps{Delete: strip, Add: http.Header{"X-Ip": {"{remote_host}"}}}, true},
 		{"static value is quiet", &headers.HeaderOps{Delete: strip, Set: http.Header{"X-Env": {"prod"}}}, false},
+		{"request uuid", &headers.HeaderOps{Delete: strip, Set: http.Header{"X-Request-Id": {"{http.request.uuid}"}}}, true},
+		{"tls server name", &headers.HeaderOps{Delete: strip, Set: http.Header{"X-Sni": {"{http.request.tls.server_name}"}}}, true},
 		{"host placeholder is keyed and quiet", &headers.HeaderOps{Delete: strip, Set: http.Header{"X-Host": {"{http.request.host}"}}}, false},
 	}
 	for _, c := range cases {
@@ -365,6 +370,190 @@ func TestSecondHostWithoutMultiHostWarnsOnce(t *testing.T) {
 		serve(h, "b.example")
 		if strings.Contains(buf.String(), "multi_host") {
 			t.Fatalf("warned with multi_host on: %s", buf)
+		}
+	})
+}
+
+// T-47-style abuse check (INV-1, breaker): a 4xx that next chooses is a
+// response. Missing paths must not open the breaker or hide good paths.
+func TestNextErrors4xxIsResponse(t *testing.T) {
+	h, _ := loadServe(t, "")
+	next := caddyhttp.HandlerFunc(func(w http.ResponseWriter, r *http.Request) error {
+		if strings.HasPrefix(r.URL.Path, "/missing") {
+			return caddyhttp.Error(http.StatusNotFound, errors.New("file does not exist"))
+		}
+		w.Header().Set("Cache-Control", "max-age=60")
+		_, err := io.WriteString(w, "good")
+		return err
+	})
+	for i := range 200 {
+		w := httptest.NewRecorder()
+		r := httptest.NewRequestWithContext(context.Background(), http.MethodGet, fmt.Sprintf("http://example.com/missing%d", i), nil)
+		if err := h.ServeHTTP(w, r, next); err != nil || w.Code != http.StatusNotFound {
+			t.Fatalf("missing%d: err %v, status %d", i, err, w.Code)
+		}
+	}
+	w := httptest.NewRecorder()
+	r := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "http://example.com/exists", nil)
+	if err := h.ServeHTTP(w, r, next); err != nil || w.Code != 200 || w.Body.String() != "good" {
+		t.Fatalf("exists: err %v, status %d body %q", err, w.Code, w.Body.String())
+	}
+}
+
+// A 5xx or plain error from next stays an origin failure, and its text never
+// reaches the error the operator's handle_errors route can template.
+func TestNextErrorTextIsHidden(t *testing.T) {
+	base := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "http://example.com/a", nil)
+	for name, boom := range map[string]error{
+		"plain": errors.New("dial tcp 10.0.0.7:8080: refused"),
+		"5xx":   caddyhttp.Error(http.StatusBadGateway, errors.New("dial tcp 10.0.0.7:8080: refused")),
+		"abort": http.ErrAbortHandler,
+	} {
+		t.Run(name, func(t *testing.T) {
+			var buf bytes.Buffer
+			log := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+			next := caddyhttp.HandlerFunc(func(http.ResponseWriter, *http.Request) error { return boom })
+			fwd := &weir.Request{Method: http.MethodGet, Scheme: "http", Host: "example.com", Path: "/a", Header: http.Header{}}
+			_, err := newNextOrigin(next, base, log).Fetch(context.Background(), fwd)
+			if !errors.Is(err, weir.ErrOrigin) || strings.Contains(err.Error(), "10.0.0.7") {
+				t.Fatalf("err = %v", err)
+			}
+			if name != "abort" && !strings.Contains(buf.String(), "10.0.0.7") {
+				t.Fatalf("cause not logged: %s", buf.String())
+			}
+		})
+	}
+}
+
+// The fetch goroutine gets its own copy of Caddy's unlocked variable table.
+func TestNextOriginCopiesVars(t *testing.T) {
+	vars := map[string]any{"k": "client"}
+	ctx := context.WithValue(context.Background(), caddyhttp.VarsCtxKey, vars)
+	base := httptest.NewRequestWithContext(ctx, http.MethodGet, "http://example.com/a", nil)
+	next := caddyhttp.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) error {
+		caddyhttp.SetVar(r.Context(), "k", "fetch")
+		return nil
+	})
+	o := newNextOrigin(next, base, nil)
+	fwd := &weir.Request{Method: http.MethodGet, Scheme: "http", Host: "example.com", Path: "/a", Header: http.Header{}}
+	resp, err := o.Fetch(ctx, fwd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	_ = resp.Body.Close()
+	if vars["k"] != "client" {
+		t.Fatalf("client's vars were written: %v", vars)
+	}
+}
+
+// 08 §4: a rewrite before weir (handle_path, rewrite) changes only r.URL; the
+// engine must key and forward the rewritten target.
+func TestRewriteBeforeWeirIsHonored(t *testing.T) {
+	mk := func(rewrite bool) *http.Request {
+		r := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "http://example.com/api/x?a=1", nil)
+		orig := *r
+		u := *r.URL
+		orig.URL = &u
+		r = r.WithContext(context.WithValue(r.Context(), caddyhttp.OriginalRequestCtxKey, orig))
+		if rewrite {
+			r.URL.Path, r.URL.RawQuery = "/x", "b=2"
+		}
+		return r
+	}
+	if req := requestFor(mk(true)); req.Path != "/x" || req.RawQuery != "b=2" {
+		t.Fatalf("rewritten: %q ? %q", req.Path, req.RawQuery)
+	}
+	if req := requestFor(mk(false)); req.Path != "/api/x" || req.RawQuery != "a=1" {
+		t.Fatalf("untouched: %q ? %q", req.Path, req.RawQuery)
+	}
+	h, _ := loadServe(t, "")
+	var got string
+	next := caddyhttp.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) error { got = r.RequestURI; return nil })
+	if err := h.ServeHTTP(httptest.NewRecorder(), mk(true), next); err != nil {
+		t.Fatal(err)
+	}
+	if got != "/x?b=2" {
+		t.Fatalf("next saw %q", got)
+	}
+}
+
+// NFR-2 / 08 §4: a gone client is not an error route.
+func TestServeErrorClientGone(t *testing.T) {
+	if err := serveError(httptest.NewRecorder(), context.Canceled); err != nil {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+// T-4: the route warnings are logged once, however many requests follow.
+func TestChainWarningsLoggedOnce(t *testing.T) {
+	h, buf := loadServe(t, "")
+	app := &caddyhttp.App{Servers: map[string]*caddyhttp.Server{
+		"srv0": {Routes: caddyhttp.RouteList{{Handlers: []caddyhttp.MiddlewareHandler{h, proxyWith(nil)}}}},
+	}}
+	h.httpApp = func() (any, error) { return app, nil }
+	var calls atomic.Int32
+	for range 3 {
+		r := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "http://example.com/p", nil)
+		if err := h.ServeHTTP(httptest.NewRecorder(), r, respond(&calls, "x")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n := strings.Count(buf.String(), "level=WARN"); n != 1 {
+		t.Fatalf("X-Forwarded-For warnings = %d, want 1: %s", n, buf)
+	}
+}
+
+// FR-COA-9, 08 §4: a stale-while-revalidate refresh runs after the triggering
+// request finished. next must get a live context and never the client's writer.
+func TestBackgroundRefreshNeverSeesClientWriter(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		h, _ := loadServe(t, `,"stale":{"while_revalidate":"1m"}`)
+		var calls atomic.Int32
+		var orig atomic.Pointer[httptest.ResponseRecorder]
+		var sawClientWriter atomic.Bool
+		var ctxErr atomic.Value
+		next := caddyhttp.HandlerFunc(func(w http.ResponseWriter, r *http.Request) error {
+			n := calls.Add(1)
+			if rec := orig.Load(); rec != nil && http.ResponseWriter(rec) == w {
+				sawClientWriter.Store(true)
+			}
+			if n > 1 {
+				ctxErr.Store(fmt.Sprint(r.Context().Err()))
+			}
+			w.Header().Set("Cache-Control", "max-age=1")
+			_, err := io.WriteString(w, "body")
+			return err
+		})
+		serve := func(ctx context.Context) *httptest.ResponseRecorder {
+			rec := httptest.NewRecorder()
+			orig.Store(rec)
+			r := httptest.NewRequestWithContext(ctx, http.MethodGet, "http://example.com/swr", nil)
+			if err := h.ServeHTTP(rec, r, next); err != nil {
+				t.Error(err)
+			}
+			return rec
+		}
+		serve(context.Background())
+		time.Sleep(5 * time.Second) // stale now, inside the 1m window
+		ctx, cancel := context.WithCancel(context.Background())
+		rec := serve(ctx)
+		cancel() // the triggering request is over before the refresh finishes
+		synctest.Wait()
+		if rec.Body.String() != "body" {
+			t.Fatalf("stale body = %q", rec.Body.String())
+		}
+		if calls.Load() != 2 {
+			t.Fatalf("next called %d times, want 2 (miss + refresh)", calls.Load())
+		}
+		if sawClientWriter.Load() {
+			t.Fatal("next received the client's ResponseWriter")
+		}
+		if v := ctxErr.Load(); v != "<nil>" {
+			t.Fatalf("refresh context error = %v", v)
+		}
+		if err := h.Cleanup(); err != nil {
+			t.Fatal(err)
 		}
 	})
 }
