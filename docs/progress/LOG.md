@@ -1481,3 +1481,11 @@ Entry template:
 - Deviations: reverted three old LOG entries that my earlier global sed pointed at PR 84; the P25-00 entry's branch deviation is the session-designated branch.
 - Follow-ups: P25-05 and P25-07/07b need Ashwin first.
 - Context: low
+
+## 2026-10-10 · P25-00 · review-fixes
+- Branch / PR: claude/nice-davinci-rh3zjh / https://github.com/AshwinSathian/weir/pull/84
+- Done: second adversarial pass. Fixed: loss repair is now a write (the global hard epoch path) and reads stay read-only; empty `hardidx` is not loss; seed from `crypto/rand` with SHA-256 in Go (Lua has neither); `NoClockSkew`; cluster-wide policy check; lazy-connect rules; key declaration; skew formula; card sizes. Earlier LOG entries named `SpreadEntries`; the field is `CoLocateEntries`.
+- Tests: none (docs only); vet and trace-strict pass.
+- Deviations: none.
+- Follow-ups: P25-05, P25-07/07b need Ashwin first.
+- Context: low

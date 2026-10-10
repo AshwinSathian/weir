@@ -95,20 +95,20 @@ These phases start from draft specs. Each begins with one planning card that ver
 - Notes: client chosen with Ashwin 2026-10-10: valkey-go v1.0.78 (05 §7). Cards P25-01 to P25-07b below replace the "expected" list; plan items 2.5.1 to 2.5.5 are split across them. A Valkey server is needed from P25-02 on (Docker or `valkey-server` in PATH); unit tests that need none stay in the default run.
 
 ### [ ] P25-01 Config and error mapping
-- Plan: 2.5.1 · Size: S · Depends on: P25-00
+- Plan: 2.5.1 · Size: M · Depends on: P25-00
 - Read: 05 §2.1 (S-2, S-3), §7; valkey-go `ClientOption`, `ValkeyError` at v1.0.78
 - Touch: store/valkey/go.mod and go.sum (new; requires valkey-go v1.0.78 and the root module with `replace => ../..`), store/valkey/{config.go,errors.go,config_test.go,errors_test.go}
-- Tests: `TestConfigValidate` (table: no addresses, bad `HashTag` or `Prefix` charset, negative durations, defaults filled), `TestConfigRedacts` (`String`, `GoString`, `slog.LogValue` hide password and TLS), `TestMapError` (every error class in 05 §7: contexts, `ErrClosing`, `net.Error`, `io.EOF`, `ErrNoSlot`, `*ValkeyError` OOM/READONLY/CLUSTERDOWN/LOADING/BUSY; `valkey.Nil` is not mapped here)
-- AC: `Config` holds `Addrs`, `Username`, `Password`, `TLS`, `Cluster` (false), `Prefix` (`weir`), `HashTag` (`e`), `CoLocateEntries` (false), `MaxRetention` (24 h), `MaxClockSkew` (1 s), `MaxHardEpochs` (10 000), `CallTimeout` (5 s), `HardEpochWait` (0), `SkipPolicyCheck` (false); `Validate` rejects bad values; every non-nil error maps to an error that `errors.Is` `store.ErrUnavailable`, wrapped with `%w`; the module builds with `GOWORK=off`; the root module still has no `require` block
+- Tests: `TestConfigValidate` (table: no addresses, empty `HashTag`, `Prefix` or `HashTag` outside `[A-Za-z0-9_.-]` (no glob, brace or colon characters), negative durations, defaults filled), `TestConfigRedacts` (`String`, `GoString`, `slog.LogValue` hide password and TLS), `TestMapError` (every error class in 05 §7: contexts, `ErrClosing`, `net.Error`, `io.EOF`, `ErrNoSlot`, `*ValkeyError` OOM/READONLY/CLUSTERDOWN/LOADING/BUSY; `valkey.Nil` is not mapped here)
+- AC: `Config` holds `Addrs`, `Username`, `Password`, `TLS`, `Cluster` (false), `Prefix` (`weir`), `HashTag` (`e`), `CoLocateEntries` (false), `MaxRetention` (24 h), `MaxClockSkew` (1 s) with `NoClockSkew` (true means skew 0), `MaxHardEpochs` (10 000), `CallTimeout` (5 s), `HardEpochWait` (0), `SkipPolicyCheck` (false); `Validate` rejects bad values; every non-nil error maps to an error that `errors.Is` `store.ErrUnavailable`, wrapped with `%w`; the module builds with `GOWORK=off`; the root module still has no `require` block
 - Out of scope: the `Store` type, `go.work`, any client or server call (P25-01b)
 - Notes: the fields in 05 §7 and above were approved by Ashwin's delegation on 2026-10-10 (STATUS). New dependency approved at P25-00. The Makefile finds submodules by `find`, so it needs no change.
 
 ### [ ] P25-01b Store skeleton, lazy connect and policy check
-- Plan: 2.5.1 · Size: S · Depends on: P25-01
+- Plan: 2.5.1 · Size: M · Depends on: P25-01
 - Read: 05 §7 (Connection, Epoch state), 01 FR-STF-2; valkey-go `NewClient`, `ClientOption.ForceSingleClient`, `ClusterOption`
 - Touch: store/valkey/{doc.go,store.go,client.go,store_test.go}, go.work (add `./store/valkey`)
-- Tests: `TestNewBadConfigFails`, `TestNewUnreachableServerSucceeds` (calls return `ErrUnavailable`, no goroutine leaked), `TestReconnectRateLimited` (at most one dial per second, under synctest with a fake dialer), `TestInfo`, `TestCloseTwice`, `TestPolicyCheck` (fake client: `allkeys-lfu` fails `New`'s first connect check and every call stays `ErrUnavailable`; `volatile-lfu` and `noeviction` pass; `SkipPolicyCheck` skips)
-- AC: `valkey.New(cfg)` returns a `store.Store`; the client is built on first use with `DisableRetry`, `DisableCache`, `MaxMovedRedirections` 3, `ForceSingleClient` unless `Cluster`, no replica reads; a default deadline of `CallTimeout` is applied when the context has none; the policy check runs once per successful connect; interface guard present
+- Tests: `TestNewBadConfigFails`, `TestNewUnreachableServerSucceeds` (calls return `ErrUnavailable`, no goroutine leaked), `TestReconnectRateLimited` (at most one dial per second, under synctest with a fake dialer), `TestInfo`, `TestCloseTwice`, `TestCloseDuringConnect`, `TestNoDialAfterClose`, `TestCanceledContextDoesNotDial`, `TestPolicyCheck` (fake client, standalone and cluster node lists: `allkeys-lfu` fails `New`'s first connect check and every call stays `ErrUnavailable`; `volatile-lfu` and `noeviction` pass; `SkipPolicyCheck` skips)
+- AC: `valkey.New(cfg)` returns a `store.Store`; the client is built on first use with `DisableRetry`, `DisableCache`, `MaxMovedRedirections` 3, `ForceSingleClient` unless `Cluster`, no replica reads; a default deadline of `CallTimeout` is applied when the context has none; every method checks the context and the closed flag before dialing, and no lock is held across the dial or the policy check (single-flight channel); the policy check runs once per successful connect on every known node, and a failure wraps `ErrUnavailable` and names the policy; interface guard present
 - Out of scope: Get, Set, Delete and epochs
 - Notes: the policy check cannot run inside `New` because `New` does not connect (05 §7); until it passes, calls return `ErrUnavailable` and a `weir:`-prefixed error naming the policy.
 
@@ -117,7 +117,7 @@ These phases start from draft specs. Each begins with one planning card that ver
 - Read: 05 §2.2 to §2.4, §3 (codec), §8 (`ExpiredIsNotFound`, `ContextCanceled`, `ClosedStore`); store/codec.go API; .github/workflows/ci.yml
 - Touch: store/valkey/{entries.go,entries_test.go,integration_test.go}, .github/workflows/ci.yml, Makefile (target `test-valkey`, which also runs `go vet -tags integration`)
 - Tests: `TestKeyLayout` (unit: `weir:<hex(k)>`; `weir:{e}:<hex(k)>` with `CoLocateEntries`; custom prefix), `TestSetClampsToMaxRetention`, `TestGetDecodeFailureIsUnavailable`; under `-tags integration`: `storetest.Run` with `WithoutEpochs()` against a real server
-- AC: `Get` maps `valkey.Nil` to `ErrNotFound` and decodes with `store.Decode`; `Set` issues `SET ... PXAT <ms>` with `Expires` clamped (E-11); past `Expires` is a no-op; `Delete` is `DEL`; CI job `valkey` starts a pinned `valkey/valkey:8.x` service container (the minor is chosen when the card is done) with `--maxmemory-policy volatile-lfu`, runs `go test -race -tags integration ./store/valkey/...`, and is not multiplied by the Go version matrix; `ExpiredIsNotFound` runs there, not skipped
+- AC: `Get` maps `valkey.Nil` to `ErrNotFound` and decodes with `store.Decode`; `Set` issues `SET ... PXAT <ms>` with `Expires` clamped (E-11); past `Expires` is a no-op; `Delete` is `DEL`; CI job `valkey` starts a pinned `valkey/valkey:8.x` service container (Valkey 7 or later is required; the minor is chosen when the card is done) with `--maxmemory-policy volatile-lfu`, runs `go test -race -tags integration ./store/valkey/...`, and is not multiplied by the Go version matrix; `ExpiredIsNotFound` runs there, not skipped
 - Out of scope: epochs
 - Notes: unit tests wrap the client behind a small unexported interface; script paths (`Lua.Exec` takes a full `valkey.Client`) are integration-only. Address from `WEIR_VALKEY_ADDR`, skipped with a clear message when unset outside CI.
 
@@ -125,17 +125,18 @@ These phases start from draft specs. Each begins with one planning card that ver
 - Plan: 2.5.1 · Size: M · Depends on: P25-02
 - Read: 05 §4.1 to §4.3, E-5, E-6, E-10, §7 (table, Epoch state, Loss detection); 04 §4.3; valkey-go `Lua.Exec`, `NewLuaScriptReadOnly`
 - Touch: store/valkey/{epochs.go,scripts.go,meta.go,epochs_test.go}, store/storetest/storetest.go (option `EpochModes`), docs/05 §8, docs/07 (row for the option)
-- Tests: integration with `storetest.EpochModes(EpochHard)` (global tag keeps all three modes, tested in a Valkey-specific case): `EpochSinceBoundary`, `EpochFastPath`, `EpochsMaxAcrossTags`; Valkey-specific: `TestHardEpochCap` (at `At = now`, small `MaxRetention`: cap reached, old members pruned, slots freed), `TestAbsentNewestIsNotNoEpochs` (delete `newest`, purge still found), `TestMetaLossReportsHardEpoch` (flush, next lookup reports a hard epoch at now and recreates `meta`), `TestSoftEpochBeforeSketchIsUnavailable`, `TestSaturatingWrite` (zero `At` does not wrap), `TestSkewAddsConservatively`
-- AC: `SetEpoch` hard and global is one script call (`ZADD GT`, prune by server `TIME`, cap refusal wraps `ErrUnavailable`, max semantics); soft or invalid on a non-global tag returns an error wrapping `ErrUnavailable` until P25-03b; `NewestEpoch` uses the `GET newest` fast path and one read-only script otherwise; keys are declared in `KEYS`; `HardEpochWait` issues `WAIT`; `SetEpoch` uses the retryable script variant
+- Tests: integration with `storetest.EpochModes(EpochHard)` (global tag keeps all three modes, tested in a Valkey-specific case): `EpochSinceBoundary`, `EpochFastPath`, `EpochsMaxAcrossTags`; Valkey-specific: `TestHardEpochCap` (at `At = now`, small `MaxRetention`: cap reached, old members pruned, slots freed), `TestAbsentNewestIsNotNoEpochs` (delete `newest`, purge still found), `TestMetaLossRepairs` (fetch an entry, flush, look up from a second store, twice: the entry is still purged, `meta` and `global.hard` exist), `TestEmptyHardidxIsNotLoss` (hard purge, wait for pruning, lookups report no epoch and trigger no repair), `TestAbsentNewestWithMetaPresent`, `TestSoftEpochBeforeSketchIsUnavailable`, `TestSaturatingWrite` (zero `At` does not wrap), `TestSkewAddsConservatively`
+- AC: `SetEpoch` hard and global is one script call (`ZSCORE` then `ZADD GT`, prune by server `TIME`, cap refusal wraps `ErrUnavailable`, max semantics); all epoch keys in `KEYS`; loss is detected by `meta` alone and repaired by the global hard write (05 §7); soft or invalid on a non-global tag returns an error wrapping `ErrUnavailable` until P25-03b; `NewestEpoch` uses the `GET newest` fast path and one read-only script otherwise; keys are declared in `KEYS`; `HardEpochWait` issues `WAIT`; the store retries `SetEpoch` once on a network error
 - Out of scope: the sketch (P25-03b)
+- Notes on size: docs edits count as one file; if the session overruns, split the loss repair into P25-03c.
 - Notes: the option `EpochModes` makes cases skip the modes the store lacks and run the rest, so `EpochHardCap` and `EpochPerModeKept` stay in P25-03b where they can run whole.
 
 ### [ ] P25-03b Soft and invalid sketch, shared tags
 - Plan: 2.5.1 · Size: M · Depends on: P25-03
 - Read: 05 §4.4 (E-7 to E-9, E-12), §7 (Sketch positions); store/memory/epochs.go; 06 T-29
 - Touch: store/valkey/{sketch.go,sketch_test.go,epochs.go}, store/storetest/storetest.go (option `Parallel`), docs/05 §8, docs/07
-- Tests: integration: `storetest` without `EpochModes`, so `EpochPerModeKept`, `EpochHardCap` (with `HardEpochCap(cfg.MaxHardEpochs)`), `EpochsMaxAcrossTags` and `EpochNeverUnderInvalidates` all run, the last under `Parallel(64)`; `TestSharedTagsSkipInvalidPlane`; `TestSketchStrlenAtMost2MiB` (plane created full-size, `STRLEN` stays 2 MiB after 100 000 tags); `TestSeedSharedAcrossStores` (two stores, one server, same positions); `TestSketchLossReportsHardEpoch`
-- AC: soft and invalid epochs raise `d = 2` cells per 05 §7; `NewestEpochShared` implemented (`store.SharedTagEpochs`), one round trip, never reads the invalid plane for shared tags; positions use `SHA-256(seed || tag)`; the seed is created inside the script and shared by all nodes
+- Tests: integration: `storetest` without `EpochModes`, so `EpochPerModeKept`, `EpochHardCap` (with `HardEpochCap(cfg.MaxHardEpochs)`), `EpochsMaxAcrossTags` and `EpochNeverUnderInvalidates` all run, the last under `Parallel(64)`; `TestSharedTagsSkipInvalidPlane`; `TestSketchStrlenAtMost2MiB` (plane created full-size, `STRLEN` stays 2 MiB after 100 000 tags); `TestSeedSharedAcrossStores` (two stores, one server, same positions); `TestSeedChangedAfterFlushRetries` (two round trips, then correct), `TestSketchPlaneLossRepairs`
+- AC: soft and invalid epochs raise `d = 2` cells per 05 §7; `NewestEpochShared` implemented (`store.SharedTagEpochs`), one round trip, never reads the invalid plane for shared tags; positions use `SHA-256(seed || tag)` computed in Go; the 16-byte seed comes from `crypto/rand`, is stored with `HSETNX` and shared by all nodes; scripts check the seed id and reply `SEED_CHANGED`
 - Notes: valkey-go auto-pipelines concurrent callers, which is why the property test gets `Parallel`; if 200 000 epochs still takes more than a few minutes, stop and ask before shrinking the count (docs/07 criterion).
 
 ### [ ] P25-04 Engine suite against Valkey
@@ -154,7 +155,7 @@ These phases start from draft specs. Each begins with one planning card that ver
 - Tests: `TestVaryCASConcurrentWriters` on the memory store (64 writers never leave more than `MaxVariants` refs), `TestVaryCASFallsBackWithoutCapability`
 - AC: 64 concurrent writers never leave more than `MaxVariants` refs on one spec in the engine with the memory store; stores without the mechanism behave as before; the chosen mechanism is written into 04 §6.7 and 05 §7
 - Out of scope: the Valkey implementation (P25-05b), eviction (P25-06)
-- Notes: ASK THE USER FIRST. Options: (a) an optional capability `VarySetter` (public API addition), (b) a version field on `Entry` (public type change that also touches the memory store and the codec, hence its own review). Recommendation when asking: (a), because it leaves the codec alone.
+- Notes: likely to split on overrun (interface and engine vs memory store). ASK THE USER FIRST. Options: (a) an optional capability `VarySetter` (public API addition), (b) a version field on `Entry` (public type change that also touches the memory store and the codec, hence its own review). Recommendation when asking: (a), because it leaves the codec alone.
 
 ### [ ] P25-05b Vary-spec compare-and-set in Valkey
 - Plan: 2.5.3 · Size: S · Depends on: P25-05
@@ -178,7 +179,7 @@ These phases start from draft specs. Each begins with one planning card that ver
 - Tests: config table cases for a `store valkey { ... }` block (JSON and Caddyfile), `TestPoolKeyIncludesStoreSettings`, `TestValkeyStoreOutageOpensBreaker` (unreachable server at `Provision` does not fail the load)
 - AC: a site can select the Valkey store in JSON and Caddyfile; the pool key and key-generation hash cover the store settings; passwords come from `{$VAR}` and never appear in errors; `caddy validate` fails on a bad block; the xcaddy CI job gains a `--with` for `store/valkey`
 - Out of scope: the two-node test and the guide (P25-07b)
-- Notes: ASK THE USER FIRST: a new Caddy config block (CLAUDE.md "When to stop and ask").
+- Notes: likely to split on overrun (config and Caddyfile vs pool wiring). ASK THE USER FIRST: a new Caddy config block (CLAUDE.md "When to stop and ask").
 
 ### [ ] P25-07b Two-node test and the multi-node guide
 - Plan: 2.5.5 · Size: M · Depends on: P25-07

@@ -19,6 +19,7 @@ Ashwin delegated "take decisions on all items"; "Waiting on Ashwin" was empty. A
 - Epoch state must never be evictable: epoch keys have no TTL, the server policy is `volatile-lfu` (or `noeviction`); the store refuses `allkeys-*` on connect (`SkipPolicyCheck` for managed services). Hard epochs live in one pruned sorted set (no per-tag keys); an absent `newest` key is never "no epochs"; a lost `meta`/sketch reports a hard epoch at now. This replaces the earlier `allkeys-lfu` recommendation.
 - Connection: `New` validates config but does not connect; an unreachable server opens the store breaker (FR-STF-2). `Cluster` is an explicit setting. Replica reads off.
 - New config fields approved for `store/valkey`: `Prefix`, `HashTag`, `CoLocateEntries` (entries omit the hash tag by default), `Cluster`, `MaxRetention`, `MaxClockSkew`, `MaxHardEpochs`, `CallTimeout`, `HardEpochWait`, `SkipPolicyCheck`.
+- Second review: loss repair is a write (global hard epoch), seed from `crypto/rand` hashed in Go, `NoClockSkew` bool, policy checked on every node.
 - Skew: accept the up to `MaxClockSkew` + 1 s re-purge window and document it; single-clock operators set skew 0.
 - Scrubber stays synchronous (SCAN per node, `ponytail:` ceiling O(keyspace)).
 - Cards re-cut: P25-01 split into P25-01 and P25-01b, P25-05 into P25-05 and P25-05b; storetest gets `EpochModes` and `Parallel`. P25-05 (vary CAS mechanism) and P25-07/07b (Caddy `store valkey` block, lifting D17) still need Ashwin's approval when they start.
