@@ -33,13 +33,16 @@ jobs:
 
   # P2-01c: catches Caddy API drift (docs/08 §9). The root `replace` is needed
   # because no root tag exists yet; drop it once one does.
+  # xcaddy resolves the latest Caddy on purpose: a red build here means Caddy
+  # moved under the module, which is the drift this job exists to catch.
   caddy-build:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
-          go-version: "1.27"
+          go-version-file: caddy/go.mod
           cache: true
           cache-dependency-path: |
             go.mod
@@ -68,7 +71,7 @@ jobs:
           }
           EOF
           ./caddy-weir validate --config Caddyfile.ci --adapter caddyfile
-          ./caddy-weir run --config Caddyfile.ci --adapter caddyfile &
+          ./caddy-weir run --config Caddyfile.ci --adapter caddyfile >caddy.log 2>&1 &
           pid=$!
           trap 'kill $pid' EXIT
           for i in $(seq 1 30); do
@@ -76,6 +79,7 @@ jobs:
             sleep 1
           done
           echo "caddy did not serve the minimal Caddyfile" >&2
+          cat caddy.log >&2
           exit 1
 
   # Keeps a stable required-check name (`check`) however many Go versions the

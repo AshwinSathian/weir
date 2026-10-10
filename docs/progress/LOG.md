@@ -1307,3 +1307,12 @@ Entry template:
 - Tests: new cases in TestCaddyfileParse; caddy lint (Go 1.27) clean, race tests pass with GOWORK=off.
 - Deviations: 08 §2 text added; no requirement, default or signature changed.
 - Follow-ups: P2-02 placeholders in `snapshot_dir` and duplicate-name test (in STATUS).
+
+## 2026-10-10 · P2-01c · done
+- Branch / PR: claude/friendly-bardeen-ufk3ke (session branch, not card/*) / pending
+- Done: `caddy-build` CI job (xcaddy with root and caddy module via `--with`, `caddy validate`, run a minimal Caddyfile and curl it); aggregate `check` now needs it. 15 minute timeout, Caddy log printed on failure, Go version from caddy/go.mod.
+- Tests: built and smoke-ran locally with xcaddy v0.4.5 (Caddy v2.11.7). `make check` passes (lint pinned v2.14.0 under Go 1.27).
+- Deviations: none.
+- Review: card-reviewer, no must-fix. Applied timeout, log capture, go-version-file, comment on why Caddy is unpinned. Its note that the Go matrix was added by this commit is wrong: it predates it.
+- Follow-ups: none.
+- Context: low; size S was right.
