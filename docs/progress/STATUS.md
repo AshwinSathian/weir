@@ -5,7 +5,7 @@ Phase: 1
 Current card: none
 Card state: awaiting-merge
 Branch: card/P25-07c-keygen-record (pushed to claude/beautiful-keller-9d29y4)
-PR: none yet
+PR: https://github.com/AshwinSathian/weir/pull/96
 Next card: see `make next`
 
 ## Notes for the next session (P25-07c)

@@ -1706,7 +1706,7 @@ Entry template:
 - Context: medium; size S was right.
 
 ## 2026-10-11 · P25-07c · done
-- Branch / PR: card/P25-07c-keygen-record / see STATUS
+- Branch / PR: card/P25-07c-keygen-record / https://github.com/AshwinSathian/weir/pull/96
 - Done: `valkey.Store.CheckKeyGen` (GET) and `RecordKeyGen` (SET, no TTL) at `<prefix>:keygen`; adapter reads the record on every Valkey Provision, purges on a mismatch, writes the record only after the purge. Reviewer's must-fix applied (the first version replaced the record before the purge). 05 §7, 08 §3, runbook 8.6/8.7 updated; PLAN 2.5.5 ticked.
 - Tests: `TestRecordKeyGen*`, `TestSyncKeyGen*`, `TestRecordedHashExcludesStoreSettings`, integration `TestValkeyKeyGenRecord` (fails with the check disabled). gofmt, vet, `go test -race` in all three modules and trace 146/146 pass; integration tests pass on redis 7.0.15. `make check` stops at golangci-lint (built with Go 1.25 here).
 - Deviations: card said SET NX; a read then a write after the purge is crash-safe. Outage at start skips the check with a warning (FR-STF-2).
