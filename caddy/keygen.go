@@ -61,43 +61,42 @@ func keyGenHashFor(cfg weir.Config, storeDigest [sha256.Size]byte) [sha256.Size]
 // (the Valkey store, 05 §7). The memory store keeps its record beside the
 // snapshot instead.
 type keyGenRecorder interface {
-	RecordKeyGen(ctx context.Context, hash []byte) (changed bool, err error)
+	CheckKeyGen(ctx context.Context, hash []byte) (changed bool, err error)
+	RecordKeyGen(ctx context.Context, hash []byte) error
 }
 
-// pendingKeyGen is written over the record when the purge that a change
-// called for failed, so the next start sees a mismatch and purges again
-// instead of trusting a record that describes entries still on the server.
-var pendingKeyGen = []byte{0}
-
-// syncKeyGen records the forwarding hash on the shared server and reports
-// whether it differed from what another node (or an earlier run) recorded
-// there (R-3, 08 §3). A server that cannot answer is not an error: FR-STF-2
-// requires that an outage at start opens the store breaker instead of
-// failing the load, so the check is skipped with a warning and the next
-// start repeats it. A store with no record (memory) reports false.
-func syncKeyGen(ctx context.Context, st store.Store, fwd [sha256.Size]byte, log *slog.Logger, name string) bool {
+// checkKeyGen reports whether the record on the shared server differs from
+// fwd, meaning another node or an earlier run stored entries under other
+// forwarding rules (R-3, 08 §3). It only reads: the record is replaced by
+// recordKeyGen after the purge, so a process that dies in between purges
+// again on its next start. A server that cannot answer is not an error:
+// FR-STF-2 requires that an outage at start opens the store breaker instead of
+// failing the load, so the check is skipped with a warning and repeated at the
+// next start or reload. A store with no record (memory) reports false.
+func checkKeyGen(ctx context.Context, st store.Store, fwd [sha256.Size]byte, log *slog.Logger, name string) bool {
 	rec, ok := st.(keyGenRecorder)
 	if !ok {
 		return false
 	}
-	changed, err := rec.RecordKeyGen(ctx, fwd[:])
+	changed, err := rec.CheckKeyGen(ctx, fwd[:])
 	if err != nil {
-		log.Warn("weir: key-generation record not checked; entries stored under older forwarding rules stay servable until the next start with the server reachable",
+		log.Warn("weir: key-generation record not checked; entries stored under older forwarding rules stay servable until the next start or reload with the server reachable",
 			"name", name, "error", err)
 		return false
 	}
 	if changed {
-		log.Warn("weir: forwarding rules differ from the key-generation record on the store; writing a hard epoch. Nodes that share this prefix must use the same forward settings, or they purge each other on every restart",
+		log.Warn("weir: forwarding rules differ from the key-generation record on the store; writing a hard epoch. Nodes that share this prefix must use the same forward settings, or they purge each other on every start or reload",
 			"name", name)
 	}
 	return changed
 }
 
-// markKeyGenPending replaces the record with a value no hash can equal. It is
-// best effort: it runs after a failed purge, usually because the server went
-// away, in which case the record was not trusted either.
-func markKeyGenPending(ctx context.Context, st store.Store) {
+// recordKeyGen stores fwd as the record once the engine is built and any
+// purge has succeeded. A failure only means the next start checks again.
+func recordKeyGen(ctx context.Context, st store.Store, fwd [sha256.Size]byte, log *slog.Logger, name string) {
 	if rec, ok := st.(keyGenRecorder); ok {
-		_, _ = rec.RecordKeyGen(ctx, pendingKeyGen)
+		if err := rec.RecordKeyGen(ctx, fwd[:]); err != nil {
+			log.Warn("weir: key-generation record not written; the next start checks again", "name", name, "error", err)
+		}
 	}
 }

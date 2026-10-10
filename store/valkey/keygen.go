@@ -17,19 +17,17 @@ const maxKeyGenBytes = 64
 // never reads it (05 §7).
 func (s *Store) keyGenKey() string { return s.cfg.Prefix + ":keygen" }
 
-// RecordKeyGen stores hash as the cache's key-generation record and reports
-// whether a different record was already there (R-3, 08 §3). The caller
-// hashes the settings that change what an unchanged key means (forwarding
-// rules); a true answer means entries stored under the older rules may still
-// be on the server, and the caller writes the hard epoch. No record yet
-// (a fresh server, a flush) is not a change: there is nothing to compare, and
-// a flush took the entries too. It is one atomic SET ... GET, so two nodes
-// starting together see each other's record and never both miss a change.
-// The record replaces the old one on a change, so each node that disagrees
-// with the stored hash purges once per restart (the adapter warns).
-func (s *Store) RecordKeyGen(ctx context.Context, hash []byte) (changed bool, err error) {
-	if n := len(hash); n == 0 || n > maxKeyGenBytes {
-		return false, fmt.Errorf("store: valkey: key-generation hash must be 1 to %d bytes, got %d", maxKeyGenBytes, n)
+// CheckKeyGen reports whether the key-generation record holds a value other
+// than hash (R-3, 08 §3). The caller hashes the settings that change what an
+// unchanged key means (forwarding rules); true means entries stored under
+// older rules may still be on the server, and the caller writes the hard
+// epoch and then RecordKeyGen. No record (a fresh server, a flush) is not a
+// change: there is nothing to compare, and a flush took the entries too. It
+// only reads, so a node that dies before its purge leaves the old record and
+// the next start purges again.
+func (s *Store) CheckKeyGen(ctx context.Context, hash []byte) (changed bool, err error) {
+	if err := checkKeyGenLen(hash); err != nil {
+		return false, err
 	}
 	cl, err := s.acquire(ctx)
 	if err != nil {
@@ -37,7 +35,7 @@ func (s *Store) RecordKeyGen(ctx context.Context, hash []byte) (changed bool, er
 	}
 	ctx, cancel := s.callCtx(ctx)
 	defer cancel()
-	prev, err := cl.swapString(ctx, s.keyGenKey(), hash)
+	prev, err := cl.get(ctx, s.keyGenKey())
 	if err != nil {
 		if valkey.IsValkeyNil(err) {
 			return false, nil
@@ -45,4 +43,32 @@ func (s *Store) RecordKeyGen(ctx context.Context, hash []byte) (changed bool, er
 		return false, mapError(err)
 	}
 	return string(prev) != string(hash), nil
+}
+
+// RecordKeyGen stores hash as the record, with no expiry. Call it after the
+// purge that CheckKeyGen called for has succeeded. Two nodes that start
+// together may both see a change and both purge: extra work, on the safe
+// side. Each node that disagrees with the record purges on every start or
+// reload (the adapter warns).
+func (s *Store) RecordKeyGen(ctx context.Context, hash []byte) error {
+	if err := checkKeyGenLen(hash); err != nil {
+		return err
+	}
+	cl, err := s.acquire(ctx)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := s.callCtx(ctx)
+	defer cancel()
+	if _, err := cl.swapString(ctx, s.keyGenKey(), hash); err != nil && !valkey.IsValkeyNil(err) {
+		return mapError(err)
+	}
+	return nil
+}
+
+func checkKeyGenLen(hash []byte) error {
+	if n := len(hash); n == 0 || n > maxKeyGenBytes {
+		return fmt.Errorf("store: valkey: key-generation hash must be 1 to %d bytes, got %d", maxKeyGenBytes, n)
+	}
+	return nil
 }

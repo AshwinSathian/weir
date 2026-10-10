@@ -202,7 +202,7 @@ These phases start from draft specs. Each begins with one planning card that ver
 ## Phase 3: Experiment dimensions
 
 
-### [ ] P25-07c Server-side key-generation record for the Valkey store
+### [x] P25-07c Server-side key-generation record for the Valkey store
 - Plan: 2.5.5 · Size: S · Depends on: P25-07
 - Read: 08 §3; 05 §7; 06 R-3
 - Touch: caddy/pool.go, caddy/module.go, store/valkey (a record key), docs/05 §7, docs/08 §3

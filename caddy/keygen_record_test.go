@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"io"
 	"log/slog"
 	"strings"
 	"sync"
@@ -17,22 +16,29 @@ import (
 // fakeRecorder is a store with a key-generation record, like the Valkey store.
 type fakeRecorder struct {
 	store.Store
-	mu   sync.Mutex
-	rec  []byte
-	err  error
-	seen [][]byte
+	mu       sync.Mutex
+	rec      []byte
+	checkErr error
+	writeErr error
 }
 
-func (f *fakeRecorder) RecordKeyGen(_ context.Context, h []byte) (bool, error) {
+func (f *fakeRecorder) CheckKeyGen(_ context.Context, h []byte) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.seen = append(f.seen, bytes.Clone(h))
-	if f.err != nil {
-		return false, f.err
+	if f.checkErr != nil {
+		return false, f.checkErr
 	}
-	prev := f.rec
+	return f.rec != nil && !bytes.Equal(f.rec, h), nil
+}
+
+func (f *fakeRecorder) RecordKeyGen(_ context.Context, h []byte) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.writeErr != nil {
+		return f.writeErr
+	}
 	f.rec = bytes.Clone(h)
-	return prev != nil && !bytes.Equal(prev, h), nil
+	return nil
 }
 
 func warnLog(sb *strings.Builder) *slog.Logger {
@@ -41,7 +47,8 @@ func warnLog(sb *strings.Builder) *slog.Logger {
 
 // R-3, 08 §3: the record decides, not the process. A first record and an
 // equal one purge nothing; a different one reports a change and warns that
-// nodes sharing the prefix must agree.
+// nodes sharing the prefix must agree. Checking alone never replaces the
+// record, so a start that dies before its purge repeats it.
 func TestSyncKeyGen(t *testing.T) {
 	loose := keyGenHash((&Handler{Name: "n"}).weirConfig())
 	tight := keyGenHash((&Handler{Name: "n", Forward: ForwardConfig{Allow: []string{"X-A"}}}).weirConfig())
@@ -50,29 +57,40 @@ func TestSyncKeyGen(t *testing.T) {
 	}
 	f := &fakeRecorder{}
 	var sb strings.Builder
-	for i, tc := range []struct {
-		h    [32]byte
-		want bool
-	}{{loose, false}, {loose, false}, {tight, true}, {tight, false}} {
-		if got := syncKeyGen(t.Context(), f, tc.h, warnLog(&sb), "n"); got != tc.want {
-			t.Fatalf("step %d: changed = %v, want %v", i, got, tc.want)
+	log := warnLog(&sb)
+	step := func(h [32]byte, want, record bool) {
+		t.Helper()
+		if got := checkKeyGen(t.Context(), f, h, log, "n"); got != want {
+			t.Fatalf("changed = %v, want %v", got, want)
+		}
+		if record {
+			recordKeyGen(t.Context(), f, h, log, "n")
 		}
 	}
-	if n := strings.Count(sb.String(), "purge each other"); n != 1 {
-		t.Fatalf("want one warning naming the shared-prefix rule, got %d in %q", n, sb.String())
+	step(loose, false, true)
+	step(loose, false, true)
+	step(tight, true, false) // the purge never finished
+	step(tight, true, true)  // the retry purges again, then records
+	step(tight, false, true)
+	if n := strings.Count(sb.String(), "purge each other"); n != 2 {
+		t.Fatalf("want two warnings naming the shared-prefix rule, got %d in %q", n, sb.String())
 	}
 }
 
 // FR-STF-2: a server that cannot answer neither fails the load nor purges;
-// the skipped check is logged. A memory store has no record and says nothing.
+// the skipped check, and a record write that fails, are logged. A memory
+// store has no record and says nothing.
 func TestSyncKeyGenOutageAndMemory(t *testing.T) {
 	var sb strings.Builder
-	f := &fakeRecorder{err: errors.New("down")}
-	if syncKeyGen(t.Context(), f, [32]byte{1}, warnLog(&sb), "n") {
+	f := &fakeRecorder{checkErr: errors.New("down"), writeErr: errors.New("down")}
+	if checkKeyGen(t.Context(), f, [32]byte{1}, warnLog(&sb), "n") {
 		t.Fatal("an unreachable server reported a change")
 	}
-	if !strings.Contains(sb.String(), "not checked") {
-		t.Fatalf("skipped check not logged: %q", sb.String())
+	recordKeyGen(t.Context(), f, [32]byte{1}, warnLog(&sb), "n")
+	for _, want := range []string{"not checked", "not written"} {
+		if !strings.Contains(sb.String(), want) {
+			t.Fatalf("missing %q in %q", want, sb.String())
+		}
 	}
 	mem, err := memory.New(memory.Config{})
 	if err != nil {
@@ -80,20 +98,12 @@ func TestSyncKeyGenOutageAndMemory(t *testing.T) {
 	}
 	defer mem.Close()
 	sb.Reset()
-	if syncKeyGen(t.Context(), mem, [32]byte{1}, warnLog(&sb), "n") || sb.Len() != 0 {
-		t.Fatalf("memory store: changed or logged %q", sb.String())
+	if checkKeyGen(t.Context(), mem, [32]byte{1}, warnLog(&sb), "n") {
+		t.Fatal("memory store reported a change")
 	}
-}
-
-// R-3: a failed purge leaves a record no hash equals, so the next start
-// purges again instead of trusting a record for entries still on the server.
-func TestMarkKeyGenPendingNeverMatches(t *testing.T) {
-	f := &fakeRecorder{}
-	h := keyGenHash((&Handler{Name: "n"}).weirConfig())
-	syncKeyGen(t.Context(), f, h, slog.New(slog.NewTextHandler(io.Discard, nil)), "n")
-	markKeyGenPending(t.Context(), f)
-	if !syncKeyGen(t.Context(), f, h, slog.New(slog.NewTextHandler(io.Discard, nil)), "n") {
-		t.Fatal("the same config after a failed purge must purge again")
+	recordKeyGen(t.Context(), mem, [32]byte{1}, warnLog(&sb), "n")
+	if sb.Len() != 0 {
+		t.Fatalf("memory store logged %q", sb.String())
 	}
 }
 

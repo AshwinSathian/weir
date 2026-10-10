@@ -2,11 +2,18 @@
 
 Updated: 2026-10-11
 Phase: 1
-Current card: P25-07c
-Card state: blocked
+Current card: none
+Card state: awaiting-merge
 Branch: card/P25-07c-keygen-record (pushed to claude/beautiful-keller-9d29y4)
 PR: none yet
-Next card: P25-07c (needs Ashwin's approval: persisted key-generation hash changes purge semantics)
+Next card: see `make next`
+
+## Notes for the next session (P25-07c)
+
+- The record is read first (`CheckKeyGen`) and written only after the purge (`RecordKeyGen`); a crash in between purges again. Reviewer's must-fix (record replaced before purge) is fixed this way.
+- PLAN 2.5.5 is ticked, but CI must still run lint and the integration tests on Valkey 8.1 (lint cannot run here, Go 1.25 build).
+- No unit test drives `Provision` end to end with a fake recorder (needs a store-injection seam in the pool); `TestValkeyKeyGenRecord` (integration tag, `make test-valkey`) covers the wiring.
+- Nodes that share a `prefix` but differ in `forward` flush the cache on every start or reload; the warning says so.
 
 ## Decided 2026-10-11 (P25-07, adversarial review of PR 94)
 
@@ -57,7 +64,7 @@ Ashwin delegated "take decisions on all items"; "Waiting on Ashwin" was empty. A
 
 ## Waiting on Ashwin
 
-- Run `/handoff` for P25-07c (the model cannot invoke it). Confirm: a server outage at start skips the key-generation check with a warning instead of failing Provision.
+- Confirm at review: a server outage at start or reload skips the key-generation check with a warning instead of failing Provision (FR-STF-2; residual risk in 08 §3).
 
 Earlier decisions: none open. Decided 2026-10-10 (P2-03b, review of PR 79; Ashwin delegated "take decisions on all items"): caddytest e2e files are a named exception to the real-clock rule (CLAUDE.md rule 6, docs/07 §1) instead of a build tag, because a tag would stop CI running them; a skip outside `-short` fails the test; the test site binds 127.0.0.1; the herd test uses a 2 s client timeout so a hard purge reports counts. Also decided (P2-02): multi-host is an explicit `multi_host` key; scanning the http app was rejected (handler cannot find its own route; global scan would cap unrelated sites and flush their stores). Documented in 08 §2/§3/§4b.
 
