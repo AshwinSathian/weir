@@ -1340,3 +1340,11 @@ Entry template:
 - Review: card-reviewer, no must-fix. Fixed: stale superseded flag after rollback, test name and cites. Documented: hash is in-process only, rollback keeps the new hash. Not done: Destruct timing assertion (store close is bounded by closeTimeout, not unit-tested).
 - Follow-ups: see STATUS notes (host warning, MaxObjectBytes key, persisted hash).
 - Context: medium; size M was right.
+
+## 2026-10-10 · P2-02 · review-fixes
+- Branch / PR: claude/peaceful-mccarthy-b9uz60 / https://github.com/AshwinSathian/weir/pull/77
+- Done: adversarial review (agent), delegated decisions by Ashwin ("take decisions on all items"). Must-fix: key-generation hash is now recorded only after weir.New and the purge succeed (retry of a failed Provision still purges). Fixed: hash persisted beside the snapshot (`<name>.weir.keygen`, stale snapshot deleted on mismatch, covers restart and hash-plus-spec changes); `Cleanup` no longer nils `engine`; `max_bytes` under 160 MiB rejected in `Validate`; `snapshot_dir` must be absolute, is cleaned, and refused when group/other-writable; `Destruct` reads the superseded flag and retires under one lock; FR-FAIR-3 amended to the `multi_host` key.
+- Tests: TestKeyGenHashRetryAfterFailedProvisionStillPurges, TestSnapshotKeyGenReconcile, TestKeyGenRecordFollowsLoad, TestMaxBytesBelowMinimumRejectedEarly, TestSnapshotDirSafety, TestRegistryConcurrentAcquireRelease; caddy race tests and lint pass.
+- Deviations: docs/01 FR-FAIR-3 reworded (requirement change, delegated); 08 §2/§3 updated.
+- Declined: warning on on-demand TLS without `multi_host` (needs the global scan already rejected); per-name closing gate in acquire (Caddy serializes loads; ponytail comment records it).
+- Follow-ups: STATUS notes (host warning in P2-03, `Storable.MaxObjectBytes` key).

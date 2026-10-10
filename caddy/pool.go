@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -19,6 +20,11 @@ import (
 // Memory-store defaults the fairness cap is computed from (memory.Config:
 // 0 means 256 MiB and 16 shards). P2-04 replaces the size with auto-sizing.
 const (
+	// minStoreBytes is the smallest max_bytes whose largest object (10% of a
+	// shard, 05 §5.1) fits the default 1 MiB Storable.MaxObjectBytes, which
+	// the adapter has no key for. Rejected early instead of clamped, so the
+	// operator sees why (16 shards x 10 x 1 MiB).
+	minStoreBytes     = defaultShards * 10 << 20
 	defaultStoreBytes = 256 << 20
 	defaultShards     = 16
 )
@@ -53,23 +59,37 @@ type pooledStore struct {
 	keyGen [sha256.Size]byte // hash of the newest engine that used the store
 }
 
-// swapKeyGen records the hash of the engine now using the store and reports
-// whether it differs from the previous one.
-func (p *pooledStore) swapKeyGen(h [sha256.Size]byte) bool {
+// keyGenChanged reports whether h differs from the hash of the engine that
+// last used the store. It does not record h: that happens in commitKeyGen
+// once the purge succeeded, so a failed Provision followed by a retry of the
+// same config still purges (R-3).
+func (p *pooledStore) keyGenChanged(h [sha256.Size]byte) bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	changed := p.keyGen != h
+	return p.keyGen != h
+}
+
+// commitKeyGen records h, in memory and beside the snapshot, after the
+// engine that carries it is built and the hard epoch is written.
+func (p *pooledStore) commitKeyGen(h [sha256.Size]byte) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.spec.snapshotDir != "" {
+		if err := writeKeyGenFile(p.spec.snapshotDir, p.spec.name, h); err != nil {
+			return err
+		}
+	}
 	p.keyGen = h
-	return changed
+	return nil
 }
 
 // Destruct implements caddy.Destructor. Caddy calls it outside the pool lock
 // with no context, so the snapshot is bounded by closeTimeout (08 §3).
 func (p *pooledStore) Destruct() error {
-	p.reg.forget(p)
+	superseded := p.reg.retire(p)
 	ctx, cancel := context.WithTimeout(context.Background(), closeTimeout)
 	defer cancel()
-	if p.superseded.Load() {
+	if superseded {
 		// A cancelled context makes CloseContext discard the snapshot; the
 		// store is closed either way (FR-SNP-1).
 		cancel()
@@ -137,10 +157,9 @@ func (r *storeRegistry) acquire(load any, spec storeSpec, keyGen [sha256.Size]by
 	r.markWriter(spec.name)
 	r.mu.Unlock()
 
-	if loaded {
-		keyChanged = p.swapKeyGen(keyGen)
-	}
-	return p, keyChanged, nil
+	// A store built just now carries keyGen already (buildStore reconciled it
+	// with the snapshot); only a reused store can be at a different hash.
+	return p, loaded && p.keyGenChanged(keyGen), nil
 }
 
 // release gives back one reference. Callers call it exactly once per
@@ -151,16 +170,27 @@ func (r *storeRegistry) release(load any, p *pooledStore) error {
 	return err
 }
 
-func (r *storeRegistry) forget(p *pooledStore) {
+// retire removes p from the live set and reports, in the same critical
+// section, whether a newer store had superseded it, so the writer decision
+// and the removal cannot straddle another acquire.
+//
+// ponytail: a store of the same spec built after UsagePool.Delete removed
+// the key but before this Destruct finishes would load the old snapshot.
+// Caddy serializes config loads, and Cleanup of the old config runs inside
+// the load that replaces it, so no caller reaches that window today. The
+// upgrade is a per-name closing gate in acquire.
+func (r *storeRegistry) retire(p *pooledStore) (superseded bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	superseded = p.superseded.Load()
 	name := p.spec.name
 	r.live[name] = slices.DeleteFunc(r.live[name], func(q *pooledStore) bool { return q == p })
 	if len(r.live[name]) == 0 {
 		delete(r.live, name)
-		return
+		return superseded
 	}
 	r.markWriter(name)
+	return superseded
 }
 
 // markWriter flags every live store of name except the newest as superseded.
@@ -221,7 +251,7 @@ func (r *storeRegistry) loadClaims(load any) int {
 // storeSpec derives the pool key from the handler.
 func (h *Handler) storeSpec() storeSpec {
 	return storeSpec{
-		name: h.Name, maxBytes: int64(h.MaxBytes), ownerCap: h.MultiHost, snapshotDir: h.SnapshotDir,
+		name: h.Name, maxBytes: int64(h.MaxBytes), ownerCap: h.MultiHost, snapshotDir: h.snapshotDir(),
 	}
 }
 
@@ -232,8 +262,8 @@ func (h *Handler) memoryConfig() memory.Config {
 		MaxBytes:        int64(h.MaxBytes),
 		SnapshotTimeout: closeTimeout,
 	}
-	if h.SnapshotDir != "" {
-		cfg.SnapshotPath = filepath.Join(h.SnapshotDir, h.Name+".weir")
+	if dir := h.snapshotDir(); dir != "" {
+		cfg.SnapshotPath = filepath.Join(dir, h.Name+".weir")
 	}
 	if h.MultiHost {
 		size := cfg.MaxBytes
@@ -246,11 +276,16 @@ func (h *Handler) memoryConfig() memory.Config {
 }
 
 // buildStore creates the memory store for h. The snapshot directory is made
-// here, not at Validate, so caddy validate has no side effects on disk.
-func (h *Handler) buildStore() (*memory.Store, error) {
-	if h.SnapshotDir != "" {
-		if err := os.MkdirAll(h.SnapshotDir, 0o700); err != nil {
-			return nil, fmt.Errorf("weir: snapshot_dir: %w", err)
+// here, not at Validate, so caddy validate has no side effects on disk. A
+// snapshot written under a different key-generation hash is deleted before
+// the store can load it (R-3), and the current hash is recorded beside it.
+func (h *Handler) buildStore(keyGen [sha256.Size]byte) (*memory.Store, error) {
+	if dir := h.snapshotDir(); dir != "" {
+		if err := prepareSnapshotDir(dir); err != nil {
+			return nil, err
+		}
+		if _, err := reconcileKeyGen(dir, h.Name, keyGen); err != nil {
+			return nil, err
 		}
 	}
 	st, err := memory.New(h.memoryConfig())
@@ -260,9 +295,78 @@ func (h *Handler) buildStore() (*memory.Store, error) {
 	return st, nil
 }
 
+// snapshotDir is the cleaned directory, so "/data" and "/data/" are one
+// store identity.
+func (h *Handler) snapshotDir() string {
+	if h.SnapshotDir == "" {
+		return ""
+	}
+	return filepath.Clean(h.SnapshotDir)
+}
+
+// prepareSnapshotDir creates dir (0700) and refuses one another user could
+// write into: a planted snapshot would be decoded as trusted cache content.
+func prepareSnapshotDir(dir string) error {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return fmt.Errorf("weir: snapshot_dir: %w", err)
+	}
+	fi, err := os.Stat(dir)
+	if err != nil {
+		return fmt.Errorf("weir: snapshot_dir: %w", err)
+	}
+	if !fi.IsDir() {
+		return errors.New("weir: snapshot_dir is not a directory")
+	}
+	if fi.Mode().Perm()&0o022 != 0 {
+		return errors.New("weir: snapshot_dir must not be writable by group or others")
+	}
+	return nil
+}
+
+func keyGenPath(dir, name string) string { return filepath.Join(dir, name+".weir.keygen") }
+
+// reconcileKeyGen compares the hash recorded beside the snapshot with want.
+// On a mismatch, or when none is recorded, it deletes the snapshot and records
+// want. It reports whether the snapshot was dropped.
+func reconcileKeyGen(dir, name string, want [sha256.Size]byte) (dropped bool, err error) {
+	got, err := os.ReadFile(keyGenPath(dir, name))
+	switch {
+	case err == nil && len(got) == sha256.Size && [sha256.Size]byte(got) == want:
+		return false, nil
+	case err != nil && !errors.Is(err, fs.ErrNotExist):
+		return false, fmt.Errorf("weir: snapshot key-generation record: %w", err)
+	}
+	if err := os.Remove(filepath.Join(dir, name+".weir")); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return false, fmt.Errorf("weir: dropping stale snapshot: %w", err)
+	}
+	return true, writeKeyGenFile(dir, name, want)
+}
+
+// writeKeyGenFile replaces the record atomically with mode 0600.
+func writeKeyGenFile(dir, name string, h [sha256.Size]byte) error {
+	f, err := os.CreateTemp(dir, name+".weir.keygen.*")
+	if err != nil {
+		return fmt.Errorf("weir: snapshot key-generation record: %w", err)
+	}
+	_, werr := f.Write(h[:])
+	cerr := f.Close()
+	if err := errors.Join(werr, cerr); err != nil {
+		_ = os.Remove(f.Name())
+		return fmt.Errorf("weir: snapshot key-generation record: %w", err)
+	}
+	if err := os.Rename(f.Name(), keyGenPath(dir, name)); err != nil {
+		_ = os.Remove(f.Name())
+		return fmt.Errorf("weir: snapshot key-generation record: %w", err)
+	}
+	return nil
+}
+
 // validateSnapshotDir rejects what Caddy would not expand here: braces are
 // placeholders (08 §2), and NUL cannot be in a path.
 func validateSnapshotDir(dir string) error {
+	if dir != "" && !filepath.IsAbs(dir) {
+		return errors.New("weir: snapshot_dir must be an absolute path")
+	}
 	for i := range len(dir) {
 		switch dir[i] {
 		case '{', '}':

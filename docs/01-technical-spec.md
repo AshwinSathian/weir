@@ -1,7 +1,7 @@
 # Weir technical specification
 
 Status: v1.0, approved for Phase 0 and Phase 1 implementation
-Date: 2026-10-09
+Date: 2026-10-10
 Owner: Ashwin Sathian
 Module: `github.com/AshwinSathian/weir`
 Supersedes: the interface sketch in [00-design-doc.md §7.2](00-design-doc.md)
@@ -590,7 +590,7 @@ Open: none that block any milestone before Phase 3.
 
 - FR-FAIR-1. `Limiter.MaxPerHost` caps in-flight origin fetches per normalized host, in addition to the partition cap. 0 (library default) disables it. Memory stays O(`MaxConcurrent`).
 - FR-FAIR-2. `store.Entry.Owner` is an opaque `Tag` the engine sets to the entry's origin tag. `memory.Config.MaxBytesPerOwner` (0 disables; library default 0) caps bytes per owner per shard. A `Set` that would push its owner over the cap first evicts that owner's own entries, scanning at most 64 nodes from the small-queue tail and then at most 64 from the main-queue tail for same-owner victims; if that frees too little, the `Set` is declined (S-4). A tenant can therefore turn over its own quota, but can never evict another tenant's entries (T-32). Declining outright was rejected: a legitimate tenant whose working set exceeds its quota would keep its oldest entries for up to `MaxRetention` while its new pages went uncached.
-- FR-FAIR-3. The Caddy adapter enables both at 25% (of `MaxConcurrent` and of shard bytes) when a site serves more than one host or uses on-demand TLS, unless configured otherwise.
+- FR-FAIR-3. The Caddy adapter enables both at 25% (of `MaxConcurrent` and of shard bytes) when the site sets `multi_host` (one site serving more than one host, or using on-demand TLS; docs/08 §2 explains why the operator states it). Without it both stay at the library default, off.
 
 ### 13.5 Eager hard purge (M15, D18)
 

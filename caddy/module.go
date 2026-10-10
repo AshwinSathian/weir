@@ -7,12 +7,14 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sync/atomic"
 	"time"
 
 	"github.com/caddyserver/caddy/v2"
 	"github.com/caddyserver/caddy/v2/modules/caddyhttp"
 
 	"github.com/AshwinSathian/weir"
+	"github.com/AshwinSathian/weir/store/memory"
 )
 
 func init() { caddy.RegisterModule(&Handler{}) }
@@ -40,11 +42,12 @@ type Handler struct {
 	MultiHost bool `json:"multi_host,omitempty"`
 
 	engine *weir.Engine
-	// pool and release are set by a successful Provision (Caddy calls
-	// Provision and Cleanup serially, so no lock). release gives back
-	// the one store reference and is called at most once.
+	// pool and release are set by a successful Provision and not changed
+	// afterwards. release gives back the one store reference; closed makes
+	// Cleanup run it at most once.
 	pool    *pooledStore
 	release func() error
+	closed  *atomic.Bool // set by Provision; a pointer so Handler stays copyable
 }
 
 // CaddyModule implements caddy.Module.
@@ -76,7 +79,8 @@ func (h *Handler) Provision(ctx caddy.Context) (err error) {
 
 	load := any(ctx.GetMetricsRegistry())
 	keyGen := keyGenHash(cfg)
-	p, keyChanged, err := stores.acquire(load, h.storeSpec(), keyGen, h.buildStore)
+	p, keyChanged, err := stores.acquire(load, h.storeSpec(), keyGen,
+		func() (*memory.Store, error) { return h.buildStore(keyGen) })
 	if err != nil {
 		return err
 	}
@@ -104,7 +108,15 @@ func (h *Handler) Provision(ctx caddy.Context) (err error) {
 			return fmt.Errorf("weir: key-generation change: %w", perr)
 		}
 	}
-	h.engine, h.pool, h.release = e, p, release
+	// Record the hash only now: a Provision that failed above must not
+	// make a retry of the same config skip the purge.
+	if err := p.commitKeyGen(keyGen); err != nil {
+		cctx, ccancel := context.WithTimeout(context.Background(), closeTimeout)
+		defer ccancel()
+		_ = e.Close(cctx)
+		return err
+	}
+	h.engine, h.pool, h.release, h.closed = e, p, release, new(atomic.Bool)
 	return nil
 }
 
@@ -114,22 +126,25 @@ func (h *Handler) Validate() error {
 	if err := validateName(h.Name); err != nil {
 		return err
 	}
+	if h.MaxBytes != 0 && h.MaxBytes < minStoreBytes {
+		return fmt.Errorf("weir: max_bytes must be at least %d MiB (the largest cacheable object is 10%% of a shard)", minStoreBytes>>20)
+	}
 	return validateSnapshotDir(h.SnapshotDir)
 }
 
 // Cleanup implements caddy.CleanerUpper. It is safe to call twice: the
 // engine closes first, then the one store reference is released, which closes
-// the store only when no other instance holds it (08 §3).
+// the store only when no other instance holds it (08 §3). h.engine stays set,
+// because requests still running on the old config read it; the closed
+// engine rejects them with ErrClosed.
 func (h *Handler) Cleanup() error {
-	e, release := h.engine, h.release
-	if e == nil {
+	if h.engine == nil || h.closed.Swap(true) {
 		return nil
 	}
-	h.engine, h.pool, h.release = nil, nil, nil
 	ctx, cancel := context.WithTimeout(context.Background(), closeTimeout)
 	defer cancel()
-	err := e.Close(ctx)
-	return errors.Join(err, release())
+	err := h.engine.Close(ctx)
+	return errors.Join(err, h.release())
 }
 
 // ServeHTTP implements caddyhttp.MiddlewareHandler. Serving arrives with

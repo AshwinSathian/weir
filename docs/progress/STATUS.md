@@ -465,7 +465,8 @@ The cards' Notes give the reasons and the options rejected. All three come befor
 ## Notes for P2-03 and later (from P2-02)
 
 - `multi_host` is an explicit key (08 §2). P2-03 should log one warning when one engine sees a second distinct host while `multi_host` is off (bounded: count to 2).
-- `max_bytes` below about 160 MiB fails Provision: the engine's largest object is 10% of a shard and defaults to 1 MiB, and the adapter has no `Storable.MaxObjectBytes` key. Add the key or clamp in a later card.
-- The key-generation hash guards in-process reloads only; persisting it with the snapshot is a follow-up (08 §3). `Forward.Mode` and `Storable.StripSetCookie` have no JSON form yet, so only `forward.allow` feeds it.
+- `max_bytes` below 160 MiB is now rejected by `Validate` (no `Storable.MaxObjectBytes` key yet). Add the key, then lower the floor.
+- The key-generation hash is also recorded beside the snapshot (`<name>.weir.keygen`); `Forward.Mode` and `Storable.StripSetCookie` have no JSON form yet, so only `forward.allow` feeds it.
+- `Cleanup` keeps `h.engine` set (a closed engine rejects late requests), so P2-03's `ServeHTTP` can read it without a lock.
 - Shard count is not in the pool key (no setting); add it with the setting. `defaultShards` and `defaultStoreBytes` in caddy/pool.go duplicate memory defaults; P2-04 replaces the size with auto-sizing.
 - Caddy lint here: `cd caddy && GOWORK=off GOTOOLCHAIN=go1.27.0 go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0 run`. `make check` lint fails in this container (Go 1.25 build); CI must confirm.

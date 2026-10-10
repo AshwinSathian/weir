@@ -2,15 +2,18 @@ package weircaddy
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/caddyserver/caddy/v2"
 
 	"github.com/AshwinSathian/weir/store"
+	"github.com/AshwinSathian/weir/store/memory"
 )
 
 func newCtx(t *testing.T) caddy.Context {
@@ -57,7 +60,7 @@ func globalEpoch(t *testing.T, st store.Store) (store.Epoch, bool) {
 	return ep, ok
 }
 
-// 08 §3: Cleanup deletes exactly once; an extra Delete would take another
+// FR-SNP-1, 08 §3: Cleanup deletes exactly once; an extra Delete would take another
 // instance's reference and close the store under a live engine.
 func TestCleanupDeletesOnce(t *testing.T) {
 	ctx1, ctx2 := newCtx(t), newCtx(t)
@@ -168,7 +171,7 @@ func TestRolledBackReloadRestoresSnapshotWriter(t *testing.T) {
 	}
 }
 
-// 08 §3: the pooled value closes with the last release.
+// FR-SNP-1, 08 §3: the pooled value closes with the last release.
 func TestPoolDestructsOnLastRelease(t *testing.T) {
 	h1 := mustLoad(t, newCtx(t), `{"name":"last","max_bytes":"200MiB"}`)
 	h2 := mustLoad(t, newCtx(t), `{"name":"last","max_bytes":"200MiB"}`)
@@ -284,5 +287,150 @@ func TestSnapshotDirValidation(t *testing.T) {
 	}
 	if err := (&Handler{Name: "a", SnapshotDir: "/var/lib/weir"}).Validate(); err != nil {
 		t.Error(err)
+	}
+}
+
+// R-3: the hash is recorded only after the purge, so a Provision that failed
+// after seeing the change does not let a retry of the same config skip it.
+func TestKeyGenHashRetryAfterFailedProvisionStillPurges(t *testing.T) {
+	a := mustLoad(t, newCtx(t), `{"name":"kg-retry","max_bytes":"200MiB"}`)
+	if _, err := loadIn(t, newCtx(t), `{"name":"kg-retry","max_bytes":"200MiB","forward":{"allow":["x-a"]},"limiter":{"max_concurrent":-1}}`); err == nil {
+		t.Fatal("invalid engine config accepted")
+	}
+	if _, ok := globalEpoch(t, a.pool.store); ok {
+		t.Fatal("epoch written by a Provision that failed")
+	}
+	mustLoad(t, newCtx(t), `{"name":"kg-retry","max_bytes":"200MiB","forward":{"allow":["x-a"]}}`)
+	if ep, ok := globalEpoch(t, a.pool.store); !ok || ep.Mode != store.EpochHard {
+		t.Fatalf("retry wrote no hard epoch: %+v, %v", ep, ok)
+	}
+}
+
+// R-3: a snapshot written under another hash, or with none recorded, is
+// deleted before the store can load it; a matching one is kept.
+func TestSnapshotKeyGenReconcile(t *testing.T) {
+	dir := t.TempDir()
+	snap := filepath.Join(dir, "r.weir")
+	x, y := sha256.Sum256([]byte("x")), sha256.Sum256([]byte("y"))
+	write := func() {
+		if err := os.WriteFile(snap, []byte("snapshot"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write()
+	if dropped, err := reconcileKeyGen(dir, "r", x); err != nil || !dropped {
+		t.Fatalf("no record: dropped=%v err=%v", dropped, err)
+	}
+	if _, err := os.Stat(snap); err == nil {
+		t.Fatal("snapshot with no hash record survived")
+	}
+	write()
+	if dropped, err := reconcileKeyGen(dir, "r", x); err != nil || dropped {
+		t.Fatalf("same hash: dropped=%v err=%v", dropped, err)
+	}
+	if _, err := os.Stat(snap); err != nil {
+		t.Fatal("snapshot with matching hash deleted")
+	}
+	if dropped, err := reconcileKeyGen(dir, "r", y); err != nil || !dropped {
+		t.Fatalf("changed hash: dropped=%v err=%v", dropped, err)
+	}
+	if _, err := os.Stat(snap); err == nil {
+		t.Fatal("snapshot under an old hash survived")
+	}
+	if fi, err := os.Stat(keyGenPath(dir, "r")); err != nil || fi.Mode().Perm() != 0o600 {
+		t.Fatalf("record: %v %v", fi, err)
+	}
+}
+
+// R-3, 08 §3: a reload that changes the hash and the store spec together
+// builds a new store; the record beside the snapshot follows the live hash.
+func TestKeyGenRecordFollowsLoad(t *testing.T) {
+	dir := t.TempDir()
+	h := mustLoad(t, newCtx(t), `{"name":"rec","max_bytes":"200MiB","snapshot_dir":"`+dir+`"}`)
+	want := keyGenHash(h.weirConfig())
+	got, err := os.ReadFile(keyGenPath(dir, "rec"))
+	if err != nil || [sha256.Size]byte(got) != want {
+		t.Fatalf("record after first load: %x %v", got, err)
+	}
+	h2 := mustLoad(t, newCtx(t), `{"name":"rec","max_bytes":"400MiB","snapshot_dir":"`+dir+`","forward":{"allow":["x-a"]}}`)
+	want2 := keyGenHash(h2.weirConfig())
+	got, err = os.ReadFile(keyGenPath(dir, "rec"))
+	if err != nil || [sha256.Size]byte(got) != want2 {
+		t.Fatalf("record after spec and hash change: %x %v", got, err)
+	}
+}
+
+// Rejecting early beats a late engine error about a field the operator
+// cannot set (the largest object is 10% of a shard).
+func TestMaxBytesBelowMinimumRejectedEarly(t *testing.T) {
+	if err := (&Handler{Name: "a", MaxBytes: minStoreBytes - 1}).Validate(); err == nil {
+		t.Fatal("max_bytes below the minimum accepted")
+	}
+	for _, n := range []ByteSize{0, minStoreBytes} {
+		if err := (&Handler{Name: "a", MaxBytes: n}).Validate(); err != nil {
+			t.Errorf("max_bytes %d rejected: %v", n, err)
+		}
+	}
+	if _, err := load(t, `{"name":"tiny","max_bytes":"8MiB"}`); err == nil {
+		t.Fatal("8MiB provisioned")
+	}
+}
+
+// T-33-style planted-snapshot guard: a directory others can write is refused,
+// and a relative one is not accepted at all.
+func TestSnapshotDirSafety(t *testing.T) {
+	if err := (&Handler{Name: "a", SnapshotDir: "relative/dir"}).Validate(); err == nil {
+		t.Fatal("relative snapshot_dir accepted")
+	}
+	open := t.TempDir()
+	if err := os.Chmod(open, 0o777); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := load(t, `{"name":"open","max_bytes":"200MiB","snapshot_dir":"`+open+`"}`); err == nil {
+		t.Fatal("world-writable snapshot_dir accepted")
+	}
+	// "/dir/" and "/dir" are one store identity.
+	dir := t.TempDir()
+	a := mustLoad(t, newCtx(t), `{"name":"slash","max_bytes":"200MiB","snapshot_dir":"`+dir+`"}`)
+	b := mustLoad(t, newCtx(t), `{"name":"slash","max_bytes":"200MiB","snapshot_dir":"`+dir+`/"}`)
+	if a.pool != b.pool {
+		t.Fatal("trailing slash built a second store")
+	}
+}
+
+// 08 §3: concurrent acquire and release leave no reference, claim or live
+// entry behind. Run under -race.
+func TestRegistryConcurrentAcquireRelease(t *testing.T) {
+	r := newStoreRegistry()
+	spec := storeSpec{name: "conc", maxBytes: 0}
+	var kg [sha256.Size]byte
+	build := func() (*memory.Store, error) { return memory.New(memory.Config{}) }
+	var wg sync.WaitGroup
+	for range 16 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			load := new(int)
+			for range 25 {
+				p, _, err := r.acquire(load, spec, kg, build)
+				if err != nil {
+					t.Error(err)
+					return
+				}
+				if err := r.release(load, p); err != nil {
+					t.Error(err)
+					return
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	if n, ok := r.pool.References(spec); ok {
+		t.Fatalf("pool still holds %d references", n)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if len(r.live) != 0 || len(r.loads) != 0 {
+		t.Fatalf("leaked state: live=%d loads=%d", len(r.live), len(r.loads))
 	}
 }
