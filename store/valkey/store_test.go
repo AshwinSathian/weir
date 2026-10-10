@@ -18,8 +18,9 @@ type fakeClient struct {
 	pol    map[string]string
 	polErr error
 	closed atomic.Int32
-	kv     fakeKV // the entry commands (entries_test.go)
-	ep     fakeEp // the epoch scripts (epochs_test.go)
+	kv     fakeKV   // the entry commands (entries_test.go)
+	ep     fakeEp   // the epoch scripts (epochs_test.go)
+	vary   fakeVary // hooks for the vary compare-and-set (vary_test.go)
 }
 
 func (f *fakeClient) policies(context.Context) (map[string]string, error) { return f.pol, f.polErr }

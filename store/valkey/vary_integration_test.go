@@ -18,9 +18,10 @@ import (
 )
 
 // FR-KEY-10, NFR-3, T6.2, 05 V-1: 64 concurrent writers of different variants
-// against a real server never list more than MaxVariants, and each one that
-// reports a swap is listed (no lost reference). Runs against the server's
-// script, so it also covers CoLocateEntries.
+// against a real server lose no reference: exactly the writers that report a
+// swap are listed. The test itself stops at maxVariants (the engine owns the
+// cap; TestEngineVaryCapHoldsAcrossWriters checks it), so this proves the
+// server-side compare-and-set. Covers CoLocateEntries too.
 func TestVaryCASConcurrentWriters(t *testing.T) {
 	for _, co := range []bool{false, true} {
 		t.Run("co-locate "+strconv.FormatBool(co), func(t *testing.T) {
@@ -117,5 +118,35 @@ func TestEngineVaryCapHoldsAcrossWriters(t *testing.T) {
 	}
 	if hits > 8 || hits == 0 {
 		t.Fatalf("reachable variants = %d, want 1..8", hits)
+	}
+}
+
+// 05 V-1, 05 §2.2: a nil prev swaps over a record past its Expires that the
+// server still holds, and loses to a live one, on a real server.
+func TestVaryCASNilPrevOverStaleRecord(t *testing.T) {
+	s, err := New(Config{Addrs: []string{serverAddr(t)}, NoClockSkew: true,
+		Prefix: "vs" + strconv.FormatInt(time.Now().UnixNano(), 36)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	var k store.Key
+	k[0] = 5
+	cl, err := s.acquire(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale, err := store.Encode(specEntry(time.Now().Add(-2*time.Hour), "en")) // expired an hour ago
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cl.set(t.Context(), s.entryKey(k), stale, time.Now().Add(time.Hour).UnixMilli()); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := s.SetVarySpec(t.Context(), k, nil, specEntry(time.Now(), "fr")); !ok || err != nil {
+		t.Fatalf("swap over the stale record = %v, %v", ok, err)
+	}
+	if ok, _ := s.SetVarySpec(t.Context(), k, nil, specEntry(time.Now(), "de")); ok {
+		t.Fatal("nil prev swapped over a live record")
 	}
 }

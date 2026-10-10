@@ -52,7 +52,10 @@ func (s *Store) SetVarySpec(ctx context.Context, k store.Key, prev, next *store.
 // Expires as absent while the server, on its own clock, may still hold it,
 // and the swap must not fail until the server catches up (05 §2.2). If the
 // key now holds a live record, the loss is real. Otherwise it swaps against
-// whatever was seen there, which still loses to a concurrent writer.
+// whatever was seen there, which still loses to a concurrent writer. The
+// engine's Get returns an error, not ErrNotFound, for an undecodable record,
+// so it never passes a nil prev for one; this serves direct callers.
+// The three round trips share one callCtx deadline (05 §7).
 func (s *Store) swapOverStale(ctx context.Context, cl client, key string, val []byte, pxat int64) (bool, error) {
 	raw, err := cl.get(ctx, key)
 	switch {

@@ -20,6 +20,10 @@ Earlier decisions: none open. Decided 2026-10-10 (P2-03b, review of PR 79; Ashwi
 - Implemented in this PR with P25-04b, at Ashwin's request: interface, memory store, engine (`setVariantCAS`, 16 attempts, a writer that loses to a full spec deletes its variant), docs 04 §6.7 and 05 V-1. The old path showed 64 of 64 variants reachable with `MaxVariants` 8, because lookup finds a variant by key and the lost spec refs only hid the accounting.
 - Valkey implementation stays P25-05b (a script comparing a digest of the stored spec). Until then the Valkey store has no capability and keeps the old bound.
 
+## Decided 2026-10-10 (P25-05b, adversarial review of PR 92)
+
+Ashwin delegated "take decisions on all items"; "Waiting on Ashwin" was empty. No must-fix. The undecodable-record swap stays but is documented as unreachable from the engine; no SHA-1 digest (gosec; the cost bound is in 05 §7); fallback tests and a real-server stale-record test added.
+
 ## Notes for the next session (P25-05b)
 
 - The Valkey vary CAS compares the encoded `prev` bytes; a real server confirmed decode-then-encode reproduces the stored bytes. A nil `prev` that loses re-reads the key and swaps over a record past its `Expires` or one that does not decode (Get hides both).

@@ -3,6 +3,7 @@ package valkey
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
@@ -16,7 +17,15 @@ var _ store.VarySetter = (*Store)(nil)
 // evalVarySet is the fake of the compare-and-set script: it holds the same
 // lock as the other fake commands, so the compare and the write are atomic as
 // they are on the server.
-func (f *fakeClient) evalVarySet(_ context.Context, key string, prev []byte, hasPrev bool, val []byte, pxat int64) (bool, error) {
+func (f *fakeClient) evalVarySet(ctx context.Context, key string, prev []byte, hasPrev bool, val []byte, pxat int64) (bool, error) {
+	ok, err := f.evalVarySetLocked(key, prev, hasPrev, val, pxat)
+	if h := f.vary.afterEval; h != nil {
+		h()
+	}
+	return ok, err
+}
+
+func (f *fakeClient) evalVarySetLocked(key string, prev []byte, hasPrev bool, val []byte, pxat int64) (bool, error) {
 	f.kv.mu.Lock()
 	defer f.kv.mu.Unlock()
 	if f.kv.err != nil {
@@ -32,6 +41,13 @@ func (f *fakeClient) evalVarySet(_ context.Context, key string, prev []byte, has
 	f.kv.vals[key], f.kv.pxat[key] = val, pxat
 	f.kv.sets++
 	return true, nil
+}
+
+// fakeVary holds test hooks that let a concurrent writer act at a chosen
+// point of SetVarySpec's fallback.
+type fakeVary struct {
+	afterGet  func() // after a GET found its key
+	afterEval func() // after a compare-and-set script ran
 }
 
 func specEntry(now time.Time, langs ...string) *store.Entry {
@@ -113,6 +129,66 @@ func TestSetVarySpec(t *testing.T) {
 			t.Fatalf("record after the swap = %v, %v", got, err)
 		}
 	})
+	t.Run("nil prev loses to a live record and leaves it untouched", func(t *testing.T) {
+		s, cl := connected(t, nil)
+		if err := s.Set(t.Context(), k, specEntry(now, "en")); err != nil {
+			t.Fatal(err)
+		}
+		if ok, _ := s.SetVarySpec(t.Context(), k, nil, specEntry(now, "fr")); ok {
+			t.Fatal("swapped over a live record")
+		}
+		if cl.kv.sets != 1 {
+			t.Fatalf("sets = %d, the live record must be untouched", cl.kv.sets)
+		}
+	})
+	t.Run("nil prev swaps when the record vanishes after the script lost", func(t *testing.T) {
+		s, cl := connected(t, nil)
+		if err := s.Set(t.Context(), k, specEntry(now, "en")); err != nil {
+			t.Fatal(err)
+		}
+		cl.vary.afterEval = func() { // the server expired it after the script said no
+			cl.vary.afterEval = nil
+			_ = cl.del(t.Context(), s.entryKey(k))
+		}
+		if ok, err := s.SetVarySpec(t.Context(), k, nil, specEntry(now, "fr")); !ok || err != nil {
+			t.Fatalf("swap after the record vanished = %v, %v", ok, err)
+		}
+	})
+	t.Run("a server error on the re-read is ErrUnavailable", func(t *testing.T) {
+		s, cl := connected(t, nil)
+		if err := s.Set(t.Context(), k, specEntry(now, "en")); err != nil {
+			t.Fatal(err)
+		}
+		cl.vary.afterEval = func() { // only the re-read fails
+			cl.vary.afterEval = nil
+			cl.kv.mu.Lock()
+			cl.kv.err = fmt.Errorf("boom")
+			cl.kv.mu.Unlock()
+		}
+		if ok, err := s.SetVarySpec(t.Context(), k, nil, specEntry(now, "fr")); ok || !errors.Is(err, store.ErrUnavailable) {
+			t.Fatalf("swap = %v, %v, want false, ErrUnavailable", ok, err)
+		}
+	})
+	t.Run("the second swap loses to a writer that replaced the stale record", func(t *testing.T) {
+		s, cl := connected(t, nil)
+		b, err := store.Encode(specEntry(now.Add(-2*time.Hour), "en")) // expired an hour ago
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = cl.set(t.Context(), s.entryKey(k), b, time.Now().Add(time.Hour).UnixMilli())
+		cl.vary.afterGet = func() { // a concurrent writer wins between the re-read and the second script
+			cl.vary.afterGet = nil
+			if err := s.Set(t.Context(), k, specEntry(now, "de")); err != nil {
+				t.Error(err)
+			}
+		}
+		if ok, err := s.SetVarySpec(t.Context(), k, nil, specEntry(now, "fr")); ok || err != nil {
+			t.Fatalf("swap = %v, %v, want a lost swap", ok, err)
+		}
+		if got, err := s.Get(t.Context(), k); err != nil || len(got.Variants) != 1 || got.Variants[0].Key[0] != 'd' {
+			t.Fatalf("record = %v, %v, want the concurrent writer's", got, err)
+		}
+	})
 	t.Run("a next that is past its expiry is declined and leaves the record", func(t *testing.T) {
 		s, _ := connected(t, nil)
 		a := specEntry(now, "en")
@@ -156,7 +232,7 @@ func TestSetVarySpecConcurrentWritersLoseNothing(t *testing.T) {
 			defer wg.Done()
 			var ref store.VariantRef
 			ref.Key[0], ref.Key[1], ref.Expires = 1, byte(i), now.Add(time.Hour)
-			for {
+			for range 1000 { // a regression fails the count below instead of hanging
 				cur, err := s.Get(t.Context(), k)
 				next := specEntry(now)
 				if err == nil {
