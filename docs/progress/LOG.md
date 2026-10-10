@@ -1381,3 +1381,10 @@ Entry template:
 - Deviations: none in docs. T6.12 uses a POST group invalidation because the admin purge API is P2-05. Review (card-reviewer): no must-fix; fixed t.Fatal from goroutines, loosened the collapsed assertion to at least one (load-dependent), added the 05 E-7 citation, corrected two requirement citations.
 - Follow-ups: end-to-end admin purge case in P2-05.
 - Context: low; size S was right.
+
+## 2026-10-10 · P2-03b · review-fixes
+- Branch / PR: claude/lucid-wright-8y0epq / https://github.com/AshwinSathian/weir/pull/79
+- Done: adversarial review (agent), decisions delegated by Ashwin ("take decisions on all items"; "Waiting on Ashwin" was empty). No must-fix. Fixed: silent skip of caddytest turned into a failure outside `-short`; site bound to 127.0.0.1; herd test fails with counts instead of 100 timeouts. Decided: real-clock caddytest files are a documented exception (CLAUDE.md rule 6, docs/07 §1) rather than a build tag.
+- Tests: e2e tests unchanged in scope; `make check` passes.
+- Deviations: CLAUDE.md rule 6 and docs/07 §1 amended (docs/07 date bumped); this changes a project rule under the delegation.
+- Declined: subtest independence in the reload test (nit), a pinned reserve in the herd test (no config key; the comment ties it to the FR-LIM-4 default), the T6.6 t=80 s case (needs a clock; the engine test covers it).

@@ -91,10 +91,24 @@ func e2eCaddyfile(upstream, site string) string {
 	skip_install_trust
 }
 http://localhost:9080 {
+	bind 127.0.0.1
 %s
 	reverse_proxy %s
 }
 `, site, strings.TrimPrefix(upstream, "http://"))
+}
+
+// newTester wraps caddytest.NewTester. caddytest skips a test when its admin
+// port does not come up, and a skip is green in make check, so outside -short
+// a skip is turned into a failure.
+func newTester(t *testing.T) *caddytest.Tester {
+	t.Helper()
+	t.Cleanup(func() {
+		if t.Skipped() && !testing.Short() {
+			t.Error("caddytest skipped the test: admin port 2999 did not come up")
+		}
+	})
+	return caddytest.NewTester(t)
 }
 
 func (o *e2eOrigin) caddyfile(site string) string { return e2eCaddyfile(o.URL, site) }
@@ -150,7 +164,7 @@ func eventually(t *testing.T, what string, cond func() bool) {
 // host to a site that is already multi_host changes nothing.
 func TestReloadKeepsWarmKeys(t *testing.T) {
 	o := newE2EOrigin(t, cacheableBody)
-	tester := caddytest.NewTester(t)
+	tester := newTester(t)
 	c := tester.Client
 	site := func(extra string) string {
 		return "\tweir {\n\t\tname e2e-reload\n\t\tmulti_host\n" + extra + "\t}\n"
@@ -211,7 +225,7 @@ func TestE2ECoalesceColdKey(t *testing.T) {
 	o := newE2EOrigin(t, cacheableBody)
 	gate := make(chan struct{})
 	o.setGate(gate)
-	tester := caddytest.NewTester(t)
+	tester := newTester(t)
 	tester.InitServer(o.caddyfile("\tweir {\n\t\tname e2e-coalesce\n\t}\n"), "caddyfile")
 
 	const clients = 50
@@ -280,7 +294,7 @@ func TestE2EOriginOutage(t *testing.T) {
 		w.Header().Set("Cache-Control", cc)
 		_, _ = io.WriteString(w, "body "+r.URL.Path)
 	})
-	tester := caddytest.NewTester(t)
+	tester := newTester(t)
 	tester.InitServer(o.caddyfile("\tweir {\n\t\tname e2e-outage\n\t}\n"), "caddyfile")
 	c := tester.Client
 	for _, p := range []string{"/sie", "/mr"} {
@@ -318,7 +332,7 @@ func TestE2EOriginOutage(t *testing.T) {
 func TestRetryAfterSurvivesHandleErrors(t *testing.T) {
 	o := newE2EOrigin(t, cacheableBody)
 	o.down.Store(true)
-	tester := caddytest.NewTester(t)
+	tester := newTester(t)
 	site := "\tweir {\n\t\tname e2e-retry\n\t}\n" +
 		"\thandle_errors {\n\t\theader X-Handled yes\n\t\trespond \"custom {http.error.status_code}\" {http.error.status_code}\n\t}\n"
 	tester.InitServer(o.caddyfile(site), "caddyfile")
@@ -351,7 +365,7 @@ func TestE2EPurgeHerd(t *testing.T) {
 		w.Header().Set("Cache-Groups", `"g"`)
 		_, _ = io.WriteString(w, "body "+r.URL.Path)
 	})
-	tester := caddytest.NewTester(t)
+	tester := newTester(t)
 	site := fmt.Sprintf("\tweir {\n\t\tname e2e-herd\n\t\tlimiter {\n\t\t\tmax_concurrent %d\n\t\t}\n\t}\n", maxConc)
 	tester.InitServer(o.caddyfile(site), "caddyfile")
 	c := tester.Client
@@ -377,15 +391,18 @@ func TestE2EPurgeHerd(t *testing.T) {
 
 	o.setGate(make(chan struct{}))
 	var wg sync.WaitGroup
-	var stale atomic.Int32
+	var stale, failed atomic.Int32
+	// A purge that turned hard would block every request on the gate; a short
+	// timeout reports that as "served stale" counts, not 100 timeouts at 5 s.
+	quick := &http.Client{Transport: c.Transport, Timeout: 2 * time.Second}
 	start := time.Now()
 	for i := range keys {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			resp, err := getErr(t, c, "/k"+strconv.Itoa(i))
+			resp, err := getErr(t, quick, "/k"+strconv.Itoa(i))
 			if err != nil {
-				t.Error(err)
+				failed.Add(1)
 				return
 			}
 			if resp.code == http.StatusOK && resp.body == "body /k"+strconv.Itoa(i) &&
@@ -396,7 +413,7 @@ func TestE2EPurgeHerd(t *testing.T) {
 	}
 	wg.Wait() // the origin is still gated, so these were all served stale
 	if n := stale.Load(); n != keys {
-		t.Fatalf("%d of %d requests served stale while revalidating", n, keys)
+		t.Fatalf("%d of %d requests served stale while revalidating (%d timed out)", n, keys, failed.Load())
 	}
 	if d := time.Since(start); d > 3*time.Second {
 		t.Fatalf("herd took %v with the origin gated", d)
