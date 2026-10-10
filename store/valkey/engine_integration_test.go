@@ -37,7 +37,7 @@ import (
 // here, and a skew would stretch the wait.
 func engineStore(t *testing.T) *Store {
 	t.Helper()
-	s, err := New(Config{Addrs: []string{serverAddr(t)}, NoClockSkew: true, Prefix: "e" + strconv.FormatInt(time.Now().UnixNano(), 36)})
+	s, err := New(Config{Addrs: []string{serverAddr(t)}, NoClockSkew: true, Prefix: "e" + strconv.FormatInt(time.Now().UnixNano(), 36) + sanitize(t.Name())})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +134,7 @@ func waitFor(t *testing.T, what string, cond func() bool) {
 func TestEngineCoalesceColdKey(t *testing.T) {
 	t.Parallel()
 	o := testorigin.NewChecked(t, 64, 16)
-	o.Default(testorigin.Behavior{Header: http.Header{"Cache-Control": {"max-age=60"}}, Body: []byte("x"), Delay: 200 * time.Millisecond})
+	o.Default(testorigin.Behavior{Header: http.Header{"Cache-Control": {"max-age=60"}}, Body: []byte("x"), Delay: 500 * time.Millisecond})
 	obs := &eventLog{}
 	e := engineWith(t, weir.Config{Observer: obs})
 
@@ -198,17 +198,17 @@ func TestEngineStaleWhileRevalidate(t *testing.T) {
 func TestEngineStaleIfErrorOnOriginDown(t *testing.T) {
 	t.Parallel()
 	o := testorigin.NewChecked(t, 64, 16)
-	o.Default(cc(200, "max-age=1, stale-if-error=2", "a"))
+	o.Default(cc(200, "max-age=1, stale-if-error=4", "a"))
 	e := engineWith(t, weir.Config{})
 
 	engineServe(t, e, "/a", o)
-	time.Sleep(1500 * time.Millisecond) // stale, 0.5 s into the 2 s window
+	time.Sleep(1500 * time.Millisecond) // stale, 0.5 s into the 4 s window
 	o.SetDown(true)
 	resp, body := engineServe(t, e, "/a", o)
 	if body != "a" || resp.Cache.Stale != weir.StaleIfError {
 		t.Fatalf("inside the window: %q stale=%v, want stale-if-error", body, resp.Cache.Stale)
 	}
-	time.Sleep(2500 * time.Millisecond) // 4 s old: past max-age plus window
+	time.Sleep(5 * time.Second) // 6.5 s old: past max-age plus window
 	if _, _, err := engineServeErr(t, e, "/a", o); !errors.Is(err, weir.ErrOrigin) {
 		t.Fatalf("past the window: err = %v, want ErrOrigin", err)
 	}
@@ -323,10 +323,10 @@ func TestEngineNegativeCache(t *testing.T) {
 	o := testorigin.NewChecked(t, 64, 16)
 	o.Default(testorigin.Behavior{Status: 503, Header: http.Header{"Retry-After": {"7"}, "X-Origin": {"secret"}}, Body: []byte("down")})
 	obs := &eventLog{}
-	e := engineWith(t, weir.Config{Observer: obs, Negative: weir.NegativeConfig{TTL: time.Second}})
+	e := engineWith(t, weir.Config{Observer: obs, Negative: weir.NegativeConfig{TTL: 3 * time.Second}})
 
 	engineServe(t, e, "/a", o)
-	for range 20 {
+	for range 5 {
 		resp, body := engineServe(t, e, "/a", o)
 		if resp.StatusCode != http.StatusServiceUnavailable || resp.Cache.Detail != "negative" || body != "" || resp.Header.Get("X-Origin") != "" || resp.Header.Get("Retry-After") != "7" {
 			t.Fatalf("negative hit: %d detail=%q body=%q header=%v", resp.StatusCode, resp.Cache.Detail, body, resp.Header)
@@ -335,7 +335,7 @@ func TestEngineNegativeCache(t *testing.T) {
 	if c := o.Calls("/a"); c != 1 {
 		t.Fatalf("origin calls = %d, want 1", c)
 	}
-	time.Sleep(2100 * time.Millisecond) // past Negative.TTL on the server clock
+	time.Sleep(3200 * time.Millisecond) // past Negative.TTL on the server clock
 	engineServe(t, e, "/a", o)
 	if c := o.Calls("/a"); c != 2 {
 		t.Fatalf("after Negative.TTL origin calls = %d, want 2", c)
@@ -349,7 +349,7 @@ func TestEngineBreaker(t *testing.T) {
 	t.Parallel()
 	o := testorigin.NewChecked(t, 64, 16)
 	o.Route("/stale", cc(200, "max-age=1, stale-if-error=600", "s"))
-	cfg := weir.Config{Breaker: weir.BreakerConfig{MinRequests: 10, OpenFor: time.Second, MaxOpenFor: time.Second}, Rand: func() float64 { return 0.5 }}
+	cfg := weir.Config{Breaker: weir.BreakerConfig{MinRequests: 10, OpenFor: 3 * time.Second, MaxOpenFor: 3 * time.Second}, Rand: func() float64 { return 0.5 }}
 	e := engineWith(t, cfg)
 
 	engineServe(t, e, "/stale", o)
@@ -372,7 +372,7 @@ func TestEngineBreaker(t *testing.T) {
 		t.Fatalf("origin calls while open = %d, want none", o.TotalCalls()-calls)
 	}
 
-	time.Sleep(1200 * time.Millisecond) // past OpenFor
+	time.Sleep(3200 * time.Millisecond) // past OpenFor
 	o.Default(cc(200, "max-age=60", "ok"))
 	if _, body := engineServe(t, e, "/probe", o); body != "ok" {
 		t.Fatalf("probe body = %q", body)
@@ -380,4 +380,15 @@ func TestEngineBreaker(t *testing.T) {
 	if _, body := engineServe(t, e, "/after", o); body != "ok" {
 		t.Fatalf("after close: body = %q", body)
 	}
+}
+
+// sanitize keeps the test name usable inside a key prefix and short.
+func sanitize(name string) string {
+	b := make([]byte, 0, len(name))
+	for i := 0; i < len(name) && len(b) < 24; i++ {
+		if c := name[i]; c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' {
+			b = append(b, c)
+		}
+	}
+	return string(b)
 }

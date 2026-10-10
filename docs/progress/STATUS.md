@@ -4,9 +4,9 @@ Updated: 2026-10-10
 Phase: 1
 Current card: none
 Card state: awaiting-merge
-Branch: claude/compassionate-pasteur-k8ueay
-PR: https://github.com/AshwinSathian/weir/pull/89
-Next card: P25-04
+Branch: claude/optimistic-mendel-k6iji6
+PR: pending (filled after the PR is opened)
+Next card: P25-05
 
 ## Waiting on Ashwin
 
@@ -111,6 +111,11 @@ Ashwin delegated "take decisions on all items"; "Waiting on Ashwin" was empty. A
 Ashwin delegated "take decisions on all items"; "Waiting on Ashwin" was empty. An independent agent attacked the PR; no must-fix. Decisions: empty `Prefix`/`HashTag` mean the default (card test list reworded); config errors wrap `weir.ErrInvalidConfig` (no new sentinel); upper bounds added (MaxRetention 10 y, MaxClockSkew 1 h, MaxHardEpochs 1e6, key parts 64 bytes); `HardEpochWait` whole ms and below `CallTimeout`; `Addrs` must be unique `host:port`. Fixed: `Validate` copy aliased `Addrs`/`TLS`, returns the zero Config on error; JSON marshalling leaked the password (now redacted); `mapError` leaves wrapped `valkey.Nil` and `ErrNotFound` alone. Written into 05 §7.
 
 ## Notes for the next session
+
+- P25-04 done: `store/valkey/engine_integration_test.go` (tag `integration`, eight engine scenarios on the real clock, about 15 s). A fresh prefix starts with a repair epoch at `ceil(server now)`, and an entry fetched in that second is purged (05 §7, E-7), so `engineStore` primes the store and waits 2.1 s with `NoClockSkew`. Not repeated against Valkey (they read memory-store internals or need a wrapper or synctest timing): flight-table bounds, the store-outage wrapper tests, the 5 000-key limiter cap, batch expiry spread, limiter/partition/miss-rate component tests.
+- Still open from P25-03b: nobody has measured the two-round-trip lookup under an invalidation flood; P25-04 did not add a benchmark (not in its scope). The CI Valkey job has not run on Valkey 8.1; local runs use redis 7.0.15.
+- P25-05 needs Ashwin's decision first (card Notes: capability `VarySetter` vs a version field on `Entry`).
+- Work was done on `claude/optimistic-mendel-k6iji6`, not a `card/*` branch.
 
 - P25-03b done: `store/valkey/sketch.go` (seed, positions, `NewestEpochShared`, `setSketch`). Loss is now `meta` without field `v` or a missing plane; the client writes `meta.seed` first with `HSETNX`, so `meta` alone no longer means "initialised". Scripts take the seed id and reply `SEED_CHANGED` (write: error reply mapped to `errSeedChanged`; read: `{-2}`); the read arguments are four per non-global tag. `SetEpoch` refuses only unknown modes now, so the store can be wired into an engine (P25-07 still depends on P25-04..06).
 - `storetest.EpochNeverUnderInvalidates` now accepts a more severe colliding mode and checks time only for the tag's own mode (skew makes the other case legitimate); `Parallel(n)` added. The Valkey conformance run passes no `EpochModes` and takes about 10 s for 200 000 epochs locally (redis 7.0.15).

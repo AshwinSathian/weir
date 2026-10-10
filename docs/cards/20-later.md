@@ -139,7 +139,7 @@ These phases start from draft specs. Each begins with one planning card that ver
 - AC: soft and invalid epochs raise `d = 2` cells per 05 §7; `NewestEpochShared` implemented (`store.SharedTagEpochs`), one round trip, never reads the invalid plane for shared tags; positions use `SHA-256(seed || tag)` computed in Go; the 16-byte seed comes from `crypto/rand`, is stored with `HSETNX` and shared by all nodes; scripts check the seed id and reply `SEED_CHANGED`
 - Notes: valkey-go auto-pipelines concurrent callers, which is why the property test gets `Parallel`; if 200 000 epochs still takes more than a few minutes, stop and ask before shrinking the count (docs/07 criterion).
 
-### [ ] P25-04 Engine suite against Valkey
+### [x] P25-04 Engine suite against Valkey
 - Plan: 2.5.2 · Size: M · Depends on: P25-03b
 - Read: 07 §1, §6 (T6.x matrix); engine test helpers; hard rule 6 (real clock only under `integration`)
 - Touch: engine test files in store/valkey (build tag `integration`), small test-helper changes in the root package only if an engine test hard-codes the memory store
