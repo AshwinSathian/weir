@@ -1516,7 +1516,7 @@ Entry template:
 - Context: low; size M was right.
 
 ## 2026-10-10 · P25-01b · done
-- Branch / PR: claude/brave-hamilton-yomx12 / PENDING
+- Branch / PR: claude/brave-hamilton-yomx12 / https://github.com/AshwinSathian/weir/pull/86
 - Done: `store/valkey` Store skeleton (store.go, client.go): `New` validates only, lazy single-flight connect at most once per second, shared dial under `CallTimeout`, closed/ctx checks before dialing, fail-closed `maxmemory-policy` check on every node, `go.work` entry. Get/Set/Delete/epochs are placeholders returning `ErrUnavailable` until P25-02/03.
 - Tests: card list plus TestCloseClosesClientBuiltDuringConnect, TestShortDeadlineCallerDoesNotCancelSharedDial, empty-node and empty-policy rows; submodule lint, vet, race tests, root vet/tests and trace-strict pass. Root lint and `make check`'s lint/modules steps cannot run here (Go 1.25 binary); ran with the go1.27 toolchain.
 - Deviations: `New` returns `*Store`; prefix `store: valkey:` (card note and 05 §7 updated). 05 §7 Connection bullet gained fail-closed policy, shared dial, Close bound.

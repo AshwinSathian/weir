@@ -5,7 +5,7 @@ Phase: 1
 Current card: none
 Card state: awaiting-merge
 Branch: claude/brave-hamilton-yomx12
-PR: PENDING
+PR: https://github.com/AshwinSathian/weir/pull/86
 Next card: P25-02
 
 ## Waiting on Ashwin
