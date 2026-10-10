@@ -138,8 +138,30 @@ if best_mode == 0 then return {} end
 return {best_mode, best_at}
 `
 
+// varySetSrc is the vary-spec compare-and-set (05 V-1). It touches only the
+// entry key, so it runs in cluster mode with or without CoLocateEntries.
+//
+//	KEYS 1 the spec's entry key
+//	ARGV 1 '1' if a record is expected there, '0' if none  2 the expected bytes
+//	     3 the new bytes  4 PXAT, Unix milliseconds
+//
+// Replies 1 after the SET and 0 when the stored value is not the expected one.
+// It compares the bytes, not a digest: a spec lists at most MaxVariants refs,
+// so the arguments stay small and a collision cannot exist.
+const varySetSrc = `
+local cur = redis.call('GET', KEYS[1])
+if ARGV[1] == '1' then
+  if cur ~= ARGV[2] then return 0 end
+elseif cur ~= false then
+  return 0
+end
+redis.call('SET', KEYS[1], ARGV[3], 'PXAT', ARGV[4])
+return 1
+`
+
 // The scripts are immutable once built; valkey-go keeps their SHA-1.
 var (
 	writeEpochScript = valkey.NewLuaScript(writeEpochSrc)
 	readEpochScript  = valkey.NewLuaScriptReadOnly(readEpochSrc)
+	varySetScript    = valkey.NewLuaScript(varySetSrc)
 )

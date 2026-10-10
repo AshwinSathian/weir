@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/valkey-io/valkey-go"
@@ -22,6 +23,10 @@ type client interface {
 	// set stores val at key until the Unix millisecond pxat.
 	set(ctx context.Context, key string, val []byte, pxat int64) error
 	del(ctx context.Context, key string) error
+	// evalVarySet stores val at key until pxat if the value there is prev
+	// (hasPrev false: if there is none) and reports whether it did, in one
+	// server-side step (05 V-1).
+	evalVarySet(ctx context.Context, key string, prev []byte, hasPrev bool, val []byte, pxat int64) (bool, error)
 	// evalWrite runs the epoch write script (scripts.go); evalRead the
 	// read-only lookup script and returns its integer array reply.
 	evalWrite(ctx context.Context, keys, args []string) error
@@ -89,6 +94,16 @@ func (v valkeyClient) set(ctx context.Context, key string, val []byte, pxat int6
 
 func (v valkeyClient) del(ctx context.Context, key string) error {
 	return v.c.Do(ctx, v.c.B().Del().Key(key).Build()).Error()
+}
+
+func (v valkeyClient) evalVarySet(ctx context.Context, key string, prev []byte, hasPrev bool, val []byte, pxat int64) (bool, error) {
+	flag := "0"
+	if hasPrev {
+		flag = "1"
+	}
+	n, err := varySetScript.Exec(ctx, v.c, []string{key},
+		[]string{flag, string(prev), string(val), strconv.FormatInt(pxat, 10)}).AsInt64()
+	return n == 1, err
 }
 
 func (v valkeyClient) evalWrite(ctx context.Context, keys, args []string) error {

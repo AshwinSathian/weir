@@ -166,7 +166,7 @@ These phases start from draft specs. Each begins with one planning card that ver
 - Out of scope: the Valkey implementation (P25-05b), eviction (P25-06)
 - Notes: likely to split on overrun (interface and engine vs memory store). ASK THE USER FIRST. Options: (a) an optional capability `VarySetter` (public API addition), (b) a version field on `Entry` (public type change that also touches the memory store and the codec, hence its own review). Recommendation when asking: (a), because it leaves the codec alone.
 
-### [ ] P25-05b Vary-spec compare-and-set in Valkey
+### [x] P25-05b Vary-spec compare-and-set in Valkey
 - Plan: 2.5.3 · Size: S · Depends on: P25-05
 - Read: the mechanism chosen in P25-05; 05 §7
 - Touch: store/valkey/{vary.go,vary_test.go}
