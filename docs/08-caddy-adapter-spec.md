@@ -117,7 +117,7 @@ One engine serves every host of a site (OQ-C3, resolved): the tenants share one 
 ## 5. Ordering with other handlers
 
 - `encode` (compression): if `encode` runs before `weir` (outer), Weir caches uncompressed bytes and `encode` compresses every response, including hits. Simple and CPU-bound. If `encode` runs after `weir` (inner, between Weir and `reverse_proxy`), Weir caches compressed variants keyed by the `Accept-Encoding` bucket. Default recommendation: let the origin compress and leave `encode` out of Weir-cached routes, or place it outside `weir` when the origin cannot. Documented with both examples.
-- `rate_limit` (third-party `caddy-ratelimit`): place before `weir` to answer residual risk R-2 (distinct-path floods). Its directive order and the placement are not verified against its source; the deployment guide checks them before shipping the advice.
+- `rate_limit` (third-party `caddy-ratelimit`): place before `weir` to answer residual risk R-2 (distinct-path floods). Verified by P2-07 against its `caddyfile.go`: it registers `rate_limit` ordered `before basic_auth`, so it is outside `weir` by default; the runbook (§7.3) gives the `caddy adapt` check.
 - `forward_auth` or other auth: must run before `weir`, and routes that need per-user responses should use `bypass` rules or rely on `Authorization` handling.
 - Directive order applies inside each block: a `reverse_proxy` inside `handle { }` or `route { }` needs `weir` in the same block. `intercept`, `templates` and `request_header` come before `weir` in the default order, which is the safe side for T-45.
 

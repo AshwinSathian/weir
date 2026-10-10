@@ -1447,3 +1447,11 @@ Entry template:
 - Branch / PR: claude/inspiring-galileo-j1jrdh / https://github.com/AshwinSathian/weir/pull/82
 - Done: CI `caddy-build` failed because xcaddy cannot resolve `observe/prom` (an unreleased module; a `replace` in `caddy/go.mod` is ignored by importers). The job now passes `--with github.com/AshwinSathian/weir/observe/prom=./observe/prom`. Verified locally with xcaddy v0.4.5 against Caddy v2.11.7 (build complete).
 - Follow-ups: any later module the `caddy` module requires needs its own `--with` until root and sub-modules have release tags.
+
+## 2026-10-10 · P2-07 · done
+- Branch / PR: claude/nice-rubin-sw5o8p (session-designated, not card/*) / not opened yet
+- Done: docs/runbook.md section 7 (single-node Caddy deployment guide, all AC items); 08 §5 now records that `rate_limit` is ordered before `basic_auth` (checked in caddy-ratelimit's caddyfile.go) and Caddy v2.11.7's default order puts `encode` ahead of `weir`.
+- Tests: none (docs only); `make check` stops at lint (container golangci-lint built with Go 1.25), CI must confirm.
+- Deviations: none. Card mark and PLAN checkbox left for `/handoff`, which the Skill tool refused to run.
+- Follow-ups: run `/handoff` for P2-07; the runbook's Caddyfile examples were not run through `caddy adapt`.
+- Context: low; size S was right.

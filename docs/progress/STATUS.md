@@ -2,10 +2,10 @@
 
 Updated: 2026-10-10
 Phase: 1
-Current card: none
-Card state: awaiting-merge
-Branch: claude/inspiring-galileo-j1jrdh
-PR: https://github.com/AshwinSathian/weir/pull/82
+Current card: P2-07
+Card state: in-progress
+Branch: claude/nice-rubin-sw5o8p
+PR: none yet (run /handoff)
 Next card: P2-07
 
 ## Waiting on Ashwin
