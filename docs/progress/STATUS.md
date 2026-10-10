@@ -2,17 +2,18 @@
 
 Updated: 2026-10-10
 Phase: 1
-Current card: P25-06
-Card state: in-progress
+Current card: none
+Card state: awaiting-merge
 Branch: card/P25-06-scrubber-scan (pushed as claude/serene-dirac-0yagok)
 PR: none yet
 Next card: P25-07
 
-## Notes from P25-06 (pending /handoff)
+## Notes for the next session (P25-06)
 
-- Code, tests and docs are written and pass on redis 7.0.15 (full integration suite with `-race`); `/handoff` has not run: no card-reviewer pass, card and PLAN 2.5.4 not ticked, no PR. golangci-lint cannot run here; CI must confirm.
-- Gap, not fixed: the engine bounds the whole `Scrub` by `Timeouts.Store` (50 ms default, remote), so an eager purge on a real keyspace times out. Needs its own scrub deadline (new card or P25-07). Documented in 05 §7 and 09 §7.
-- CI now needs a second Valkey service on 6380 (`WEIR_VALKEY_STORM_ADDR`, maxmemory 16mb); first CI run unverified.
+- Review (card-reviewer): one must-fix (CI `docker ps --filter publish=` cannot tell the two Valkey services apart; the step now uses `job.services.<id>.id`), fixed but unproven until CI runs. Fixed too: busy-loop reader replaced by a channel, the poll names its real-clock exception, empty-tag `Scrub` no longer dials. Hot-key hit counts in the storm test are logged, not asserted (09 §7 says so).
+- Open: the engine bounds the whole `Scrub` by `Timeouts.Store` (50 ms default, remote), so an eager purge on a real keyspace times out. Needs its own scrub deadline in the engine (new card or P25-07). In 05 §7 and 09 §7.
+- A failed command inside a `getMulti`/`delMulti` pipeline (for example MOVED during resharding) fails the scrub with `ErrUnavailable`; P25-07 decides whether that needs handling.
+- golangci-lint cannot run here (Go 1.25 build); CI must confirm lint, the second Valkey service on 6380, and the storm on Valkey 8.1. PLAN 2.5.4 is ticked on the strength of local redis 7.0.15 runs; PLAN 2.5.2 still waits on the CI run.
 
 ## Waiting on Ashwin
 

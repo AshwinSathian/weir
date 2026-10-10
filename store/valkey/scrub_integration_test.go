@@ -321,7 +321,7 @@ func TestEvictionStormEngineStaysCorrect(t *testing.T) {
 	// through the engine, and a hard purge of /victim a third of the way in.
 	const total, writers = 30000, 8
 	var next, setErrs, serveErrs, stale atomic.Int64
-	var purged atomic.Bool
+	purged := make(chan struct{}) // closed once the hard purge has returned
 	var wg sync.WaitGroup
 	for range writers {
 		wg.Go(func() {
@@ -362,8 +362,10 @@ func TestEvictionStormEngineStaysCorrect(t *testing.T) {
 				return
 			default:
 			}
-			if !purged.Load() {
-				continue
+			select {
+			case <-purged:
+			case <-done:
+				return
 			}
 			_, b, err := engineServeErr(t, e, "/victim", o)
 			if err != nil {
@@ -373,6 +375,8 @@ func TestEvictionStormEngineStaysCorrect(t *testing.T) {
 			}
 		}
 	})
+	// Real-clock poll (CLAUDE.md rule 6, integration tag): the writers run on
+	// a real server and expose no signal at a third of the way.
 	for next.Load() < total/3 {
 		time.Sleep(10 * time.Millisecond)
 	}
@@ -380,7 +384,7 @@ func TestEvictionStormEngineStaysCorrect(t *testing.T) {
 	if err := e.Purge(t.Context(), weir.Purge{Mode: weir.PurgeHard, URLs: []string{"https://example.com/victim"}}); err != nil {
 		t.Fatal(err)
 	}
-	purged.Store(true)
+	close(purged)
 	wg.Wait()
 	time.Sleep(2100 * time.Millisecond) // the epoch is ceil(now); a v2 fetched inside that second is purged once more (E-7)
 	close(done)

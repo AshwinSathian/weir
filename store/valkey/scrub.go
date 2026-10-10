@@ -28,12 +28,21 @@ const scrubBatch = 1000
 // Each round trip runs under CallTimeout (or the caller's deadline), not the
 // whole scan.
 func (s *Store) Scrub(ctx context.Context, tags []store.Tag) (int, error) {
+	if len(tags) == 0 {
+		if err := ctx.Err(); err != nil {
+			return 0, mapError(err)
+		}
+		s.mu.Lock()
+		closed := s.closed
+		s.mu.Unlock()
+		if closed {
+			return 0, errClosed
+		}
+		return 0, nil // no tags, no work, and no dial
+	}
 	cl, err := s.acquire(ctx)
 	if err != nil {
 		return 0, err
-	}
-	if len(tags) == 0 {
-		return 0, nil
 	}
 	want := make(map[store.Tag]struct{}, len(tags))
 	for _, t := range tags {

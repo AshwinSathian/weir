@@ -113,7 +113,7 @@ Seed T6.11 asks that the storage interface not assume one eviction policy. For t
 
 Setup. `TestEvictionStormEngineStaysCorrect` (store/valkey, tag `integration`) runs against a throwaway server with `maxmemory 16mb` and `maxmemory-policy volatile-lfu`, set by CI on a second Valkey 8.1 service (port 6380) and by the developer for a local run (`WEIR_VALKEY_STORM_ADDR`). The test refuses a server with no `maxmemory` or more than 64 MiB, because it runs `FLUSHALL`. The engine caches 40 hot paths (1 KiB bodies, `max-age=3600`) and one victim path. Eight writers then store 30 000 one-hit entries of about 2 KiB straight into the store while a reader keeps requesting the hot paths through the engine. A third of the way in, the origin changes the victim to `v2` and the engine hard-purges its URL; a second reader requests the victim for the rest of the flood and counts every `v1` it receives.
 
-Result, one local run (redis-server 7.0.15, not Valkey; the CI run on Valkey 8.1 is the one that counts):
+Result, one local run (redis-server 7.0.15, not Valkey; the CI run on Valkey 8.1 is the one that counts). The test asserts the epoch keys, the purge, the engine errors and that evictions happened; the hot-key hit counts are logged, not asserted, because they depend on the reader keeping the counters warm:
 
 | Measure | Value |
 |---|---|

@@ -1648,3 +1648,11 @@ Entry template:
 - Deviations: manual SCAN loop instead of `valkey.NewScanner` (per-call timeouts); Touch list short by client.go, store.go, CI, Makefile, engine_integration_test.go.
 - Follow-ups: run `/handoff` (review, tick card, PR); engine scrub deadline; CI Valkey 8.1 storm run.
 - Context: medium
+
+## 2026-10-10 · P25-06 · done
+- Branch / PR: card/P25-06-scrubber-scan / PR link in STATUS
+- Done: handoff. card-reviewer found one must-fix (CI container lookup; now `job.services.<id>.id`) and three should-fix (storm reader busy loop, unnamed poll, empty-tag Scrub dialing), all fixed; hit counts stay logged, not asserted, and 09 §7 says so. Card and PLAN 2.5.4 ticked.
+- Tests: Scrub unit and integration tests, storm and policy tests pass with `-race` on redis 7.0.15; trace 146/146; lint not run here.
+- Deviations: none beyond the first entry.
+- Follow-ups: engine scrub deadline; CI run on Valkey 8.1.
+- Context: medium
