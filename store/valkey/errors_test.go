@@ -50,6 +50,13 @@ func TestMapError(t *testing.T) {
 			t.Fatalf("Nil must not map to ErrUnavailable: %v", got)
 		}
 	})
+	t.Run("wrapped valkey.Nil and ErrNotFound are left alone", func(t *testing.T) {
+		for _, in := range []error{fmt.Errorf("x: %w", valkey.Nil), fmt.Errorf("x: %w", store.ErrNotFound)} {
+			if got := mapError(in); errors.Is(got, store.ErrUnavailable) {
+				t.Fatalf("%v became ErrUnavailable", in)
+			}
+		}
+	})
 	t.Run("nil stays nil", func(t *testing.T) {
 		if got := mapError(nil); got != nil {
 			t.Fatalf("got %v", got)

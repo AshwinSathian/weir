@@ -1498,3 +1498,11 @@ Entry template:
 - Review: card-reviewer, no must-fix; should-fix (sub-ms wait, `go mod tidy`, Nil contract) fixed. Left: no cap on `MaxRetention`/`MaxClockSkew` magnitude (P25-03 clamps).
 - Follow-ups: P25-01b next.
 - Context: low; size M was right.
+
+## 2026-10-10 · P25-01 · review-fixes
+- Branch / PR: claude/nice-goodall-atnlor / https://github.com/AshwinSathian/weir/pull/85
+- Done: adversarial review (agent) of PR 85; decisions in STATUS. `Validate` wraps `weir.ErrInvalidConfig`, caps durations, `MaxHardEpochs` and key-part length, checks `Addrs`, clones `Addrs`/`TLS`, returns the zero Config on error; `Config` JSON is redacted; `mapError` leaves wrapped `valkey.Nil` and `ErrNotFound` alone.
+- Tests: new rows in TestConfigValidate, JSON case in TestConfigRedacts, wrapped Nil in TestMapError; module lint, vet, race tests and trace-strict pass.
+- Deviations: 05 §7 gets a config-validation bullet; card P25-01 test list reworded for the empty-means-default rule.
+- Follow-ups: P25-01b adds `./store/valkey` to `go.work`.
+- Context: low

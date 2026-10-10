@@ -14,10 +14,10 @@ import (
 // READONLY, CLUSTERDOWN, LOADING, BUSY) all mean "could not answer". The
 // cause stays in the chain for errors.Is and errors.As.
 //
-// valkey.Nil is not an outage and is returned unchanged; Get turns it into
-// store.ErrNotFound.
+// valkey.Nil (also wrapped) and store.ErrNotFound are not outages and are
+// returned unchanged; Get turns Nil into store.ErrNotFound.
 func mapError(err error) error {
-	if err == nil || valkey.IsValkeyNil(err) {
+	if err == nil || valkey.IsValkeyNil(err) || errors.Is(err, valkey.Nil) || errors.Is(err, store.ErrNotFound) {
 		return err
 	}
 	if errors.Is(err, store.ErrUnavailable) {

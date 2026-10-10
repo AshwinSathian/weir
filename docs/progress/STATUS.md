@@ -72,11 +72,15 @@ Ashwin delegated "take decisions on all items"; "Waiting on Ashwin" was empty. A
 
 "Waiting on Ashwin" was empty. No must-fix. Decided: sub-block keys (`key`, `forward`, `bypass`, `limiter`, `stale`) with no block or empty braces are an error; repeated keys stay an error and 08 §2 now says so; the `weir <matcher>` form is supported and documented; runtime placeholders (`{env.X}`, `{host}`) are not expanded, only parse-time `{$VAR}`, documented in 08 §2; the `name` error points at the `name` line. Tests added for repeated sub-block keys, negative durations, directive arguments, bare and empty sub-blocks, the matcher form. Kept: duplicate `name` handling in P2-02, the non-`card/*` branch, `RegisterDirectiveOrder` (TestDirectiveOrder fails loudly on a Caddy bump).
 
+## Decided 2026-10-10 (P25-01, adversarial review of PR 85)
+
+Ashwin delegated "take decisions on all items"; "Waiting on Ashwin" was empty. An independent agent attacked the PR; no must-fix. Decisions: empty `Prefix`/`HashTag` mean the default (card test list reworded); config errors wrap `weir.ErrInvalidConfig` (no new sentinel); upper bounds added (MaxRetention 10 y, MaxClockSkew 1 h, MaxHardEpochs 1e6, key parts 64 bytes); `HardEpochWait` whole ms and below `CallTimeout`; `Addrs` must be unique `host:port`. Fixed: `Validate` copy aliased `Addrs`/`TLS`, returns the zero Config on error; JSON marshalling leaked the password (now redacted); `mapError` leaves wrapped `valkey.Nil` and `ErrNotFound` alone. Written into 05 §7.
+
 ## Notes for the next session
 
 - P25-01 done: `store/valkey` module (Config, Validate, redaction, `mapError`). `Validate` returns a defaults-filled copy; `mapError(valkey.Nil)` returns Nil unchanged, so `Get` (P25-01b onward) maps it to `ErrNotFound`. `store/valkey` is not in `go.work` yet (the card left it out); add it with P25-01b if tooling needs it.
 - Lint for submodules: run golangci-lint v2.14.0 with `GOTOOLCHAIN=go1.27.0` and `GOWORK=off` inside the module.
-- Nothing bounds `MaxRetention`/`MaxClockSkew` magnitude; P25-03 must clamp before the prune arithmetic.
+- `Validate` now caps `MaxRetention` (10 y), `MaxClockSkew` (1 h), `MaxHardEpochs` (1e6), key parts (64 bytes) and errors wrap `weir.ErrInvalidConfig` (05 §7). P25-01b must add `./store/valkey` to `go.work` and wrap the policy-check error as `ErrUnavailable`.
 
 - P2-07 done: runbook section 7. Not yet run through `caddy adapt`; the examples were read against Caddy v2.11.7 source only. caddy-ratelimit order was read on `master` (no tag).
 

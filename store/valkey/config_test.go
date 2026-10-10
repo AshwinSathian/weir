@@ -3,11 +3,15 @@ package valkey
 import (
 	"bytes"
 	"crypto/tls"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/AshwinSathian/weir"
 )
 
 func validConfig() Config { return Config{Addrs: []string{"127.0.0.1:6379"}} }
@@ -58,6 +62,27 @@ func TestConfigValidate(t *testing.T) {
 			t.Fatal("want error")
 		}
 	})
+	t.Run("copy does not alias Addrs or TLS", func(t *testing.T) {
+		in := validConfig()
+		in.TLS = &tls.Config{ServerName: "a"}
+		c, err := in.Validate()
+		if err != nil {
+			t.Fatal(err)
+		}
+		c.Addrs[0] = "mut:1"
+		c.TLS.ServerName = "mut"
+		if in.Addrs[0] != "127.0.0.1:6379" || in.TLS.ServerName != "a" {
+			t.Fatal("copy shares memory with the receiver")
+		}
+	})
+	t.Run("empty HashTag and Prefix mean the defaults", func(t *testing.T) {
+		in := validConfig()
+		in.HashTag, in.Prefix = "", ""
+		c, err := in.Validate()
+		if err != nil || c.HashTag != "e" || c.Prefix != "weir" {
+			t.Fatalf("got %+v, %v", c, err)
+		}
+	})
 	t.Run("zero-value Validate does not mutate the receiver", func(t *testing.T) {
 		in := validConfig()
 		if _, err := in.Validate(); err != nil {
@@ -90,6 +115,20 @@ func TestConfigValidate(t *testing.T) {
 		{"negative CallTimeout", func(c *Config) { c.CallTimeout = -1 }},
 		{"negative HardEpochWait", func(c *Config) { c.HardEpochWait = -1 }},
 		{"HardEpochWait below one millisecond", func(c *Config) { c.HardEpochWait = time.Microsecond }},
+		{"HardEpochWait fractional millisecond", func(c *Config) { c.HardEpochWait = 1500 * time.Microsecond }},
+		{"HardEpochWait not shorter than CallTimeout", func(c *Config) { c.HardEpochWait, c.CallTimeout = 5*time.Second, 5*time.Second }},
+		{"MaxRetention that overflows the prune margin", func(c *Config) { c.MaxRetention = time.Duration(1<<63 - 1) }},
+		{"MaxClockSkew above one hour", func(c *Config) { c.MaxClockSkew = 2 * time.Hour }},
+		{"MaxHardEpochs above the cap", func(c *Config) { c.MaxHardEpochs = 1_000_001 }},
+		{"prefix longer than 64 bytes", func(c *Config) { c.Prefix = strings.Repeat("a", 65) }},
+		{"hash tag longer than 64 bytes", func(c *Config) { c.HashTag = strings.Repeat("a", 65) }},
+		{"address without port", func(c *Config) { c.Addrs = []string{"host"} }},
+		{"address with scheme", func(c *Config) { c.Addrs = []string{"redis://x:1"} }},
+		{"address with port out of range", func(c *Config) { c.Addrs = []string{"host:99999"} }},
+		{"address with whitespace", func(c *Config) { c.Addrs = []string{"a b:1"} }},
+		{"address with trailing newline", func(c *Config) { c.Addrs = []string{"x:1\n"} }},
+		{"blank address", func(c *Config) { c.Addrs = []string{" "} }},
+		{"duplicate address", func(c *Config) { c.Addrs = []string{"a:1", "a:1"} }},
 		{"negative MaxHardEpochs", func(c *Config) { c.MaxHardEpochs = -1 }},
 	}
 	for _, tc := range bad {
@@ -98,8 +137,10 @@ func TestConfigValidate(t *testing.T) {
 			tc.mod(&c)
 			if _, err := c.Validate(); err == nil {
 				t.Fatal("want error")
-			} else if !strings.HasPrefix(err.Error(), "store: valkey: ") {
-				t.Fatalf("error %q lacks the store: valkey: prefix", err)
+			} else if !strings.HasPrefix(err.Error(), "store: valkey: ") || !errors.Is(err, weir.ErrInvalidConfig) {
+				t.Fatalf("error %q lacks the prefix or weir.ErrInvalidConfig", err)
+			} else if c2, _ := c.Validate(); c2.Addrs != nil {
+				t.Fatal("a failed Validate must return the zero Config")
 			}
 		})
 	}
@@ -115,6 +156,10 @@ func TestConfigRedacts(t *testing.T) {
 	log := slog.New(slog.NewTextHandler(&buf, nil))
 	log.Info("cfg", "config", c)
 	log.Info("cfgptr", "config", &c)
+	js, err := json.Marshal(c)
+	if err != nil {
+		t.Fatal(err)
+	}
 	outputs := map[string]string{
 		"String":     c.String(),
 		"GoString":   c.GoString(),
@@ -123,6 +168,7 @@ func TestConfigRedacts(t *testing.T) {
 		"%#v":        fmt.Sprintf("%#v", c),
 		"%v pointer": fmt.Sprintf("%v", &c),
 		"slog":       buf.String(),
+		"json":       string(js),
 	}
 	for name, out := range outputs {
 		t.Run(name, func(t *testing.T) {

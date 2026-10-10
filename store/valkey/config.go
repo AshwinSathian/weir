@@ -2,11 +2,16 @@ package valkey
 
 import (
 	"crypto/tls"
-	"errors"
+	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net"
+	"slices"
+	"strconv"
 	"strings"
 	"time"
+
+	"github.com/AshwinSathian/weir"
 )
 
 // Config configures a Store. The zero value of every field except Addrs
@@ -62,54 +67,38 @@ const (
 	defaultMaxClockSkew  = time.Second
 	defaultMaxHardEpochs = 10000
 	defaultCallTimeout   = 5 * time.Second
+
+	// Upper bounds: the prune margin MaxRetention + MaxClockSkew + 1s must
+	// not overflow, and every table has a stated bound (P5, NFR-3).
+	maxMaxRetention  = 10 * 365 * 24 * time.Hour
+	maxMaxClockSkew  = time.Hour
+	maxMaxHardEpochs = 1_000_000
+	maxKeyPartLen    = 64
 )
 
-// Validate returns a copy of c with defaults filled in, or an error that
-// names the first bad field. An empty Prefix or HashTag means the default,
-// so neither can be set to empty.
+// cfgErr builds a config error that wraps weir.ErrInvalidConfig, so callers
+// treat every Weir config error alike.
+func cfgErr(format string, args ...any) error {
+	return fmt.Errorf("store: valkey: config: %s: %w", fmt.Sprintf(format, args...), weir.ErrInvalidConfig)
+}
+
+// Validate returns a copy of c with defaults filled in, or a zero Config and
+// an error wrapping weir.ErrInvalidConfig that names the first bad field. An
+// empty Prefix or HashTag means the default, so neither can be set to empty.
+// The copy does not alias c.Addrs or c.TLS.
 func (c Config) Validate() (Config, error) {
-	if len(c.Addrs) == 0 {
-		return c, errors.New("store: valkey: config: no addresses")
+	if err := c.check(); err != nil {
+		return Config{}, err
 	}
-	for _, a := range c.Addrs {
-		if a == "" {
-			return c, errors.New("store: valkey: config: empty address")
-		}
+	c.Addrs = slices.Clone(c.Addrs)
+	if c.TLS != nil {
+		c.TLS = c.TLS.Clone()
 	}
 	if c.Prefix == "" {
 		c.Prefix = defaultPrefix
 	}
 	if c.HashTag == "" {
 		c.HashTag = defaultHashTag
-	}
-	if !keyPartOK(c.Prefix) {
-		return c, fmt.Errorf("store: valkey: config: Prefix %q must use only A-Z a-z 0-9 _ . -", c.Prefix)
-	}
-	if !keyPartOK(c.HashTag) {
-		return c, fmt.Errorf("store: valkey: config: HashTag %q must use only A-Z a-z 0-9 _ . -", c.HashTag)
-	}
-	for _, d := range []struct {
-		name string
-		v    time.Duration
-	}{
-		{"MaxRetention", c.MaxRetention},
-		{"MaxClockSkew", c.MaxClockSkew},
-		{"CallTimeout", c.CallTimeout},
-		{"HardEpochWait", c.HardEpochWait},
-	} {
-		if d.v < 0 {
-			return c, fmt.Errorf("store: valkey: config: %s is negative", d.name)
-		}
-	}
-	if c.HardEpochWait > 0 && c.HardEpochWait < time.Millisecond {
-		// WAIT takes whole milliseconds and 0 means block forever.
-		return c, errors.New("store: valkey: config: HardEpochWait is below 1ms")
-	}
-	if c.MaxHardEpochs < 0 {
-		return c, errors.New("store: valkey: config: MaxHardEpochs is negative")
-	}
-	if c.NoClockSkew && c.MaxClockSkew != 0 {
-		return c, errors.New("store: valkey: config: NoClockSkew conflicts with MaxClockSkew")
 	}
 	if c.MaxRetention == 0 {
 		c.MaxRetention = defaultMaxRetention
@@ -125,14 +114,76 @@ func (c Config) Validate() (Config, error) {
 	if c.CallTimeout == 0 {
 		c.CallTimeout = defaultCallTimeout
 	}
+	if c.HardEpochWait >= c.CallTimeout && c.HardEpochWait != 0 {
+		return Config{}, cfgErr("HardEpochWait must be shorter than CallTimeout")
+	}
 	return c, nil
+}
+
+// check validates the fields as given, before defaults.
+func (c Config) check() error {
+	if len(c.Addrs) == 0 {
+		return cfgErr("no addresses")
+	}
+	for i, a := range c.Addrs {
+		if err := addrOK(a); err != nil {
+			return err
+		}
+		if slices.Contains(c.Addrs[:i], a) {
+			return cfgErr("duplicate address %q", a)
+		}
+	}
+	for _, p := range []struct{ name, v string }{{"Prefix", c.Prefix}, {"HashTag", c.HashTag}} {
+		if p.v != "" && !keyPartOK(p.v) {
+			return cfgErr("%s %q must be 1-%d bytes of A-Z a-z 0-9 _ . -", p.name, p.v, maxKeyPartLen)
+		}
+	}
+	for _, d := range []struct {
+		name     string
+		v, limit time.Duration
+	}{
+		{"MaxRetention", c.MaxRetention, maxMaxRetention},
+		{"MaxClockSkew", c.MaxClockSkew, maxMaxClockSkew},
+		{"CallTimeout", c.CallTimeout, 0},
+		{"HardEpochWait", c.HardEpochWait, 0},
+	} {
+		if d.v < 0 {
+			return cfgErr("%s is negative", d.name)
+		}
+		if d.limit != 0 && d.v > d.limit {
+			return cfgErr("%s exceeds %v", d.name, d.limit)
+		}
+	}
+	if c.HardEpochWait%time.Millisecond != 0 {
+		// WAIT takes whole milliseconds and 0 means block forever.
+		return cfgErr("HardEpochWait must be a whole number of milliseconds")
+	}
+	if c.MaxHardEpochs < 0 || c.MaxHardEpochs > maxMaxHardEpochs {
+		return cfgErr("MaxHardEpochs must be 0-%d", maxMaxHardEpochs)
+	}
+	if c.NoClockSkew && c.MaxClockSkew != 0 {
+		return cfgErr("NoClockSkew conflicts with MaxClockSkew")
+	}
+	return nil
+}
+
+// addrOK accepts "host:port" with a port in 1-65535 and no whitespace.
+func addrOK(a string) error {
+	host, port, err := net.SplitHostPort(a)
+	if err != nil || host == "" || strings.ContainsAny(a, " \t\r\n") {
+		return cfgErr("address %q must be host:port", a)
+	}
+	if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
+		return cfgErr("address %q has a bad port", a)
+	}
+	return nil
 }
 
 // keyPartOK reports whether s is non-empty and uses only characters that
 // are neither a glob, a brace nor a colon, so a Prefix cannot widen the
 // Scrub pattern or break the hash tag (05 §7).
 func keyPartOK(s string) bool {
-	if s == "" {
+	if s == "" || len(s) > maxKeyPartLen {
 		return false
 	}
 	for i := 0; i < len(s); i++ {
@@ -172,3 +223,7 @@ func (c Config) GoString() string { return c.String() }
 // LogValue implements slog.LogValuer so structured logs never carry the
 // password or TLS settings.
 func (c Config) LogValue() slog.Value { return slog.StringValue(c.String()) }
+
+// MarshalJSON implements json.Marshaler so encoding a Config never writes
+// the password (or fails on the TLS config).
+func (c Config) MarshalJSON() ([]byte, error) { return json.Marshal(c.String()) }
