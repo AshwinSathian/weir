@@ -138,8 +138,21 @@ func (s *Store) Set(_ context.Context, k store.Key, e *store.Entry) error {
 	if s.closed.Load() {
 		return store.ErrUnavailable
 	}
-	s.put(k, e, false)
+	s.put(k, e, false, nil)
 	return nil
+}
+
+// varyPrev is the precondition of put for SetVarySpec.
+type varyPrev struct{ prev *store.Entry }
+
+// SetVarySpec stores next at k if the live record there is still prev (nil:
+// none), in one shard lock hold (store.VarySetter). A record the store
+// declines counts as swapped, as for Set (S-4).
+func (s *Store) SetVarySpec(_ context.Context, k store.Key, prev, next *store.Entry) (bool, error) {
+	if s.closed.Load() {
+		return false, store.ErrUnavailable
+	}
+	return s.put(k, next, false, &varyPrev{prev}) != putStale, nil
 }
 
 type putResult int
@@ -148,12 +161,13 @@ const (
 	putStored putResult = iota
 	putExpired
 	putDeclined // too large, or (when loading) no room left
+	putStale    // SetVarySpec: the record at the key is no longer prev
 )
 
 // put is Set's body. With loading set, a record that does not fit the
 // shard's byte budget is declined instead of evicting an earlier record, so
 // a snapshot loads in file order up to MaxBytes (FR-SNP-3).
-func (s *Store) put(k store.Key, e *store.Entry, loading bool) putResult {
+func (s *Store) put(k store.Key, e *store.Entry, loading bool, cas *varyPrev) putResult {
 	sh := &s.shards[s.shardIndex(k)]
 	size := e.Size()
 	now := time.Now()
@@ -176,6 +190,20 @@ func (s *Store) put(k store.Key, e *store.Entry, loading bool) putResult {
 	if !now.Before(expires) {
 		return putExpired
 	}
+	if cas != nil {
+		if size > sh.smallCap {
+			return putDeclined // a spec that large is declined; it does not evict the record it was compared with
+		}
+		ev, swapped, ok := sh.setIf(k, cas.prev, e, size, expires, maphash.Comparable(s.fpSeed, k))
+		if !swapped {
+			return putStale
+		}
+		s.reportEvictions(ev)
+		if !ok {
+			return putDeclined
+		}
+		return putStored
+	}
 	if size > sh.smallCap {
 		// Declined. Drop the record it would have replaced, so Set leaves
 		// the new record or nothing, never an older one.
@@ -186,6 +214,11 @@ func (s *Store) put(k store.Key, e *store.Entry, loading bool) putResult {
 	if !ok {
 		return putDeclined
 	}
+	s.reportEvictions(ev)
+	return putStored
+}
+
+func (s *Store) reportEvictions(ev evictions) {
 	if s.onEvict != nil {
 		for _, c := range []struct {
 			q string
@@ -196,7 +229,6 @@ func (s *Store) put(k store.Key, e *store.Entry, loading bool) putResult {
 			}
 		}
 	}
-	return putStored
 }
 
 // Delete removes the record at k, if any.

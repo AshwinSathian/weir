@@ -152,9 +152,31 @@ func (sh *shard) get(k store.Key) (*store.Entry, bool) {
 // until the shard is within its byte budget. With noEvict, a record that
 // would exceed the budget is refused (ok false) and nothing changes.
 func (sh *shard) set(k store.Key, e *store.Entry, size int64, expires time.Time, fp uint64, noEvict bool) (ev evictions, ok bool) {
-	now := time.Now()
 	sh.mu.Lock()
 	defer sh.mu.Unlock()
+	return sh.setLocked(k, e, size, expires, fp, noEvict)
+}
+
+// setIf is set under the precondition that the live record at k is prev
+// (nil: none). The check and the write share one lock hold, which is what
+// makes SetVarySpec atomic. A failed check reports swapped false.
+func (sh *shard) setIf(k store.Key, prev, e *store.Entry, size int64, expires time.Time, fp uint64) (ev evictions, swapped, ok bool) {
+	sh.mu.Lock()
+	defer sh.mu.Unlock()
+	n := sh.m[k]
+	if n != nil && n.expired(time.Now()) {
+		n = nil
+	}
+	if (n == nil) != (prev == nil) || n != nil && n.e != prev {
+		return ev, false, true
+	}
+	ev, ok = sh.setLocked(k, e, size, expires, fp, false)
+	return ev, true, ok
+}
+
+// setLocked is set's body; the caller holds sh.mu.
+func (sh *shard) setLocked(k store.Key, e *store.Entry, size int64, expires time.Time, fp uint64, noEvict bool) (ev evictions, ok bool) {
+	now := time.Now()
 	if noEvict {
 		grow := size
 		if n := sh.m[k]; n != nil {

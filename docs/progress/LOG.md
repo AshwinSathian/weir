@@ -1608,3 +1608,11 @@ Entry template:
 - Deviations: none. Review: card-reviewer found `TestEngineGlobalEpochSoft` failing (refresh started before the epoch second, so purged again); fixed with a 2.1 s wait and a 5 s window. Also set Warm.Concurrency explicitly and asserted 2..4 in flight, renamed the flood test to claim only what it shows (the shared-tag rule is pinned by storetest).
 - Follow-ups: CI Valkey 8.1 run still pending; PLAN 2.5.2 unticked until then. P25-05 waits on Ashwin.
 - Context: low; size S was right.
+
+## 2026-10-10 · P25-05 · done
+- Branch / PR: claude/amazing-galileo-2z89q7 / https://github.com/AshwinSathian/weir/pull/91 (added to the P25-04b PR at Ashwin's request)
+- Done: `store.VarySetter` (SetVarySpec compare-and-set), memory store implementation (one shard lock hold), engine `setVariantCAS`/`nextSpec` (16 attempts, delete of an orphaned variant), guard methods; docs 04 §6.7, 05 V-1, 07.
+- Tests: TestVaryCASConcurrentWriters (fails without the capability: 64 of 64 variants reachable), TestVaryCASFallsBackWithoutCapability, TestVaryCASStoreError, TestSetVarySpec, TestSetVarySpecOneWinner; `lazyStore` test wrapper got its own SetVarySpec. Root and memory race tests pass.
+- Deviations: 04 §6.7 and 05 §7 note rewritten for the capability; the decision (capability over `Entry` field) was delegated to the agent by Ashwin.
+- Follow-ups: P25-05b (Valkey script); the Valkey store keeps the old bound until then.
+- Context: medium

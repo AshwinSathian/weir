@@ -451,16 +451,72 @@ func (e *Engine) storeResponse(ctx context.Context, c *keys.Classified, res *fet
 	return ent, e.setVariant(ctx, c, vk, ent)
 }
 
+// varyCASAttempts bounds the compare-and-set retries of one setVariant. Each
+// lost swap means another writer changed the spec, and at most MaxVariants
+// such changes can add a reference before the spec is full, so the bound only
+// matters when writers keep replacing refs of the same variant.
+const varyCASAttempts = 16
+
 // setVariant stores ent under its variant key vk, then the vary spec under
 // the primary key that lists it (04 §6.7). Variant first, so a reader that
 // finds the spec usually finds the variant. A spec with other names is
 // replaced and its variants age out. Refs past their Expires are dropped,
 // and at the cap those without a record too, freeing their slots (D37); a new variant past
-// MaxVariants live ones is not stored (FR-KEY-10, NFR-3).
+// MaxVariants live ones is not stored (FR-KEY-10, NFR-3). With a store that
+// has store.VarySetter the spec write is a compare-and-set, so concurrent
+// writers cannot lose each other's refs.
 func (e *Engine) setVariant(ctx context.Context, c *keys.Classified, vk store.Key, ent *store.Entry) bool {
+	if e.sg.vary != nil {
+		return e.setVariantCAS(ctx, c, vk, ent)
+	}
+	cur, _ := e.sg.get(ctx, c.Primary)
+	spec := e.nextSpec(ctx, c, vk, ent, cur)
+	if spec == nil || e.sg.set(ctx, vk, ent) != nil {
+		return false
+	}
+	return e.sg.set(ctx, c.Primary, spec) == nil
+}
+
+// setVariantCAS is setVariant for a store with store.VarySetter. The variant
+// is written once, before the first swap. A writer that finds the spec full
+// at a later attempt deletes its variant again: left in place it would be
+// found by variant key although no spec lists it, and the cap would not hold.
+func (e *Engine) setVariantCAS(ctx context.Context, c *keys.Classified, vk store.Key, ent *store.Entry) bool {
+	written := false
+	for range varyCASAttempts {
+		cur, err := e.sg.get(ctx, c.Primary)
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			return false
+		}
+		spec := e.nextSpec(ctx, c, vk, ent, cur)
+		if spec == nil {
+			if written {
+				_ = e.sg.del(ctx, vk)
+			}
+			return false
+		}
+		if !written {
+			if e.sg.set(ctx, vk, ent) != nil {
+				return false
+			}
+			written = true
+		}
+		if swapped, err := e.sg.setVarySpec(ctx, c.Primary, cur, spec); err != nil {
+			return false
+		} else if swapped {
+			return true
+		}
+	}
+	return false // ponytail: 16 lost swaps in a row; the variant stays unlisted until it expires
+}
+
+// nextSpec builds the vary spec that lists ent's variant on top of cur, the
+// record read at the primary key (nil: none). It returns nil, after emitting
+// EvVaryOverflow, when the cap leaves no slot. cur is not modified (P4).
+func (e *Engine) nextSpec(ctx context.Context, c *keys.Classified, vk store.Key, ent, cur *store.Entry) *store.Entry {
 	now := ent.StoredAt
 	var refs []store.VariantRef // a new slice: the stored spec is immutable (P4)
-	if cur, err := e.sg.get(ctx, c.Primary); err == nil && cur.Kind == store.KindVarySpec && slices.Equal(cur.VaryNames, ent.VaryNames) {
+	if cur != nil && cur.Kind == store.KindVarySpec && slices.Equal(cur.VaryNames, ent.VaryNames) {
 		for _, r := range cur.Variants {
 			if r.Key != vk && r.Expires.After(now) {
 				refs = append(refs, r)
@@ -479,17 +535,14 @@ func (e *Engine) setVariant(ctx context.Context, c *keys.Classified, vk store.Ke
 	}
 	if len(refs) >= e.cfg.Key.MaxVariants {
 		emit(e.cfg.Observer, Event{Kind: EvVaryOverflow, Time: now, Partition: c.Partition})
-		return false
-	}
-	if e.sg.set(ctx, vk, ent) != nil {
-		return false
+		return nil
 	}
 	refs = append(refs, store.VariantRef{Key: vk, Expires: ent.Expires})
 	spec := &store.Entry{Kind: store.KindVarySpec, StoredAt: now, VaryNames: ent.VaryNames, Variants: refs}
 	for _, r := range refs { // 04 §4.2: a spec lives as long as its longest variant
 		spec.Expires = later(spec.Expires, r.Expires)
 	}
-	return e.sg.set(ctx, c.Primary, spec) == nil
+	return spec
 }
 
 // sameRecord reports whether a and b are the same stored response. Stores

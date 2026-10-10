@@ -6,13 +6,19 @@ Current card: none
 Card state: awaiting-merge
 Branch: claude/amazing-galileo-2z89q7
 PR: https://github.com/AshwinSathian/weir/pull/91
-Next card: P25-05 (blocked on the question below)
+Next card: P25-05b
 
 ## Waiting on Ashwin
 
-- P25-05 (does not block P25-04b): how the engine updates a vary spec atomically. (a) optional capability `VarySetter` (public API addition, leaves the codec alone; recommended) or (b) a version field on `store.Entry` (public type change touching memory store and codec). Not decided: it is a public API choice, not covered by the delegation on PR 90.
+Nothing.
 
 Earlier decisions: none open. Decided 2026-10-10 (P2-03b, review of PR 79; Ashwin delegated "take decisions on all items"): caddytest e2e files are a named exception to the real-clock rule (CLAUDE.md rule 6, docs/07 §1) instead of a build tag, because a tag would stop CI running them; a skip outside `-short` fails the test; the test site binds 127.0.0.1; the herd test uses a 2 s client timeout so a hard purge reports counts. Also decided (P2-02): multi-host is an explicit `multi_host` key; scanning the http app was rejected (handler cannot find its own route; global scan would cap unrelated sites and flush their stores). Documented in 08 §2/§3/§4b.
+
+## Decided 2026-10-10 (P25-05, delegated: "take decisions on all items")
+
+- Vary-spec compare-and-set is the optional capability `store.VarySetter` (05 V-1), not a version field on `Entry`: no change to the codec or the entry layout, and a store with no cross-node writers pays nothing. Signature `SetVarySpec(ctx, k, prev, next) (swapped, err)`, `prev` being the `*Entry` Get returned (a remote store compares bytes).
+- Implemented in this PR with P25-04b, at Ashwin's request: interface, memory store, engine (`setVariantCAS`, 16 attempts, a writer that loses to a full spec deletes its variant), docs 04 §6.7 and 05 V-1. The old path showed 64 of 64 variants reachable with `MaxVariants` 8, because lookup finds a variant by key and the lost spec refs only hid the accounting.
+- Valkey implementation stays P25-05b (a script comparing a digest of the stored spec). Until then the Valkey store has no capability and keeps the old bound.
 
 ## Notes for the next session (P25-04b)
 
