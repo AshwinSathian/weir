@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/caddyserver/caddy/v2/modules/caddyhttp"
 
 	"github.com/AshwinSathian/weir"
+	"github.com/AshwinSathian/weir/store"
 )
 
 // adminDo sends one request through the admin router the way Caddy's mux
@@ -367,7 +369,7 @@ func TestAdminClosedEngineIs503(t *testing.T) {
 // event, which an origin response can trigger at any time, does not change the
 // scrubbed count.
 func TestPurgeTapIgnoresGroupInvalidation(t *testing.T) {
-	tap := new(purgeTap)
+	tap := newPurgeTap()
 	tap.Observe(weir.Event{Kind: weir.EvPurge, Reason: "group", Status: 5})
 	tap.Observe(weir.Event{Kind: weir.EvPurge, Reason: "hard", Status: 2})
 	tap.Observe(weir.Event{Kind: weir.EvRequest, Reason: "hard", Status: 9})
@@ -376,10 +378,13 @@ func TestPurgeTapIgnoresGroupInvalidation(t *testing.T) {
 	}
 }
 
-// 08 §7: purge goes through the first engine that is not closed.
+// 08 §7: a closed engine is skipped and the purge still lands on the live one.
 func TestAdminPurgeSkipsClosedEngine(t *testing.T) {
 	name := fmt.Sprintf("skip-%d", serveSeq.Add(1))
 	first, second := loadNamed(t, name, ""), loadNamed(t, name, "")
+	var calls atomic.Int32
+	next := respond(&calls, "body")
+	serveGet(t, second, next, "/k")
 	ctx, cancel := context.WithTimeout(context.Background(), closeTimeout)
 	defer cancel()
 	if err := first.engine.Close(ctx); err != nil {
@@ -388,5 +393,156 @@ func TestAdminPurgeSkipsClosedEngine(t *testing.T) {
 	if code, w := adminStatus(t, http.MethodPost, "/weir/"+name+"/purge", `{"all":true}`); code != http.StatusAccepted {
 		t.Fatalf("status %d body %s, want 202 via the second engine", code, w.Body)
 	}
-	_ = second
+	if cs := serveGet(t, second, next, "/k").Header().Get("Cache-Status"); !strings.Contains(cs, "fwd=stale") {
+		t.Fatalf("Cache-Status = %q, want fwd=stale", cs)
+	}
+}
+
+// 08 §7 (adversarial review M2): a reload that changes a store-level setting
+// builds a second store under the same name. A purge during the overlap must
+// reach both engines, or the new one keeps serving what was purged.
+func TestAdminPurgeReachesEveryStoreInOverlap(t *testing.T) {
+	name := fmt.Sprintf("split-%d", serveSeq.Add(1))
+	oldH := loadNamed(t, name, "")
+	newH := loadNamed(t, name, `,"max_bytes":"512MiB"`)
+	if oldH.pool == newH.pool {
+		t.Fatal("test needs two stores under one name")
+	}
+	var calls atomic.Int32
+	next := respond(&calls, "body")
+	for _, h := range []*Handler{oldH, newH} {
+		serveGet(t, h, next, "/k")
+	}
+	if code, w := adminStatus(t, http.MethodPost, "/weir/"+name+"/purge", `{"all":true}`); code != http.StatusAccepted {
+		t.Fatalf("status %d body %s", code, w.Body)
+	}
+	for i, h := range []*Handler{oldH, newH} {
+		if cs := serveGet(t, h, next, "/k").Header().Get("Cache-Status"); !strings.Contains(cs, "fwd=stale") {
+			t.Fatalf("engine %d Cache-Status = %q, want fwd=stale", i, cs)
+		}
+	}
+}
+
+// P8, rule 6: a purge waiting behind another stops when its context ends.
+func TestPurgeTapWaitHonoursContext(t *testing.T) {
+	h, _ := loadServe(t, "")
+	tap := h.admin.tap
+	tap.sem <- struct{}{} // another purge holds the engine
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := tap.purge(ctx, h.engine, weir.Purge{All: true}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
+	}
+	<-tap.sem
+	if _, err := tap.purge(context.Background(), h.engine, weir.Purge{All: true}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// FR-PRG-8: concurrent eager purges on one engine each report their own count.
+func TestAdminConcurrentEagerPurgeCounts(t *testing.T) {
+	h, _ := loadServe(t, "")
+	var calls atomic.Int32
+	next := respond(&calls, "body")
+	const n = 8
+	for i := range n {
+		serveGet(t, h, next, fmt.Sprintf("/c%d", i))
+	}
+	var wg sync.WaitGroup
+	var total atomic.Int64
+	for i := range n {
+		wg.Go(func() {
+			body := fmt.Sprintf(`{"mode":"hard","eager":true,"urls":["http://example.com/c%d"]}`, i)
+			code, w := adminStatus(t, http.MethodPost, "/weir/"+h.Name+"/purge", body)
+			var got struct{ Scrubbed *int64 }
+			if code != http.StatusAccepted || json.Unmarshal(w.Body.Bytes(), &got) != nil || got.Scrubbed == nil || *got.Scrubbed != 1 {
+				t.Errorf("purge c%d: status %d body %s, want scrubbed 1", i, code, w.Body)
+				return
+			}
+			total.Add(*got.Scrubbed)
+		})
+	}
+	wg.Wait()
+	if total.Load() != n {
+		t.Fatalf("scrubbed total %d, want %d", total.Load(), n)
+	}
+}
+
+// Registry and Cleanup race with admin calls (rule 10).
+func TestAdminRacesWithCleanup(t *testing.T) {
+	name := fmt.Sprintf("race-%d", serveSeq.Add(1))
+	keep := loadNamed(t, name, "")
+	_ = keep
+	var wg sync.WaitGroup
+	for range 4 {
+		wg.Go(func() {
+			for range 20 {
+				h := loadNamed(t, name, "")
+				_ = h.Cleanup()
+			}
+		})
+		wg.Go(func() {
+			for range 50 {
+				code, _ := adminStatus(t, http.MethodGet, "/weir/"+name+"/stats", "")
+				adminStatus(t, http.MethodPost, "/weir/"+name+"/purge", `{"all":true}`)
+				if code != http.StatusOK && code != http.StatusNotFound {
+					t.Errorf("stats status %d", code)
+				}
+			}
+		})
+	}
+	wg.Wait()
+}
+
+// 04 §13.5: a failure inside an eager scrub says the epochs are written and
+// how many records went; other failures do not claim that.
+func TestPurgeErrorWordsPartialScrub(t *testing.T) {
+	scrub := fmt.Errorf("weir: purge: scrub: %w", store.ErrUnavailable)
+	err := purgeError(scrub, true, 3)
+	var apiErr caddy.APIError
+	if !errors.As(err, &apiErr) || apiErr.HTTPStatus != http.StatusServiceUnavailable ||
+		!strings.Contains(apiErr.Error(), "epochs written") || !strings.Contains(apiErr.Error(), "3 records") {
+		t.Fatalf("err = %v", err)
+	}
+	other := purgeError(fmt.Errorf("weir: purge: %w", store.ErrUnavailable), true, 0)
+	if strings.Contains(other.Error(), "epochs written") {
+		t.Fatalf("epoch-write failure claims epochs were written: %v", other)
+	}
+}
+
+// 08 §7: bodies of exactly 1 MiB decode; one byte more is a 413. Trailing
+// data of any kind is a 400.
+func TestAdminBodyEdges(t *testing.T) {
+	h, _ := loadServe(t, "")
+	path := "/weir/" + h.Name + "/purge"
+	pad := func(total int) string {
+		const obj = `{"all":true}`
+		return obj + strings.Repeat(" ", total-len(obj))
+	}
+	cases := []struct {
+		name, body string
+		want       int
+	}{
+		{"exactly 1 MiB", pad(1 << 20), http.StatusAccepted},
+		{"1 MiB plus one byte", pad(1<<20 + 1), http.StatusRequestEntityTooLarge},
+		{"junk after object", `{"all":true} x`, http.StatusBadRequest},
+		{"bracket after object", `{"all":true}]`, http.StatusBadRequest},
+		{"null body", `null`, http.StatusBadRequest},
+		{"duplicate key last wins", `{"all":false,"all":true}`, http.StatusAccepted},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if code, w := adminStatus(t, http.MethodPost, path, tc.body); code != tc.want {
+				t.Fatalf("status %d (%.80s), want %d", code, w.Body, tc.want)
+			}
+		})
+	}
+}
+
+// 08 §7: ttl means nothing for normal and is ignored there.
+func TestAdminModeNormalIgnoresTTL(t *testing.T) {
+	h, _ := loadServe(t, "")
+	if code, w := adminStatus(t, http.MethodPost, "/weir/"+h.Name+"/mode", `{"mode":"normal","ttl":"-1m"}`); code != http.StatusOK {
+		t.Fatalf("status %d body %s", code, w.Body)
+	}
 }

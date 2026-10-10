@@ -130,13 +130,14 @@ type purgeReply struct {
 	Warning  string `json:"warning,omitempty"`
 }
 
-// adminPurge writes the epochs through one live engine: epochs live in the
-// shared store, so any engine does. An engine already closed is skipped.
+// adminPurge writes the epochs through every live engine of the name. An
+// engine already closed is skipped.
 func adminPurge(w http.ResponseWriter, r *http.Request, live []*adminEntry) error {
 	var b purgeBody
 	if err := decodeBody(w, r, &b); err != nil {
 		return err
 	}
+	rep := purgeReply{Status: "accepted"}
 	if len(b.URLs) > maxPurgeURLs || len(b.Groups) > maxPurgeGroups {
 		return apiError(http.StatusBadRequest, "a purge takes at most %d urls and %d groups", maxPurgeURLs, maxPurgeGroups)
 	}
@@ -152,23 +153,36 @@ func adminPurge(w http.ResponseWriter, r *http.Request, live []*adminEntry) erro
 	default:
 		return apiError(http.StatusBadRequest, "mode must be soft or hard")
 	}
-	err := weir.ErrClosed
+	// Every live engine gets the purge (08 §7): engines of one name usually
+	// share a store, but a reload that changes max_bytes, multi_host or
+	// snapshot_dir builds a second one, and the new engine must not keep
+	// serving what an operator just purged. Epochs are idempotent; a shared
+	// store makes the second eager scrub find nothing.
 	var n int64
+	var purged int
+	var firstErr error
 	for _, e := range live {
-		n, err = e.tap.purge(r.Context(), e.engine, p)
-		if !errors.Is(err, weir.ErrClosed) {
-			break
+		k, err := e.tap.purge(r.Context(), e.engine, p)
+		n += k
+		switch {
+		case err == nil:
+			purged++
+		case errors.Is(err, weir.ErrEagerUnsupported):
+			purged++
+			rep.Warning = "the store cannot delete records; the epochs are written and the entries are unreachable"
+		case errors.Is(err, weir.ErrClosed):
+			// closing engine: another one carries the purge
+		default:
+			if firstErr == nil {
+				firstErr = err
+			}
 		}
 	}
-	rep := purgeReply{Status: "accepted"}
-	switch {
-	case err == nil:
-	case errors.Is(err, weir.ErrEagerUnsupported):
-		rep.Warning = "the store cannot delete records; the epochs are written and the entries are unreachable"
-		err = nil
+	if firstErr != nil {
+		return purgeError(firstErr, p.Eager, n)
 	}
-	if err != nil {
-		return purgeError(err)
+	if purged == 0 {
+		return purgeError(weir.ErrClosed, false, 0)
 	}
 	if p.Eager && rep.Warning == "" {
 		rep.Scrubbed = &n
@@ -177,10 +191,15 @@ func adminPurge(w http.ResponseWriter, r *http.Request, live []*adminEntry) erro
 }
 
 // purge runs one purge and returns the number of records an eager one deleted.
-// Calls on one engine are serialized so the count is this call's own.
+// Calls on one engine are serialized so the count is this call's own; a call
+// whose context ends while waiting gives up.
 func (t *purgeTap) purge(ctx context.Context, e *weir.Engine, p weir.Purge) (int64, error) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
+	select {
+	case t.sem <- struct{}{}:
+		defer func() { <-t.sem }()
+	case <-ctx.Done():
+		return 0, ctx.Err()
+	}
 	before := t.scrubbed.Load()
 	err := e.Purge(ctx, p)
 	return t.scrubbed.Load() - before, err
@@ -188,7 +207,14 @@ func (t *purgeTap) purge(ctx context.Context, e *weir.Engine, p weir.Purge) (int
 
 // purgeError maps an engine error to an admin status. Details of store
 // failures stay in the message because the admin API is operator-only.
-func purgeError(err error) error {
+//
+// A failure inside an eager purge's scrub comes after the epochs were written,
+// so the message says so and carries the count deleted before it: retrying is
+// safe, and the entries are already unreachable (04 §13.5).
+func purgeError(err error, eager bool, scrubbed int64) error {
+	if eager && strings.Contains(err.Error(), "purge: scrub:") {
+		err = fmt.Errorf("%w (epochs written, entries unreachable; scrub incomplete, %d records deleted)", err, scrubbed)
+	}
 	switch {
 	case errors.Is(err, weir.ErrInvalidRequest):
 		return apiError(http.StatusBadRequest, "%v", err)
@@ -220,7 +246,8 @@ type modeReply struct {
 // adminMode applies the mode to every live engine of the name, so the old and
 // new engine of a reload overlap agree (D33). SetMode validates before it
 // changes anything and all engines get the same arguments, so a bad request
-// fails on the first engine with nothing applied.
+// fails on the first engine with nothing applied. SetMode has no closed-engine
+// failure, so a closing engine takes the mode like any other.
 func adminMode(w http.ResponseWriter, r *http.Request, live []*adminEntry) error {
 	var b modeBody
 	if err := decodeBody(w, r, &b); err != nil {
@@ -231,20 +258,21 @@ func adminMode(w http.ResponseWriter, r *http.Request, live []*adminEntry) error
 		return apiError(http.StatusBadRequest, "mode must be normal, stale-on-error or bypass")
 	}
 	ttl := time.Duration(0)
-	if b.TTL != "" {
+	switch {
+	case m == weir.ModeNormal:
+		ttl = normalModeTTL // meaningless for normal: ignored, even if malformed
+	case b.TTL != "":
 		var err error
 		if ttl, err = time.ParseDuration(b.TTL); err != nil {
 			return apiError(http.StatusBadRequest, "invalid ttl: %v", err)
 		}
-	} else if m == weir.ModeNormal {
-		ttl = normalModeTTL
 	}
 	for _, e := range live {
 		if err := e.engine.SetMode(m, ttl); err != nil {
 			if errors.Is(err, weir.ErrInvalidConfig) {
 				return apiError(http.StatusBadRequest, "%v", err)
 			}
-			return purgeError(err)
+			return purgeError(err, false, 0)
 		}
 	}
 	rep := modeReply{Mode: b.Mode, Engines: len(live)}

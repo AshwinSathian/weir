@@ -90,7 +90,7 @@ func (h *Handler) Provision(ctx caddy.Context) (err error) {
 	}
 	cfg := h.weirConfig()
 	cfg.Logger = ctx.Slogger()
-	tap := new(purgeTap)
+	tap := newPurgeTap()
 	cfg.Observer = tap
 	load := any(ctx.GetMetricsRegistry())
 	keyGen := keyGenHash(cfg)

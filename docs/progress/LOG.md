@@ -982,7 +982,7 @@ Entry template:
 - Context: medium; size S was a little small because of the failure triage.
 
 ## 2026-10-07 · M10-04 · done
-- Branch / PR: claude/zealous-ritchie-wdpztv / https://github.com/AshwinSathian/weir/pull/81
+- Branch / PR: claude/zealous-ritchie-wdpztv / see STATUS
 - Done: handoff of the work in the previous entry, plus review fixes: fuzz list no longer hides compile errors and fails on an empty matrix, script waits for origin and proxy and prints CLI errors, `npm ci` with fallback, weirproxy `splitList` test, `headers-store-Transfer-Encoding` moved to Unexplained, `conditional-etag-forward*` cites D4 only.
 - Tests: TestSplitList added; root race tests, gofmt, vet and trace (130/152) pass; the baseline run still reports no regressions. Lint unrun locally (Go 1.25 build); CI must confirm.
 - Deviations: none beyond the docs/07 §8 paragraph.
@@ -1254,7 +1254,7 @@ Entry template:
 - Context: low.
 
 ## 2026-10-09 · P2-00 · done
-- Branch / PR: card/P2-00-caddy-spec (remote branch claude/zen-shannon-l879he) / https://github.com/AshwinSathian/weir/pull/81
+- Branch / PR: card/P2-00-caddy-spec (remote branch claude/zen-shannon-l879he) / see STATUS
 - Done: docs/08 is v1.0, verified against Caddy v2.11.7 with a file:line table (§11); Phase 2 cards P2-01 to P2-07 (plus P2-01b, P2-03b) in docs/cards/20-later.md; docs/09 Caddy facts refreshed.
 - Tests: docs only. gofmt, vet and trace 146/146 pass; `make check` stops at lint (container golangci-lint is Go 1.25), CI must confirm.
 - Deviations: none from normative requirements. Findings written into 08: admin routes outlive reloads (engine registry), metrics registry is per config load, Caddy's upgrade detector is unusable (adapter uses `internal/keys.IsUpgrade`).
@@ -1271,7 +1271,7 @@ Entry template:
 - Context: low.
 
 ## 2026-10-09 · P2-01 · done
-- Branch / PR: card/P2-01-module-skeleton (remote branch claude/epic-maxwell-jkv0at) / https://github.com/AshwinSathian/weir/pull/81
+- Branch / PR: card/P2-01-module-skeleton (remote branch claude/epic-maxwell-jkv0at) / see STATUS
 - Done: `caddy/` module (`weircaddy`): `http.handlers.weir` with strict JSON config, required `name` charset check, `ByteSize` parsing, mapping to `weir.Config`, Provision/Validate/Cleanup (idempotent), interface guards, pass-through ServeHTTP. `go.work` includes `./caddy`; root `go.mod` still has no `require`. docs/08 §2 key table lists every block key.
 - Tests: `TestConfigFromJSON`, `TestProvisionReportsBadConfig`, `TestInternalKeysImport`. `make check` passes with the pinned golangci-lint run under Go 1.27; trace 146/146.
 - Deviations: none from normative text; five keys added beyond the 08 example, recorded in the 08 table. `max_bytes`/`snapshot_dir` parsed but applied by P2-02. `internal/keys.IsUpgrade` imports across modules, so no `weirhttp.IsUpgrade` fallback.
@@ -1419,3 +1419,10 @@ Entry template:
 - Deviations: 08 §7 states how the scrubbed count is derived (reason `hard` only).
 - Follow-ups: P2-06 chains its observer behind `purgeTap`.
 - Context: medium; size M was right.
+
+## 2026-10-10 · P2-05 · review-fixes
+- Branch / PR: claude/wizardly-ride-guhrru / https://github.com/AshwinSathian/weir/pull/81
+- Done: adversarial review (agent); "Waiting on Ashwin" was empty. Fixed M1: my earlier PR-link substitution had touched three older LOG entries, restored from main. Fixed M2: a purge now reaches every live engine (a reload that changes a pool-key setting builds a second store, and the old purge-through-one-engine left the new one serving purged entries). S1: purge serialization is a context-aware semaphore, not a held mutex. S2: a scrub failure says the epochs are written and reports the count so far. S3: stronger tests. S4 and N4/N5: mode comment fixed, ttl ignored for `normal`, duplicate keys documented.
+- Tests: TestAdminPurgeReachesEveryStoreInOverlap, TestAdminPurgeSkipsClosedEngine (now checks fwd=stale), TestPurgeTapWaitHonoursContext, TestAdminConcurrentEagerPurgeCounts, TestAdminRacesWithCleanup, TestPurgeErrorWordsPartialScrub, TestAdminBodyEdges, TestAdminModeNormalIgnoresTTL; e2e now checks the cached entry survives a site-listener purge attempt. Race and shuffle tests and lint on Go 1.27 pass.
+- Deviations: 08 §7 reworded (purge through every engine, semaphore, partial-failure wording, ttl for normal).
+- Declined: checking count limits before decode (bounded by the 1 MiB cap); hiding which names exist from a prober (admin API is operator-only); an integration test for an origin group invalidation during an eager purge (the tap is unit-tested on the event reason).

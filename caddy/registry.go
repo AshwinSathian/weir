@@ -69,9 +69,13 @@ func engineList(name string) []*adminEntry { return engines.list(name) }
 // only the admin API issues an eager one, so the sum seen during a serialized
 // call is that call's count.
 type purgeTap struct {
-	mu       sync.Mutex // serializes admin purges on one engine
+	// sem is a one-slot semaphore, not a mutex: a purge waiting for its turn
+	// stops when its request is cancelled (P8, rule 6).
+	sem      chan struct{}
 	scrubbed atomic.Int64
 }
+
+func newPurgeTap() *purgeTap { return &purgeTap{sem: make(chan struct{}, 1)} }
 
 // Observe implements weir.Observer.
 func (t *purgeTap) Observe(ev weir.Event) {

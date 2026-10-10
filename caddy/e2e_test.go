@@ -468,8 +468,13 @@ func TestE2EAdminPurge(t *testing.T) {
 	if cs := get(t, c, "/p").header.Get("Cache-Status"); !strings.Contains(cs, "fwd=stale") {
 		t.Fatalf("after purge Cache-Status = %q, want fwd=stale", cs)
 	}
-	// A purge route on the site listener would be reachable by clients (T-26).
+	// A purge route on the site listener would be reachable by clients (T-26):
+	// the request goes to the origin like any POST, and the cached entry stays.
+	get(t, c, "/p") // refill after the purge
 	if code := post("http://localhost:9080/weir/e2e-admin/purge", `{"all":true}`); code == http.StatusAccepted {
 		t.Fatal("the site listener accepted a purge")
+	}
+	if cs := get(t, c, "/p").header.Get("Cache-Status"); !strings.Contains(cs, "hit") {
+		t.Fatalf("Cache-Status after a site-listener purge = %q, want the entry to survive", cs)
 	}
 }
