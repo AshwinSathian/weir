@@ -1464,3 +1464,11 @@ Entry template:
 - Deviations: 08 §2 and §5 reworded to match observed behavior.
 - Follow-ups: 06 T-45/R-6 per-client placeholder case at its next revision; the 5xx mapping from P2-03; STATUS still says Phase 1 (unchanged).
 - Context: low
+
+## 2026-10-10 · P25-00 · blocked
+- Branch / PR: claude/nice-davinci-rh3zjh (session-designated, not card/*) / not opened; waiting for the user to run /handoff
+- Done: client chosen with Ashwin (valkey-go v1.0.78); 05 §7 corrected (Lua for epoch writes, one-script reads, client options, Unix-second epochs, cap counter); cards P25-01 to P25-07 (with P25-03b) written in docs/cards/20-later.md.
+- Tests: none (docs only); `make check` not run.
+- Deviations: none beyond 05 §7 edits.
+- Follow-ups: P25-05 and P25-07 need user approval first (public API change; new config block and D17); P25-06 decides epoch-key eviction policy.
+- Context: low; size S was right.

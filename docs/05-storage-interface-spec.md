@@ -1,7 +1,7 @@
 # Weir storage interface specification
 
 Status: v1.0
-Date: 2026-10-09
+Date: 2026-10-10
 Depends on: [01-technical-spec.md](01-technical-spec.md), [04-lld.md §2](04-lld.md)
 Seed name: `02-storage-interface-spec.md` (renumbered, see [docs/README.md](README.md))
 
@@ -260,8 +260,8 @@ This section exists to prove the interface above does not assume in-process sema
 | `Get(k)` | `GET weir:{e}:<hex(k)>`, decode |
 | `Set(k, e)` | `SET weir:{e}:<hex(k)> <encoded> PXAT <e.Expires in ms>` |
 | `Delete(k)` | `DEL` |
-| `SetEpoch(t, ep)` | hard: Lua `max` update of `weir:{e}:epoch:hard:<hex(t)>` with expiry `MaxRetention`; soft and invalid: Lua raising the `d` sketch cells with `BITFIELD ... u32` on one 2 MiB string per plane (`weir:{e}:sketch:<mode>`), which keeps memory fixed as in E-9; plus the newest-epoch key |
-| `NewestEpoch(tags, since)` | fast path on a client-side cached newest-epoch key; otherwise one pipelined round trip: `BITFIELD GET u32` for the sketch cells of all tags plus `MGET` of their hard keys |
+| `SetEpoch(t, ep)` | one Lua script (`EVALSHA`, all keys under `{e}`): hard: `max` update of `weir:{e}:epoch:hard:<hex(t)>` with expiry `MaxRetention`; soft and invalid: raise the `d` sketch cells (`BITFIELD GET`/`SET ... u32`, because `BITFIELD` has no max operation) on one 2 MiB string per plane (`weir:{e}:sketch:<mode>`), which keeps memory fixed as in E-9; plus the newest-epoch key |
+| `NewestEpoch(tags, since)`, `NewestEpochShared(tags, shared, since)` | one Lua read script, one round trip (E-12): newest-epoch key first (E-10 fast path), then the sketch cells of all tags and the hard keys. A client-side cached newest-epoch key (RESP3 tracking) is an optimization for later |
 | `Info()` | `{Name: "valkey", Remote: true}` |
 
 Notes that follow from the table and require nothing new from the interface:
@@ -271,6 +271,9 @@ Notes that follow from the table and require nothing new from the interface:
 - Eviction is Valkey's (`maxmemory-policy allkeys-lfu` recommended). The engine does not care which policy (seed T6.11: "the storage interface must not assume a single eviction policy").
 - Timeouts: every call runs under the engine's `Timeouts.Store` deadline; the client library is configured with no internal retries longer than that.
 - Client-side caching (RESP3 tracking) can make `Get` for hot keys local; invalidation messages from Valkey keep it coherent. This is an optimization inside the store and invisible to the engine.
+- Client library (decided 2026-10-10): `github.com/valkey-io/valkey-go` v1.0.78 (needs Go 1.25, the project needs 1.27), pure Go, in the `store/valkey` module only (the root module stays standard-library only, NFR-6). `ClientOption.DisableRetry` is true so a call never outlives `Timeouts.Store`; `DisableCache` is true until the client-side caching card; scripts use `valkey.NewLuaScript` (`EVALSHA` with `EVAL` fallback). `valkey.ErrClosing`, context errors and network errors map to `ErrUnavailable`; a record that fails `Decode` is `ErrUnavailable` too (S-3).
+- Epoch times are wall-clock Unix seconds (u32, valid to 2106), not the memory store's monotonic offsets (§4.3). The Valkey store adds `MaxClockSkew` when comparing with `since`.
+- Hard-epoch cap (E-6): a Lua-maintained counter key under `{e}`, checked in the same script as the write.
 - What the paper design exposed: the vary-spec read-modify-write race ([04-lld.md §6.7](04-lld.md)) is wider across nodes. It stays bounded by the per-partition cap per node times the node count. A Lua compare-and-set for vary specs is the planned mitigation, still behind the same `Set` call.
 
 ## 8. Conformance suite (`store/storetest`)
