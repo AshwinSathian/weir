@@ -1666,7 +1666,7 @@ Entry template:
 - Context: medium
 
 ## 2026-10-11 · P25-07 · done
-- Branch / PR: claude/gracious-brown-acmyd0 / PR_URL
+- Branch / PR: claude/gracious-brown-acmyd0 / https://github.com/AshwinSathian/weir/pull/94
 - Done: `store valkey { ... }` in Caddyfile and JSON (`caddy/valkeystore.go`, `caddyfile.go`); pool key and key-generation hash carry a SHA-256 digest of the store settings; `pooledStore` holds a `store.Store`; credentials never reach errors or logs; unreachable server leaves Provision alone and opens the store breaker; CI xcaddy gains `--with` for `store/valkey` and a Valkey `caddy validate` step.
 - Tests: TestStoreValkeyJSONMapsEveryField, TestStoreValkeyValidation, TestStoreConfigRedacts, TestPoolKeyIncludesStoreSettings, TestCaddyfileStoreValkey, TestValkeyStoreOutageOpensBreaker; caddy and root tests pass with `-race`; lint not run here.
 - Deviations: 08 §2 and §3 updated (store block, pool key, no server-side key-generation record). Block shape approved by Ashwin.

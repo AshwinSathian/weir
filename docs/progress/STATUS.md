@@ -5,7 +5,7 @@ Phase: 1
 Current card: none
 Card state: awaiting-merge
 Branch: claude/gracious-brown-acmyd0 (session branch, not card/*)
-PR: PR_URL
+PR: https://github.com/AshwinSathian/weir/pull/94
 Next card: P25-07b
 
 ## Notes for the next session (P25-07)
