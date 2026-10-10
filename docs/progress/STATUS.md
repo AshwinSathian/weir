@@ -1,12 +1,12 @@
 # Status
 
-Updated: 2026-10-09
+Updated: 2026-10-10
 Phase: 1
 Current card: none
 Card state: awaiting-merge
-Branch: card/P2-01-module-skeleton
-PR: https://github.com/AshwinSathian/weir/pull/74
-Next card: P2-01b (Caddyfile parsing and directive order)
+Branch: claude/adoring-curie-pvckor
+PR: https://github.com/AshwinSathian/weir/pull/75
+Next card: P2-01c (CI for the Caddy module)
 
 ## Waiting on Ashwin
 
@@ -51,8 +51,14 @@ Ashwin delegated "take decisions on all items"; "Waiting on Ashwin" was empty. A
 - Risk for P2-01c: `caddy/go.mod` uses `replace => ..`, which importers ignore; `xcaddy build --with .../weir/caddy` outside the repo may not resolve the root module until it has a tag. P2-01c must test this.
 - P2-03: `Cleanup` clears `h.engine` without a lock; `ServeHTTP` must read it safely (atomic pointer or the engine registry).
 
+## Decided 2026-10-10 (P2-01b, adversarial review of PR 75)
+
+"Waiting on Ashwin" was empty. No must-fix. Decided: sub-block keys (`key`, `forward`, `bypass`, `limiter`, `stale`) with no block or empty braces are an error; repeated keys stay an error and 08 §2 now says so; the `weir <matcher>` form is supported and documented; runtime placeholders (`{env.X}`, `{host}`) are not expanded, only parse-time `{$VAR}`, documented in 08 §2; the `name` error points at the `name` line. Tests added for repeated sub-block keys, negative durations, directive arguments, bare and empty sub-blocks, the matcher form. Kept: duplicate `name` handling in P2-02, the non-`card/*` branch, `RegisterDirectiveOrder` (TestDirectiveOrder fails loudly on a Caddy bump).
+
 ## Notes for the next session
 
+- P2-02 must (a) reject or expand `{...}` in `snapshot_dir` (the Caddyfile path keeps `{env.X}` literally), (b) test that two handlers with the same `name` and different config in one load fail (08 §3), including a `weir` in `handle_errors`.
+- P2-01b: `caddy/caddyfile.go` parses the `weir` block into `Handler` (strict keys, single-set keys, errors carry the Caddyfile line); `init` registers the directive and `RegisterDirectiveOrder(Before, reverse_proxy)`. `route` keeps written order, so weir must be written first there (pinned by a test). Caddyfile tests import caddy `standard`, `encode` and `reverseproxy`, so `caddy/go.sum` grew. Two `weir` directives with the same `name` in one config are not rejected yet: P2-02 (store pool) should own that. Integer upper bounds are left to `weir.New`.
 - P2-01: Go package in `caddy/` is named `weircaddy`. `Handler.weirConfig()` maps adapter settings to `weir.Config`; `Provision` builds the engine with `weir.New` (default store). `max_bytes` and `snapshot_dir` are parsed and validated but not applied: P2-02 builds the pooled store and must pass it as `Config.Store`. `ServeHTTP` is a pass-through until P2-03.
 - P2-01: `decodeStrict` in caddy/config.go mirrors Caddy's strict module decoding; P2-01b's Caddyfile `UnmarshalCaddyfile` must fill the same `Handler` fields and reject unknown subdirectives. Added keys beyond the 08 example (documented in the 08 §2 table): `query_keep`, `normalize_path`, `bypass.headers`, `max_queue`, `while_revalidate`.
 - P2-01: lint for submodules ran with `GOTOOLCHAIN=go1.27.0 make check GOLANGCI="go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0"`; this passes in the container.
