@@ -17,8 +17,8 @@ import (
 	"github.com/AshwinSathian/weir/store/memory"
 )
 
-// Memory-store defaults the fairness cap is computed from (memory.Config:
-// 0 means 256 MiB and 16 shards). P2-04 replaces the size with auto-sizing.
+// Memory-store defaults (memory.Config: 0 means 256 MiB and 16 shards).
+// defaultStoreBytes is also FR-MEM-1's size when no memory limit is set.
 const (
 	// minStoreBytes is the smallest max_bytes whose largest object (10% of a
 	// shard, 05 §5.1) fits the default 1 MiB Storable.MaxObjectBytes, which
@@ -54,6 +54,10 @@ type pooledStore struct {
 	// superseded is set when a newer store with the same name exists, so
 	// the final snapshot writer is the live store (08 §3).
 	superseded atomic.Bool
+
+	// size is the byte budget the store was built with when max_bytes was
+	// unset (08 §7); zero for explicit sizes, which spec.maxBytes holds.
+	size atomic.Int64
 
 	mu      sync.Mutex
 	keyGen  [sha256.Size]byte // hash of the newest engine that used the store
@@ -152,6 +156,9 @@ type storeRegistry struct {
 	// away (a reload rolled back) the previous one becomes the writer again.
 	live  map[string][]*pooledStore
 	loads map[any]map[string]*claim
+
+	// warnedNoLimit makes the "no memory limit" warning one per process.
+	warnedNoLimit atomic.Bool
 }
 
 // claim records what one config load has said about a name, so a second site
@@ -160,6 +167,7 @@ type claim struct {
 	spec   storeSpec
 	keyGen [sha256.Size]byte
 	refs   int
+	size   int64 // bytes an auto-sized store of this name holds (memory.go)
 }
 
 func newStoreRegistry() *storeRegistry {
@@ -296,9 +304,9 @@ func (h *Handler) storeSpec() storeSpec {
 
 // memoryConfig maps the handler onto the store settings. A multi-host site
 // gets MaxBytesPerOwner at 25% of a shard (FR-FAIR-3).
-func (h *Handler) memoryConfig() memory.Config {
+func (h *Handler) memoryConfig(size int64) memory.Config {
 	cfg := memory.Config{
-		MaxBytes:        int64(h.MaxBytes),
+		MaxBytes:        size,
 		SnapshotTimeout: closeTimeout,
 	}
 	if dir := h.snapshotDir(); dir != "" {
@@ -318,7 +326,7 @@ func (h *Handler) memoryConfig() memory.Config {
 // here, not at Validate, so caddy validate has no side effects on disk. A
 // snapshot written under a different key-generation hash is deleted before
 // the store can load it (R-3), and the current hash is recorded beside it.
-func (h *Handler) buildStore(keyGen [sha256.Size]byte) (*memory.Store, error) {
+func (h *Handler) buildStore(keyGen [sha256.Size]byte, size int64) (*memory.Store, error) {
 	if dir := h.snapshotDir(); dir != "" {
 		if err := prepareSnapshotDir(dir); err != nil {
 			return nil, err
@@ -327,7 +335,7 @@ func (h *Handler) buildStore(keyGen [sha256.Size]byte) (*memory.Store, error) {
 			return nil, err
 		}
 	}
-	st, err := memory.New(h.memoryConfig())
+	st, err := memory.New(h.memoryConfig(size))
 	if err != nil {
 		return nil, fmt.Errorf("weir: %w", err)
 	}

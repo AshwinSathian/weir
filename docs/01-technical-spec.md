@@ -631,5 +631,5 @@ Open: none that block any milestone before Phase 3.
 
 ### 14.8 Memory sizing (D35)
 
-- FR-MEM-1. With `Config.Store` nil, the memory store size is 40% of `debug.SetMemoryLimit(-1)` when that is below `math.MaxInt64`, clamped to [16 MiB, 8 GiB]; otherwise 256 MiB and a startup warning recommending `GOMEMLIMIT`. The Caddy adapter divides the 40% budget evenly across named stores that do not set `max_bytes`, so several sites in one process cannot overcommit (T-43).
+- FR-MEM-1. With `Config.Store` nil, the memory store size is 40% of `debug.SetMemoryLimit(-1)` when that is below `math.MaxInt64`, clamped to [16 MiB, 8 GiB]; otherwise 256 MiB and a startup warning recommending `GOMEMLIMIT`. The Caddy adapter splits the 40% budget across named stores that do not set `max_bytes`: Caddy provisions handlers one at a time, so the k-th new store of a config load takes half of the budget that load has not granted yet (20%, 10%, 5% of the limit), never below the 160 MiB floor. Several sites in one load therefore cannot overcommit until the floor binds (T-43).
 

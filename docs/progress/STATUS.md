@@ -2,10 +2,10 @@
 
 Updated: 2026-10-10
 Phase: 1
-Current card: none
-Card state: awaiting-merge
-Branch: claude/lucid-wright-8y0epq
-PR: https://github.com/AshwinSathian/weir/pull/79
+Current card: P2-04 (Memory budget split and memory sizing)
+Card state: in-progress
+Branch: claude/focused-dijkstra-cr32by
+PR: none yet
 Next card: P2-04 (Memory budget split and memory sizing)
 
 ## Waiting on Ashwin

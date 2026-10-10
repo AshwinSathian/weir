@@ -252,13 +252,13 @@ func TestMultiHostEnablesFairnessCaps(t *testing.T) {
 	}
 
 	// 256 MiB default, 16 shards, a quarter of a shard.
-	if got := (&Handler{MultiHost: true}).memoryConfig().MaxBytesPerOwner; got != 4<<20 {
+	if got := (&Handler{MultiHost: true}).memoryConfig(0).MaxBytesPerOwner; got != 4<<20 {
 		t.Fatalf("MaxBytesPerOwner = %d, want 4 MiB", got)
 	}
-	if got := (&Handler{MultiHost: true, MaxBytes: 64 << 20}).memoryConfig().MaxBytesPerOwner; got != 1<<20 {
+	if got := (&Handler{MultiHost: true, MaxBytes: 64 << 20}).memoryConfig(64 << 20).MaxBytesPerOwner; got != 1<<20 {
 		t.Fatalf("MaxBytesPerOwner = %d, want 1 MiB", got)
 	}
-	if single.memoryConfig().MaxBytesPerOwner != 0 {
+	if single.memoryConfig(0).MaxBytesPerOwner != 0 {
 		t.Fatal("single-host store has an owner cap")
 	}
 }
