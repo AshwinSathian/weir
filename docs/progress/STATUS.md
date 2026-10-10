@@ -5,7 +5,7 @@ Phase: 1
 Current card: none
 Card state: awaiting-merge
 Branch: claude/wizardly-ride-guhrru
-PR: none yet
+PR: https://github.com/AshwinSathian/weir/pull/81
 Next card: P2-06
 
 ## Waiting on Ashwin
