@@ -1442,3 +1442,8 @@ Entry template:
 - Tests: TestStoreEvictionReachesMetric (a real store fill reaches `weir_evictions_total`), TestPoolKeepsTheSinkItBuiltWith, TestProvisionFailureInEngineReleasesMetricSet (weir.New failure), stronger TestMetricsGaugesAcrossEngines (max not sum, survives sibling Cleanup), every `weir_*` series carries `name`. Race and shuffle tests (count=3), vet, gofmt and lint on Go 1.27 (`GOTOOLCHAIN=go1.27.0 ... golangci-lint@v2.14.0`) pass.
 - Deviations: 08 §8 reworded (count in all attached sets).
 - Declined: asserting all 19 names of 04 §9.3 (labelled families appear only after an event; `observe/prom`'s own tests cover the names).
+
+## 2026-10-10 · P2-06 · review-fixes
+- Branch / PR: claude/inspiring-galileo-j1jrdh / https://github.com/AshwinSathian/weir/pull/82
+- Done: CI `caddy-build` failed because xcaddy cannot resolve `observe/prom` (an unreleased module; a `replace` in `caddy/go.mod` is ignored by importers). The job now passes `--with github.com/AshwinSathian/weir/observe/prom=./observe/prom`. Verified locally with xcaddy v0.4.5 against Caddy v2.11.7 (build complete).
+- Follow-ups: any later module the `caddy` module requires needs its own `--with` until root and sub-modules have release tags.

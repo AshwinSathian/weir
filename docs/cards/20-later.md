@@ -31,7 +31,7 @@ These phases start from draft specs. Each begins with one planning card that ver
 - Plan: 2.2 · Size: S · Depends on: P2-01b
 - Read: 08 §9; Makefile; .github/workflows/ci.yml
 - Touch: .github/workflows/ci.yml
-- AC: a CI job runs `xcaddy build --with github.com/AshwinSathian/weir=. --with github.com/AshwinSathian/weir/caddy=./caddy` (the root `replace` is needed because no root tag exists yet) and starts the binary with a minimal Caddyfile; `GOWORK=off` runs of the `caddy` module are already covered by the Makefile and stay green
+- AC: a CI job runs `xcaddy build --with github.com/AshwinSathian/weir=. --with github.com/AshwinSathian/weir/caddy=./caddy --with github.com/AshwinSathian/weir/observe/prom=./observe/prom` (the root `replace` is needed because no root tag exists yet) and starts the binary with a minimal Caddyfile; `GOWORK=off` runs of the `caddy` module are already covered by the Makefile and stay green
 
 ### [x] P2-02 Store pool and key-generation hash
 - Plan: 2.2 · Size: M · Depends on: P2-01
