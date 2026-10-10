@@ -165,7 +165,7 @@ func (s *Store) loadRecord(kind byte, p []byte) {
 		// ponytail: every record enters the small queue, so under later
 		// pressure the oldest-admitted (hottest) records are evicted first.
 		// Upgrade: mark main-section records in the file and push them to main.
-		switch s.put(store.Key(p[:snapKeyLen]), e, true) {
+		switch s.put(store.Key(p[:snapKeyLen]), e, true, nil) {
 		case putStored:
 			st.loaded++
 		case putExpired:

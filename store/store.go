@@ -169,6 +169,20 @@ type SharedTagEpochs interface {
 	NewestEpochShared(ctx context.Context, tags, shared []Tag, since time.Time) (Epoch, bool, error)
 }
 
+// VarySetter is an optional Store capability: a compare-and-set for the vary
+// spec at a primary key (04 §6.7, 05 §2.3). SetVarySpec stores next at k only
+// if the live record at k is still prev, the *Entry that Get returned (a nil
+// prev means no live record), and reports whether it did. A store compares
+// the record it holds, not the pointer's address: a memory store compares
+// identity, a remote store the stored bytes. Declining next (too large, past
+// its Expires) is reported as swapped with a nil error, like Set (S-4). The
+// engine retries a lost swap a bounded number of times, so concurrent writers
+// cannot lose each other's variant references. A wrapper that embeds only
+// Store hides the capability and the engine falls back to Get then Set.
+type VarySetter interface {
+	SetVarySpec(ctx context.Context, k Key, prev, next *Entry) (swapped bool, err error)
+}
+
 // Sizer is an optional Store capability reporting current bytes and the
 // largest record the store accepts (FR-LCY-1).
 type Sizer interface {

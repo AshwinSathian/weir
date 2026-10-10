@@ -1600,3 +1600,27 @@ Entry template:
 - Deviations: none. The earlier excluded-scenario list was incomplete: Invalid epoch, global soft, Vary variants, MustRevalidate, Warm and creator cancel could run on Valkey; they are P25-04b.
 - Follow-ups: P25-05 API decision waits on Ashwin; Valkey 8.1 CI job still not run.
 - Context: low
+
+## 2026-10-10 · P25-04b · done
+- Branch / PR: claude/amazing-galileo-2z89q7 / https://github.com/AshwinSathian/weir/pull/91
+- Done: `store/valkey/engine_scenarios_integration_test.go` (tag `integration`): unsafe-method and group invalidation (invalid mode, shared tags), invalidation flood with a logged lookup-cost measurement, global soft epoch, soft after hard, purge during an in-flight fetch, Vary followers through the codec, must-revalidate 504, creator cancel, Warm.
+- Tests: TestEngineUnsafeMethodInvalidates, GroupInvalidationIsSoft, InvalidationFlood, GlobalEpochSoft, SoftAfterHardStaysHard, PurgeDuringInflightFetch, VaryFollowersRecoalesce, MustRevalidate504, CoalesceCreatorCancel, Warm. All TestEngine* pass 3 of 3 runs with `-race` on redis 7.0.15 (about 32 s). Root `make check` passes except `lint`/`modules`, which stop on the container's Go 1.25 golangci-lint (CI must confirm).
+- Deviations: the card names `TestSharedTagsKeepURIInvalidation` with `NewestEpochShared` on Valkey; the Valkey sketch size is not configurable, so a flood cannot saturate it and `TestEngineInvalidationFlood` cannot tell the shared path from the plain one (storetest `SharedTagEpochs` pins the rule). It still checks that a POST invalidates its own URI. Review: card-reviewer found `TestEngineGlobalEpochSoft` failing (refresh started before the epoch second, so purged again); fixed with a 2.1 s wait and a 5 s window. Also set Warm.Concurrency explicitly and asserted 2..4 in flight, renamed the flood test to claim only what it shows (the shared-tag rule is pinned by storetest).
+- Follow-ups: CI Valkey 8.1 run still pending; PLAN 2.5.2 unticked until then. P25-05 waits on Ashwin.
+- Context: low; size S was right.
+
+## 2026-10-10 · P25-05 · done
+- Branch / PR: claude/amazing-galileo-2z89q7 / https://github.com/AshwinSathian/weir/pull/91 (added to the P25-04b PR at Ashwin's request)
+- Done: `store.VarySetter` (SetVarySpec compare-and-set), memory store implementation (one shard lock hold), engine `setVariantCAS`/`nextSpec` (16 attempts, delete of an orphaned variant), guard methods; docs 04 §6.7, 05 V-1, 07.
+- Tests: TestVaryCASConcurrentWriters (fails without the capability: 64 of 64 variants reachable), TestVaryCASFallsBackWithoutCapability, TestVaryCASStoreError, TestSetVarySpec, TestSetVarySpecOneWinner; `lazyStore` test wrapper got its own SetVarySpec. Root and memory race tests pass.
+- Deviations: 04 §6.7 and 05 §7 note rewritten for the capability; the decision (capability over `Entry` field) was delegated to the agent by Ashwin.
+- Follow-ups: P25-05b (Valkey script); the Valkey store keeps the old bound until then.
+- Context: medium
+
+## 2026-10-10 · P25-04b + P25-05 · review-fixes
+- Branch / PR: claude/amazing-galileo-2z89q7 / https://github.com/AshwinSathian/weir/pull/91
+- Done: adversarial reviews (two agents) of the scenarios and of the compare-and-set. Scenarios: `PurgeDuringInflightFetch` waits 3 s (the old pause let a request time taken at completion pass, confirmed by mutation), flood test warms up, Warm lower bound dropped. CAS: an unlisted variant is deleted on every failure exit with a context detached from the caller; docs 04 §6.7 and 05 V-1 say best effort and name the same-variant race; `TestVaryCASStoreError` counts calls (an error is not retried); the quota-refusal caveat is in V-1; a `ponytail:` note on the reclaim reads.
+- Tests: TestVary*, TestSetVarySpec*, TestEngine* pass with `-race`; no must-fix from either review.
+- Deviations: none beyond the notes above.
+- Follow-ups: P25-05b (Valkey script); CI Valkey 8.1 run.
+- Context: medium

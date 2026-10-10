@@ -31,6 +31,7 @@ var errStoreTimeout = errors.New("weir: store timeout")
 type storeGuard struct {
 	s       store.Store
 	shared  store.SharedTagEpochs // nil when the store lacks the capability
+	vary    store.VarySetter      // nil when the store lacks the capability
 	remote  bool
 	timeout time.Duration
 	obs     Observer
@@ -43,7 +44,8 @@ type storeGuard struct {
 
 func newStoreGuard(s store.Store, timeout time.Duration, obs Observer) *storeGuard {
 	sh, _ := s.(store.SharedTagEpochs)
-	return &storeGuard{s: s, shared: sh, remote: s.Info().Remote, timeout: timeout, obs: obs, backoff: storeBackoffFirst}
+	vs, _ := s.(store.VarySetter)
+	return &storeGuard{s: s, shared: sh, vary: vs, remote: s.Info().Remote, timeout: timeout, obs: obs, backoff: storeBackoffFirst}
 }
 
 func (g *storeGuard) get(ctx context.Context, k store.Key) (*store.Entry, error) {
@@ -63,6 +65,27 @@ func (g *storeGuard) set(ctx context.Context, k store.Key, ent *store.Entry) err
 	}
 	defer cancel()
 	return g.exit(ctx, "set", g.s.Set(ctx, k, ent))
+}
+
+func (g *storeGuard) del(ctx context.Context, k store.Key) error {
+	ctx, cancel, err := g.enter(ctx)
+	if err != nil {
+		return err
+	}
+	defer cancel()
+	return g.exit(ctx, "delete", g.s.Delete(ctx, k))
+}
+
+// setVarySpec is store.VarySetter.SetVarySpec under the same gate. The
+// caller has checked g.vary.
+func (g *storeGuard) setVarySpec(ctx context.Context, k store.Key, prev, next *store.Entry) (bool, error) {
+	ctx, cancel, err := g.enter(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer cancel()
+	ok, err := g.vary.SetVarySpec(ctx, k, prev, next)
+	return ok, g.exit(ctx, "set", err)
 }
 
 func (g *storeGuard) newestEpoch(ctx context.Context, tags []store.Tag, since time.Time) (store.Epoch, bool, error) {

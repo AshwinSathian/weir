@@ -451,16 +451,87 @@ func (e *Engine) storeResponse(ctx context.Context, c *keys.Classified, res *fet
 	return ent, e.setVariant(ctx, c, vk, ent)
 }
 
+// varyCASAttempts bounds the compare-and-set retries of one setVariant. Each
+// lost swap means another writer changed the spec, and at most MaxVariants
+// such changes can add a reference before the spec is full, so the bound only
+// matters when writers keep replacing refs of the same variant.
+const varyCASAttempts = 16
+
 // setVariant stores ent under its variant key vk, then the vary spec under
 // the primary key that lists it (04 §6.7). Variant first, so a reader that
 // finds the spec usually finds the variant. A spec with other names is
 // replaced and its variants age out. Refs past their Expires are dropped,
 // and at the cap those without a record too, freeing their slots (D37); a new variant past
-// MaxVariants live ones is not stored (FR-KEY-10, NFR-3).
+// MaxVariants live ones is not stored (FR-KEY-10, NFR-3). With a store that
+// has store.VarySetter the spec write is a compare-and-set, so concurrent
+// writers cannot lose each other's refs.
 func (e *Engine) setVariant(ctx context.Context, c *keys.Classified, vk store.Key, ent *store.Entry) bool {
+	if e.sg.vary != nil {
+		return e.setVariantCAS(ctx, c, vk, ent)
+	}
+	cur, _ := e.sg.get(ctx, c.Primary)
+	spec := e.nextSpec(ctx, c, vk, ent, cur)
+	if spec == nil || e.sg.set(ctx, vk, ent) != nil {
+		return false
+	}
+	return e.sg.set(ctx, c.Primary, spec) == nil
+}
+
+// setVariantCAS is setVariant for a store with store.VarySetter. The variant
+// is written once, before the first swap. Whenever the variant ends up not
+// listed (the spec is full, a store call failed, 16 swaps were lost), it is
+// deleted again, best effort: left in place it would be found by variant key
+// although no spec lists it, and the cap would not hold. The delete can remove
+// a record that a concurrent writer of the same variant has since listed; the
+// spec then lists a ref without a record, which the reclaim path (D37) frees
+// and a request turns into one extra miss.
+//
+// ponytail: the reclaim reads in nextSpec repeat on every attempt, so a full
+// spec costs up to 16 * MaxVariants reads; the ceiling is ctx, and the upgrade
+// is to reclaim on the first attempt only.
+func (e *Engine) setVariantCAS(ctx context.Context, c *keys.Classified, vk store.Key, ent *store.Entry) (stored bool) {
+	written := false
+	defer func() {
+		if written && !stored {
+			// The caller's context may be the reason for the failure.
+			dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), e.cfg.Timeouts.Store)
+			defer cancel()
+			_ = e.sg.del(dctx, vk)
+		}
+	}()
+	for range varyCASAttempts {
+		cur, err := e.sg.get(ctx, c.Primary)
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			return false
+		}
+		spec := e.nextSpec(ctx, c, vk, ent, cur)
+		if spec == nil {
+			return false
+		}
+		if !written {
+			if e.sg.set(ctx, vk, ent) != nil {
+				return false
+			}
+			written = true
+		}
+		swapped, err := e.sg.setVarySpec(ctx, c.Primary, cur, spec)
+		if err != nil {
+			return false
+		}
+		if swapped {
+			return true
+		}
+	}
+	return false
+}
+
+// nextSpec builds the vary spec that lists ent's variant on top of cur, the
+// record read at the primary key (nil: none). It returns nil, after emitting
+// EvVaryOverflow, when the cap leaves no slot. cur is not modified (P4).
+func (e *Engine) nextSpec(ctx context.Context, c *keys.Classified, vk store.Key, ent, cur *store.Entry) *store.Entry {
 	now := ent.StoredAt
 	var refs []store.VariantRef // a new slice: the stored spec is immutable (P4)
-	if cur, err := e.sg.get(ctx, c.Primary); err == nil && cur.Kind == store.KindVarySpec && slices.Equal(cur.VaryNames, ent.VaryNames) {
+	if cur != nil && cur.Kind == store.KindVarySpec && slices.Equal(cur.VaryNames, ent.VaryNames) {
 		for _, r := range cur.Variants {
 			if r.Key != vk && r.Expires.After(now) {
 				refs = append(refs, r)
@@ -479,17 +550,14 @@ func (e *Engine) setVariant(ctx context.Context, c *keys.Classified, vk store.Ke
 	}
 	if len(refs) >= e.cfg.Key.MaxVariants {
 		emit(e.cfg.Observer, Event{Kind: EvVaryOverflow, Time: now, Partition: c.Partition})
-		return false
-	}
-	if e.sg.set(ctx, vk, ent) != nil {
-		return false
+		return nil
 	}
 	refs = append(refs, store.VariantRef{Key: vk, Expires: ent.Expires})
 	spec := &store.Entry{Kind: store.KindVarySpec, StoredAt: now, VaryNames: ent.VaryNames, Variants: refs}
 	for _, r := range refs { // 04 §4.2: a spec lives as long as its longest variant
 		spec.Expires = later(spec.Expires, r.Expires)
 	}
-	return e.sg.set(ctx, c.Primary, spec) == nil
+	return spec
 }
 
 // sameRecord reports whether a and b are the same stored response. Stores

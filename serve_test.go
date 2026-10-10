@@ -787,6 +787,18 @@ func (s *lazyStore) Set(_ context.Context, k store.Key, e *store.Entry) error {
 	return nil
 }
 
+// SetVarySpec keeps the promoted memory-store method from writing around the
+// map: lazyStore reads and writes only m.
+func (s *lazyStore) SetVarySpec(_ context.Context, k store.Key, prev, next *store.Entry) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if cur := s.m[k]; cur != prev {
+		return false, nil
+	}
+	s.m[k] = next
+	return true, nil
+}
+
 // FR-UPG-1, T-44: CONNECT (including the authority-form target that would
 // otherwise fail path validation) never reaches the origin.
 func TestConnectRejected(t *testing.T) {

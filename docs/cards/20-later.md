@@ -148,7 +148,7 @@ These phases start from draft specs. Each begins with one planning card that ver
 - Out of scope: new scenarios; weakening a test to pass
 - Notes: root-module tests may not import valkey-go, so the suite lives in the `store/valkey` module and imports the engine.
 
-### [ ] P25-04b Remaining engine scenarios against Valkey
+### [x] P25-04b Remaining engine scenarios against Valkey
 - Plan: 2.5.2 · Size: S · Depends on: P25-04
 - Read: 07 §6 (T6.x matrix); `store/valkey/engine_integration_test.go`; purge_test.go and vary_test.go in the root package
 - Touch: `store/valkey/engine_integration_test.go` (or a second file), docs/05 only if a test finds an interface bug
@@ -157,12 +157,12 @@ These phases start from draft specs. Each begins with one planning card that ver
 - Out of scope: new scenarios beyond the list; weakening a test to pass
 - Notes: P25-04 covered the card's required list; the adversarial review of PR 90 found these uncovered. The suite sets `Timeouts.Store` to 2 s on purpose (the 50 ms default flaked under starvation).
 
-### [ ] P25-05 Vary-spec compare-and-set: interface and memory store
+### [x] P25-05 Vary-spec compare-and-set: interface and memory store
 - Plan: 2.5.3 · Size: M · Depends on: P25-04
 - Read: 04 §6.7 (vary spec read-modify-write, vary reclaim D37); 05 §2.3, §7 last notes; 01 FR-VAR requirements
 - Touch: docs/04, docs/05, store/store.go (the mechanism), store/memory (if the mechanism needs it), the engine's vary update path, tests
 - Tests: `TestVaryCASConcurrentWriters` on the memory store (64 writers never leave more than `MaxVariants` refs), `TestVaryCASFallsBackWithoutCapability`
-- AC: 64 concurrent writers never leave more than `MaxVariants` refs on one spec in the engine with the memory store; stores without the mechanism behave as before; the chosen mechanism is written into 04 §6.7 and 05 §7
+- AC: 64 concurrent writers never leave more than `MaxVariants` refs on one spec in the engine with the memory store; stores without the mechanism behave as before; the chosen mechanism (capability `VarySetter`) is written into 04 §6.7 and 05 V-1
 - Out of scope: the Valkey implementation (P25-05b), eviction (P25-06)
 - Notes: likely to split on overrun (interface and engine vs memory store). ASK THE USER FIRST. Options: (a) an optional capability `VarySetter` (public API addition), (b) a version field on `Entry` (public type change that also touches the memory store and the codec, hence its own review). Recommendation when asking: (a), because it leaves the codec alone.
 
