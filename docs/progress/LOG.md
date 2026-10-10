@@ -1356,3 +1356,20 @@ Entry template:
 - Deviations: none beyond 08 §2/§3 wording.
 - Declined: warning for on-demand TLS without `multi_host`; per-name closing gate; docs/07 adapter rows (no adapter table exists, add with P2-03b); a crash-leftover temp sweep (bounded by crashes, safe side).
 - Follow-ups: P2-03 card now has the multi-host warning test and the ErrClosed 503; P2-04 card has the 160 MiB floor AC.
+
+## 2026-10-10 · P2-03 · done
+- Branch / PR: claude/funny-bohr-vcgmor / https://github.com/AshwinSathian/weir/pull/78 (branch name set by the environment, not `card/*`)
+- Done: caddy/module.go `ServeHTTP` (upgrade bypass, engine call, `serveError` with Retry-After, ErrClosed 503), caddy/origin.go `nextOrigin` on `weirhttp.HandlerOrigin`, caddy/warn.go (route scan on first request: X-Forwarded-For and per-client placeholder warnings; one-host memory for the multi_host warning). The card's Touch list named `serve.go`; the code lives in `module.go`, `origin.go` and `warn.go`.
+- Tests: TestUpgradeAndConnectBypassEngine, TestNextOriginUsesDetachedContext, TestNextOriginForwardsKeyedRequest, TestNextOriginErrorIsOriginError, TestErrorsReturnHandlerError, TestServeCachesThroughNext, TestForwardedForWarning, TestPlaceholderHeaderWarning, TestRouteScanFindsHandler, TestSecondHostWithoutMultiHostWarnsOnce. Root race tests, caddy race tests and lint (via `go run` v2.14.0) pass; `make check` lint step cannot run here (Go 1.25 build); trace 146/146.
+- Deviations: docs/08 §6 reworded, warnings run on the first request, not at provision time (the route does not hold the handler until the http app provisions). Not a requirement change.
+- Review: card-reviewer, no must-fix. Fixed: client `GetBody`/`Pattern`/`Close`/`Response` cleared on the clone, port stripped in the host comparison, more placeholder prefixes, recovered panic logged at Debug, test cites. Left: error text of `next` reaches `{http.error.message}` (ponytail comment, 08 §6 note, P2-03b); no SWR test of a background Fetch with a live writer (`next` asserts it never gets the client writer instead).
+- Follow-ups: P2-03b (status mapping for `next` errors, warnings against a real config).
+- Context: medium; size M was right.
+
+## 2026-10-10 · P2-03 · review-fixes
+- Branch / PR: claude/funny-bohr-vcgmor / https://github.com/AshwinSathian/weir/pull/78
+- Done: adversarial review (agent), decisions delegated by Ashwin ("take decisions on all items"; "Waiting on Ashwin" was empty). Must-fix: a 4xx from `next` was a 502 that tripped the breaker for any run of missing paths (now an empty-bodied response with that status); `rewrite`/`handle_path` before `weir` was undone because the engine read `RequestURI` (now `r.URL` is used when it differs from Caddy's saved original request; the forwarding rule change was approved under the delegation). Fixed: private copy of Caddy's vars map per fetch (unlocked map shared with the client goroutine); `next`'s error text no longer reaches `{http.error.message}` (fixed text, cause at debug); `AppIfConfigured` instead of `App`; 499 returns no error; more per-client placeholders (`uuid`, `tls.server_name`, `proto`, `regexp`); alias assertion made real.
+- Tests: TestNextErrors4xxIsResponse, TestNextErrorTextIsHidden, TestNextOriginCopiesVars, TestRewriteBeforeWeirIsHonored, TestServeErrorClientGone, TestChainWarningsLoggedOnce, TestBackgroundRefreshNeverSeesClientWriter (synctest SWR); caddy race tests (x3) and lint pass.
+- Deviations: docs/08 §6 note rewritten for the points above.
+- Declined: none.
+- Follow-ups: STATUS notes (5xx statuses from `next`, caddytest).
