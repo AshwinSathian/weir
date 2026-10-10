@@ -55,7 +55,7 @@ Recorded as ADRs in [docs/02-architecture.md §6](docs/02-architecture.md). The 
 ## Dependencies
 
 - Upstream: Go 1.27 toolchain; golangci-lint v2; govulncheck; GitHub Actions (`actions/checkout`, `actions/setup-go`, `golangci/golangci-lint-action`); Node.js for the nightly `http-tests/cache-tests` job.
-- Downstream: the BYOD custom-domain project (single Caddy node shared in Phase 2, D17).
+- Downstream: the BYOD custom-domain project (single Caddy node shared in Phase 2, D17; several nodes need the Valkey store).
 - External: none in Phase 1. Phase 2 needs `xcaddy`. Phase 2.5 needs a Valkey server for tests (Docker).
 
 ## Phases and milestones

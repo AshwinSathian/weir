@@ -199,7 +199,7 @@ func TestE2ETwoNodePurge(t *testing.T) {
 		time.Sleep(100 * time.Millisecond)
 	}
 	if !strings.Contains(cs, "hit") {
-		t.Fatalf("node A Cache-Status = %q, want a hit on its own entry", cs)
+		t.Fatalf("node A Cache-Status = %q, want a hit on its own entry (check the node logs: an allkeys-* maxmemory-policy keeps the store unavailable)", cs)
 	}
 	before := calls.Load()
 	if cs, _ := b.get(t, "/shared"); !strings.Contains(cs, "hit") {
@@ -214,10 +214,11 @@ func TestE2ETwoNodePurge(t *testing.T) {
 	time.Sleep(1100 * time.Millisecond)
 	a.purgeAll(t)
 
-	// Node B learns the epoch from the server, not from A. A soft purge can
-	// take up to the 2 s clock-skew window to be seen (05 §4.3), so poll.
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
+	// Node B learns the epoch from the server, not from A, and a future-dated
+	// epoch counts as now (05 E-7), so the first request must show it. One
+	// retry covers the epoch second rolling over under load; a longer poll
+	// would hide a purge that is slow to propagate.
+	for range 2 {
 		if cs, _ = b.get(t, "/shared"); strings.Contains(cs, "fwd=stale") {
 			return
 		}

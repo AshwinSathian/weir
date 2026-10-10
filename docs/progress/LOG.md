@@ -1688,3 +1688,11 @@ Entry template:
 - Deviations: CLAUDE.md rule 6 and D17 changed under delegated decisions, needs Ashwin's confirmation. Reviewer: no must-fix; date lines bumped, log buffer made race-free, two unsupported runbook claims softened.
 - Follow-ups: P25-07c; CI run on Valkey 8.1.
 - Context: medium; size M was right.
+
+## 2026-10-11 · P25-07b · review-fixes
+- Branch / PR: card/P25-07b-two-node-purge / https://github.com/AshwinSathian/weir/pull/95
+- Done: adversarial review (agent), decisions delegated by Ashwin. Test asserts the first post-purge request; runbook 8 corrected (window wording, prefix/name, non-eager purge, server-down start, setting name); `-race` in `make test-valkey`; rule 6 broadened to the `integration` tag; stale single-node wording fixed.
+- Tests: two-node test passes 3 of 3 with `-race` on redis 7.0.15; lint not run here.
+- Deviations: CLAUDE.md rule 6 and docs/07 §1 wording.
+- Follow-ups: P25-07c (needs approval); CI run on Valkey 8.1.
+- Context: medium

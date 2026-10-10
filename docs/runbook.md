@@ -271,7 +271,7 @@ example.com {
 
 ### 8.1 One Valkey and one prefix per cache
 
-- All nodes of a cache use the same `addrs` and the same `prefix`. The `prefix` defaults to the site `name`, so two sites on one server do not share a keyspace by accident. Two caches that must not see each other's purges need two prefixes (or two servers).
+- All nodes of a cache use the same `addrs` and the same `prefix`. Set `prefix` explicitly. It defaults to the site `name`, which keeps two sites on one server apart, but then `name` must be identical on every node or the nodes share nothing. Two caches that must not see each other's purges need two prefixes (or two servers).
 - Every node that shares a `prefix` must also agree on `max_retention` and `max_clock_skew` (05 §7): the prune margin comes from the node that writes, so a node with a shorter retention prunes hard epochs that another node's entries still depend on.
 - Give the cache its own server. Epoch keys have no TTL, and `maxmemory` is server-wide, so another application that writes TTL-less keys to the same server fills it with keys the eviction policy cannot remove.
 
@@ -283,7 +283,7 @@ The server's `maxmemory-policy` must be `volatile-lfu` (recommended), another `v
 
 ### 8.3 Clocks and the purge window
 
-Epochs compare the clock of the node that purged with the clock of the node that fetched, stored as Unix seconds rounded up. Keep node clocks within `max_clock_skew` (default 1 s) with NTP or chrony. The store adds the skew to its comparisons, which can only purge a little too much, never too little. With rounding the window is up to `max_clock_skew` plus 1 s, which with the default is the 2 s of 05 §4.3: a response fetched within 2 s after a purge is purged again, so a URL purged every second never stays cached. If every node has one clock source, `no_clock_skew` removes the skew and leaves only the rounding second. The first lookup on a prefix that has no epoch state yet (a new cache, or one whose server lost its data) writes a global hard epoch at the server's time, so entries fetched in the first 2 s of a new cache are refetched once. A soft purge on another node can also be seen up to that window late: after a purge, wait 2 s before you test it.
+Epochs compare the clock of the node that purged with the clock of the node that fetched, stored as Unix seconds rounded up. Keep node clocks within `max_clock_skew` (default 1 s) with NTP or chrony. The store adds the skew to its comparisons, which can only purge a little too much, never too little. With rounding the window is up to `max_clock_skew` plus 1 s, which with the default is the 2 s of 05 §4.3: a response fetched within 2 s after a purge is purged again, so a URL purged every second never stays cached. If every node has one clock source, `no_clock_skew` removes the skew and leaves only the rounding second. The first lookup on a prefix that has no epoch state yet (a new cache, or one whose server lost its data) writes a global hard epoch at the server's time, so entries fetched in the first 2 s of a new cache are refetched once. A purge itself is seen by the other nodes at once (a future-dated epoch counts as now, 05 E-7); the window only re-purges responses fetched just after it. So when you test a cache, wait 3 s after the first request on a new prefix, and after a purge do not refill the URL and expect it to stay cached for the next 2 s.
 
 If clocks drift past `max_clock_skew`, a node whose clock runs behind can serve an entry that a faster node purged. Alert on clock offset; it is not visible in Weir's metrics.
 
@@ -299,16 +299,16 @@ With `cluster`, entry keys spread over all slots by default and only the epoch k
 
 ### 8.6 Settings that must match on every node
 
-The adapter cannot compare nodes. A reload on one node that changes `forward` writes a hard epoch to the server, which flushes the cache for all nodes. A restart does not: the server keeps no key-generation record (08 §3). So, when you tighten `forward` (or `storable { strip_set_cookie }`) on a shared cache:
+The adapter cannot compare nodes. A reload on one node that changes `forward` writes a hard epoch to the server, which flushes the cache for all nodes. A restart does not: the server keeps no key-generation record (08 §3). So, when you tighten `forward` on a shared cache:
 
 1. Roll the new config to every node (a mixed fleet stores entries under two different rules, and the looser node can serve what the tighter one would never have stored).
-2. Purge by hand once: `{"mode":"hard","all":true,"eager":true}` on any node.
+2. Purge by hand once: `{"mode":"hard","all":true}` on any node. The hard purge alone makes old entries unservable. `eager` only reclaims their memory and, on Valkey, scans the whole keyspace (05 §7), so add it only off-peak.
 
 `stale` and key settings that change which entry a request maps to (query rules, key headers and cookies, normalization) must also match. A node with different key settings misses on, or worse, reads a different bucket of, the same URL, but it never serves another key's entry, because the forwarded request equals the keyed request (INV-1).
 
 ### 8.7 When Valkey is down
 
-The store has a breaker (FR-STF-2): after 5 consecutive store errors it opens for 1 s, doubling to 30 s. While it is open every lookup is a miss and nothing is stored, so the node behaves as a cache-less proxy in front of the origin. Request coalescing, the origin limiter and the origin breaker stay on (FR-STF-3), so a Valkey outage is not an origin stampede, but hit ratio and stale-while-revalidate protection are gone until the store recovers. A purge sent while the server is down fails with an error (the operator sees it and retries). A node starting with the server down does not fail its config load; it starts with the breaker open. A config reload that changes `forward` needs the server up (the epoch must be written).
+The store has a breaker (FR-STF-2): after 5 consecutive store errors it opens for 1 s, doubling to 30 s. While it is open every lookup is a miss and nothing is stored, so the node behaves as a cache-less proxy in front of the origin. Request coalescing, the origin limiter and the origin breaker stay on (FR-STF-3), so a Valkey outage is not an origin stampede, but hit ratio and stale-while-revalidate protection are gone until the store recovers. A purge sent while the server is down fails with an error (the operator sees it and retries). A node starting with the server down does not fail its config load. It serves as a cache-less proxy; the first requests each wait for the dial (up to `call_timeout`) until 5 failures open the breaker. A config reload that changes `forward` needs the server up (the epoch must be written).
 
 Watch the `weir_store_*` series (section 2) and alert on a store breaker that stays open.
 
@@ -319,6 +319,6 @@ A node closes its store when Caddy stops it, and it does not touch other nodes' 
 ### 8.9 Before you go live
 
 1. `caddy validate` on every node's config. It builds the store lazily: a wrong address passes validation and shows up as an open breaker (8.7), so also run the next step.
-2. One request twice through node A, then once through node B: the third shows `Cache-Status: Weir; hit`.
-3. A purge on node A (7.7), wait 2 s (8.3), then a request through node B showing `fwd=stale` or `fwd=uri-miss`.
+2. On a new cache, wait 3 s after the first request (8.3). Then request a URL once through node A; the store write happens after the response, so repeat until A shows `Cache-Status: Weir; hit`, and only then request it through node B. B shows `hit` too.
+3. A purge on node A (7.7), then a request through node B showing `fwd=stale` or `fwd=uri-miss`.
 4. `CONFIG GET maxmemory-policy` on the server shows a `volatile-*` policy or `noeviction`.

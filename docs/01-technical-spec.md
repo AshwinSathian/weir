@@ -42,7 +42,7 @@ Phase 1.x (milestones M11 to M15, §13) adds single-range responses, targeted ca
 - No trailer storage. Trailers from the origin are discarded on stored responses (RFC 9111 §3.1 permits this).
 - Targeted cache-control fields (RFC 9213) arrive in M12 (§13.2), not in M1 to M10.
 - No persistence across crashes. Graceful shutdowns snapshot the memory store (M13, §13.3); `Warm` covers everything else.
-- No multi-node cache coherence before Phase 2.5. Phase 2 deployments run one Caddy node (D17).
+- No multi-node cache coherence before Phase 2.5. Memory-store deployments run one Caddy node (D17); several nodes share a cache only through the Valkey store (runbook §8).
 
 ## 2. Decisions locked before this spec
 

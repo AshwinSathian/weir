@@ -13,7 +13,7 @@ Phase 1 (the engine, milestones M1 to M10) is implemented and tested; the option
 | 0 | skeleton, CI, test harness | done |
 | 1 | the engine, milestone by milestone (M1 to M10) | implemented, in hardening |
 | 1.x | single-range responses, targeted cache-control, snapshots, per-host fairness, eager purge (M11 to M16) | specified |
-| 2 | Caddy module (single node) | draft spec |
+| 2 | Caddy module (one node on the memory store; several on Valkey) | draft spec |
 | 2.5 | Valkey store, multi-node | planned |
 | 3 | experiment-aware key dimensions | draft spec |
 
