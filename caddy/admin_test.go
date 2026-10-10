@@ -13,6 +13,8 @@ import (
 
 	"github.com/caddyserver/caddy/v2"
 	"github.com/caddyserver/caddy/v2/modules/caddyhttp"
+
+	"github.com/AshwinSathian/weir"
 )
 
 // adminDo sends one request through the admin router the way Caddy's mux
@@ -359,4 +361,32 @@ func TestAdminClosedEngineIs503(t *testing.T) {
 	if code, w := adminStatus(t, http.MethodPost, "/weir/"+name+"/purge", `{"all":true}`); code != http.StatusServiceUnavailable {
 		t.Fatalf("purge on closed engine: status %d body %s, want 503", code, w.Body)
 	}
+}
+
+// T-26 (operator numbers are not origin-controlled): a group invalidation
+// event, which an origin response can trigger at any time, does not change the
+// scrubbed count.
+func TestPurgeTapIgnoresGroupInvalidation(t *testing.T) {
+	tap := new(purgeTap)
+	tap.Observe(weir.Event{Kind: weir.EvPurge, Reason: "group", Status: 5})
+	tap.Observe(weir.Event{Kind: weir.EvPurge, Reason: "hard", Status: 2})
+	tap.Observe(weir.Event{Kind: weir.EvRequest, Reason: "hard", Status: 9})
+	if got := tap.scrubbed.Load(); got != 2 {
+		t.Fatalf("scrubbed = %d, want 2", got)
+	}
+}
+
+// 08 §7: purge goes through the first engine that is not closed.
+func TestAdminPurgeSkipsClosedEngine(t *testing.T) {
+	name := fmt.Sprintf("skip-%d", serveSeq.Add(1))
+	first, second := loadNamed(t, name, ""), loadNamed(t, name, "")
+	ctx, cancel := context.WithTimeout(context.Background(), closeTimeout)
+	defer cancel()
+	if err := first.engine.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if code, w := adminStatus(t, http.MethodPost, "/weir/"+name+"/purge", `{"all":true}`); code != http.StatusAccepted {
+		t.Fatalf("status %d body %s, want 202 via the second engine", code, w.Body)
+	}
+	_ = second
 }

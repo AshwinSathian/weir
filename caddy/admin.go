@@ -219,7 +219,7 @@ type modeReply struct {
 
 // adminMode applies the mode to every live engine of the name, so the old and
 // new engine of a reload overlap agree (D33). SetMode validates before it
-// changes anything, and all engines see the same arguments, so a bad request
+// changes anything and all engines get the same arguments, so a bad request
 // fails on the first engine with nothing applied.
 func adminMode(w http.ResponseWriter, r *http.Request, live []*adminEntry) error {
 	var b modeBody
@@ -241,7 +241,10 @@ func adminMode(w http.ResponseWriter, r *http.Request, live []*adminEntry) error
 	}
 	for _, e := range live {
 		if err := e.engine.SetMode(m, ttl); err != nil {
-			return apiError(http.StatusBadRequest, "%v", err)
+			if errors.Is(err, weir.ErrInvalidConfig) {
+				return apiError(http.StatusBadRequest, "%v", err)
+			}
+			return purgeError(err)
 		}
 	}
 	rep := modeReply{Mode: b.Mode, Engines: len(live)}

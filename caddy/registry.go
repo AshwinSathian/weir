@@ -62,9 +62,12 @@ func engineList(name string) []*adminEntry { return engines.list(name) }
 
 // purgeTap is the Observer the adapter gives each engine so the admin API can
 // report how many records an eager purge deleted: Engine.Purge returns only an
-// error, and the count travels in EvPurge's Status (04 §13.5). Only an eager
-// purge sets a non-zero Status, and only the admin API issues one, so summing
-// the Status values seen during a serialized call yields that call's count.
+// error, and the count travels in EvPurge's Status (04 §13.5). Only events with
+// Reason "hard" count: a group invalidation from an origin response also
+// emits EvPurge with a non-zero Status (reason "group"), and origin data must
+// not move an operator's number. A non-eager hard purge reports Status 0, and
+// only the admin API issues an eager one, so the sum seen during a serialized
+// call is that call's count.
 type purgeTap struct {
 	mu       sync.Mutex // serializes admin purges on one engine
 	scrubbed atomic.Int64
@@ -72,7 +75,7 @@ type purgeTap struct {
 
 // Observe implements weir.Observer.
 func (t *purgeTap) Observe(ev weir.Event) {
-	if ev.Kind == weir.EvPurge {
+	if ev.Kind == weir.EvPurge && ev.Reason == "hard" {
 		t.scrubbed.Add(int64(ev.Status))
 	}
 }

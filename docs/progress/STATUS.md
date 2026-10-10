@@ -2,15 +2,15 @@
 
 Updated: 2026-10-10
 Phase: 1
-Current card: P2-05 (Admin API: purge, mode, stats)
-Card state: blocked
+Current card: none
+Card state: awaiting-merge
 Branch: claude/wizardly-ride-guhrru
 PR: none yet
 Next card: P2-06
 
 ## Waiting on Ashwin
 
-Run `/handoff` for P2-05 (code and tests are committed on this branch; the skill cannot be invoked by the model). Otherwise none. Decided 2026-10-10 (P2-03b, review of PR 79; Ashwin delegated "take decisions on all items"): caddytest e2e files are a named exception to the real-clock rule (CLAUDE.md rule 6, docs/07 §1) instead of a build tag, because a tag would stop CI running them; a skip outside `-short` fails the test; the test site binds 127.0.0.1; the herd test uses a 2 s client timeout so a hard purge reports counts. Also decided (P2-02): multi-host is an explicit `multi_host` key; scanning the http app was rejected (handler cannot find its own route; global scan would cap unrelated sites and flush their stores). Documented in 08 §2/§3/§4b.
+none. Decided 2026-10-10 (P2-03b, review of PR 79; Ashwin delegated "take decisions on all items"): caddytest e2e files are a named exception to the real-clock rule (CLAUDE.md rule 6, docs/07 §1) instead of a build tag, because a tag would stop CI running them; a skip outside `-short` fails the test; the test site binds 127.0.0.1; the herd test uses a 2 s client timeout so a hard purge reports counts. Also decided (P2-02): multi-host is an explicit `multi_host` key; scanning the http app was rejected (handler cannot find its own route; global scan would cap unrelated sites and flush their stores). Documented in 08 §2/§3/§4b.
 
 ## Decided 2026-10-10 (P2-04)
 
@@ -60,6 +60,9 @@ Ashwin delegated "take decisions on all items"; "Waiting on Ashwin" was empty. A
 "Waiting on Ashwin" was empty. No must-fix. Decided: sub-block keys (`key`, `forward`, `bypass`, `limiter`, `stale`) with no block or empty braces are an error; repeated keys stay an error and 08 §2 now says so; the `weir <matcher>` form is supported and documented; runtime placeholders (`{env.X}`, `{host}`) are not expanded, only parse-time `{$VAR}`, documented in 08 §2; the `name` error points at the `name` line. Tests added for repeated sub-block keys, negative durations, directive arguments, bare and empty sub-blocks, the matcher form. Kept: duplicate `name` handling in P2-02, the non-`card/*` branch, `RegisterDirectiveOrder` (TestDirectiveOrder fails loudly on a Caddy bump).
 
 ## Notes for the next session
+
+- P2-06: `Handler.Provision` sets `cfg.Observer` to a `purgeTap` (caddy/registry.go), which the admin API uses to report the eager-purge scrubbed count. The metrics observer must wrap it (forward every event to the tap), not replace it.
+- P2-05 admin tests call the router handler directly; the only real-Caddy admin case is `TestE2EAdminPurge` (admin port 2999, one named 1.1 s pause).
 
 - P2-04: the deployment guide (P2-09 or later) must tell single-site operators to set `max_bytes` if they want more than 20% of the limit. Tests that depend on the memory budget call `isolateStores` because the caddytest instance and earlier tests leave stores live in the global registry.
 - P2-03b ran the T6.12 scenario through a POST with `Cache-Group-Invalidation`; the admin purge endpoint does not exist yet, so P2-05 should add an end-to-end purge case (`fwd=stale` on the next `Cache-Status`).

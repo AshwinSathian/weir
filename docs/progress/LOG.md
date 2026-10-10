@@ -1411,3 +1411,11 @@ Entry template:
 - Deviations: scrubbed count read from `EvPurge` Status through `purgeTap` because `Engine.Purge` returns only an error (P2-06 must chain its observer behind it); an empty purge is a 400 at the adapter; documented in 08 §7.
 - Follow-ups: card not marked done and no PR opened, because `/handoff` can only be run by the user. Run `/handoff`.
 - Context: medium; size M was right.
+
+## 2026-10-10 · P2-05 · done
+- Branch / PR: claude/wizardly-ride-guhrru / see STATUS
+- Done: handoff of the earlier P2-05 work. card-reviewer must-fix fixed: `purgeTap` counts only `EvPurge` with reason `hard`, so origin `Cache-Group-Invalidation` events cannot inflate the scrubbed count. Mode errors other than invalid config now go through `purgeError`.
+- Tests: added TestPurgeTapIgnoresGroupInvalidation, TestAdminPurgeSkipsClosedEngine. Race and shuffle tests, lint on Go 1.27 and trace-strict pass; `make check` fails only at the Go 1.25 golangci-lint binary (known).
+- Deviations: 08 §7 states how the scrubbed count is derived (reason `hard` only).
+- Follow-ups: P2-06 chains its observer behind `purgeTap`.
+- Context: medium; size M was right.
