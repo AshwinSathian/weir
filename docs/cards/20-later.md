@@ -63,7 +63,7 @@ These phases start from draft specs. Each begins with one planning card that ver
 - AC: within one load the auto-sized stores sum to at most 40% of `debug.SetMemoryLimit(-1)`; existing stores keep their size on reload; the overcommit warning names `max_bytes` as the remedy; no auto-sized store is below the 160 MiB floor `Validate` enforces for explicit `max_bytes` (P2-02: clamp the share up with a warning, or add a `max_object_bytes` key after asking Ashwin, since that is a new config field)
 - Notes: decided in 08 §7 (P2-00 review): the store interface has no resize, so the 40% bound holds per load, not across loads.
 
-### [ ] P2-05 Admin API: purge, mode, stats
+### [x] P2-05 Admin API: purge, mode, stats
 - Plan: 2.3 · Size: M · Depends on: P2-03
 - Read: 08 §7, §11 (admin rows); 01 FR-PRG, D33; 06 T-26
 - Touch: caddy/admin.go, caddy/registry.go, caddy/admin_test.go

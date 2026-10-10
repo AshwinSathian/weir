@@ -1403,3 +1403,26 @@ Entry template:
 - Tests: TestMemoryShareSameNameReplacement, TestMemoryReleasedStoreStopsCounting, TestMemoryBudgetClamps; TestMemoryShareNewSiteFirst now exact. Lint, shuffled race tests, trace-strict pass.
 - Deviations: 08 §7 states that a renamed or removed site's store counts until destroyed, so a swap-sites reload can shrink the new ones (set `max_bytes`), and that sizing assumes Caddy provisions handlers one at a time (ponytail comment names the upgrade: reserve the grant under `r.mu`).
 - Declined: reserving the grant under a lock now (no concurrent provisioning exists); skipping every superseded store (would let a swap exceed 40% while both live).
+
+## 2026-10-10 · P2-05 · blocked
+- Branch / PR: claude/wizardly-ride-guhrru / none yet
+- Done: `caddy/registry.go` (engines per name, removal by identity, `purgeTap` observer), `caddy/admin.go` (`admin.api.weir`: purge, mode, stats; bodies bounded), Provision/Cleanup wiring, 08 §7 JSON shapes and status mapping.
+- Tests: admin_test.go (all nine card tests plus invalid-input, closed-engine 503), `TestE2EAdminPurge` under caddytest. Race and shuffle tests, lint on Go 1.27 and `make trace-strict` pass; `make check` not run as one command (lint toolchain, see STATUS).
+- Deviations: scrubbed count read from `EvPurge` Status through `purgeTap` because `Engine.Purge` returns only an error (P2-06 must chain its observer behind it); an empty purge is a 400 at the adapter; documented in 08 §7.
+- Follow-ups: card not marked done and no PR opened, because `/handoff` can only be run by the user. Run `/handoff`.
+- Context: medium; size M was right.
+
+## 2026-10-10 · P2-05 · done
+- Branch / PR: claude/wizardly-ride-guhrru / https://github.com/AshwinSathian/weir/pull/81
+- Done: handoff of the earlier P2-05 work. card-reviewer must-fix fixed: `purgeTap` counts only `EvPurge` with reason `hard`, so origin `Cache-Group-Invalidation` events cannot inflate the scrubbed count. Mode errors other than invalid config now go through `purgeError`.
+- Tests: added TestPurgeTapIgnoresGroupInvalidation, TestAdminPurgeSkipsClosedEngine. Race and shuffle tests, lint on Go 1.27 and trace-strict pass; `make check` fails only at the Go 1.25 golangci-lint binary (known).
+- Deviations: 08 §7 states how the scrubbed count is derived (reason `hard` only).
+- Follow-ups: P2-06 chains its observer behind `purgeTap`.
+- Context: medium; size M was right.
+
+## 2026-10-10 · P2-05 · review-fixes
+- Branch / PR: claude/wizardly-ride-guhrru / https://github.com/AshwinSathian/weir/pull/81
+- Done: adversarial review (agent); "Waiting on Ashwin" was empty. Fixed M1: my earlier PR-link substitution had touched three older LOG entries, restored from main. Fixed M2: a purge now reaches every live engine (a reload that changes a pool-key setting builds a second store, and the old purge-through-one-engine left the new one serving purged entries). S1: purge serialization is a context-aware semaphore, not a held mutex. S2: a scrub failure says the epochs are written and reports the count so far. S3: stronger tests. S4 and N4/N5: mode comment fixed, ttl ignored for `normal`, duplicate keys documented.
+- Tests: TestAdminPurgeReachesEveryStoreInOverlap, TestAdminPurgeSkipsClosedEngine (now checks fwd=stale), TestPurgeTapWaitHonoursContext, TestAdminConcurrentEagerPurgeCounts, TestAdminRacesWithCleanup, TestPurgeErrorWordsPartialScrub, TestAdminBodyEdges, TestAdminModeNormalIgnoresTTL; e2e now checks the cached entry survives a site-listener purge attempt. Race and shuffle tests and lint on Go 1.27 pass.
+- Deviations: 08 §7 reworded (purge through every engine, semaphore, partial-failure wording, ttl for normal).
+- Declined: checking count limits before decode (bounded by the 1 MiB cap); hiding which names exist from a prober (admin API is operator-only); an integration test for an origin group invalidation during an eager purge (the tap is unit-tested on the event reason).
