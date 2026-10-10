@@ -465,7 +465,7 @@ The cards' Notes give the reasons and the options rejected. All three come befor
 ## Notes for P2-03 and later (from P2-02)
 
 - `multi_host` is an explicit key (08 §2). P2-03 should log one warning when one engine sees a second distinct host while `multi_host` is off (bounded: count to 2).
-- `max_bytes` below 160 MiB is now rejected by `Validate` (no `Storable.MaxObjectBytes` key yet). Add the key, then lower the floor.
+- `max_bytes` below 160 MiB is rejected by `Validate` (no `Storable.MaxObjectBytes` key yet). P2-04's AC covers auto-sized shares under the floor; P2-03's card now carries the multi-host warning and the `ErrClosed` 503.
 - The key-generation hash is also recorded beside the snapshot (`<name>.weir.keygen`); `Forward.Mode` and `Storable.StripSetCookie` have no JSON form yet, so only `forward.allow` feeds it.
 - `Cleanup` keeps `h.engine` set (a closed engine rejects late requests), so P2-03's `ServeHTTP` can read it without a lock.
 - Shard count is not in the pool key (no setting); add it with the setting. `defaultShards` and `defaultStoreBytes` in caddy/pool.go duplicate memory defaults; P2-04 replaces the size with auto-sizing.

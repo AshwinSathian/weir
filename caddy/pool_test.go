@@ -434,3 +434,96 @@ func TestRegistryConcurrentAcquireRelease(t *testing.T) {
 		t.Fatalf("leaked state: live=%d loads=%d", len(r.live), len(r.loads))
 	}
 }
+
+// R-3: a reload that was rolled back must not leave its hash behind. A, still
+// on the looser rules, kept storing; re-applying the tighter config has to
+// purge again.
+func TestRolledBackReloadRestoresKeyGen(t *testing.T) {
+	a := mustLoad(t, newCtx(t), `{"name":"rb","max_bytes":"200MiB"}`)
+	b := mustLoad(t, newCtx(t), `{"name":"rb","max_bytes":"200MiB","forward":{"allow":["x-a"]}}`)
+	h1, h2 := keyGenHash(a.weirConfig()), keyGenHash(b.weirConfig())
+	if a.pool != b.pool || a.pool.currentKeyGen() != h2 {
+		t.Fatal("reload did not move the store to the new hash")
+	}
+	if err := b.Cleanup(); err != nil {
+		t.Fatal(err)
+	}
+	if a.pool.currentKeyGen() != h1 {
+		t.Fatal("rollback left the rolled-back hash behind")
+	}
+	if !a.pool.keyGenChanged(h2) {
+		t.Fatal("re-applying the tighter config would skip the purge")
+	}
+	// The normal order, new engine first and old one released after, keeps
+	// the new hash.
+	c := mustLoad(t, newCtx(t), `{"name":"rb","max_bytes":"200MiB","forward":{"allow":["x-a"]}}`)
+	if err := a.Cleanup(); err != nil {
+		t.Fatal(err)
+	}
+	if c.pool.currentKeyGen() != h2 {
+		t.Fatal("releasing the older engine reverted the hash")
+	}
+}
+
+// R-3, FR-SNP-1: the record beside a snapshot describes that snapshot, also
+// after a rolled-back reload with different store settings.
+func TestSnapshotRecordMatchesFinalWriter(t *testing.T) {
+	dir := t.TempDir()
+	a := mustLoad(t, newCtx(t), `{"name":"fw","max_bytes":"200MiB","snapshot_dir":"`+dir+`"}`)
+	b := mustLoad(t, newCtx(t), `{"name":"fw","max_bytes":"400MiB","snapshot_dir":"`+dir+`","forward":{"allow":["x-a"]}}`)
+	h1 := keyGenHash(a.weirConfig())
+	if got, _ := os.ReadFile(keyGenPath(dir, "fw")); [sha256.Size]byte(got) != keyGenHash(b.weirConfig()) {
+		t.Fatal("record not at the newer hash while it is live")
+	}
+	if err := b.Cleanup(); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Cleanup(); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(keyGenPath(dir, "fw")); [sha256.Size]byte(got) != h1 {
+		t.Fatal("record does not match the snapshot the older store wrote last")
+	}
+}
+
+// FR-SNP-1, 08 §3: a snapshot cut short by the close deadline is discarded,
+// and Destruct still returns with the store closed.
+func TestDestructBoundedBySnapshotDeadline(t *testing.T) {
+	dir := t.TempDir()
+	h := mustLoad(t, newCtx(t), `{"name":"dl","max_bytes":"200MiB","snapshot_dir":"`+dir+`"}`)
+	p := h.pool
+	ctx, cancel := context.WithTimeout(context.Background(), time.Nanosecond)
+	defer cancel()
+	<-ctx.Done()
+	done := make(chan error, 1)
+	go func() { done <- p.destruct(ctx) }()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("destruct did not return after its deadline")
+	}
+	if _, err := p.store.Get(context.Background(), store.Key{}); err == nil || errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("store open after destruct: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "dl.weir")); err == nil {
+		t.Fatal("snapshot written past the deadline")
+	}
+}
+
+// The adapter copies two memory-store defaults (pool.go); this fails when the
+// store's change and the adapter's cap and floor would silently drift.
+func TestMemoryDefaultsPinned(t *testing.T) {
+	st, err := memory.New(memory.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if got, want := st.MaxObjectBytes(), int64(defaultStoreBytes/defaultShards/10); got != want {
+		t.Fatalf("store default no longer 256 MiB over 16 shards: largest object %d, want %d", got, want)
+	}
+	if got := memoryObject(minStoreBytes); got != 1<<20 {
+		t.Fatalf("minStoreBytes admits objects of %d, want exactly the 1 MiB default", got)
+	}
+}
+
+func memoryObject(maxBytes int64) int64 { return maxBytes / defaultShards / 10 }

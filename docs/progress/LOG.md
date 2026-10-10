@@ -1348,3 +1348,11 @@ Entry template:
 - Deviations: docs/01 FR-FAIR-3 reworded (requirement change, delegated); 08 §2/§3 updated.
 - Declined: warning on on-demand TLS without `multi_host` (needs the global scan already rejected); per-name closing gate in acquire (Caddy serializes loads; ponytail comment records it).
 - Follow-ups: STATUS notes (host warning in P2-03, `Storable.MaxObjectBytes` key).
+
+## 2026-10-10 · P2-02 · review-fixes
+- Branch / PR: claude/peaceful-mccarthy-b9uz60 / https://github.com/AshwinSathian/weir/pull/77
+- Done: round 3 adversarial review (agent) on the round 2 fixes and every open item. Fixed: a rolled-back reload no longer leaves its hash behind (holder list, hash returns to the older engine, so re-applying purges again); the hash record is rewritten by the final snapshot writer so it always matches the snapshot; snapshot_dir must be owned by the Caddy user (unix); `Destruct` split into `destruct(ctx)` with a deadline test; memory defaults the adapter copies are pinned by a test. Reverted stray `go.work.sum` churn from local runs.
+- Tests: TestRolledBackReloadRestoresKeyGen, TestSnapshotRecordMatchesFinalWriter, TestDestructBoundedBySnapshotDeadline, TestMemoryDefaultsPinned; caddy race tests and lint pass.
+- Deviations: none beyond 08 §2/§3 wording.
+- Declined: warning for on-demand TLS without `multi_host`; per-name closing gate; docs/07 adapter rows (no adapter table exists, add with P2-03b); a crash-leftover temp sweep (bounded by crashes, safe side).
+- Follow-ups: P2-03 card now has the multi-host warning test and the ErrClosed 503; P2-04 card has the 160 MiB floor AC.

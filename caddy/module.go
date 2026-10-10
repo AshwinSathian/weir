@@ -84,7 +84,10 @@ func (h *Handler) Provision(ctx caddy.Context) (err error) {
 	if err != nil {
 		return err
 	}
-	release := func() error { return stores.release(load, p) }
+	release := func() error {
+		p.dropHolder(h)
+		return stores.release(load, p)
+	}
 	defer func() {
 		if err != nil {
 			_ = release()
@@ -110,12 +113,7 @@ func (h *Handler) Provision(ctx caddy.Context) (err error) {
 	}
 	// Record the hash only now: a Provision that failed above must not
 	// make a retry of the same config skip the purge.
-	if err := p.commitKeyGen(keyGen); err != nil {
-		cctx, ccancel := context.WithTimeout(context.Background(), closeTimeout)
-		defer ccancel()
-		_ = e.Close(cctx)
-		return err
-	}
+	p.commitKeyGen(h, keyGen)
 	h.engine, h.pool, h.release, h.closed = e, p, release, new(atomic.Bool)
 	return nil
 }

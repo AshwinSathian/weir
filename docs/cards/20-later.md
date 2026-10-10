@@ -45,8 +45,8 @@ These phases start from draft specs. Each begins with one planning card that ver
 - Plan: 2.2, 2.3 · Size: M · Depends on: P2-02
 - Read: 08 §4, §5, §6; 01 FR-UPG-1, FR-COA-9; 04 §10
 - Touch: caddy/serve.go, caddy/origin.go, caddy/serve_test.go
-- Tests: `TestUpgradeAndConnectBypassEngine`, `TestNextOriginUsesDetachedContext`, `TestErrorsReturnHandlerError`, `TestForwardedForWarning`, `TestPlaceholderHeaderWarning` (08 §6: `header_up` with a per-client placeholder after `weir` logs a one-time warning)
-- AC: all listed tests pass; `Fetch` after the request finished never touches the original `ResponseWriter`; the one-time `X-Forwarded-For` warning appears for `reverse_proxy` without `header_up -X-Forwarded-For`; `Origin.Fetch` is still called only in `(*Engine).fetch`
+- Tests: `TestUpgradeAndConnectBypassEngine`, `TestNextOriginUsesDetachedContext`, `TestErrorsReturnHandlerError`, `TestForwardedForWarning`, `TestPlaceholderHeaderWarning` (08 §6: `header_up` with a per-client placeholder after `weir` logs a one-time warning), `TestSecondHostWithoutMultiHostWarnsOnce` (a second distinct host while `multi_host` is off logs one warning naming `multi_host`; the engine remembers at most two hosts, never a set keyed by request input)
+- AC: all listed tests pass; `Fetch` after the request finished never touches the original `ResponseWriter`; the one-time `X-Forwarded-For` warning appears for `reverse_proxy` without `header_up -X-Forwarded-For`; the multi-host warning appears once (P2-02 decided `multi_host` is operator-stated, so this is its only safety net); a request on a handler whose engine is closed (`ErrClosed`, `h.engine` stays set after `Cleanup`) gets a 503; `Origin.Fetch` is still called only in `(*Engine).fetch`
 
 ### [ ] P2-03b End-to-end scenarios under caddytest
 - Plan: 2.2, 2.3 · Size: S · Depends on: P2-03, P2-01c
@@ -60,7 +60,7 @@ These phases start from draft specs. Each begins with one planning card that ver
 - Read: 08 §3, §7 (Memory); 01 FR-MEM-1; 06 T-43
 - Touch: caddy/memory.go, caddy/memory_test.go
 - Tests: `TestMemorySizingSplit` (stores without `max_bytes` in one load share 40% of the limit evenly; stores with `max_bytes` are excluded; an unset limit uses the FR-MEM-1 fallback and warns once), `TestMemoryShareFixedAfterBuild` (a later load adding a site does not resize or flush existing stores), `TestMemoryOvercommitWarns` (sum of live auto-sized stores above 40% logs a warning)
-- AC: within one load the auto-sized stores sum to at most 40% of `debug.SetMemoryLimit(-1)`; existing stores keep their size on reload; the overcommit warning names `max_bytes` as the remedy
+- AC: within one load the auto-sized stores sum to at most 40% of `debug.SetMemoryLimit(-1)`; existing stores keep their size on reload; the overcommit warning names `max_bytes` as the remedy; no auto-sized store is below the 160 MiB floor `Validate` enforces for explicit `max_bytes` (P2-02: clamp the share up with a warning, or add a `max_object_bytes` key after asking Ashwin, since that is a new config field)
 - Notes: decided in 08 §7 (P2-00 review): the store interface has no resize, so the 40% bound holds per load, not across loads.
 
 ### [ ] P2-05 Admin API: purge, mode, stats

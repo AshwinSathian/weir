@@ -55,8 +55,15 @@ type pooledStore struct {
 	// the final snapshot writer is the live store (08 §3).
 	superseded atomic.Bool
 
-	mu     sync.Mutex
-	keyGen [sha256.Size]byte // hash of the newest engine that used the store
+	mu      sync.Mutex
+	keyGen  [sha256.Size]byte // hash of the newest engine that used the store
+	holders []holder          // engines that committed a hash, oldest first
+}
+
+// holder is one provisioned handler and the hash it committed.
+type holder struct {
+	who  *Handler
+	hash [sha256.Size]byte
 }
 
 // keyGenChanged reports whether h differs from the hash of the engine that
@@ -69,34 +76,66 @@ func (p *pooledStore) keyGenChanged(h [sha256.Size]byte) bool {
 	return p.keyGen != h
 }
 
-// commitKeyGen records h, in memory and beside the snapshot, after the
-// engine that carries it is built and the hard epoch is written.
-func (p *pooledStore) commitKeyGen(h [sha256.Size]byte) error {
+// commitKeyGen records h as the store's hash, held by who, after the engine
+// that carries it is built and the hard epoch is written.
+func (p *pooledStore) commitKeyGen(who *Handler, h [sha256.Size]byte) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.spec.snapshotDir != "" {
-		if err := writeKeyGenFile(p.spec.snapshotDir, p.spec.name, h); err != nil {
-			return err
-		}
-	}
+	p.holders = append(p.holders, holder{who, h})
 	p.keyGen = h
-	return nil
+}
+
+// dropHolder removes who. If who held the newest hash, the store goes back to
+// the hash of the newest remaining holder: a reload that was rolled back must
+// not leave its hash behind, or re-applying it would skip the purge while the
+// older engine has been storing under the looser rules (R-3).
+func (p *pooledStore) dropHolder(who *Handler) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	i := slices.IndexFunc(p.holders, func(h holder) bool { return h.who == who })
+	if i < 0 {
+		return
+	}
+	last := i == len(p.holders)-1
+	p.holders = slices.Delete(p.holders, i, i+1)
+	if last && len(p.holders) > 0 {
+		p.keyGen = p.holders[len(p.holders)-1].hash
+	}
+}
+
+func (p *pooledStore) currentKeyGen() [sha256.Size]byte {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.keyGen
 }
 
 // Destruct implements caddy.Destructor. Caddy calls it outside the pool lock
 // with no context, so the snapshot is bounded by closeTimeout (08 §3).
 func (p *pooledStore) Destruct() error {
-	superseded := p.reg.retire(p)
 	ctx, cancel := context.WithTimeout(context.Background(), closeTimeout)
 	defer cancel()
-	if superseded {
+	return p.destruct(ctx)
+}
+
+// destruct closes the store, writing the snapshot only when no newer store of
+// the name exists. The hash record is rewritten first, so it describes the
+// snapshot that follows even when a rolled-back reload changed it (R-3). If
+// the record cannot be written the snapshot is skipped.
+func (p *pooledStore) destruct(ctx context.Context) error {
+	superseded := p.reg.retire(p)
+	var recErr error
+	if !superseded && p.spec.snapshotDir != "" {
+		recErr = writeKeyGenFile(p.spec.snapshotDir, p.spec.name, p.currentKeyGen())
+	}
+	if superseded || recErr != nil {
 		// A cancelled context makes CloseContext discard the snapshot; the
 		// store is closed either way (FR-SNP-1).
+		cctx, cancel := context.WithCancel(ctx)
 		cancel()
-		if err := p.store.CloseContext(ctx); err != nil && !errors.Is(err, context.Canceled) {
-			return err
+		if err := p.store.CloseContext(cctx); err != nil && !errors.Is(err, context.Canceled) {
+			return errors.Join(recErr, err)
 		}
-		return nil
+		return recErr
 	}
 	return p.store.CloseContext(ctx)
 }
@@ -319,6 +358,9 @@ func prepareSnapshotDir(dir string) error {
 	}
 	if fi.Mode().Perm()&0o022 != 0 {
 		return errors.New("weir: snapshot_dir must not be writable by group or others")
+	}
+	if !ownedByUs(fi) {
+		return errors.New("weir: snapshot_dir must be owned by the user Caddy runs as")
 	}
 	return nil
 }
