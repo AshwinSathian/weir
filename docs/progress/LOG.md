@@ -1213,7 +1213,7 @@ Entry template:
 - Context: low.
 
 ## 2026-10-09 · M15-01 · done
-- Branch / PR: claude/serene-volta-d9nvnj / pending
+- Branch / PR: claude/serene-volta-d9nvnj / https://github.com/AshwinSathian/weir/pull/76
 - Done: `memory.Store.Scrub` (one shard lock at a time, exact tag match, response records only); `Engine.Purge` with `Eager` calls it through `storeGuard.scrub` after the epochs and emits the count as `EvPurge{hard}` `Status`; stores without `Scrubber` still get `ErrEagerUnsupported`.
 - Tests: TestEagerHardPurgeDeletesAllPartitions, TestEagerSoftIsError, TestEagerUnsupportedStore, TestEagerScrubErrorKeepsEpochs, TestScrub. Race tests, vet, gofmt, trace pass; lint 0 issues via the Go 1.27 build of v2.14.0.
 - Deviations: LLD purge section reworded (no store scrubs yet is no longer true). No requirement changed.
@@ -1309,7 +1309,7 @@ Entry template:
 - Follow-ups: P2-02 placeholders in `snapshot_dir` and duplicate-name test (in STATUS).
 
 ## 2026-10-10 · P2-01c · done
-- Branch / PR: claude/friendly-bardeen-ufk3ke (session branch, not card/*) / pending
+- Branch / PR: claude/friendly-bardeen-ufk3ke (session branch, not card/*) / https://github.com/AshwinSathian/weir/pull/76
 - Done: `caddy-build` CI job (xcaddy with root and caddy module via `--with`, `caddy validate`, run a minimal Caddyfile and curl it); aggregate `check` now needs it. 15 minute timeout, Caddy log printed on failure, Go version from caddy/go.mod.
 - Tests: built and smoke-ran locally with xcaddy v0.4.5 (Caddy v2.11.7). `make check` passes (lint pinned v2.14.0 under Go 1.27).
 - Deviations: none.

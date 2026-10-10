@@ -5,7 +5,7 @@ Phase: 1
 Current card: none
 Card state: awaiting-merge
 Branch: claude/friendly-bardeen-ufk3ke
-PR: pending (filled after the PR is opened)
+PR: https://github.com/AshwinSathian/weir/pull/76
 Next card: P2-02 (store pool and key-generation hash)
 
 ## Waiting on Ashwin
