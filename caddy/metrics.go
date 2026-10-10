@@ -79,7 +79,7 @@ func (m *metricsRegistry) acquire(reg *prometheus.Registry, name string) (*metri
 }
 
 // release gives back one reference and unregisters the collectors with the
-// last one and reports it, so a registry that outlives its handlers (a failed load keeps
+// last one (and returns true), so a registry that outlives its handlers (a failed load keeps
 // the previous registry) holds no dead collectors.
 func (m *metricsRegistry) release(reg *prometheus.Registry, name string, s *metricSet) (last bool) {
 	m.mu.Lock()
@@ -136,7 +136,7 @@ func (s *metricSet) Stats() weir.EngineStats {
 // this sink. Each Provision attaches its set and Cleanup detaches it when the
 // set's last user goes. Keeping every live set, not one pointer, means a
 // sibling handler or a failed load that cleans up cannot silence the load
-// that still serves.
+// that still serves, and each live registry counts the store's evictions.
 //
 // Bound (rule 5): one entry per live set that uses the store, so at most one
 // per live load.
@@ -159,18 +159,18 @@ func (k *evictSink) detach(s *metricSet) {
 	k.sets = slices.DeleteFunc(slices.Clone(k.sets), func(x *metricSet) bool { return x == s })
 }
 
-// emit counts n evictions in the newest attached set. A nil sink drops them.
+// emit counts n evictions in every attached set. The loads share one physical
+// store, so each registry that still exposes it should see its evictions: an
+// older load that keeps serving during an overlap, or while a failed load has
+// not cleaned up yet, would otherwise undercount. A nil sink drops them.
 func (k *evictSink) emit(queue string, n int) {
 	if k == nil {
 		return
 	}
 	k.mu.RLock()
-	var s *metricSet
-	if len(k.sets) > 0 {
-		s = k.sets[len(k.sets)-1]
-	}
+	sets := slices.Clone(k.sets) // at most one per live load
 	k.mu.RUnlock()
-	if s != nil {
+	for _, s := range sets {
 		s.obs.Observe(weir.Event{Kind: weir.EvEvict, Reason: queue, Status: n})
 	}
 }

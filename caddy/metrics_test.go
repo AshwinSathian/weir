@@ -1,15 +1,24 @@
 package weircaddy
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
+	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/caddyserver/caddy/v2"
 	dto "github.com/prometheus/client_model/go"
+
+	"github.com/AshwinSathian/weir"
+	"github.com/AshwinSathian/weir/store"
+	"github.com/AshwinSathian/weir/store/memory"
 )
 
 var metricSeq atomic.Int32
@@ -102,6 +111,16 @@ func TestMetricsNamesAndNameLabel(t *testing.T) {
 			}
 		}
 	}
+	for fname, f := range fams {
+		if !strings.HasPrefix(fname, "weir_") {
+			continue
+		}
+		for _, m := range f.GetMetric() {
+			if !slices.ContainsFunc(m.GetLabel(), func(l *dto.LabelPair) bool { return l.GetName() == "name" }) {
+				t.Errorf("%s has a series without the name label", fname)
+			}
+		}
+	}
 	if got := value(t, ctx, "weir_requests_total", name, "", ""); got != 2 {
 		t.Errorf("weir_requests_total = %v, want 2", got)
 	}
@@ -169,8 +188,9 @@ func TestEvictionSinkRepointsOnReload(t *testing.T) {
 	if got := value(t, fresh, "weir_evictions_total", name, "queue", "main"); got != 2 {
 		t.Errorf("new registry evictions = %v, want 2", got)
 	}
-	if got := value(t, old, "weir_evictions_total", name, "queue", "main"); got != 0 {
-		t.Errorf("old registry received evictions after the reload: %v", got)
+	// Both loads expose the one store while they overlap, so both count.
+	if got := value(t, old, "weir_evictions_total", name, "queue", "main"); got != 2 {
+		t.Errorf("old registry evictions during overlap = %v, want 2", got)
 	}
 	if err := h1.Cleanup(); err != nil { // the old load stops after the new one started
 		t.Fatal(err)
@@ -179,9 +199,54 @@ func TestEvictionSinkRepointsOnReload(t *testing.T) {
 	if got := value(t, fresh, "weir_evictions_total", name, "queue", "main"); got != 3 {
 		t.Errorf("new registry evictions after old Cleanup = %v, want 3", got)
 	}
-	// The store itself calls the sink: OnEvict is wired at construction.
-	if (&Handler{}).memoryConfig(0, new(evictSink)).OnEvict == nil {
-		t.Error("memoryConfig leaves OnEvict unset")
+}
+
+// FR-OBS-4: a real store eviction reaches the metric through the sink buildStore
+// wires into the store, not just through a direct emit.
+func TestStoreEvictionReachesMetric(t *testing.T) {
+	ctx, name := newCtx(t), metricName()
+	h := mustLoad(t, ctx, fmt.Sprintf(`{"name":%q,"max_bytes":"200MiB"}`, name))
+	sink := new(evictSink)
+	sink.attach(h.metrics)
+	var kg [sha256.Size]byte
+	st, err := h.buildStore(kg, 4<<20, sink)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	val := bytes.Repeat([]byte("x"), 2<<10)
+	for i := range 8000 {
+		e := &store.Entry{Status: 200, Body: val, RequestTime: time.Now(), ResponseTime: time.Now(), Date: time.Now(), Expires: time.Now().Add(time.Hour)}
+		if err := st.Set(context.Background(), store.Key{byte(i), byte(i >> 8)}, e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var total float64
+	for _, q := range []string{"small", "main", "expired"} {
+		total += value(t, ctx, "weir_evictions_total", name, "queue", q)
+	}
+	if total == 0 {
+		t.Error("filling a 4 MiB store evicted nothing into weir_evictions_total")
+	}
+}
+
+// 08 §3: the entry the pool keeps owns the very sink its store was built with.
+func TestPoolKeepsTheSinkItBuiltWith(t *testing.T) {
+	r := newStoreRegistry()
+	var built *evictSink
+	build := func(s *evictSink) (*memory.Store, int64, error) {
+		built = s
+		st, err := memory.New(memory.Config{OnEvict: s.emit})
+		return st, 0, err
+	}
+	load := new(int)
+	p, _, err := r.acquire(load, storeSpec{name: "sinkpool"}, [sha256.Size]byte{}, build)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = r.release(load, p) }()
+	if built == nil || p.sink != built {
+		t.Fatal("pooledStore.sink is not the sink the store was built with")
 	}
 }
 
@@ -213,21 +278,34 @@ func TestMetricsSurviveReload(t *testing.T) {
 }
 
 // FR-OBS-4: the gauges aggregate the engines that share a name in one load.
+// Two engines share one store, so weir_store_bytes is that store's size, not
+// twice it, and a Cleanup of one engine leaves the other reporting.
 func TestMetricsGaugesAcrossEngines(t *testing.T) {
 	ctx, name := newCtx(t), metricName()
 	raw := fmt.Sprintf(`{"name":%q,"max_bytes":"200MiB"}`, name)
 	h1, h2 := mustLoad(t, ctx, raw), mustLoad(t, ctx, raw)
 	serveOne(t, h1, "/g")
-	if got := value(t, ctx, "weir_store_bytes", name, "", ""); got <= 0 {
-		t.Errorf("weir_store_bytes = %v, want > 0 (one shared store, not a sum)", got)
+	want := float64(h1.engine.Stats().StoreBytes)
+	if want <= 0 {
+		t.Fatalf("store bytes = %v, want > 0", want)
+	}
+	if got := value(t, ctx, "weir_store_bytes", name, "", ""); got != want {
+		t.Errorf("weir_store_bytes = %v, want the one store's %v", got, want)
 	}
 	if err := h1.Cleanup(); err != nil {
 		t.Fatal(err)
 	}
+	if got := value(t, ctx, "weir_store_bytes", name, "", ""); got != want {
+		t.Errorf("weir_store_bytes after sibling Cleanup = %v, want %v", got, want)
+	}
 	if got := value(t, ctx, "weir_breaker_state", name, "", ""); got != 0 {
 		t.Errorf("breaker state = %v, want 0", got)
 	}
-	_ = h2
+	// In-flight and queue depth add; the worst breaker state wins.
+	two := &metricSet{engines: []*weir.Engine{h2.engine, h2.engine}}
+	if got, one := two.Stats(), h2.engine.Stats(); got.StoreBytes != one.StoreBytes {
+		t.Errorf("two engines over one store: StoreBytes %d, want %d (max, not sum)", got.StoreBytes, one.StoreBytes)
+	}
 }
 
 // FR-OBS-4, FR-OBS-2: cleaning up one of two same-name handlers keeps the
@@ -295,5 +373,36 @@ func TestProvisionFailureReleasesMetricSetOnce(t *testing.T) {
 	metricSets.mu.Unlock()
 	if left {
 		t.Error("set left behind after the last Cleanup")
+	}
+}
+
+// 08 §8: a Provision that fails in weir.New, after the metric set and the
+// store were acquired, gives both back once and leaves a sibling working.
+func TestProvisionFailureInEngineReleasesMetricSet(t *testing.T) {
+	ctx, name := newCtx(t), metricName()
+	h1 := mustLoad(t, ctx, fmt.Sprintf(`{"name":%q,"max_bytes":"200MiB"}`, name))
+	bad := fmt.Sprintf(`{"name":%q,"max_bytes":"200MiB","limiter":{"max_concurrent":-1}}`, name)
+	if _, err := loadIn(t, ctx, bad); err == nil {
+		t.Fatal("weir.New accepted a negative max_concurrent")
+	}
+	k := metricKey{ctx.GetMetricsRegistry(), name}
+	metricSets.mu.Lock()
+	refs := metricSets.sets[k].refs
+	metricSets.mu.Unlock()
+	if refs != 1 {
+		t.Fatalf("set refs after failed Provision = %d, want 1", refs)
+	}
+	if n, _ := stores.pool.References(h1.pool.spec); n != 1 {
+		t.Fatalf("store refs after failed Provision = %d, want 1", n)
+	}
+	h1.pool.sink.mu.RLock()
+	attached := len(h1.pool.sink.sets)
+	h1.pool.sink.mu.RUnlock()
+	if attached != 1 {
+		t.Errorf("sink holds %d sets, want 1", attached)
+	}
+	serveOne(t, h1, "/e")
+	if got := value(t, ctx, "weir_requests_total", name, "", ""); got != 1 {
+		t.Errorf("sibling requests = %v, want 1", got)
 	}
 }

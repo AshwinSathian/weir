@@ -191,8 +191,8 @@ func (h *Handler) Cleanup() error {
 	engines.remove(h.Name, h.admin) // before Close: no new admin call reaches a closing engine
 	ctx, cancel := context.WithTimeout(context.Background(), closeTimeout)
 	defer cancel()
+	h.metrics.removeEngine(h.engine) // before Close: a scrape never polls a closing engine
 	err := h.engine.Close(ctx)
-	h.metrics.removeEngine(h.engine)
 	if metricSets.release(h.metricsReg, h.Name, h.metrics) {
 		h.pool.sink.detach(h.metrics) // the set's last user: stop feeding its collectors
 	}
