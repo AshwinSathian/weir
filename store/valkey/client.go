@@ -22,6 +22,14 @@ type client interface {
 	// set stores val at key until the Unix millisecond pxat.
 	set(ctx context.Context, key string, val []byte, pxat int64) error
 	del(ctx context.Context, key string) error
+	// evalWrite runs the epoch write script (scripts.go); evalRead the
+	// read-only lookup script and returns its integer array reply.
+	evalWrite(ctx context.Context, keys, args []string) error
+	evalRead(ctx context.Context, keys, args []string) ([]int64, error)
+	// evalWriteWait runs the write script and then WAIT replicas ms on the
+	// same connection: WAIT only covers writes made on its own connection,
+	// and the shared multiplexed one gives no such guarantee.
+	evalWriteWait(ctx context.Context, keys, args []string, replicas, ms int64) error
 	close()
 }
 
@@ -78,6 +86,34 @@ func (v valkeyClient) set(ctx context.Context, key string, val []byte, pxat int6
 
 func (v valkeyClient) del(ctx context.Context, key string) error {
 	return v.c.Do(ctx, v.c.B().Del().Key(key).Build()).Error()
+}
+
+func (v valkeyClient) evalWrite(ctx context.Context, keys, args []string) error {
+	return writeEpochScript.Exec(ctx, v.c, keys, args).Error()
+}
+
+func (v valkeyClient) evalRead(ctx context.Context, keys, args []string) ([]int64, error) {
+	return readEpochScript.Exec(ctx, v.c, keys, args).AsIntSlice()
+}
+
+func (v valkeyClient) evalWriteWait(ctx context.Context, keys, args []string, replicas, ms int64) error {
+	// ponytail: valkey-go's Dedicated waits for a pooled connection without
+	// honoring ctx, so a saturated pool delays a hard purge past its deadline.
+	// Only hard writes with HardEpochWait take this path; the upgrade is a
+	// separate small pool with a bounded wait.
+	return v.c.Dedicated(func(dc valkey.DedicatedClient) error {
+		// EVAL, not EVALSHA: a dedicated connection cannot fall back from
+		// NOSCRIPT, and hard epochs are rare. The first command carries keys,
+		// which cluster mode needs to pick the node.
+		eval := dc.B().Eval().Script(writeEpochSrc).Numkeys(int64(len(keys))).Key(keys...).Arg(args...).Build()
+		res := dc.DoMulti(ctx, eval, dc.B().Wait().Numreplicas(replicas).Timeout(ms).Build())
+		for _, r := range res {
+			if err := r.Error(); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 func (v valkeyClient) policies(ctx context.Context) (map[string]string, error) {

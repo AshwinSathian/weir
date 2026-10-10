@@ -119,6 +119,41 @@ func TestRun(t *testing.T) {
 	storetest.Run(t, newMapStore, storetest.Synctest())
 }
 
+// hardOnly refuses soft and invalid epochs, like the Valkey store before its
+// sketch lands (P25-03).
+type hardOnly struct{ *mapStore }
+
+func (h hardOnly) SetEpoch(ctx context.Context, t store.Tag, ep store.Epoch) error {
+	if ep.Mode != store.EpochHard {
+		return store.ErrUnavailable
+	}
+	return h.mapStore.SetEpoch(ctx, t, ep)
+}
+
+// EpochModes keeps the cases that need other modes from failing a store
+// that lacks them, and still runs the rest (05 §8).
+func TestRunEpochModes(t *testing.T) {
+	storetest.Run(t, func(t *testing.T) store.Store {
+		return hardOnly{newMapStore(t).(*mapStore)}
+	}, storetest.Synctest(), storetest.EpochModes(store.EpochHard))
+}
+
+// EpochModes() with no modes means none, not "every mode": every epoch
+// case skips, even for a store that would fail them.
+func TestRunEpochModesNone(t *testing.T) {
+	storetest.Run(t, func(*testing.T) store.Store { return brokenEpochs{newMapStore(t).(*mapStore)} },
+		storetest.Synctest(), storetest.EpochModes())
+}
+
+type brokenEpochs struct{ *mapStore }
+
+func (b brokenEpochs) NewestEpoch(ctx context.Context, tags []store.Tag, since time.Time) (store.Epoch, bool, error) {
+	if _, _, err := b.mapStore.NewestEpoch(ctx, tags, since); err != nil {
+		return store.Epoch{}, false, err // closed: the non-epoch cases still check this
+	}
+	return store.Epoch{At: time.Now(), Mode: store.EpochHard}, true, nil
+}
+
 // The epoch cases skip for a store that declares no epoch support.
 func TestRunWithoutEpochs(t *testing.T) {
 	storetest.Run(t, newMapStore, storetest.Synctest(), storetest.WithoutEpochs())

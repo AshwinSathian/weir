@@ -4,13 +4,22 @@ Updated: 2026-10-10
 Phase: 1
 Current card: none
 Card state: awaiting-merge
-Branch: claude/blissful-pascal-4l6ag2
-PR: https://github.com/AshwinSathian/weir/pull/87
-Next card: P25-03
+Branch: claude/vigilant-goodall-bdmimx
+PR: https://github.com/AshwinSathian/weir/pull/88
+Next card: P25-03b
 
 ## Waiting on Ashwin
 
 none. Decided 2026-10-10 (P2-03b, review of PR 79; Ashwin delegated "take decisions on all items"): caddytest e2e files are a named exception to the real-clock rule (CLAUDE.md rule 6, docs/07 §1) instead of a build tag, because a tag would stop CI running them; a skip outside `-short` fails the test; the test site binds 127.0.0.1; the herd test uses a 2 s client timeout so a hard purge reports counts. Also decided (P2-02): multi-host is an explicit `multi_host` key; scanning the http app was rejected (handler cannot find its own route; global scan would cap unrelated sites and flush their stores). Documented in 08 §2/§3/§4b.
+
+## Decided 2026-10-10 (P25-03, adversarial review of PR 88)
+
+Ashwin delegated "take decisions on all items"; "Waiting on Ashwin" was empty. An independent agent attacked the PR; no must-fix.
+
+- `WAIT` blocks the full `HardEpochWait` when no replica acknowledges (single node, replica down), so a hard `Purge` over N tags costs N times that. The code comment and 05 §7 were wrong; both corrected, option stays off by default. Test now also checks a healthy replica returns well under the wait.
+- Breaker hazard: until P25-03b the store refuses invalid-mode writes that the engine's RFC 9111 4.4 invalidation makes, and the guard counts them. Not reachable (P25-07 wiring depends on P25-03b through P25-06); documented in 05 §7 and on `SetEpoch` rather than coded around.
+- 05 §7 now says: stores sharing a `Prefix` must use identical `MaxRetention` and `MaxClockSkew`; stale persistence (old RDB/AOF, lagging failover) is a known T-29 residual risk; a far-future hard `At` holds a cap slot.
+- Declined as code: bounding `readArgs` (engine caller bounds it), a bounded wait for the dedicated connection (`ponytail:` note added). Test fixes: retry on the WAIT path, a vacuous cancel test now cancels mid-call, replica test waits for the link.
 
 ## Decided 2026-10-10 (P25-00, adversarial review of PR 84)
 
@@ -92,6 +101,11 @@ Ashwin delegated "take decisions on all items"; "Waiting on Ashwin" was empty. A
 Ashwin delegated "take decisions on all items"; "Waiting on Ashwin" was empty. An independent agent attacked the PR; no must-fix. Decisions: empty `Prefix`/`HashTag` mean the default (card test list reworded); config errors wrap `weir.ErrInvalidConfig` (no new sentinel); upper bounds added (MaxRetention 10 y, MaxClockSkew 1 h, MaxHardEpochs 1e6, key parts 64 bytes); `HardEpochWait` whole ms and below `CallTimeout`; `Addrs` must be unique `host:port`. Fixed: `Validate` copy aliased `Addrs`/`TLS`, returns the zero Config on error; JSON marshalling leaked the password (now redacted); `mapError` leaves wrapped `valkey.Nil` and `ErrNotFound` alone. Written into 05 §7.
 
 ## Notes for the next session
+
+- P25-03 done: `store/valkey/{epochs,scripts,meta}.go`. The client seam gained `evalWrite`, `evalRead`, `evalWriteWait`. Both scripts take the six epoch keys in `KEYS` (`Store.ekeys`, slots in meta.go); P25-03b fills `sketch:soft`/`sketch:invalid` and the `seed` field of `meta` (today `meta` holds only `v`), and must add the plane-absent loss check to the read script and `SEED_CHANGED` to both. `SetEpoch` refuses soft/invalid on non-global tags until then (`epochs.go`).
+- Any write that finds `meta` absent also raises `global.hard` to server time (05 §7 note added). `HardEpochWait` sends `EVAL` + `WAIT` on one dedicated connection; the reviewer showed `WAIT` on the shared connection never waited. `TestHardEpochWaitWaitsForReplica` needs a pausable replica (`WEIR_VALKEY_REPLICA_ADDR`, `--enable-debug-command yes`) and skips in CI.
+- `storetest.EpochModes` marks cases by needed modes; `EpochModes()` with none skips all epoch cases. P25-03b drops the option so all cases run.
+- Local check: `redis-server --port 6390 --maxmemory-policy volatile-lfu --save "" --daemonize yes`, then `WEIR_VALKEY_ADDR=127.0.0.1:6390 go test -race -tags integration ./store/valkey/` (redis 7.0.15, not Valkey; the CI job has still not run).
 
 - P25-02 done: `Get`/`Set`/`Delete` in `store/valkey/entries.go`; the `client` seam gained `get`, `set`, `del` (P25-03 adds script calls). `Set` declines (nil) a record `store.Encode` rejects. `Decode` is bounded by `maxValueBytes` (512 MiB, the server's limit), not a Weir cap; confirm the engine's body cap is far below it. Integration tests need `WEIR_VALKEY_ADDR` (`make test-valkey`); only `redis-server` 7.0 was available here, so the CI job on `valkey/valkey:8.1` has not run. The job sets `volatile-lfu` with `docker exec ... valkey-cli config set` (service containers take no command); it is a new required job in the aggregate `check`.
 

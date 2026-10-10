@@ -19,6 +19,7 @@ type fakeClient struct {
 	polErr error
 	closed atomic.Int32
 	kv     fakeKV // the entry commands (entries_test.go)
+	ep     fakeEp // the epoch scripts (epochs_test.go)
 }
 
 func (f *fakeClient) policies(context.Context) (map[string]string, error) { return f.pol, f.polErr }

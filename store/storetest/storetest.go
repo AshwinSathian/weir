@@ -9,6 +9,7 @@ import (
 	"math/rand/v2"
 	"net/http"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -23,6 +24,8 @@ type Option func(*options)
 
 type options struct {
 	noEpochs bool
+	modes    []store.EpochMode // used only when modesSet
+	modesSet bool              // EpochModes() with no modes means none
 	synctest bool
 	hardCap  int
 }
@@ -31,6 +34,13 @@ type options struct {
 // SetEpoch and NewestEpoch yet. ContextCanceled and ClosedStore still call
 // them, so stubs must return nil (or ErrUnavailable once closed).
 func WithoutEpochs() Option { return func(o *options) { o.noEpochs = true } }
+
+// EpochModes restricts the epoch cases to the given modes, for a store whose
+// soft or invalid support lands in a later card. A case that needs a mode
+// outside the list skips; the others run with the modes they have.
+func EpochModes(m ...store.EpochMode) Option {
+	return func(o *options) { o.modes, o.modesSet = slices.Clone(m), true }
+}
 
 // Synctest runs each time-dependent case inside its own synctest bubble, so
 // in-process stores that read time.Now expire records on the fake clock.
@@ -85,7 +95,7 @@ func Run(t *testing.T, newStore func(t *testing.T) store.Store, opts ...Option) 
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if c.epoch && o.noEpochs {
+			if c.epoch && (o.noEpochs || (o.modesSet && len(o.modes) == 0)) {
 				t.Skip("store does not support epochs (WithoutEpochs)")
 			}
 			c.f(t, newStore, o)
@@ -424,6 +434,32 @@ func testCodecRoundTrip(t *testing.T, _ func(*testing.T) store.Store, _ options)
 	}
 }
 
+// has reports whether the epoch cases may use mode m (EpochModes).
+func (o options) has(m store.EpochMode) bool {
+	return !o.modesSet || slices.Contains(o.modes, m)
+}
+
+// need skips the case unless every mode in ms is allowed.
+func (o options) need(t *testing.T, ms ...store.EpochMode) {
+	t.Helper()
+	for _, m := range ms {
+		if !o.has(m) {
+			t.Skipf("case needs epoch mode %d, which EpochModes excludes", m)
+		}
+	}
+}
+
+// allowed returns the modes the cases may use, least severe first.
+func (o options) allowed() []store.EpochMode {
+	var out []store.EpochMode
+	for _, m := range []store.EpochMode{store.EpochSoft, store.EpochInvalid, store.EpochHard} {
+		if o.has(m) {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
 func mustSetEpoch(t *testing.T, s store.Store, tg store.Tag, at time.Time, m store.EpochMode) {
 	t.Helper()
 	if err := s.SetEpoch(t.Context(), tg, store.Epoch{At: at, Mode: m}); err != nil {
@@ -461,7 +497,8 @@ func epochBase(t *testing.T, newStore func(*testing.T) store.Store) (store.Store
 }
 
 // E-1: a soft epoch after a hard one on the same tag keeps the hard one.
-func testEpochPerModeKept(t *testing.T, newStore func(*testing.T) store.Store, _ options) {
+func testEpochPerModeKept(t *testing.T, newStore func(*testing.T) store.Store, o options) {
+	o.need(t, store.EpochHard, store.EpochSoft)
 	s, base := epochBase(t, newStore)
 	tg := []store.Tag{tag(1)}
 	hard, soft := base.Add(time.Minute), base.Add(2*time.Minute)
@@ -472,9 +509,9 @@ func testEpochPerModeKept(t *testing.T, newStore func(*testing.T) store.Store, _
 }
 
 // E-3: an epoch with At == since applies, in every mode.
-func testEpochSinceBoundary(t *testing.T, newStore func(*testing.T) store.Store, _ options) {
+func testEpochSinceBoundary(t *testing.T, newStore func(*testing.T) store.Store, o options) {
 	s, base := epochBase(t, newStore)
-	for i, m := range []store.EpochMode{store.EpochSoft, store.EpochInvalid, store.EpochHard} {
+	for i, m := range o.allowed() {
 		at := base.Add(time.Duration(i) * time.Minute)
 		mustSetEpoch(t, s, tag(i), at, m)
 		wantEpoch(t, s, []store.Tag{tag(i)}, at, m, at)
@@ -482,12 +519,14 @@ func testEpochSinceBoundary(t *testing.T, newStore func(*testing.T) store.Store,
 }
 
 // E-3, E-10: no epoch at or after since means ok=false.
-func testEpochFastPath(t *testing.T, newStore func(*testing.T) store.Store, _ options) {
+func testEpochFastPath(t *testing.T, newStore func(*testing.T) store.Store, o options) {
 	s, base := epochBase(t, newStore)
+	ms := o.allowed()
+	lo, hi := ms[0], ms[len(ms)-1]
 	tg := []store.Tag{tag(1), tag(2)}
 	wantNoEpoch(t, s, tg, base)
-	mustSetEpoch(t, s, tag(1), base, store.EpochSoft)
-	mustSetEpoch(t, s, tag(2), base, store.EpochHard)
+	mustSetEpoch(t, s, tag(1), base, lo)
+	mustSetEpoch(t, s, tag(2), base, hi)
 	wantNoEpoch(t, s, tg, base.Add(time.Minute))
 	// An unset tag is unaffected by other tags' epochs. since sits a minute
 	// after the store's base instant: a sketch compares against its zero
@@ -496,20 +535,30 @@ func testEpochFastPath(t *testing.T, newStore func(*testing.T) store.Store, _ op
 }
 
 // E-3: across tags the most severe qualifying mode wins, then its newest At.
-func testEpochsMaxAcrossTags(t *testing.T, newStore func(*testing.T) store.Store, _ options) {
+func testEpochsMaxAcrossTags(t *testing.T, newStore func(*testing.T) store.Store, o options) {
 	s, base := epochBase(t, newStore)
+	ms := o.allowed()
+	lo, hi := ms[0], ms[len(ms)-1]
+	if o.has(store.EpochInvalid) {
+		hi = store.EpochInvalid
+	}
 	tg := []store.Tag{tag(1), tag(2), tag(3)}
 	t1, t2, t3 := base.Add(time.Minute), base.Add(2*time.Minute), base.Add(3*time.Minute)
-	mustSetEpoch(t, s, tag(3), t1, store.EpochInvalid)
-	mustSetEpoch(t, s, tag(2), t2, store.EpochInvalid)
-	mustSetEpoch(t, s, tag(1), t3, store.EpochSoft)
-	wantEpoch(t, s, tg, base, store.EpochInvalid, t2)
-	wantEpoch(t, s, tg, t2.Add(30*time.Second), store.EpochSoft, t3)
+	mustSetEpoch(t, s, tag(3), t1, hi)
+	mustSetEpoch(t, s, tag(2), t2, hi)
+	mustSetEpoch(t, s, tag(1), t3, lo)
+	if lo == hi { // one mode: the newest At across tags wins
+		wantEpoch(t, s, tg, base, hi, t3)
+		return
+	}
+	wantEpoch(t, s, tg, base, hi, t2)
+	wantEpoch(t, s, tg, t2.Add(30*time.Second), lo, t3)
 }
 
 // FR-PRG-7, E-8, T-29: whatever other tags share its cells, a tag's lookup
 // never reports less than its own epoch, in either sketch mode.
-func testEpochNeverUnderInvalidates(t *testing.T, newStore func(*testing.T) store.Store, _ options) {
+func testEpochNeverUnderInvalidates(t *testing.T, newStore func(*testing.T) store.Store, o options) {
+	o.need(t, store.EpochSoft, store.EpochInvalid)
 	s, base := epochBase(t, newStore)
 	rng := rand.New(rand.NewPCG(1, 2)) //nolint:gosec // reproducible test data
 	const n = 200_000
@@ -532,6 +581,7 @@ func testEpochHardCap(t *testing.T, newStore func(*testing.T) store.Store, o opt
 	if o.hardCap <= 0 {
 		t.Skip("hard-epoch cap unknown (HardEpochCap not given)")
 	}
+	o.need(t, store.EpochHard, store.EpochSoft)
 	s, base := epochBase(t, newStore)
 	for i := range o.hardCap {
 		mustSetEpoch(t, s, tag(i), base, store.EpochHard)
@@ -551,7 +601,8 @@ func testEpochHardCap(t *testing.T, newStore func(*testing.T) store.Store, o opt
 // E-12: for a store with the SharedTagEpochs capability, a shared tag is
 // read like any other in the soft and hard modes and never in the invalid
 // mode, while a plain tag keeps matching in all three. Skipped otherwise.
-func testSharedTagEpochs(t *testing.T, newStore func(*testing.T) store.Store, _ options) {
+func testSharedTagEpochs(t *testing.T, newStore func(*testing.T) store.Store, o options) {
+	o.need(t, store.EpochSoft, store.EpochInvalid, store.EpochHard)
 	s, base := epochBase(t, newStore)
 	st, ok := s.(store.SharedTagEpochs)
 	if !ok {

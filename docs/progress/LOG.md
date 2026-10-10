@@ -1548,3 +1548,21 @@ Entry template:
 - Deviations: 05 §7 as above.
 - Follow-ups: CI job still unproven until the PR runs; a `MaxValueBytes` config field needs approval if wanted.
 - Context: low
+
+## 2026-10-10 · P25-03 · done
+- Branch / PR: claude/vigilant-goodall-bdmimx / https://github.com/AshwinSathian/weir/pull/88
+- Done: hard and global epochs for `store/valkey` (epochs.go, scripts.go, meta.go): one write script (prune by server TIME, cap, max), one read-only script, `GET newest` fast path, loss repair by global hard write, one retry on network errors, `HardEpochWait` via `EVAL`+`WAIT` on a dedicated connection. `storetest.EpochModes` added.
+- Tests: TestSaturatingWrite, TestSoftEpochBeforeSketchIsUnavailable, TestHardEpochCap, TestAbsentNewestIsNotNoEpochs, TestAbsentNewestWithMetaPresent, TestMetaLossRepairs, TestEmptyHardidxIsNotLoss, TestSkewAddsConservatively, TestGlobalTagKeepsAllModes, TestHardEpochWaitWaitsForReplica, fake-client unit tests; storetest TestRunEpochModes(None); integration conformance passes on redis 7.0.15; module lint 0 issues; root `make check` lint needs the go1.27 workaround.
+- Deviations: 05 §7 note: any write that finds `meta` absent repairs the loss; `HardEpochWait` mechanism; refusals. docs/07 Conformance row mentions `EpochModes`.
+- Review: card-reviewer, one must-fix, fixed: `WAIT` ran on a different connection and never waited (shown with a paused replica); now one dedicated connection. Also fixed: `EpochModes()` with no modes meant all modes. Left: `isNetworkError` also retries `ErrNoSlot` (harmless, scripts are idempotent).
+- Follow-ups: replica wait test does not run in CI; P25-03b next.
+- Context: medium; size M was right.
+
+## 2026-10-10 · P25-03 · review-fixes
+- Branch / PR: claude/vigilant-goodall-bdmimx / https://github.com/AshwinSathian/weir/pull/88
+- Done: adversarial review (agent) of PR 88; decisions in STATUS. Corrected the WAIT-with-no-replica claim in code and 05 §7; documented identical-settings, stale-persistence, far-future-At and pre-P25-03b wiring limits; `ponytail:` note on the dedicated connection wait.
+- Tests: TestSetEpochWaitPathRetriesOnce, tightened and un-vacuous cancel case, healthy-replica timing and link wait in TestHardEpochWaitWaitsForReplica; unit and integration (master plus replica, redis 7.0.15) pass, module lint 0 issues.
+- Deviations: 05 §7 as above.
+- Follow-ups: none.
+- Context: low
+

@@ -121,7 +121,7 @@ These phases start from draft specs. Each begins with one planning card that ver
 - Out of scope: epochs
 - Notes: unit tests wrap the client behind a small unexported interface; script paths (`Lua.Exec` takes a full `valkey.Client`) are integration-only. Address from `WEIR_VALKEY_ADDR`, skipped with a clear message when unset outside CI.
 
-### [ ] P25-03 Hard and global epochs
+### [x] P25-03 Hard and global epochs
 - Plan: 2.5.1 · Size: M · Depends on: P25-02
 - Read: 05 §4.1 to §4.3, E-5, E-6, E-10, §7 (table, Epoch state, Loss detection); 04 §4.3; valkey-go `Lua.Exec`, `NewLuaScriptReadOnly`
 - Touch: store/valkey/{epochs.go,scripts.go,meta.go,epochs_test.go}, store/storetest/storetest.go (option `EpochModes`), docs/05 §8, docs/07 (row for the option)
