@@ -202,14 +202,23 @@ These phases start from draft specs. Each begins with one planning card that ver
 ## Phase 3: Experiment dimensions
 
 
-### [ ] P25-07c Server-side key-generation record for the Valkey store
+### [x] P25-07c Server-side key-generation record for the Valkey store
 - Plan: 2.5.5 · Size: S · Depends on: P25-07
 - Read: 08 §3; 05 §7; 06 R-3
 - Touch: caddy/pool.go, caddy/module.go, store/valkey (a record key), docs/05 §7, docs/08 §3
 - Tests: `TestValkeyKeyGenRecord` (a restart with a tightened `forward` writes the hard epoch; an unchanged config does not; a password rotation alone does not)
-- AC: the forwarding hash (without the store digest) is stored under `<prefix>:keygen` with SET NX and compared when a store is built; a mismatch writes the hard epoch and logs a warning; the 08 §3 restart limitation is removed
+- AC: the forwarding hash (without the store digest) is stored under `<prefix>:keygen` and compared when a store is built (read, purge, then plain SET after the purge; the first version said SET NX); a mismatch, or an existing prefix with no record, writes the hard epoch and logs a warning; the 08 §3 restart limitation is removed
 - Out of scope: the two-node test and the guide (P25-07b)
 - Notes: ASK THE USER FIRST: it changes purge semantics and adds a store record (CLAUDE.md "When to stop and ask"). Two nodes with different forwarding settings would purge each other on every restart; the warning must say so.
+
+### [ ] P25-07d Retry the key-generation check after a start with the server down
+- Plan: 2.5.5 · Size: S · Depends on: P25-07c
+- Read: 08 §3 (key-generation record); 05 §7; 07 §6
+- Touch: caddy/keygen.go, caddy/module.go, docs/08 §3, docs/runbook.md 8.7
+- Tests: `TestKeyGenCheckRetriedAfterOutage` (check fails at Provision, the server returns, the retry purges and records once; Cleanup stops the goroutine)
+- AC: a handler-owned goroutine registered for shutdown retries check, purge, record with backoff until it succeeds or the handler is cleaned up; the skipped-check warning says a retry is running
+- Out of scope: failing Provision when the server is down (FR-STF-2)
+- Notes: decided in the P25-07c adversarial review: the retry narrows but cannot close the window (entries are servable the moment the server returns, before the retry finishes). Ask first if it needs a config field.
 
 ### [ ] P3-00 Finalize the experiments spec and write its cards
 - Plan: Phase 3 · Size: S · Depends on: Phase 2.5 cards done
