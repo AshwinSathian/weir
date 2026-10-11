@@ -211,7 +211,7 @@ These phases start from draft specs. Each begins with one planning card that ver
 - Out of scope: the two-node test and the guide (P25-07b)
 - Notes: ASK THE USER FIRST: it changes purge semantics and adds a store record (CLAUDE.md "When to stop and ask"). Two nodes with different forwarding settings would purge each other on every restart; the warning must say so.
 
-### [ ] P25-07d Retry the key-generation check after a start with the server down
+### [x] P25-07d Retry the key-generation check after a start with the server down
 - Plan: 2.5.5 · Size: S · Depends on: P25-07c
 - Read: 08 §3 (key-generation record); 05 §7; 07 §6
 - Touch: caddy/keygen.go, caddy/module.go, docs/08 §3, docs/runbook.md 8.7

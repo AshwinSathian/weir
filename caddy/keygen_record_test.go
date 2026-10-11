@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
+	"time"
 
 	"github.com/AshwinSathian/weir/store"
 	"github.com/AshwinSathian/weir/store/memory"
@@ -59,13 +61,13 @@ type keyGenRun struct {
 func runKeyGen(t *testing.T, f *fakeRecorder, h [32]byte, keyChanged bool, purgeErr error) *keyGenRun {
 	t.Helper()
 	r := &keyGenRun{purgeErr: purgeErr}
-	r.err = reconcileServerKeyGen(t.Context(), f, h, keyChanged, func(context.Context) error {
+	_, r.err = reconcileServerKeyGen(t.Context(), f, h, keyChanged, func(context.Context) error {
 		r.purges++
 		f.mu.Lock()
 		r.recAtPurge = bytes.Clone(f.rec)
 		f.mu.Unlock()
 		return purgeErr
-	}, warnLog(&r.log), "n")
+	}, warnLog(&r.log), "n", false)
 	f.mu.Lock()
 	r.recAfterRun = bytes.Clone(f.rec)
 	f.mu.Unlock()
@@ -151,7 +153,7 @@ func TestReconcileServerKeyGenOutageAndMemory(t *testing.T) {
 	var sb strings.Builder
 	purges := 0
 	for _, kc := range []bool{false, true} {
-		if err := reconcileServerKeyGen(t.Context(), mem, tight, kc, func(context.Context) error { purges++; return nil }, warnLog(&sb), "n"); err != nil {
+		if _, err := reconcileServerKeyGen(t.Context(), mem, tight, kc, func(context.Context) error { purges++; return nil }, warnLog(&sb), "n", false); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -170,5 +172,214 @@ func TestRecordedHashExcludesStoreSettings(t *testing.T) {
 	}
 	if keyGenHash(a.weirConfig()) != keyGenHash(b.weirConfig()) {
 		t.Fatal("a store setting reached the recorded forwarding hash")
+	}
+}
+
+// FR-STF-2, R-3, 08 §3: a check that failed at Provision is repeated in the
+// background until the server answers; the retry then purges once and records.
+// Stopping it ends the goroutine (the bubble would deadlock otherwise).
+func TestKeyGenCheckRetriedAfterOutage(t *testing.T) {
+	loose, tight := [32]byte{1}, [32]byte{2}
+	t.Run("retry purges and records once after the server returns", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			f := &fakeRecorder{rec: loose[:], checkErr: errors.New("down")}
+			var mu sync.Mutex
+			purges := 0
+			purge := func(context.Context) error { mu.Lock(); purges++; mu.Unlock(); return nil }
+			var sb strings.Builder
+			r := startKeyGenRetry(f, tight, purge, warnLog(&sb), "n")
+			time.Sleep(10 * time.Minute) // several failed attempts
+			mu.Lock()
+			if purges != 0 {
+				t.Fatalf("purged %d times while the server was down", purges)
+			}
+			mu.Unlock()
+			f.mu.Lock()
+			f.checkErr = nil
+			f.mu.Unlock()
+			time.Sleep(2 * keyGenRetryMax) // the next attempt
+			mu.Lock()
+			if purges != 1 {
+				t.Fatalf("purges = %d after the server returned, want 1", purges)
+			}
+			mu.Unlock()
+			f.mu.Lock()
+			if !bytes.Equal(f.rec, tight[:]) {
+				t.Fatalf("record = %x, want the new hash", f.rec)
+			}
+			f.mu.Unlock()
+			time.Sleep(time.Hour)
+			mu.Lock()
+			if purges != 1 {
+				t.Fatalf("purges = %d, the retry kept running", purges)
+			}
+			mu.Unlock()
+			r.stop()
+		})
+	})
+	t.Run("a failed purge is retried and the record keeps the old value", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			f := &fakeRecorder{rec: loose[:]}
+			n := 0
+			purge := func(context.Context) error {
+				n++
+				if n == 1 {
+					return errors.New("boom")
+				}
+				return nil
+			}
+			var sb strings.Builder
+			r := startKeyGenRetry(f, tight, purge, warnLog(&sb), "n")
+			time.Sleep(time.Hour)
+			r.stop() // synchronizes with the goroutine before the reads below
+			if n != 2 || !bytes.Equal(f.rec, tight[:]) {
+				t.Fatalf("purges = %d, record %x", n, f.rec)
+			}
+		})
+	})
+	t.Run("stop ends a retry that never succeeded without purging", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			f := &fakeRecorder{rec: loose[:], checkErr: errors.New("down")}
+			purges := 0
+			var sb strings.Builder
+			r := startKeyGenRetry(f, tight, func(context.Context) error { purges++; return nil }, warnLog(&sb), "n")
+			time.Sleep(time.Minute)
+			r.stop()
+			r.stop() // twice is fine
+			f.mu.Lock()
+			f.checkErr = nil
+			f.mu.Unlock()
+			time.Sleep(time.Hour)
+			if purges != 0 || !bytes.Equal(f.rec, loose[:]) {
+				t.Fatalf("a stopped retry acted: %d purges, record %x", purges, f.rec)
+			}
+		})
+	})
+}
+
+// reconcileServerKeyGen asks for a retry when the check or the record write failed so Provision can start the retry.
+func TestReconcileServerKeyGenReportsSkippedCheck(t *testing.T) {
+	loose, tight := [32]byte{1}, [32]byte{2}
+	var sb strings.Builder
+	noop := func(context.Context) error { return nil }
+	down := &fakeRecorder{rec: loose[:], checkErr: errors.New("down")}
+	if retry, err := reconcileServerKeyGen(t.Context(), down, tight, false, noop, warnLog(&sb), "n", false); !retry || err != nil {
+		t.Fatalf("retry = %v, err = %v; want retry", retry, err)
+	}
+	if !strings.Contains(sb.String(), "background retry is running") {
+		t.Fatalf("warning does not mention the retry: %q", sb.String())
+	}
+	up := &fakeRecorder{rec: loose[:]}
+	if retry, _ := reconcileServerKeyGen(t.Context(), up, tight, false, noop, warnLog(&sb), "n", false); retry {
+		t.Fatal("a successful check reported skipped")
+	}
+	mem, err := memory.New(memory.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mem.Close()
+	if retry, _ := reconcileServerKeyGen(t.Context(), mem, tight, false, noop, warnLog(&sb), "n", false); retry {
+		t.Fatal("a store with no record reported skipped")
+	}
+}
+
+// blockingRecorder never answers until its context ends, like a blackholed server.
+type blockingRecorder struct{ store.Store }
+
+func (blockingRecorder) CheckKeyGen(ctx context.Context, _ []byte) (bool, error) {
+	<-ctx.Done()
+	return false, ctx.Err()
+}
+func (blockingRecorder) RecordKeyGen(ctx context.Context, _ []byte) error {
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+// FR-STF-2, R-3: the retry also covers a record write that failed after the
+// purge, logs a long outage quietly, and stops promptly while a call is in
+// flight without reporting the cancelled attempt.
+func TestKeyGenRetryRecordWriteLoggingAndStop(t *testing.T) {
+	loose, tight := [32]byte{1}, [32]byte{2}
+	t.Run("a failed record write is retried until it lands", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			f := &fakeRecorder{rec: loose[:], writeErr: errors.New("timeout")}
+			var sb strings.Builder
+			r := startKeyGenRetry(f, tight, func(context.Context) error { return nil }, warnLog(&sb), "n")
+			time.Sleep(time.Minute)
+			f.mu.Lock()
+			stale := bytes.Equal(f.rec, loose[:])
+			f.writeErr = nil
+			f.mu.Unlock()
+			if !stale {
+				t.Fatal("the record changed while writes failed")
+			}
+			time.Sleep(time.Minute)
+			r.stop()
+			if !bytes.Equal(f.rec, tight[:]) {
+				t.Fatalf("record = %x after the write recovered, want the new hash", f.rec)
+			}
+		})
+	})
+	t.Run("an hour of outage logs nothing above debug", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			f := &fakeRecorder{rec: loose[:], checkErr: errors.New("down")}
+			var sb strings.Builder
+			r := startKeyGenRetry(f, tight, func(context.Context) error { return nil }, warnLog(&sb), "n")
+			time.Sleep(time.Hour)
+			r.stop()
+			if sb.Len() != 0 {
+				t.Fatalf("retry attempts logged: %q", sb.String())
+			}
+		})
+	})
+	t.Run("a persistent purge failure is logged once", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			f := &fakeRecorder{rec: loose[:]}
+			var sb strings.Builder
+			r := startKeyGenRetry(f, tight, func(context.Context) error { return errors.New("boom") }, warnLog(&sb), "n")
+			time.Sleep(time.Hour)
+			r.stop()
+			// The 'forwarding rules differ' Warn is not quiet and repeats with each
+			// failed purge (rare: reads work, the purge does not); the purge error
+			// itself is logged once.
+			if n := strings.Count(sb.String(), "purge failed"); n != 1 {
+				t.Fatalf("purge failure logged %d times, want 1:\n%s", n, sb.String())
+			}
+		})
+	})
+	t.Run("stop during a blocked call returns and logs nothing", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			var sb strings.Builder
+			r := startKeyGenRetry(blockingRecorder{}, tight, func(context.Context) error { return nil }, warnLog(&sb), "n")
+			time.Sleep(1500 * time.Millisecond) // the first attempt is in flight
+			r.stop()
+			if sb.Len() != 0 {
+				t.Fatalf("a cancelled attempt was reported: %q", sb.String())
+			}
+		})
+	})
+}
+
+// FR-STF-2, R-3: Provision starts the retry only for a Valkey site whose check
+// failed, and Cleanup stops it (no goroutine is left behind).
+func TestProvisionStartsAndCleanupStopsKeyGenRetry(t *testing.T) {
+	h := mustLoad(t, newCtx(t), `{"name":"kgr-valkey","store":{"type":"valkey","addrs":["127.0.0.1:1"]}}`)
+	if h.keyGenRetry == nil {
+		t.Fatal("no retry after a failed check")
+	}
+	if err := h.Cleanup(); err != nil {
+		t.Logf("cleanup: %v", err) // the dead server may make the close report an error
+	}
+	select {
+	case <-h.keyGenRetry.done:
+	default:
+		t.Fatal("Cleanup left the retry running")
+	}
+	m := mustLoad(t, newCtx(t), `{"name":"kgr-mem"}`)
+	if m.keyGenRetry != nil {
+		t.Fatal("a memory site started a retry")
+	}
+	if err := m.Cleanup(); err != nil {
+		t.Fatal(err)
 	}
 }

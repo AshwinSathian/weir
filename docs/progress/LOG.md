@@ -982,7 +982,7 @@ Entry template:
 - Context: medium; size S was a little small because of the failure triage.
 
 ## 2026-10-07 · M10-04 · done
-- Branch / PR: claude/zealous-ritchie-wdpztv / see STATUS
+- Branch / PR: claude/zealous-ritchie-wdpztv / https://github.com/AshwinSathian/weir/pull/97
 - Done: handoff of the work in the previous entry, plus review fixes: fuzz list no longer hides compile errors and fails on an empty matrix, script waits for origin and proxy and prints CLI errors, `npm ci` with fallback, weirproxy `splitList` test, `headers-store-Transfer-Encoding` moved to Unexplained, `conditional-etag-forward*` cites D4 only.
 - Tests: TestSplitList added; root race tests, gofmt, vet and trace (130/152) pass; the baseline run still reports no regressions. Lint unrun locally (Go 1.25 build); CI must confirm.
 - Deviations: none beyond the docs/07 §8 paragraph.
@@ -1254,7 +1254,7 @@ Entry template:
 - Context: low.
 
 ## 2026-10-09 · P2-00 · done
-- Branch / PR: card/P2-00-caddy-spec (remote branch claude/zen-shannon-l879he) / see STATUS
+- Branch / PR: card/P2-00-caddy-spec (remote branch claude/zen-shannon-l879he) / https://github.com/AshwinSathian/weir/pull/97
 - Done: docs/08 is v1.0, verified against Caddy v2.11.7 with a file:line table (§11); Phase 2 cards P2-01 to P2-07 (plus P2-01b, P2-03b) in docs/cards/20-later.md; docs/09 Caddy facts refreshed.
 - Tests: docs only. gofmt, vet and trace 146/146 pass; `make check` stops at lint (container golangci-lint is Go 1.25), CI must confirm.
 - Deviations: none from normative requirements. Findings written into 08: admin routes outlive reloads (engine registry), metrics registry is per config load, Caddy's upgrade detector is unusable (adapter uses `internal/keys.IsUpgrade`).
@@ -1271,7 +1271,7 @@ Entry template:
 - Context: low.
 
 ## 2026-10-09 · P2-01 · done
-- Branch / PR: card/P2-01-module-skeleton (remote branch claude/epic-maxwell-jkv0at) / see STATUS
+- Branch / PR: card/P2-01-module-skeleton (remote branch claude/epic-maxwell-jkv0at) / https://github.com/AshwinSathian/weir/pull/97
 - Done: `caddy/` module (`weircaddy`): `http.handlers.weir` with strict JSON config, required `name` charset check, `ByteSize` parsing, mapping to `weir.Config`, Provision/Validate/Cleanup (idempotent), interface guards, pass-through ServeHTTP. `go.work` includes `./caddy`; root `go.mod` still has no `require`. docs/08 §2 key table lists every block key.
 - Tests: `TestConfigFromJSON`, `TestProvisionReportsBadConfig`, `TestInternalKeysImport`. `make check` passes with the pinned golangci-lint run under Go 1.27; trace 146/146.
 - Deviations: none from normative text; five keys added beyond the 08 example, recorded in the 08 table. `max_bytes`/`snapshot_dir` parsed but applied by P2-02. `internal/keys.IsUpgrade` imports across modules, so no `weirhttp.IsUpgrade` fallback.
@@ -1728,3 +1728,19 @@ Entry template:
 - Deviations: 08 §2, §3, runbook only.
 - Follow-ups: P25-07d; a way for `validate` to skip the purge (needs a signal from Caddy); Provision-level test seam.
 - Context: medium
+
+## 2026-10-11 · P25-07d · done
+- Branch / PR: claude/sweet-clarke-gwnywy (designated branch) / https://github.com/AshwinSathian/weir/pull/97
+- Done: `keyGenRetry` (`startKeyGenRetry`, `stop`) in `caddy/keygen.go`: check, purge, record with backoff 1 s to 30 s, failed purge retried, purge never closes the engine. `reconcileServerKeyGen` returns whether the check was skipped; `Provision` starts the retry last, `Cleanup` stops it before `Close`. 08 §3 and runbook 8.7 updated.
+- Tests: `TestKeyGenCheckRetriedAfterOutage` (3 subtests, synctest), `TestReconcileServerKeyGenReportsSkippedCheck`; pass with `-race`. gofmt, vet, trace 146/146, root and `caddy` race tests pass; `make check` stops at golangci-lint (Go 1.25 build). card-reviewer: no must-fix.
+- Deviations: none beyond 08 §3 and runbook wording; no config field added.
+- Follow-ups: Provision/Cleanup wiring has no test (needs the store seam, should-fix left open); warning repeats per attempt; `validate` signal.
+- Context: low; size S was right.
+
+## 2026-10-11 · P25-07d · review-fixes
+- Branch / PR: claude/sweet-clarke-gwnywy / https://github.com/AshwinSathian/weir/pull/97
+- Done: adversarial review (agent), decisions delegated by Ashwin. `reconcileServerKeyGen` now returns `retry` (check failed or record write failed) and takes `quiet`; the retry loop logs attempts at Debug, a purge error once per distinct message, nothing after `stop`. Wiring test added with a real handler (no seam). 08 §3 and runbook 8.7 corrected: the retry also repeats a failed record write, and a known in-process change still purges at Provision. The reviewer's claim that a skipped check skips that purge was wrong (an existing test covers it).
+- Tests: `TestKeyGenRetryRecordWriteLoggingAndStop` (4 subtests), `TestProvisionStartsAndCleanupStopsKeyGenRetry`; gofmt, vet, trace 146/146, root and `caddy` race tests pass; lint not run here.
+- Deviations: 08 §3 and runbook only.
+- Follow-ups: `validate` signal; the "differ" Warn repeats while a purge keeps failing.
+- Context: low
