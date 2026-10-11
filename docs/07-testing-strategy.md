@@ -129,7 +129,7 @@ Each seed taxonomy entry maps to the tests below. "Engine" tests run under synct
 - `TestFlightTableBoundedUnderFlood` (engine): 5 000 cold keys with a gated origin and clients that leave; the flight table holds exactly `MaxConcurrent + MaxQueue` flights, and none once the origin answers.
 - `TestLimiterPartitionQueueCap` (component): a partition holds at most max(`PerPartition`, `MaxQueue/4`) queued waiters; the next gets `ErrQueueFull` while other partitions still queue; a waiter leaving by timeout or grant frees its place.
 - `TestBackgroundRefreshDroppedWithoutSlot` (engine): with `MaxConcurrent − ReserveForeground` slots busy, an early refresh is dropped with `EvRefreshDropped` `no-slot` and the hit is still served.
-- `TestBackgroundDroppedFollowerFetches` (engine): a request that joined a background flight which found no slot gets a foreground fetch, not `ErrShed`.
+- `TestForegroundJoinsDroppedBackgroundFlight` (engine): a request that joined a background flight which found no slot gets a foreground fetch, not `ErrShed`.
 - `TestLimiterSkipsFullPartition` (component): queue head blocked by its partition cap does not block a later waiter of another partition.
 - `TestLimiterQueueTimeout`, `TestLimiterCancel`, `TestLimiterGrantRace` (component): the grant-versus-timeout race returns the slot exactly once (run 1 000 times with shuffled timings inside the bubble).
 

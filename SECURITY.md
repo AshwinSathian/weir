@@ -8,11 +8,13 @@ Use GitHub private vulnerability reporting: the "Report a vulnerability" button 
 
 Include the Weir version or commit, the configuration involved (`Forward`, `Key`, `Storable` settings), and a request and origin response that reproduce the problem. A failing Go test is the most useful form.
 
-You should get an acknowledgement within 7 days. Fixes for confirmed issues are released as a new `v0.x` tag with an advisory that credits the reporter unless you ask otherwise.
+You should get an acknowledgement within 7 days. Fixes for confirmed issues are released as a patch version with an advisory that credits the reporter unless you ask otherwise.
 
 ## Supported versions
 
-Before `v1.0.0`, only the latest `v0.x` tag gets fixes.
+The latest `v1.x` minor release gets security fixes. `v0.x` tags are unsupported.
+
+The root module, `weirhttp`, `observe/prom`, `store/valkey` and `caddy` are all in scope. They are versioned together, so a fix to the root module ships with a matching tag for each of the others.
 
 ## Scope
 

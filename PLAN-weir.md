@@ -1,6 +1,6 @@
 # RFC: Weir build plan
 
-> Status: approved for Phase 0 and Phase 1
+> Status: approved; Phases 0 to 3 implemented, release gate open
 > Scale: Epic
 > Target start: 2026-09-28
 > Created: 2026-09-27
@@ -115,7 +115,7 @@ Refs: FR-LIM-*, FR-STF-*, FR-WRM-*, T6.3, T6.4, T6.5, T-18.
 - [x] M4.1 `internal/limiter` ([04 §8.2](docs/04-lld.md)). AC: `TestLimiterSkipsFullPartition`, `TestLimiterQueueTimeout`, `TestLimiterCancel`, `TestLimiterGrantRace`, `BenchmarkLimiterAcquireRelease` pass.
 - [x] M4.2 Wire limiter into the fetch function; streaming slot release at headers. AC: `TestLimiterCap5000Keys`, `TestPartitionFairness`, `TestSlowReaderDoesNotPinSlots`, `TestColdStartBounded` pass; `testorigin.NewChecked` used in all engine tests from here on.
 - [x] M4.3 Store guard with remote timeouts and store breaker ([04 §5.2](docs/04-lld.md)). AC: `TestStoreOutageStillCoalescedAndLimited`, `TestStoreSlowRemote` pass.
-- [ ] M4.3b Upload pool and timeout split (D25, D26). AC: `TestSlowUploadsDoNotStarveMisses`, `TestBodylessBypassUsesMainPool`, `TestDripOriginReleasesSlot`, `TestStreamIdleTimeout` pass.
+- [x] M4.3b Upload pool and timeout split (D25, D26). AC: `TestSlowUploadsDoNotStarveMisses`, `TestBodylessBypassUsesMainPool`, `TestDripOriginReleasesSlot`, `TestStreamIdleTimeout` pass.
 - [x] M4.4 `Warm`. AC: `TestWarm`, `TestWarmDoesNotUseReserve` pass.
 
 #### M5 Stale serving and circuit breaker (~2 weeks)
@@ -163,7 +163,7 @@ Refs: FR-OBS-*, NFR-*, seed §7.5.
 - [x] M10.1 Event catalog complete ([04 §9.2](docs/04-lld.md)); `Stats()`; one test per event kind asserting it fires. AC: `TestEveryEventKindEmitted` passes.
 - [x] M10.2 `observe/prom` module (own `go.mod`, added to `go.work`). AC: metrics from [04 §9.3](docs/04-lld.md) exported; `testutil` checks in its tests; root module still has zero third-party imports.
 - [x] M10.3 Load tests ([07 §9](docs/07-testing-strategy.md)) and nightly workflow. AC: all scenarios pass on the reference machine; results in `docs/benchmarks.md`.
-- [ ] M10.4 Nightly fuzz and cache-tests jobs; `testdata/cache-tests-baseline.json`; `docs/cache-tests-expected-failures.md`. AC: both jobs green; every expected failure cites a decision ID.
+- [x] M10.4 Nightly fuzz and cache-tests jobs; `testdata/cache-tests-baseline.json`; `docs/cache-tests-expected-failures.md`. AC: both jobs green; every expected failure cites a decision ID.
 - [x] M10.5 NFR-5 measured; spec updated if the provisional budget was wrong. AC: `docs/benchmarks.md` has before/after `benchstat` for M1 to M10.
 - [x] M10.5b GC cost at 1M entries measured (D36). AC: `docs/benchmarks.md` reports GC CPU share and p99; if GC CPU exceeds 10% at 1M entries, a pointer-light layout task is added to Phase 1.x (done: M16-01, GC share 13.6% to 15.4%).
 - [x] M10.6 `TRACE_STRICT=1` in CI. AC: trace report empty.
@@ -194,8 +194,8 @@ Refs: [01 §13](docs/01-technical-spec.md), decisions D11, D12, D15, D16, D18.
 
 Goal: prove the store interface has no in-process assumptions and unlock multi-node deployments.
 
-- [ ] 2.5.1 `store/valkey` module per [05 §7](docs/05-storage-interface-spec.md). AC: `storetest.Run` passes against Valkey in Docker in CI.
-- [ ] 2.5.2 Engine test suite (T6.x matrix) re-run with the Valkey store, real time, via a build tag. AC: all pass; any failure is an interface bug fixed in [05](docs/05-storage-interface-spec.md) first.
+- [x] 2.5.1 `store/valkey` module per [05 §7](docs/05-storage-interface-spec.md). AC: `storetest.Run` passes against Valkey in Docker in CI.
+- [x] 2.5.2 Engine test suite (T6.x matrix) re-run with the Valkey store, real time, via a build tag. AC: all pass; any failure is an interface bug fixed in [05](docs/05-storage-interface-spec.md) first.
 - [x] 2.5.3 Vary-spec compare-and-set via Lua. AC: 64 concurrent variant writers never exceed `MaxVariants`.
 - [x] 2.5.4 Eviction-storm review (seed T6.11) with a Valkey `maxmemory` experiment; `Scrubber` via background `SCAN`. AC: written up in `docs/09-research-notes.md`.
 - [x] 2.5.5 Multi-node Caddy guide (lifts D17). AC: purge on one node is observed on another in an integration test.
@@ -203,6 +203,11 @@ Goal: prove the store interface has no in-process assumptions and unlock multi-n
 ### Phase 3: Experiment dimensions (~4 weeks, after Phase 2.5)
 
 Spec: [docs/10-experiments-spec.md](docs/10-experiments-spec.md) (decisions E1 to E9 locked, v1.0). Cards P3-01 to P3-05 in docs/cards/20-later.md; the T-35 and T-36 tests come with P3-02 and P3-03.
+
+- [x] 3.1 Match, assign and key dimension (P3-01, P3-02). AC: `TestVariantIsKeyDimension`, `TestWeirVariantAlwaysReplaced`, `TestExperimentCookieNeverForwarded` pass.
+- [x] 3.2 Set-Cookie and downstream cache rewrite (P3-03). AC: `TestSetCookieNeverStored`, `TestDownstreamRewrittenPrivate` pass.
+- [x] 3.3 `EvExposure` (P3-04). AC: `TestExposureOncePerVisitor` passes.
+- [x] 3.4 Caddy `experiments` block (P3-05). AC: `TestCaddyfileExperiments`, `TestExperimentsExcludedFromKeyGenHash` pass.
 
 ## Testing strategy
 

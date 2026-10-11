@@ -32,8 +32,8 @@ The seed (§11) planned four follow-on documents. They were renumbered to fit ar
 
 ## Precedence
 
-When documents disagree: 01 over everything; then 05, 06, 07 for their areas; then 02; then 04; then 03. The seed (00) is historical and loses to all of them. A disagreement is a bug: fix the losing document in the same change that notices it.
+When documents disagree: 01 over everything; then 05, 06, 07 for their areas, 08 for the Caddy adapter and 10 for experiments, each within its area; then 02; then 04; then 03. The seed (00) is historical and loses to all of them. A disagreement is a bug: fix the losing document in the same change that notices it.
 
 ## Changing a normative document
 
-Requirement IDs are never reused or renumbered. A removed requirement keeps its ID with the text "Removed (date): reason". A new requirement takes the next free number in its group. Every change to 01, 02, 04, 05, 06 or 07 updates the document's date line.
+Requirement IDs are never reused or renumbered. A removed requirement keeps its ID with the text "Removed (date): reason". A new requirement takes the next free number in its group. Every change to 01, 02, 04, 05, 06, 07, 08 or 10 updates the document's date line.
