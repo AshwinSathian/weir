@@ -213,6 +213,15 @@ func (e *Engine) purgedSince(ctx context.Context, ent *store.Entry) bool {
 	return ok && err == nil
 }
 
+// hardPurgedSince reports whether a hard epoch newer than ent's request time
+// applies to it. A lookup error fails open, as in lookup (T-9). Only a hard
+// epoch counts: a soft or invalidating one leaves the entry open to
+// validation (FR-PRG-2, FR-STL-5).
+func (e *Engine) hardPurgedSince(ctx context.Context, ent *store.Entry) bool {
+	ep, ok, err := e.sg.newestEpoch(ctx, ent.Tags, ent.RequestTime)
+	return ok && err == nil && ep.Mode != store.EpochSoft && ep.Mode != store.EpochInvalid
+}
+
 // leaveFlight marks the creator gone. When the flight published first,
 // runFlight may have checked too early, so the creator closes an unclaimed
 // stream itself (04 §6.4).
