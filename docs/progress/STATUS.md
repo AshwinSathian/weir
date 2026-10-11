@@ -10,13 +10,12 @@ Next card: P3-02 (`make next`)
 
 ## Waiting on Ashwin
 
-- docs/10 never says which variant is the control (E6 consent fallback). P3-01 uses the first listed variant. OK to add "the first listed variant is the control" to 10 §3 / §4 step 3?
-- `Pick` hashes `salt || visitor-id` exactly as 10 §4 step 3 reads, with no separator, so (salt `ab`, id `c`) equals (`a`, `bc`). Ids are fixed-length in practice. Keep as is, or add a NUL separator to the spec?
+Nothing. The control-variant and hash-separator questions were decided in the PR 100 review (first listed variant; `salt || 0x00 || id`) and are in docs/10 v1.1.
 
 ## Notes for the next session
 
 - P3-01 is done: `internal/experiments` has config, cookie and pick, nothing wired into the engine. `Validate` fills in no defaults; P3-02 decides them and the public shape (ask first).
-- Limits added without a spec line (document in 10 §3 with the P3-02 edit): signing key at least 16 bytes, names at most 32 bytes of `[A-Za-z0-9_-]`, weights 1 to 1000, total at most 10000, cookie at most 512 bytes. Consent (E6) is not in the package yet; it belongs to P3-02.
+- The load limits are now in docs/10 §3 (v1.1). Consent (E6) is not in the package yet; it belongs to P3-02, with the defaults and the public shape (ask first). See the P3-02 card notes for the header-spoofing and allocation points from the review.
 - `make check` stops at golangci-lint here (binary built with Go 1.25, module targets 1.27). gofmt, vet, `go test -race -shuffle=on ./...` and trace 146/146 pass. CI is the lint gate.
 - `TestE2EPurgeHerd` (real-clock caddytest) is a known flake.
 - Open follow-up from P25-07d: a way for `caddy validate` to skip the purge (needs a signal from Caddy).

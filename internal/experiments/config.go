@@ -7,16 +7,32 @@ package experiments
 import (
 	"errors"
 	"fmt"
+	"math"
+	"net/netip"
 	"strings"
 )
 
 // Limits that keep the cookie and the key space bounded (NFR-3).
 const (
-	maxNameLen      = 32
-	maxWeight       = 1000
-	maxTotalWeight  = 10000
-	minSigningKeyLn = 16
+	maxNameLen        = 32
+	maxWeight         = 1000
+	maxTotalWeight    = 10000
+	minSigningKeyLn   = 32 // HMAC-SHA-256 block-size practice; an unset env key must fail the load
+	maxSaltLen        = 64
+	maxActiveLimit    = 8  // bounds the forwarded header and the key dimensions (NFR-3)
+	maxExperiments    = 64 // bounds validateOverlap and the config size
+	maxVariantsPerExp = 16
 )
+
+// reservedHeaders are names the forwarded variant header must not take: the
+// forwarding step deletes and sets it, so one of these would remove the
+// request's own cookie, framing or credentials (T-35).
+var reservedHeaders = map[string]bool{
+	"cookie": true, "set-cookie": true, "host": true, "content-length": true, "content-type": true,
+	"transfer-encoding": true, "connection": true, "te": true, "upgrade": true, "keep-alive": true,
+	"trailer": true, "vary": true, "authorization": true, "accept": true, "accept-encoding": true,
+	"user-agent": true, "forwarded": true, "via": true, "cache-control": true,
+}
 
 // ErrConfig wraps every configuration error so callers can test for it.
 var ErrConfig = errors.New("weir: invalid experiments config")
@@ -27,8 +43,10 @@ type Variant struct {
 	Weight int
 }
 
-// Experiment is one static experiment (E5). Variants[0] is the control arm,
-// served when consent is missing (E6).
+// Experiment is one static experiment (E5). The first listed variant is the
+// control arm, served when consent is missing (E6, 10 §3). A prefix path
+// ("/checkout*") also matches "/checkoutx"; end it with "/*" to stop at a
+// segment boundary.
 type Experiment struct {
 	Name     string
 	Salt     string
@@ -72,10 +90,16 @@ func (e *Experiment) Matches(host, path string) bool {
 // MaxActive match (Validate rejects statically overlapping matchers, so this
 // is a safety net), the first MaxActive in config order apply (10 §4 step 1).
 func (c *Config) Active(host, path string) []*Experiment {
+	if c.MaxActive < 1 {
+		return nil
+	}
 	var out []*Experiment
 	for i := range c.Experiments {
 		e := &c.Experiments[i]
 		if e.Matches(host, path) {
+			if out == nil {
+				out = make([]*Experiment, 0, min(c.MaxActive, len(c.Experiments)))
+			}
 			out = append(out, e)
 			if len(out) >= c.MaxActive {
 				break
@@ -97,14 +121,18 @@ func (c *Config) Lookup(name string) (*Experiment, bool) {
 
 // Validate checks the configuration at load time. keyMaxVariants is the
 // resolved Key.MaxVariants; no request may combine variants into more than
-// keyMaxVariants*4 key variants (10 §4 step 1, T-27). It fills in no
+// keyMaxVariants*4 key variants (10 §4 step 1, T-15, FR-KEY-10). It fills in no
 // defaults: the caller that exposes the block decides them.
 func (c *Config) Validate(keyMaxVariants int) error {
 	if !isToken(c.CookieName, maxNameLen) {
 		return cfgErr("cookie name %q is not a short token", c.CookieName)
 	}
-	if !isToken(c.Header, maxNameLen) {
-		return cfgErr("header name %q is not a short token", c.Header)
+	if !isToken(c.Header, maxNameLen) || strings.Contains(c.Header, "_") ||
+		reservedHeaders[strings.ToLower(c.Header)] || strings.HasPrefix(strings.ToLower(c.Header), "proxy-") {
+		// An underscore is out: CGI-style origins map "Weir_Variant" and
+		// "Weir-Variant" to one variable, so a client could spoof around the
+		// delete step (T-35).
+		return cfgErr("header name %q is reserved, has an underscore, or is not a short token", c.Header)
 	}
 	if len(c.SigningKeys) == 0 {
 		return cfgErr("no signing key")
@@ -114,8 +142,11 @@ func (c *Config) Validate(keyMaxVariants int) error {
 			return cfgErr("signing key %d is shorter than %d bytes", i, minSigningKeyLn)
 		}
 	}
-	if c.MaxActive < 1 {
-		return cfgErr("max_active must be at least 1")
+	if c.MaxActive < 1 || c.MaxActive > maxActiveLimit {
+		return cfgErr("max_active must be 1 to %d", maxActiveLimit)
+	}
+	if len(c.Experiments) > maxExperiments {
+		return cfgErr("more than %d experiments", maxExperiments)
 	}
 	seen := make(map[string]bool, len(c.Experiments))
 	for i := range c.Experiments {
@@ -128,21 +159,30 @@ func (c *Config) Validate(keyMaxVariants int) error {
 			return err
 		}
 	}
-	return c.validateOverlap(max(keyMaxVariants, 1) * 4)
+	limit := math.MaxInt
+	if k := max(keyMaxVariants, 1); k <= math.MaxInt/4 {
+		limit = k * 4
+	}
+	return c.validateOverlap(limit)
 }
 
 func (e *Experiment) validate() error {
 	if !isToken(e.Name, maxNameLen) {
 		return cfgErr("experiment name %q is not a short token", e.Name)
 	}
-	if e.Salt == "" {
-		return cfgErr("experiment %q has no salt", e.Name)
+	if e.Salt == "" || len(e.Salt) > maxSaltLen {
+		return cfgErr("experiment %q: salt must be 1 to %d printable ASCII bytes", e.Name, maxSaltLen)
+	}
+	for i := 0; i < len(e.Salt); i++ {
+		if e.Salt[i] <= ' ' || e.Salt[i] > '~' { // no NUL: it separates salt and id in Pick
+			return cfgErr("experiment %q: salt must be printable ASCII without spaces", e.Name)
+		}
 	}
 	if err := e.validateMatcher(); err != nil {
 		return err
 	}
-	if len(e.Variants) < 2 {
-		return cfgErr("experiment %q needs at least two variants", e.Name)
+	if len(e.Variants) < 2 || len(e.Variants) > maxVariantsPerExp {
+		return cfgErr("experiment %q needs 2 to %d variants", e.Name, maxVariantsPerExp)
 	}
 	total := 0
 	names := make(map[string]bool, len(e.Variants))
@@ -165,22 +205,113 @@ func (e *Experiment) validate() error {
 	return nil
 }
 
+// validateMatcher accepts only spellings the key can produce, so a matcher
+// never silently fails to match: hosts as keys.normalizeHost writes them
+// (lower case, no trailing dot, compressed IPv6, no leading-zero port) and
+// paths in the form keys.normalizePath leaves (escapes upper case and not
+// decodable to an unreserved byte).
 func (e *Experiment) validateMatcher() error {
-	for i := 0; i < len(e.Host); i++ {
-		b := e.Host[i]
-		// The key's normalized host keeps a non-default port and a bracketed
-		// IPv6 literal, so the matcher must be able to name them (E8).
-		if !(b >= 'a' && b <= 'z' || b >= '0' && b <= '9' || b == '-' || b == '.' || b == ':' || b == '[' || b == ']') {
-			return cfgErr("experiment %q: host %q must be the lower case normalized host, without wildcard", e.Name, e.Host)
-		}
+	if e.Host != "" && !normalizedHost(e.Host) {
+		return cfgErr("experiment %q: host %q is not in normalized form (lower case, no trailing dot, no wildcard)", e.Name, e.Host)
 	}
 	if e.Path == "" {
 		return nil
 	}
-	if e.Path[0] != '/' || strings.Contains(strings.TrimSuffix(e.Path, "*"), "*") {
-		return cfgErr("experiment %q: path %q must start with / and may end in one *", e.Name, e.Path)
+	stem, _ := strings.CutSuffix(e.Path, "*")
+	if e.Path[0] != '/' || strings.Contains(stem, "*") || !normalizedPath(stem) {
+		return cfgErr("experiment %q: path %q must start with /, be in normalized form and may end in one *", e.Name, e.Path)
 	}
 	return nil
+}
+
+func normalizedHost(h string) bool {
+	if len(h) > 255 {
+		return false
+	}
+	name, port := h, ""
+	if h[0] == '[' {
+		end := strings.IndexByte(h, ']')
+		if end < 0 {
+			return false
+		}
+		name, port = h[:end+1], h[end+1:]
+		a, err := netip.ParseAddr(name[1 : len(name)-1])
+		if err != nil || !a.Is6() || name != "["+a.String()+"]" {
+			return false
+		}
+		if port != "" && port[0] != ':' {
+			return false
+		}
+	} else {
+		if i := strings.LastIndexByte(h, ':'); i >= 0 {
+			name, port = h[:i], h[i:]
+		}
+		if name == "" || strings.HasSuffix(name, ".") {
+			return false
+		}
+		for i := 0; i < len(name); i++ {
+			b := name[i]
+			if !(b >= 'a' && b <= 'z' || b >= '0' && b <= '9' || b == '-' || b == '.') {
+				return false
+			}
+		}
+	}
+	if port == "" {
+		return true
+	}
+	digits := port[1:]
+	if digits == "" || len(digits) > 5 || digits[0] == '0' {
+		return false
+	}
+	n := 0
+	for i := 0; i < len(digits); i++ {
+		if digits[i] < '0' || digits[i] > '9' {
+			return false
+		}
+		n = n*10 + int(digits[i]-'0')
+	}
+	return n <= 65535
+}
+
+func normalizedPath(p string) bool {
+	for i := 0; i < len(p); i++ {
+		b := p[i]
+		if b <= ' ' || b > '~' || b == '?' || b == '#' {
+			return false
+		}
+		if b != '%' {
+			continue
+		}
+		if i+2 >= len(p) {
+			return false
+		}
+		hi, lo := hexVal(p[i+1]), hexVal(p[i+2])
+		if hi < 0 || lo < 0 {
+			return false
+		}
+		if c := byte(hi<<4 | lo); unreservedByte(c) {
+			return false // the key decodes it
+		}
+		i += 2
+	}
+	return true
+}
+
+// hexVal returns the value of an upper-case hex digit, or -1 (lower case is
+// not normalized form).
+func hexVal(b byte) int {
+	switch {
+	case b >= '0' && b <= '9':
+		return int(b - '0')
+	case b >= 'A' && b <= 'F':
+		return int(b-'A') + 10
+	}
+	return -1
+}
+
+func unreservedByte(c byte) bool {
+	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' ||
+		c == '-' || c == '.' || c == '_' || c == '~'
 }
 
 // validateOverlap looks for a request that matches too many experiments, or
@@ -210,8 +341,14 @@ func (c *Config) validateOverlap(maxProduct int) error {
 					continue
 				}
 				n++
+				// A winner still contributes its dimension to the key and the
+				// header (10 §4 step 4) but only one value.
 				if e.Winner == "" {
-					product *= len(e.Variants)
+					if product > maxProduct/len(e.Variants) {
+						product = maxProduct + 1
+					} else {
+						product *= len(e.Variants)
+					}
 				}
 				if product > maxProduct {
 					return cfgErr("requests for %q%s could combine into more than %d variants", h, p, maxProduct)

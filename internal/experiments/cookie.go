@@ -4,6 +4,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
+	"slices"
 	"strings"
 )
 
@@ -51,15 +52,19 @@ func ParseCookie(value string, keys [][]byte) (c Cookie, ok bool) {
 	}
 	// Decode panics when dst is too short, so the length is checked first.
 	var mac [macLen]byte
+	// Strict rejects non-zero padding bits, so a MAC has exactly one spelling.
 	if len(macStr) != base64.RawURLEncoding.EncodedLen(macLen) {
 		return Cookie{}, false
 	}
-	if _, err := base64.RawURLEncoding.Decode(mac[:], []byte(macStr)); err != nil {
+	if _, err := base64.RawURLEncoding.Strict().Decode(mac[:], []byte(macStr)); err != nil {
 		return Cookie{}, false
 	}
 	body := value[:len(value)-len(macStr)-1]
 	verified := false
 	for _, k := range keys {
+		if len(k) < minSigningKeyLn {
+			continue // an empty or short key must never verify (T-35)
+		}
 		// Do not stop early: the loop's length is the key count either way.
 		if hmac.Equal(sign(k, body), mac[:]) {
 			verified = true
@@ -110,22 +115,45 @@ func (c *Cookie) Get(experiment string) (Assignment, bool) {
 
 // Set records a variant for an experiment. A new experiment is appended, so
 // order stays creation order; a changed variant keeps its place and loses
-// its exposure mark, because it is a new exposure.
+// its exposure mark, because it is a new exposure. Set never writes to the
+// old backing array, so copies of a Cookie do not see the change.
 func (c *Cookie) Set(experiment, variant string) {
 	for i, a := range c.Assignments {
 		if a.Experiment == experiment {
 			if a.Variant != variant {
-				c.Assignments[i] = Assignment{experiment, variant, false}
+				next := slices.Clone(c.Assignments)
+				next[i] = Assignment{experiment, variant, false}
+				c.Assignments = next
 			}
 			return
 		}
 	}
-	c.Assignments = append(c.Assignments, Assignment{experiment, variant, false})
+	c.Assignments = append(slices.Clip(c.Assignments), Assignment{experiment, variant, false})
+}
+
+// MarkExposed records that the exposure for an experiment was emitted
+// (10 §4 step 7) and reports whether the mark changed.
+func (c *Cookie) MarkExposed(experiment string) bool {
+	for i, a := range c.Assignments {
+		if a.Experiment == experiment {
+			if a.Exposed {
+				return false
+			}
+			next := slices.Clone(c.Assignments)
+			next[i].Exposed = true
+			c.Assignments = next
+			return true
+		}
+	}
+	return false
 }
 
 // Prune drops assignments whose experiment is no longer configured (E9) and
 // reports whether it dropped any. The caller runs it on every rewrite.
 func (c *Cookie) Prune(configured func(experiment string) bool) bool {
+	if configured == nil {
+		return false
+	}
 	kept := c.Assignments[:0:0]
 	for _, a := range c.Assignments {
 		if configured(a.Experiment) {
@@ -139,14 +167,26 @@ func (c *Cookie) Prune(configured func(experiment string) bool) bool {
 
 // Encode signs the cookie with key. If the value would pass MaxCookieLen,
 // assignments are dropped from the front, oldest first (E9). The receiver is
-// not changed.
-func (c Cookie) Encode(key []byte) string {
+// not changed. It returns false, and no value, for a key shorter than the
+// minimum, an invalid visitor id or name, or a value that cannot fit.
+func (c Cookie) Encode(key []byte) (string, bool) {
+	if len(key) < minSigningKeyLn || !isToken(c.VisitorID, maxVisitorLen) {
+		return "", false
+	}
+	for _, a := range c.Assignments {
+		if !isToken(a.Experiment, maxNameLen) || !isToken(a.Variant, maxNameLen) {
+			return "", false
+		}
+	}
 	as := c.Assignments
 	for {
 		body := cookiePrefix + c.VisitorID + "." + formatAssignments(as)
 		v := body + "." + base64.RawURLEncoding.EncodeToString(sign(key, body))
-		if len(v) <= MaxCookieLen || len(as) == 0 {
-			return v
+		if len(v) <= MaxCookieLen {
+			return v, true
+		}
+		if len(as) == 0 {
+			return "", false
 		}
 		as = as[1:]
 	}

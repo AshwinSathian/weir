@@ -7,9 +7,32 @@ import (
 )
 
 var (
-	keyA = []byte("0123456789abcdef-key-A")
-	keyB = []byte("0123456789abcdef-key-B")
+	keyA = []byte("0123456789abcdef0123456789abcdef-key-A")
+	keyB = []byte("0123456789abcdef0123456789abcdef-key-B")
 )
+
+// enc encodes or fails the test.
+func enc(t testing.TB, c Cookie, key []byte) string {
+	t.Helper()
+	v, ok := c.Encode(key)
+	if !ok {
+		t.Fatalf("Encode(%+v) refused", c)
+	}
+	return v
+}
+
+// forge signs an arbitrary "v1.<id>.<assignments>" body, as a holder of the
+// key could, to reach the grammar behind the MAC.
+func forge(body string, key []byte) string {
+	return body + "." + base64.RawURLEncoding.EncodeToString(sign(key, body))
+}
+
+// altMAC changes only the unused trailing bits of the last MAC character.
+func altMAC(v string) string {
+	const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+	last := strings.IndexByte(alphabet, v[len(v)-1])
+	return v[:len(v)-1] + string(alphabet[last^1])
+}
 
 func sample() Cookie {
 	return Cookie{VisitorID: "visitor1", Assignments: []Assignment{
@@ -19,7 +42,7 @@ func sample() Cookie {
 
 // E2, E3, T-35: a signed cookie decodes to what was encoded.
 func TestCookieRoundTrip(t *testing.T) {
-	v := sample().Encode(keyA)
+	v := enc(t, sample(), keyA)
 	if !strings.HasPrefix(v, "v1.visitor1.checkout-copy:b!+hero:control.") {
 		t.Fatalf("unexpected grammar: %s", v)
 	}
@@ -29,7 +52,7 @@ func TestCookieRoundTrip(t *testing.T) {
 		got.Assignments[1] != (Assignment{"hero", "control", false}) {
 		t.Fatalf("got %+v, %v", got, ok)
 	}
-	empty, ok := ParseCookie(Cookie{VisitorID: "x"}.Encode(keyA), [][]byte{keyA})
+	empty, ok := ParseCookie(enc(t, Cookie{VisitorID: "x"}, keyA), [][]byte{keyA})
 	if !ok || empty.VisitorID != "x" || len(empty.Assignments) != 0 {
 		t.Fatalf("no assignments: %+v, %v", empty, ok)
 	}
@@ -37,7 +60,7 @@ func TestCookieRoundTrip(t *testing.T) {
 
 // E2, T-35: editing the assignment, the id or the MAC means no assignment.
 func TestCookieRejectsBadMAC(t *testing.T) {
-	v := sample().Encode(keyA)
+	v := enc(t, sample(), keyA)
 	keys := [][]byte{keyA}
 	for name, bad := range map[string]string{
 		"edited variant":   strings.Replace(v, ":b!", ":a!", 1),
@@ -45,15 +68,19 @@ func TestCookieRejectsBadMAC(t *testing.T) {
 		"dropped exposed":  strings.Replace(v, "b!", "b", 1),
 		"truncated mac":    v[:len(v)-2],
 		"missing mac":      v[:strings.LastIndex(v, ".")],
-		"other key":        sample().Encode(keyB),
+		"other key":        enc(t, sample(), keyB),
 		"extra field":      v + ".x",
 		"empty":            "",
 		"wrong version":    "v2" + v[2:],
 		"bare version":     "v1.",
 		"padded mac":       v + "=",
 		"oversized":        strings.Repeat("a", MaxCookieLen+1),
-		"duplicate exp":    Cookie{VisitorID: "v", Assignments: []Assignment{{"e", "a", false}, {"e", "b", false}}}.Encode(keyA),
-		"bad variant byte": Cookie{VisitorID: "v", Assignments: []Assignment{{"e", "a.b", false}}}.Encode(keyA),
+		"duplicate exp":    forge("v1.v.e:a+e:b", keyA),
+		"bad variant byte": forge("v1.v.e:a.b", keyA),
+		"trailing plus":    forge("v1.v.e:a+", keyA),
+		"empty item":       forge("v1.v.e:a++f:b", keyA),
+		"double bang":      forge("v1.v.e:a!!", keyA),
+		"mac last bits":    altMAC(enc(t, sample(), keyA)),
 	} {
 		t.Run(name, func(t *testing.T) {
 			if c, ok := ParseCookie(bad, keys); ok {
@@ -65,14 +92,14 @@ func TestCookieRejectsBadMAC(t *testing.T) {
 
 // T-35: the first key signs, every configured key verifies.
 func TestCookieKeyRotation(t *testing.T) {
-	old := sample().Encode(keyB)
+	old := enc(t, sample(), keyB)
 	if _, ok := ParseCookie(old, [][]byte{keyA, keyB}); !ok {
 		t.Error("cookie signed with the previous key was refused")
 	}
 	if _, ok := ParseCookie(old, [][]byte{keyA}); ok {
 		t.Error("cookie signed with a retired key was accepted")
 	}
-	if _, ok := ParseCookie(sample().Encode(keyA), [][]byte{keyA, keyB}); !ok {
+	if _, ok := ParseCookie(enc(t, sample(), keyA), [][]byte{keyA, keyB}); !ok {
 		t.Error("cookie signed with the first key was refused")
 	}
 }
@@ -100,7 +127,7 @@ func TestCookieCap512(t *testing.T) {
 	for i := range 40 {
 		c.Set("experiment-"+string(rune('a'+i%26))+string(rune('a'+i/26)), "variant-name-"+string(rune('a'+i%26)))
 	}
-	v := c.Encode(keyA)
+	v := enc(t, c, keyA)
 	if len(v) > MaxCookieLen {
 		t.Fatalf("value is %d bytes", len(v))
 	}
@@ -153,7 +180,7 @@ func TestNewVisitorID(t *testing.T) {
 func FuzzParseCookie(f *testing.F) {
 	keys := [][]byte{keyA, keyB}
 	for _, s := range []string{
-		sample().Encode(keyA), sample().Encode(keyB), Cookie{VisitorID: "x"}.Encode(keyA),
+		enc(f, sample(), keyA), enc(f, sample(), keyB), enc(f, Cookie{VisitorID: "x"}, keyA),
 		"", "v1.", "v1..", "v1...", "v1....", "v1.a.b:c.", "v1.a.+.x", "v1.a.:.x", "v1.a.b:c!!.x",
 		"v1.a.b:c+b:d.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "\x00v1.a..b", strings.Repeat("v1.", 200),
 	} {
@@ -178,10 +205,14 @@ func FuzzParseCookie(f *testing.F) {
 		if len(in) > MaxCookieLen {
 			t.Fatalf("accepted %d bytes", len(in))
 		}
-		again := c.Encode(keyA)
-		if sign && again != in {
-			t.Fatalf("accepted non-canonical input %q, canonical form %q", in, again)
+		// Every accepted spelling is the canonical one for the key that
+		// signed it, so no value has two accepted forms.
+		a, _ := c.Encode(keyA)
+		b, _ := c.Encode(keyB)
+		if in != a && in != b {
+			t.Fatalf("accepted non-canonical input %q (canonical %q or %q)", in, a, b)
 		}
+		again := a
 		back, ok := ParseCookie(again, keys)
 		if !ok || back.VisitorID != c.VisitorID || len(back.Assignments) != len(c.Assignments) {
 			t.Fatalf("round trip lost data: %+v vs %+v", c, back)
@@ -190,3 +221,74 @@ func FuzzParseCookie(f *testing.F) {
 }
 
 func signBody(key []byte, body string) []byte { return sign(key, body) }
+
+// T-35: a key below the minimum never verifies and never signs, so an unset
+// environment key cannot mint cookies.
+func TestCookieRefusesShortKeys(t *testing.T) {
+	short := [][]byte{nil, {}, []byte("short")}
+	for _, k := range short {
+		if v, ok := (Cookie{VisitorID: "x"}).Encode(k); ok || v != "" {
+			t.Errorf("Encode signed with a %d-byte key", len(k))
+		}
+		// A cookie MAC'd with that key must not verify under it either.
+		forged := forge("v1.x.", k)
+		if _, ok := ParseCookie(forged, [][]byte{k}); ok {
+			t.Errorf("a %d-byte key verified a cookie", len(k))
+		}
+	}
+	if _, ok := ParseCookie(enc(t, sample(), keyA), nil); ok {
+		t.Error("no keys at all verified a cookie")
+	}
+}
+
+// T-35: a MAC has one spelling; the last character's unused bits are checked.
+func TestCookieMACHasOneSpelling(t *testing.T) {
+	v := enc(t, sample(), keyA)
+	if _, ok := ParseCookie(altMAC(v), [][]byte{keyA}); ok {
+		t.Fatal("a MAC with altered padding bits verified")
+	}
+}
+
+// E9: Encode refuses values that cannot be valid or cannot fit.
+func TestCookieEncodeRefusals(t *testing.T) {
+	for name, c := range map[string]Cookie{
+		"oversized id":     {VisitorID: strings.Repeat("a", 600)},
+		"id with dot":      {VisitorID: "a.b"},
+		"empty id":         {},
+		"variant bad byte": {VisitorID: "x", Assignments: []Assignment{{"e", "a.b", false}}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if v, ok := c.Encode(keyA); ok {
+				t.Errorf("encoded %q", v)
+			}
+		})
+	}
+	// The worst case that still fits: a 64-byte id and 32+32-byte names.
+	c := Cookie{VisitorID: strings.Repeat("v", maxVisitorLen)}
+	c.Set(strings.Repeat("e", maxNameLen), strings.Repeat("w", maxNameLen))
+	v := enc(t, c, keyA)
+	got, ok := ParseCookie(v, [][]byte{keyA})
+	if !ok || len(got.Assignments) != 1 {
+		t.Fatalf("worst-case pair lost: %v, %+v", ok, got)
+	}
+}
+
+// E3, E9: copies of a Cookie do not see each other's Set or MarkExposed.
+func TestCookieCopiesDoNotAlias(t *testing.T) {
+	a := sample()
+	b := a
+	b.Set("hero", "other")
+	if !b.MarkExposed("hero") {
+		t.Fatal("MarkExposed reported no change")
+	}
+	if b.MarkExposed("hero") || b.MarkExposed("absent") {
+		t.Error("MarkExposed changed something twice or for an unknown experiment")
+	}
+	if a.Assignments[1] != (Assignment{"hero", "control", false}) {
+		t.Errorf("original changed: %+v", a.Assignments)
+	}
+	var nilPrune Cookie
+	if nilPrune.Prune(nil) {
+		t.Error("Prune(nil) reported a drop")
+	}
+}

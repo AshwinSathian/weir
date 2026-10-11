@@ -1760,3 +1760,12 @@ Entry template:
 - Deviations: none in docs. New load-time limits not in docs/10: signing key at least 16 bytes, names at most 32 token bytes, weight 1 to 1000, total weight at most 10000. Host matchers accept the normalized form with a port or IPv6 literal.
 - Follow-ups: ask Ashwin (STATUS): the first listed variant is the control, which docs/10 does not say; `Pick` hashes `salt || id` without a separator, as the spec reads. Document the new limits in docs/10 §3 with the P3-02 edit. P3-02 sets the defaults and the public `Config` shape (ask first).
 - Context: low
+
+## 2026-10-11 · P3-01 · review-fixes
+- Branch / PR: claude/gracious-shannon-w5n6k7 / https://github.com/AshwinSathian/weir/pull/100
+- Done: adversarial review (independent card-reviewer) of PR 100, decisions delegated by Ashwin. Must-fix: the MAC had four accepted spellings (non-strict base64; now `Strict()`, fuzz checks canonical form unconditionally); an empty or short key verified and signed (keys under 32 bytes now skipped, `Encode` returns `(string, bool)`); header names could be `Cookie`, `Host`, framing headers or contain `_` (denylist and no underscore). Also: matchers that could never match are load errors (trailing dot, uncompressed IPv6, non-normalized escapes, `?`); caps on `max_active` (8), experiments (64), variants (16), salt; saturating product math; `Set`/`MarkExposed` copy on write; `Pick` rejects weights below 1; T-27 citation corrected to T-15/FR-KEY-10.
+- Decisions: first listed variant is the control; hash input is `salt || 0x00 || id` (golden vector computed outside Go); load limits documented in docs/10 §3 (now v1.1), T-35 row updated, P3-02 and P3-05 card notes added; key minimum raised to 32 bytes.
+- Tests: `TestCookieRefusesShortKeys`, `TestCookieMACHasOneSpelling`, `TestCookieEncodeRefusals`, `TestCookieCopiesDoNotAlias`, `TestPickGolden`, many `TestConfigValidate` cases; fuzz target now signs its input and checks canonical form. Race tests, vet, gofmt and trace pass; 45 s fuzz clean.
+- Deviations: docs/10 v1.1 (clarifications and the hash separator; no requirement or default changed).
+- Follow-ups: P3-02 sets defaults and the public shape (ask first), deletes `_`/`-` header variants, watches allocations on the hit path.
+- Context: low

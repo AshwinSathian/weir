@@ -19,7 +19,7 @@ func validConfig() Config {
 	}
 }
 
-// E5, E8: load-time checks. T-27: variant products stay below Key.MaxVariants*4.
+// E5, E8: load-time checks. T-15, FR-KEY-10: variant products stay below Key.MaxVariants*4.
 func TestConfigValidate(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -34,13 +34,42 @@ func TestConfigValidate(t *testing.T) {
 		{"zero max_active", func(c *Config) { c.MaxActive = 0 }, "max_active"},
 		{"duplicate experiment", func(c *Config) { c.Experiments[1].Name = "checkout-copy" }, "twice"},
 		{"experiment name with dot", func(c *Config) { c.Experiments[0].Name = "a.b" }, "short token"},
-		{"missing salt", func(c *Config) { c.Experiments[0].Salt = "" }, "no salt"},
-		{"one variant", func(c *Config) { c.Experiments[0].Variants = c.Experiments[0].Variants[:1] }, "two variants"},
+		{"missing salt", func(c *Config) { c.Experiments[0].Salt = "" }, "salt"},
+		{"one variant", func(c *Config) { c.Experiments[0].Variants = c.Experiments[0].Variants[:1] }, "variants"},
 		{"zero weight", func(c *Config) { c.Experiments[0].Variants[1].Weight = 0 }, "weight"},
 		{"duplicate variant", func(c *Config) { c.Experiments[0].Variants[1].Name = "control" }, "unique"},
 		{"winner not a variant", func(c *Config) { c.Experiments[0].Winner = "zzz" }, "winner"},
 		{"winner is a variant", func(c *Config) { c.Experiments[0].Winner = "b" }, ""},
 		{"upper case host", func(c *Config) { c.Experiments[1].Host = "Shop.Example" }, "host"},
+		{"header Cookie", func(c *Config) { c.Header = "Cookie" }, "header name"},
+		{"header Host any case", func(c *Config) { c.Header = "hOsT" }, "header name"},
+		{"header Proxy-*", func(c *Config) { c.Header = "Proxy-Variant" }, "header name"},
+		{"header with underscore", func(c *Config) { c.Header = "Weir_Variant" }, "underscore"},
+		{"max_active above the limit", func(c *Config) { c.MaxActive = 1 << 30 }, "max_active"},
+		{"too many experiments", func(c *Config) {
+			for i := range 65 {
+				c.Experiments = append(c.Experiments, Experiment{Name: "e" + string(rune('a'+i%26)) + string(rune('a'+i/26)), Salt: "s", Host: "h" + string(rune('a'+i%26)) + ".example",
+					Path: "/p" + string(rune('a'+i/26)), Variants: []Variant{{"control", 1}, {"b", 1}}})
+			}
+		}, "experiments"},
+		{"too many variants", func(c *Config) {
+			for i := range 20 {
+				c.Experiments[0].Variants = append(c.Experiments[0].Variants, Variant{"v" + string(rune('a'+i)), 1})
+			}
+		}, "variants"},
+		{"salt with NUL", func(c *Config) { c.Experiments[0].Salt = "a\x00b" }, "salt"},
+		{"salt too long", func(c *Config) { c.Experiments[0].Salt = strings.Repeat("s", 65) }, "salt"},
+		{"host trailing dot", func(c *Config) { c.Experiments[1].Host = "shop.example." }, "host"},
+		{"ipv6 not compressed", func(c *Config) { c.Experiments[1].Host = "[0::1]" }, "host"},
+		{"ipv6 unclosed", func(c *Config) { c.Experiments[1].Host = "[::1" }, "host"},
+		{"port with leading zero", func(c *Config) { c.Experiments[1].Host = "shop.example:080" }, "host"},
+		{"port too large", func(c *Config) { c.Experiments[1].Host = "shop.example:65536" }, "host"},
+		{"path with escaped unreserved", func(c *Config) { c.Experiments[0].Path = "/a%7E" }, "path"},
+		{"path with lower case escape", func(c *Config) { c.Experiments[0].Path = "/a%2f" }, "path"},
+		{"path with upper case escape", func(c *Config) { c.Experiments[0].Path = "/a%2F*" }, ""},
+		{"path with query", func(c *Config) { c.Experiments[0].Path = "/a?b" }, "path"},
+		{"path with non-ASCII", func(c *Config) { c.Experiments[0].Path = "/caf\u00e9" }, "path"},
+		{"huge Key.MaxVariants does not overflow the limit", func(c *Config) {}, ""},
 		{"host with port", func(c *Config) { c.Experiments[1].Host = "shop.example:8080" }, ""},
 		{"ipv6 host", func(c *Config) { c.Experiments[1].Host = "[::1]:8080" }, ""},
 		{"host wildcard", func(c *Config) { c.Experiments[1].Host = "*.example" }, "host"},
@@ -81,7 +110,11 @@ func TestConfigValidate(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			c := validConfig()
 			tt.edit(&c)
-			err := c.Validate(8)
+			kmv := 8
+			if strings.Contains(tt.name, "does not overflow") {
+				kmv = int(^uint(0) >> 1)
+			}
+			err := c.Validate(kmv)
 			if tt.errHas == "" {
 				if err != nil {
 					t.Fatal(err)
