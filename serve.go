@@ -24,10 +24,12 @@ import (
 func (e *Engine) Serve(ctx context.Context, req *Request, origin Origin) (*Response, error) {
 	var c keys.Classified
 	if e.cfg.Observer == nil { // the hit path reads no clock for an event nobody receives
-		return e.serve(ctx, req, origin, &c)
+		resp, err := e.serve(ctx, req, origin, &c)
+		return e.experimentResponse(&c, resp), err
 	}
 	start := time.Now()
 	resp, err := e.serve(ctx, req, origin, &c)
+	resp = e.experimentResponse(&c, resp)
 	// FR-OBS-1: one EvRequest per Serve return. Partition is empty when the
 	// request was refused before classification.
 	now := time.Now()

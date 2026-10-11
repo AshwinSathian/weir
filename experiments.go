@@ -2,6 +2,7 @@ package weir
 
 import (
 	"bytes"
+	"maps"
 	"net/http"
 	"slices"
 	"strings"
@@ -22,6 +23,13 @@ type ExperimentsConfig struct {
 	MaxActive   int      // experiments that may apply to one request; 0: 4; at most 8
 	Consent     ExperimentConsent
 	Experiments []ExperimentConfig
+
+	// DownstreamKeysOnVariant declares that every cache in front of Weir keys
+	// on the variant (Weir-Variant, or the experiment cookie). Only then do
+	// matched responses keep public, s-maxage and CDN-Cache-Control, except
+	// the one that sets the assignment cookie; by default all are rewritten
+	// to private (E7, T-36).
+	DownstreamKeysOnVariant bool
 }
 
 // ExperimentConsent gates bucketing (E6). With Cookie set and the cookie
@@ -149,4 +157,93 @@ func (e *Engine) experimentsKeys() {
 	if len(x.Experiments) > 0 && !ic.Consent.Configured() {
 		e.cfg.Logger.Warn("weir: Experiments has no Consent gate; visitors are bucketed and cookied without a consent signal")
 	}
+}
+
+const expCookieMaxAge = "7776000" // 90 days, not sliding (10 §3)
+
+// experimentResponse finishes a response to a request that matched an
+// experiment (10 §4 steps 5 and 6): it adds the assignment cookie when one
+// was created or changed, and rewrites the headers downstream caches read
+// (E7, T-36). It runs after the entry is built and stored, on a header map
+// of its own, so the stored entry is never touched (P4). Responses to
+// unmatched requests, and errors, pass through.
+func (e *Engine) experimentResponse(c *keys.Classified, resp *Response) *Response {
+	res, ok := c.Decision.(experiments.Result)
+	if !ok || resp == nil || len(res.Picks) == 0 {
+		return resp
+	}
+	x := &e.cfg.Experiments
+	h := maps.Clone(resp.Header)
+	if h == nil {
+		h = http.Header{}
+	}
+	resp.Header = h
+	cookied := false
+	if res.Changed {
+		// ponytail: an Encode failure (a key or id the load checks rule out, or
+		// a value past the cap with nothing left to drop) sends no cookie and
+		// the visitor is re-picked next request; add a log line if it is seen.
+		if v, ok := res.Cookie.Encode(x.SigningKeys[0]); ok {
+			sc := x.Cookie + "=" + v + "; Path=/; Max-Age=" + expCookieMaxAge + "; HttpOnly; SameSite=Lax"
+			if c.Forwarded.Scheme == "https" {
+				sc += "; Secure"
+			}
+			old := h["Set-Cookie"]
+			h["Set-Cookie"] = append(old[:len(old):len(old)], sc)
+			cookied = true
+		}
+	}
+	// T-36: a response carrying the new cookie is private even when the
+	// operator's caches key on the variant, since they need not key on the
+	// cookie and would hand one visitor id to everyone.
+	if !x.DownstreamKeysOnVariant || cookied {
+		cc := foldHeader(h, "Cache-Control")
+		h["Cache-Control"] = []string{privateCacheControl(cc)}
+		foldHeader(h, "Cdn-Cache-Control")
+	}
+	return resp
+}
+
+// privateCacheControl drops public and s-maxage from Cache-Control lines and
+// makes sure an unqualified private is present. Every comma separates
+// members, quoted or not: a downstream parser that ignores quoting or
+// escapes must not find a bare public or s-maxage either (T-36). That can
+// mangle a quoted extension value that contains those words, which no
+// origin sends.
+func privateCacheControl(lines []string) string {
+	var kept []string
+	private := false
+	for _, l := range lines {
+		for d := range strings.SplitSeq(l, ",") {
+			d = strings.TrimSpace(d)
+			if d == "" {
+				continue
+			}
+			name, _, _ := strings.Cut(d, "=")
+			switch strings.ToLower(strings.TrimSpace(name)) {
+			case "public", "s-maxage":
+				continue
+			case "private":
+				private = private || d == name // a field-qualified private is not the broad one
+			}
+			kept = append(kept, d)
+		}
+	}
+	if !private {
+		kept = append(kept, "private")
+	}
+	return strings.Join(kept, ", ")
+}
+
+// foldHeader removes every spelling of name from h (an Origin may return
+// non-canonical keys) and returns the lines it held.
+func foldHeader(h http.Header, name string) []string {
+	var lines []string
+	for k, v := range h {
+		if strings.EqualFold(k, name) {
+			lines = append(lines, v...)
+			delete(h, k)
+		}
+	}
+	return lines
 }

@@ -39,46 +39,55 @@ type Cookie struct {
 // the caller treats as "no assignment" and reassigns (E2, T-35). The MAC is
 // checked before the assignments are read.
 func ParseCookie(value string, keys [][]byte) (c Cookie, ok bool) {
+	c, _, ok = ParseCookieKeyed(value, keys)
+	return c, ok
+}
+
+// ParseCookieKeyed is ParseCookie that also reports whether the first key
+// verified the MAC. A valid cookie with primary=false was signed under a
+// rotated-out key, so the caller re-signs it (10 §4 step 2).
+func ParseCookieKeyed(value string, keys [][]byte) (c Cookie, primary, ok bool) {
 	if len(value) > MaxCookieLen || !strings.HasPrefix(value, cookiePrefix) {
-		return Cookie{}, false
+		return Cookie{}, false, false
 	}
 	rest := value[len(cookiePrefix):]
 	id, rest, found := strings.Cut(rest, ".")
 	if !found || !isToken(id, maxVisitorLen) {
-		return Cookie{}, false
+		return Cookie{}, false, false
 	}
 	assigns, macStr, found := strings.Cut(rest, ".")
 	if !found || strings.Contains(macStr, ".") {
-		return Cookie{}, false
+		return Cookie{}, false, false
 	}
 	// Decode panics when dst is too short, so the length is checked first.
 	var mac [macLen]byte
 	// Strict rejects non-zero padding bits, so a MAC has exactly one spelling.
 	if len(macStr) != base64.RawURLEncoding.EncodedLen(macLen) {
-		return Cookie{}, false
+		return Cookie{}, false, false
 	}
 	if _, err := base64.RawURLEncoding.Strict().Decode(mac[:], []byte(macStr)); err != nil {
-		return Cookie{}, false
+		return Cookie{}, false, false
 	}
 	body := value[:len(value)-len(macStr)-1]
 	verified := false
-	for _, k := range keys {
+	for i, k := range keys {
 		if len(k) < minSigningKeyLn {
 			continue // an empty or short key must never verify (T-35)
 		}
 		// Do not stop early: the loop's length is the key count either way.
 		if hmac.Equal(sign(k, body), mac[:]) {
 			verified = true
+			primary = primary || i == 0
 		}
 	}
 	if !verified {
-		return Cookie{}, false
+		return Cookie{}, false, false
 	}
 	as, ok := parseAssignments(assigns)
 	if !ok {
-		return Cookie{}, false
+		return Cookie{}, false, false
 	}
-	return Cookie{VisitorID: id, Assignments: as}, true
+	return Cookie{VisitorID: id, Assignments: as}, primary, true
 }
 
 func parseAssignments(s string) ([]Assignment, bool) {

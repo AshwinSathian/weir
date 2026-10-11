@@ -1793,3 +1793,19 @@ Entry template:
 - Deviations: docs/10 v1.3, docs/06 T-35 row, `Warm` doc comment.
 - Follow-ups: allocation trimming (P3-05); warming non-control variants would be a new option (ask first).
 - Context: medium
+
+## 2026-10-11 · P3-03 · done
+- Branch / PR: claude/vigilant-tesla-7nuval / https://github.com/AshwinSathian/weir/pull/102
+- Done: `experimentResponse` in experiments.go (hooked in `Serve`): assignment `Set-Cookie` for a created or changed assignment only, E7 rewrite to private, `CDN-Cache-Control` removed, header map cloned (P4). New `ExperimentsConfig.DownstreamKeysOnVariant`.
+- Tests: `TestSetCookiePerClientOnly`, `TestSetCookieNeverStored`, `TestDownstreamRewrittenPrivate`, `TestDownstreamVariantAwareKeepsDirectives`, `TestStoredCopyKeepsOriginDirectives`, plus Secure-on-https, no-origin-CC, non-canonical keys, `TestPrivateCacheControl`, `FuzzPrivateCacheControl`. `make check` passes.
+- Deviations: docs/10 v1.4, docs/04 §1, docs/06 T-36 row. Review fixes: a response that sets the cookie is private even with `DownstreamKeysOnVariant`; unbalanced-quote lines split on every comma; non-canonical header keys folded. Max-Age 90 days comes from the PR 99 text, not an earlier spec line.
+- Follow-ups: Caddy key `downstream_keys_on_variant` in P3-05; Surrogate-Control left alone.
+- Context: medium
+
+## 2026-10-11 · P3-03 · review-fixes
+- Branch / PR: claude/vigilant-tesla-7nuval / https://github.com/AshwinSathian/weir/pull/102
+- Done: adversarial review found no must-fix. Decisions (delegated by Ashwin): keep the 90-day non-sliding Max-Age and the `DownstreamKeysOnVariant` field. Fixes: Cache-Control members are split on every comma (no quote exemption); a cookie that verifies only under a rotated-out key is re-signed on the next consented request (`ParseCookieKeyed`); `Encode` failure comment; docs/10 v1.5 (key retention 90 days, vendor fields, flag semantics); STATUS alloc figures corrected.
+- Tests: `TestSetCookieResignsOldKeyCookie`, `TestExperimentResponseClasses` (206, 416, bypass, followers), `TestParseCookieKeyedReportsPrimary`, extended `TestPrivateCacheControl` and `FuzzPrivateCacheControl`.
+- Deviations: docs/10 v1.5.
+- Follow-ups: P3-05 runbook states the 90-day old-key retention.
+- Context: medium
