@@ -151,7 +151,8 @@ type keyGenRetry struct {
 // startKeyGenRetry runs reconcileServerKeyGen with backoff until the check
 // is made and the purge, if one is due, and the record write have run. A
 // failed purge is retried too. purge must not close the engine, unlike
-// Provision's.
+// Provision's. Each attempt is bounded by keyGenCallTimeout and closeTimeout,
+// which is why stop returns promptly.
 func startKeyGenRetry(st store.Store, fwd [sha256.Size]byte, purge func(context.Context) error, log *slog.Logger, name string) *keyGenRetry {
 	ctx, cancel := context.WithCancel(context.Background())
 	r := &keyGenRetry{cancel: cancel, done: make(chan struct{})}
@@ -171,6 +172,7 @@ func startKeyGenRetry(st store.Store, fwd [sha256.Size]byte, purge func(context.
 			case err != nil:
 				log.Warn("weir: key-generation purge failed; retrying", "name", name, "error", err)
 			case !skipped:
+				log.Info("weir: key-generation check made after the server returned", "name", name)
 				return
 			}
 			wait = min(2*wait, keyGenRetryMax)

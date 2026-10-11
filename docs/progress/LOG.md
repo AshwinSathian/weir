@@ -1728,3 +1728,11 @@ Entry template:
 - Deviations: 08 §2, §3, runbook only.
 - Follow-ups: P25-07d; a way for `validate` to skip the purge (needs a signal from Caddy); Provision-level test seam.
 - Context: medium
+
+## 2026-10-11 · P25-07d · done
+- Branch / PR: claude/sweet-clarke-gwnywy (designated branch) / see STATUS
+- Done: `keyGenRetry` (`startKeyGenRetry`, `stop`) in `caddy/keygen.go`: check, purge, record with backoff 1 s to 30 s, failed purge retried, purge never closes the engine. `reconcileServerKeyGen` returns whether the check was skipped; `Provision` starts the retry last, `Cleanup` stops it before `Close`. 08 §3 and runbook 8.7 updated.
+- Tests: `TestKeyGenCheckRetriedAfterOutage` (3 subtests, synctest), `TestReconcileServerKeyGenReportsSkippedCheck`; pass with `-race`. gofmt, vet, trace 146/146, root and `caddy` race tests pass; `make check` stops at golangci-lint (Go 1.25 build). card-reviewer: no must-fix.
+- Deviations: none beyond 08 §3 and runbook wording; no config field added.
+- Follow-ups: Provision/Cleanup wiring has no test (needs the store seam, should-fix left open); warning repeats per attempt; `validate` signal.
+- Context: low; size S was right.
