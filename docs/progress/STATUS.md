@@ -5,7 +5,7 @@ Phase: release
 Current card: none
 Card state: ready
 Branch: claude/magical-carson-rwdd4q (release prep and review fixes)
-PR: opened at the end of the R-07 session (see the PR list)
+PR: https://github.com/AshwinSathian/weir/pull/105
 Next card: none (all cards done; M16-02 deferred)
 
 ## Waiting on Ashwin
