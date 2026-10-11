@@ -1867,7 +1867,7 @@ Entry template:
 - Context: high
 
 ## 2026-10-11 · reference-run · done
-- Branch / PR: claude/magical-carson-rwdd4q (restarted from main after PR 105 merged) / see STATUS
+- Branch / PR: claude/magical-carson-rwdd4q (restarted from main after PR 105 merged) / https://github.com/AshwinSathian/weir/pull/106
 - Done: recorded Ashwin's reference machine run (M4 Pro, Go 1.27.1): `make check` clean, `make load` all five scenarios and the GC test pass (GC 1.08 µs per request at 1M entries, gate 2 µs), `BenchmarkServeHitSmall` median 1 286 ns/op, 14 allocs/op. docs/benchmarks.md section and raw file added; NFR-5 ceiling set to 1.9 µs (1.5 times the median); D36 notes the 1.08 µs.
 - Tests: none (docs only).
 - Deviations: docs/01 NFR-5 and D36 text, as NFR-5 itself prescribes.
