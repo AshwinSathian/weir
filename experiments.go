@@ -2,6 +2,7 @@ package weir
 
 import (
 	"bytes"
+	"net/http"
 	"slices"
 	"strings"
 
@@ -63,6 +64,7 @@ func (x *ExperimentsConfig) applyDefaults() {
 	if x.Header == "" {
 		x.Header = "Weir-Variant"
 	}
+	x.Header = http.CanonicalHeaderKey(x.Header) // map keys of a forwarded request are canonical
 	orInt(&x.MaxActive, 4)
 }
 
@@ -98,7 +100,8 @@ func (c *Config) validateExperiments() error {
 		return invalid("Experiments", strings.TrimPrefix(err.Error(), experiments.ErrConfig.Error()+": "))
 	}
 	// T-35, INV-1: the cookie carries the visitor id, which is no key input.
-	if slices.Contains(c.Key.Cookies, x.Cookie) || slices.Contains(c.Bypass.Cookies, x.Cookie) {
+	named := func(n string) bool { return strings.EqualFold(n, x.Cookie) }
+	if slices.ContainsFunc(c.Key.Cookies, named) || slices.ContainsFunc(c.Bypass.Cookies, named) {
 		return invalid("Key.Cookies", "names the experiment cookie "+x.Cookie)
 	}
 	// One owner for the header: the engine sets it, never the client or an allowlist.
@@ -131,7 +134,7 @@ func (e *Engine) experimentsKeys() {
 		}
 		return dims, r
 	}
-	if !ic.Consent.Configured() {
+	if len(x.Experiments) > 0 && !ic.Consent.Configured() {
 		e.cfg.Logger.Warn("weir: Experiments has no Consent gate; visitors are bucketed and cookied without a consent signal")
 	}
 }

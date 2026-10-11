@@ -322,6 +322,7 @@ func stripCookie(h http.Header, name string) {
 // or without "=" and in any case: origins differ on both, and the visitor
 // id must reach none of them.
 func cookiePairNamed(pair, name string) bool {
-	n, _, _ := strings.Cut(strings.Trim(pair, " \t"), "=")
-	return strings.EqualFold(n, name)
+	n, _, _ := strings.Cut(pair, "=")
+	// net/http and most origins trim the name, so "weir_v =1" is the cookie.
+	return strings.EqualFold(strings.Trim(n, " \t\r\n"), name)
 }

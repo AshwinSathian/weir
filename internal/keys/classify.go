@@ -66,6 +66,7 @@ type Classified struct {
 	HasIfRange bool     // request carried If-Range
 	IfRange    string   // its value; "" when repeated, which never applies
 	expHeader  string   // Config.ExpHeader, for pass
+	expCookie  string   // Config.ExpCookie, for pass
 	rangeHdr   []string // the client's Range lines, for AsRangePass
 	ifRange    []string // the client's If-Range lines, for AsRangePass
 	req        *Request // the client request, for AsBypass; never modified
@@ -109,6 +110,7 @@ func Classify(r *Request, c *Config) (Classified, error) {
 		ifRange:    h["If-Range"],
 		Authorized: len(h["Authorization"]) > 0,
 		expHeader:  c.ExpHeader,
+		expCookie:  c.ExpCookie,
 		URITag:     TagURI(origin, path, query),
 		OriginTag:  TagOrigin(origin),
 		Origin:     origin,
@@ -206,6 +208,9 @@ func pass(out Classified, r *Request, host string) Classified {
 	}
 	DropHopByHop(h, r.Header["Connection"])
 	deleteVariantHeader(h, out.expHeader) // T-35: a client cannot pick a variant on any path
+	if out.expCookie != "" {
+		stripCookie(h, out.expCookie) // the visitor id is for Weir, not the origin
+	}
 	out.Forwarded = Request{Method: r.Method, Scheme: r.Scheme, Host: host, Path: r.Path, RawQuery: r.RawQuery,
 		Header: h, Body: r.Body}
 	// net/http gives every bodyless request http.NoBody (FR-LIM-7: main pool).

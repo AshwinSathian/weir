@@ -97,7 +97,7 @@ func TestWeirVariantAlwaysReplaced(t *testing.T) {
 
 // T-35: pass-through requests never carry a client variant header either.
 func TestWeirVariantRemovedOnPass(t *testing.T) {
-	h := http.Header{"Weir_Variant": {"exp=evil"}, "Weir-Variant": {"exp=evil"}}
+	h := http.Header{"Weir_Variant": {"exp=evil"}, "Weir-Variant": {"exp=evil"}, "Cookie": {"weir_v=v1.x.y.z; a=1"}}
 	c, err := Classify(classifyReq("POST", h), expCfg(false, Dim{"exp", "a"}))
 	if err != nil {
 		t.Fatal(err)
@@ -107,8 +107,11 @@ func TestWeirVariantRemovedOnPass(t *testing.T) {
 			t.Fatalf("pass-through forwarded %v", c.Forwarded.Header)
 		}
 	}
-	if h["Weir-Variant"] == nil {
+	if h["Weir-Variant"] == nil || h["Cookie"][0] != "weir_v=v1.x.y.z; a=1" {
 		t.Fatal("the client's header map was modified")
+	}
+	if got := c.Forwarded.Header["Cookie"]; len(got) != 1 || got[0] != "a=1" {
+		t.Fatalf("pass-through Cookie = %q, want the visitor cookie removed", got)
 	}
 }
 
@@ -126,6 +129,7 @@ func TestExperimentCookieNeverForwarded(t *testing.T) {
 		{"forward all, cookie alone", true, []string{"weir_v=v1.x.y.z"}, nil},
 		{"forward all, several lines and a repeat", true, []string{"a=1; weir_v=1", "weir_v=2; b=2", "c=3"}, []string{"a=1", "b=2", "c=3"}},
 		{"forward all, other case and no value", true, []string{"WEIR_V=1; weir_v; keep=1"}, []string{"keep=1"}},
+		{"forward all, space before the equals sign", true, []string{"weir_v =1; a=1", "weir_v\t=2; b=2"}, []string{"a=1", "b=2"}},
 		{"forward all, similar name stays", true, []string{"weir_v2=1; xweir_v=2"}, []string{"weir_v2=1; xweir_v=2"}},
 	}
 	for _, tt := range tests {
@@ -196,6 +200,7 @@ func FuzzExperimentForward(f *testing.F) {
 	f.Add(true, "a=1; WEIR_V=x; weir_v", "weir-variant", "exp=a")
 	f.Add(true, ";;weir_v=;", "WEIR_VARIANT", "")
 	f.Add(true, "weir_v =1; \tweir_v\t=2", "weir_variant", "x")
+	f.Add(true, "weir_v\t=1; a=1", "Weir-Variant", "x")
 	f.Add(true, "\xffweir_v=1", "Weir-Variant", "\x00")
 	f.Fuzz(func(t *testing.T, forwardAll bool, cookie, name, value string) {
 		cfg := expCfg(forwardAll, Dim{"exp", "a"})
@@ -216,11 +221,11 @@ func FuzzExperimentForward(f *testing.F) {
 				t.Fatalf("forwarded %q: %q", k, v)
 			}
 		}
-		for _, line := range c.Forwarded.Header["Cookie"] {
-			for pair := range strings.SplitSeq(line, ";") {
-				if cookiePairNamed(pair, "weir_v") {
-					t.Fatalf("visitor cookie forwarded: %q", line)
-				}
+		// An oracle independent of cookiePairNamed: how net/http's lenient
+		// parser, and so an origin built on it, reads the forwarded lines.
+		for _, ck := range (&http.Request{Header: http.Header{"Cookie": c.Forwarded.Header["Cookie"]}}).Cookies() {
+			if strings.EqualFold(ck.Name, "weir_v") {
+				t.Fatalf("visitor cookie forwarded: %q", c.Forwarded.Header["Cookie"])
 			}
 		}
 		again, err := Classify(&c.Forwarded, cfg)

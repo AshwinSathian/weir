@@ -235,7 +235,7 @@ Each phase began with one planning card that verified the spec against current u
 - Out of scope: the engine, keys and headers (P3-02); Set-Cookie (P3-03)
 - Notes: constant-time MAC compare (`hmac.Equal`). Randomness for new visitor ids from `Config.Rand`. The config shape in 10 §3 is decided; whether it appears as a public `Config` field or an option is not, and is an API change: ask first (P3-02 wires it). Cookie grammar: assignments in creation order, `!` suffix marks recorded exposure, 512-byte cap on the whole value (E9).
 
-### [ ] P3-02 Variant key dimension and forwarded header
+### [x] P3-02 Variant key dimension and forwarded header
 - Plan: Phase 3 · Size: M · Depends on: P3-01
 - Read: 10 §4 steps 1 to 4; 02 P2, §7; 04 §3.2, §3.5; 06 T-35
 - Touch: internal/keys/encode.go, forward.go, request.go, experiments.go in the root package (new: match and assign step), docs/04 (Config fields), tests

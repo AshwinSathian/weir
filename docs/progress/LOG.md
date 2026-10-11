@@ -1777,3 +1777,11 @@ Entry template:
 - Deviations: none
 - Follow-ups: STATUS now records how to run lint locally; run it before every push.
 - Context: low
+
+## 2026-10-11 · P3-02 · done
+- Branch / PR: claude/awesome-ritchie-8ltcfc / PR number in STATUS
+- Done: `Config.Experiments` (`experiments.go`), assignment and consent in `internal/experiments/assign.go`, key dimension (tags 0x30, 0x31), variant header replace and experiment-cookie strip in `internal/keys`, one-time no-consent warning.
+- Tests: `TestVariantIsKeyDimension`, `TestWeirVariantAlwaysReplaced`, `TestExperimentCookieNeverForwarded`, `TestForwardedEqualsKeyed`, `TestConsentAbsentGetsControl`, `TestWinnerOverridesAssignment`, config and assign tests, `FuzzExperimentForward` (seeds in testdata/fuzz, oracle uses net/http cookie parsing). Race tests, vet, gofmt, trace 146/146 and lint (0 issues) pass; `make check` itself stops at the known lint binary mismatch. `BenchmarkServeHitExperiments`: 14 allocs/op unmatched, 23 matched without cookie, 28 with a valid cookie.
+- Deviations: docs/10 v1.2 (public shape, defaults, consent rule), docs/04 (Config types, key encoding, forwarding). Public API, defaults and consent shape approved by Ashwin.
+- Follow-ups: review found the cookie strip missed `weir_v =1` (whitespace before `=`); fixed with an independent fuzz oracle. `Warm` calls Classify with no cookie and would warm a random variant when no consent gate is set (decide in P3-03/04). Purge also runs Assign needlessly. Branch is the designated session branch, not `card/P3-02-*`.
+- Context: medium

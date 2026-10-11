@@ -67,6 +67,11 @@ func TestExperimentsConfigRejects(t *testing.T) {
 
 // E6: no consent gate logs a warning once, at New; a gate does not.
 func TestExperimentsConsentWarning(t *testing.T) {
+	if e, err := New(Config{Experiments: ExperimentsConfig{SigningKeys: [][]byte{[]byte("0123456789abcdef0123456789abcdef-k")}}}); err != nil {
+		t.Fatal(err)
+	} else {
+		_ = e.Close(t.Context())
+	}
 	for _, gated := range []bool{false, true} {
 		var buf bytes.Buffer
 		c := expTestConfig()
@@ -95,5 +100,26 @@ func TestExperimentsConfigDetached(t *testing.T) {
 	in.Experiments.SigningKeys[0][0] = 'X'
 	if c.Experiments.SigningKeys[0][0] == 'X' {
 		t.Fatal("signing key aliases the caller's slice")
+	}
+}
+
+// T-35: a configured header spelling is stored canonical, so Vary and
+// Header.Get on the forwarded request find it.
+func TestExperimentsHeaderCanonical(t *testing.T) {
+	in := expTestConfig()
+	in.Experiments.Header = "weir-variant"
+	c, err := prepareConfig(in)
+	if err != nil || c.Experiments.Header != "Weir-Variant" {
+		t.Fatalf("header %q, err %v", c.Experiments.Header, err)
+	}
+}
+
+// T-35: cookie names compare case-insensitively where the key strips them,
+// so load rejects a differently-cased Key.Cookies entry too.
+func TestExperimentsRejectsCookieAnyCase(t *testing.T) {
+	c := expTestConfig()
+	c.Key.Cookies = []string{"WEIR_V"}
+	if _, err := prepareConfig(c); !errors.Is(err, ErrInvalidConfig) {
+		t.Fatalf("prepareConfig = %v", err)
 	}
 }

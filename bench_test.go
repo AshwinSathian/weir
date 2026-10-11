@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/AshwinSathian/weir"
+	"github.com/AshwinSathian/weir/internal/experiments"
 	"github.com/AshwinSathian/weir/internal/testorigin"
 )
 
@@ -199,6 +200,52 @@ func BenchmarkServeHitParallel(b *testing.B) {
 			})
 			if o.TotalCalls() != n {
 				b.Fatalf("origin calls %d, want %d: not all hits", o.TotalCalls(), n)
+			}
+		})
+	}
+}
+
+// BenchmarkServeHitExperiments measures a fresh hit with experiments on: a
+// path no experiment matches, a match with no cookie (a new visitor is
+// minted), and a match with a valid signed cookie (P3-02, T-35). Compare
+// allocs/op with BenchmarkServeHitParallel.
+func BenchmarkServeHitExperiments(b *testing.B) {
+	key := []byte("0123456789abcdef0123456789abcdef-bench")
+	ck := experiments.Cookie{VisitorID: "visitor1"}
+	ck.Set("e", "b")
+	signed, _ := ck.Encode(key)
+	for _, tc := range []struct{ name, path, cookie string }{
+		{"unmatched", "/other", ""},
+		{"matched-no-cookie", "/x/1", ""},
+		{"matched-valid-cookie", "/x/1", "weir_v=" + signed},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			o := testorigin.NewChecked(b, 64, 16)
+			o.Default(testorigin.Behavior{Header: http.Header{"Cache-Control": {"max-age=3600"}}, Body: []byte("x")})
+			cfg := cacheCfg
+			cfg.Experiments = weir.ExperimentsConfig{
+				SigningKeys: [][]byte{key},
+				Consent:     weir.ExperimentConsent{Cookie: "cmp", Value: "a=yes"},
+				Experiments: []weir.ExperimentConfig{{Name: "e", Salt: "s", Path: "/x/*",
+					Variants: []weir.VariantConfig{{Name: "control", Weight: 1}, {Name: "b", Weight: 1}}}},
+			}
+			e := benchEngine(b, cfg)
+			req := getReq(tc.path)
+			req.Header.Set("Cookie", tc.cookie+"; cmp=a=yes")
+			resp, err := e.Serve(b.Context(), req, o)
+			if err != nil {
+				b.Fatal(err)
+			}
+			_, _ = io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
+			b.ReportAllocs()
+			for b.Loop() {
+				resp, err := e.Serve(b.Context(), req, o)
+				if err != nil {
+					b.Fatal(err)
+				}
+				_, _ = io.Copy(io.Discard, resp.Body)
+				resp.Body.Close()
 			}
 		})
 	}

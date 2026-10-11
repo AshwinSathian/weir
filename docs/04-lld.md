@@ -467,6 +467,8 @@ The hop-by-hop fields are RFC 9110 §7.6.1's list plus `HTTP2-Settings` (FR-UPG-
 
 Trace filtering drops `traceparent` and `tracestate` together unless there is exactly one `traceparent` line in version-00 form with lowercase hex and non-zero ids, drops `tracestate` when it has more than 32 lines, an empty line, `..`, lines over 512 bytes combined or a byte outside the FR-FWD-6 set (letters, digits and `-_.:/=+@,;*~!|`, `traceByte`), and drops `X-Request-Id` unless it is one non-empty line of at most 128 bytes from that set without `..`. With `NoTraceHeaders` all three go.
 
+With experiments on (docs/10 §4 step 4), `forwardHeader` also removes the experiment cookie from the `Cookie` field (every mode, and pass-through requests) and replaces the variant header: every client spelling is deleted (case-folded, `_` read as `-`), then `exp=variant;exp2=variant` is set when an experiment matches. `keys.Config.Assign` receives the normalized host, the path and the Cookie lines and returns the dimensions plus an opaque decision, kept in `Classified.Decision` for the Set-Cookie step (P3-03).
+
 The client conditionals (`If-None-Match`, `If-Modified-Since`) are parsed into `ClientConditionals` before being dropped, so the engine can answer 304 itself.
 
 ### 3.6 Accept-Encoding normalizer
