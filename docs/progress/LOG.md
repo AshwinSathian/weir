@@ -1744,3 +1744,11 @@ Entry template:
 - Deviations: 08 §3 and runbook only.
 - Follow-ups: `validate` signal; the "differ" Warn repeats while a purge keeps failing.
 - Context: low
+
+## 2026-10-11 · P3-00 · done
+- Branch / PR: claude/great-bardeen-t56hcm (the session's designated branch) / none yet
+- Done: docs/10 is v1.0. Ashwin decided E8 (matchers stay path and host only) and E9 (prune unconfigured assignments on every cookie rewrite, 512-byte cap, oldest dropped first). Cards P3-01 to P3-05 written in docs/cards/20-later.md; E1 to E9 references updated in docs/01, docs/README and PLAN.
+- Tests: none (docs only); trace run below.
+- Deviations: none
+- Follow-ups: P3-01 may need a public Config field, so ask first. `/handoff` was not run (reserved for the user); PR still to open.
+- Context: low

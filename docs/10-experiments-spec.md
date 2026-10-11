@@ -1,7 +1,7 @@
 # Weir experiment dimensions specification (draft)
 
-Status: draft v0.5. Phase 3. Decisions below were made with the project owner on 2026-09-27 and are locked; mechanics are finalized when Phase 3 starts.
-Date: 2026-09-27
+Status: v1.0. Phase 3. E1 to E7 were decided with the project owner on 2026-09-27; E8 and E9 on 2026-10-11 (P3-00). All are locked.
+Date: 2026-10-11
 Depends on: [01-technical-spec.md](01-technical-spec.md), [02-architecture.md §7](02-architecture.md), [06-threat-model.md](06-threat-model.md)
 Seed: [00-design-doc.md §10](00-design-doc.md) (titled "Phase 2" there; it is Phase 3, see [09 §6](09-research-notes.md))
 
@@ -20,6 +20,8 @@ Before the cache lookup, Weir assigns the visitor to a variant of every experime
 | E5 | Experiments are static configuration; changes arrive through a config reload. |
 | E6 | Consent gate: the operator can name a consent signal. When configured and absent, the visitor gets the control variant, no cookie is set, and no exposure is recorded. When no consent signal is configured, Weir buckets normally and logs a one-time warning at start. |
 | E7 | Responses on experiment-matched requests are rewritten for downstream caches to `Cache-Control: private` (dropping `public` and `s-maxage`) and lose `CDN-Cache-Control`, unless the operator declares that downstream caches key on the variant. Weir's own stored copy keeps the origin's directives. |
+| E8 | Matchers are path and host only. Both are already key inputs, so matching adds no unkeyed input. Header-presence matchers are out of scope; one would need its header keyed and normalized (P2) and a new threat row, so it starts as a new decision with a concrete use. |
+| E9 | On every cookie rewrite, assignments for experiments that are no longer configured are dropped. The cookie value is capped at 512 bytes; if it still exceeds the cap, the oldest assignments are dropped first, and an assignment dropped this way is re-picked on the next request (a weight-based pick, so the visitor may change variant). |
 
 ## 3. Configuration shape
 
@@ -61,8 +63,6 @@ experiments {
 - Crawlers without cookies get a fresh assignment per request and a `Set-Cookie` they ignore; responses they receive are still cache hits for their variant.
 - Ending an experiment: set `winner`; existing sticky assignments are overridden. Remove the experiment in a later reload once traffic has moved.
 
-## 6. Open items for Phase 3 kickoff
+## 6. Open items
 
-- Matchers beyond path and host (header presence) would need their headers keyed and normalized; revisit only with a concrete use.
-
-- Cookie size limit with many historical assignments: prune assignments for experiments no longer configured on every rewrite.
+None. The two items open at kickoff are E8 and E9. Implementation is split into cards P3-01 to P3-05 in [cards/20-later.md](cards/20-later.md).

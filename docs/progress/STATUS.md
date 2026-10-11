@@ -3,10 +3,10 @@
 Updated: 2026-10-11
 Phase: 1
 Current card: none
-Card state: awaiting-merge
-Branch: claude/sweet-clarke-gwnywy (the session's designated branch, not a `card/` branch)
-PR: https://github.com/AshwinSathian/weir/pull/97
-Next card: P3-00 (`make next`)
+Card state: ready
+Branch: claude/great-bardeen-t56hcm (designated session branch)
+PR: none
+Next card: P3-01 (`make next`)
 
 ## Waiting on Ashwin
 
@@ -19,4 +19,4 @@ Nothing.
 - Adversarial review of PR 97 done (decisions delegated by Ashwin; "Waiting on Ashwin" was empty). Implemented: a failed record write is retried too; retry attempts log at Debug, a failing purge once per distinct error; a cancelled attempt logs nothing; `TestProvisionStartsAndCleanupStopsKeyGenRetry` covers the wiring with a real handler, no seam needed.
 - Open follow-up: a way for `caddy validate` to skip the purge (needs a signal from Caddy). The "forwarding rules differ" Warn still repeats while a purge keeps failing (rare).
 - `TestE2EPurgeHerd` (real-clock caddytest) failed once in about six runs and passed on rerun, also on the parent commit; treat it as a known flake.
-- PLAN 2.5.5 is already ticked. Phase 2.5 cards are done; P3-00 is next.
+- P3-00 is done (docs only, committed on the designated branch, no PR opened yet). Spec 10 is v1.0 with E8 and E9. Next is P3-01; ask before adding any public Config field.

@@ -220,11 +220,53 @@ These phases start from draft specs. Each begins with one planning card that ver
 - Out of scope: failing Provision when the server is down (FR-STF-2)
 - Notes: decided in the P25-07c adversarial review: the retry narrows but cannot close the window (entries are servable the moment the server returns, before the retry finishes). Ask first if it needs a config field.
 
-### [ ] P3-00 Finalize the experiments spec and write its cards
+### [x] P3-00 Finalize the experiments spec and write its cards
 - Plan: Phase 3 · Size: S · Depends on: Phase 2.5 cards done
 - Read: 10 whole; 06 T-35, T-36
 - Touch: docs/10-experiments-spec.md (v1.0), docs/cards/20-later.md
 - AC: open items in 10 §6 resolved with the user; cards written
+
+### [ ] P3-01 Experiment config and signed assignment cookie
+- Plan: Phase 3 · Size: M · Depends on: P3-00
+- Read: 10 §2 E1 to E3, E8, E9, §3, §4 steps 1 to 3; 04 §2 (Config); 06 T-35
+- Touch: internal/experiments/{config,cookie,pick}.go (new, stdlib only), tests, docs/04 (Config fields)
+- Tests: `TestCookieRoundTrip`, `TestCookieRejectsBadMAC`, `TestCookieKeyRotation`, `TestPickDistribution` (weights within 3 sigma over 100k ids), `TestPruneUnconfigured`, `TestCookieCap512`, `FuzzParseCookie` with seeds
+- AC: `v1.<visitor-id>.<assignments>.<mac>` parses and verifies against every key; a bad or missing MAC yields "no assignment"; pick is deterministic for (salt, visitor-id); pruning per E9; config load rejects overlapping matchers above `max_active` and variant products above `Key.MaxVariants x 4`; no panics on any input (NFR-2)
+- Out of scope: the engine, keys and headers (P3-02); Set-Cookie (P3-03)
+- Notes: constant-time MAC compare (`hmac.Equal`). Randomness for new visitor ids from `Config.Rand`. A public `Config` field is an API change: ask first.
+
+### [ ] P3-02 Variant key dimension and forwarded header
+- Plan: Phase 3 · Size: M · Depends on: P3-01
+- Read: 10 §4 steps 1, 3, 4; 02 P2, §7; 04 `internal/keys` encoding; 06 T-35
+- Touch: internal/keys/encode.go, forward.go, request.go, root package match/assign step, tests
+- Tests: `TestVariantIsKeyDimension` (two variants, two entries, never mixed), `TestWeirVariantAlwaysReplaced` (every forwarding mode including `ForwardAll`), `TestForwardedEqualsKeyed` with experiments, `TestConsentAbsentGetsControl`, `TestWinnerOverridesAssignment`
+- AC: dimensions `(experiment, variant)` appended in config order with a new tag byte; a client `Weir-Variant` never reaches the origin or the key; first `max_active` matches apply; consent gate per E6 including the one-time start warning; fuzz seeds for the new key input shape
+- Out of scope: Set-Cookie and E7 (P3-03); exposure events (P3-04)
+- Notes: security-sensitive (`internal/keys`): answer the 06 section 6 checklist in the commit body.
+
+### [ ] P3-03 Set-Cookie and downstream cache rewrite
+- Plan: Phase 3 · Size: S · Depends on: P3-02
+- Read: 10 §2 E7, §4 steps 5, 6; 01 FR-TCC-4; 06 T-36
+- Touch: serve.go response stage, tests
+- Tests: `TestSetCookieNeverStored`, `TestSetCookiePerClientOnly` (hit path too), `TestDownstreamRewrittenPrivate`, `TestDownstreamVariantAwareKeepsDirectives`, `TestStoredCopyKeepsOriginDirectives`
+- AC: a created or changed assignment adds `Set-Cookie` (HttpOnly, SameSite=Lax, Path=/, Secure on https) to that client's response only; matched responses drop `public` and `s-maxage` and gain `private`, lose `CDN-Cache-Control`, unless the operator declared variant-aware downstream; the stored entry is unchanged (P4: build a new header map)
+- Out of scope: exposure events (P3-04)
+
+### [ ] P3-04 EvExposure
+- Plan: Phase 3 · Size: S · Depends on: P3-03
+- Read: 10 §4 step 7; 04 §9.2 (events)
+- Touch: events, assignment step, tests, docs/04 §9.2
+- Tests: `TestExposureOncePerVisitor`, `TestExposureOnHit`, `TestExposureNoneWithoutConsent`, `TestExposureVisitorIsHashPrefix`
+- AC: one `EvExposure{experiment, variant, visitor}` per visitor per experiment (on creation or when the signed exposed mark is missing, which is then added); visitor is a SHA-256 prefix; events carry no other request data
+- Out of scope: any analytics sink
+
+### [ ] P3-05 Caddy adapter: experiments block
+- Plan: Phase 3 · Size: M · Depends on: P3-04
+- Read: 10 §3; 08 §3 (key-generation hash), Caddyfile section
+- Touch: caddy/{caddyfile,config,module}.go, tests, docs/08, docs/runbook.md
+- Tests: `TestCaddyfileExperiments`, `TestExperimentsExcludedFromKeyGenHash` (a reload changing experiments does not purge), `TestE2EExperimentSplit` (caddytest)
+- AC: the `experiments { ... }` block parses to JSON and back; signing keys from placeholders; reload changes experiments without a global purge; runbook entry for rotating signing keys
+- Out of scope: new matcher kinds (E8)
 
 ## Deferred
 
