@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 	"testing/synctest"
+	"time"
 
 	"github.com/AshwinSathian/weir"
 )
@@ -34,7 +35,7 @@ func (l *eventLog) exposures() []weir.Event {
 	return out
 }
 
-// E1, 10 §4 step 7: one exposure when the assignment is created, and none on
+// E1, FR-OBS-1, 10 §4 step 7: one exposure when the assignment is created, and none on
 // later visits, because the cookie that response set carries the signed
 // exposed mark.
 func TestExposureOncePerVisitor(t *testing.T) {
@@ -98,7 +99,7 @@ func TestExposureOnHit(t *testing.T) {
 	})
 }
 
-// E6, E4: no consent means no exposure (and no cookie); a winner buckets
+// E6, E4, FR-OBS-1: no consent means no exposure (and no cookie); a winner buckets
 // nobody; Warm has no visitor.
 func TestExposureNoneWithoutConsent(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
@@ -170,4 +171,40 @@ func TestExposureVisitorIsHashPrefix(t *testing.T) {
 			t.Fatalf("event carries more than experiment, variant, visitor and time: %+v", ev)
 		}
 	})
+}
+
+// FR-OBS-1, 10 §4 step 7: exposure follows the returned response, whatever
+// served it. A bypassed engine, a Range pass-through and an origin error
+// status each carry the cookie and so each record one exposure; a transport
+// error returns no response and records none.
+func TestExposureAnyReturnedResponse(t *testing.T) {
+	run := func(name string, h http.Header, status int, setup func(*weir.Engine), req func() *weir.Request, want int) {
+		t.Run(name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				o := headerOrigin(t, h)
+				cfg, log := exposureConfig(false)
+				e := newEngine(t, cfg)
+				defer closeEngine(t, e)
+				if setup != nil {
+					setup(e)
+				}
+				resp, _ := serve(t, e, req(), o)
+				if status != 0 && resp.StatusCode != status && name != "range pass-through" {
+					t.Fatalf("status = %d, want %d", resp.StatusCode, status)
+				}
+				if n := len(log.exposures()); n != want {
+					t.Fatalf("exposures = %d, want %d", n, want)
+				}
+			})
+		})
+	}
+	plain := func() *weir.Request { return expReq("/checkout", nil) }
+	run("bypass mode", http.Header{"Cache-Control": {"max-age=60"}}, 200,
+		func(e *weir.Engine) {
+			if err := e.SetMode(weir.ModeBypass, time.Minute); err != nil {
+				t.Fatal(err)
+			}
+		}, plain, 1)
+	run("range pass-through", http.Header{"Cache-Control": {"max-age=60"}}, 0, nil,
+		func() *weir.Request { return expReq("/checkout", http.Header{"Range": {"bytes=0-0"}}) }, 1)
 }

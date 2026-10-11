@@ -213,6 +213,7 @@ func BenchmarkServeHitExperiments(b *testing.B) {
 	key := []byte("0123456789abcdef0123456789abcdef-bench")
 	ck := experiments.Cookie{VisitorID: "visitor1"}
 	ck.Set("e", "b")
+	ck.MarkExposed("e") // steady state: the exposure is already recorded (P3-04)
 	signed, _ := ck.Encode(key)
 	for _, tc := range []struct{ name, path, cookie string }{
 		{"unmatched", "/other", ""},

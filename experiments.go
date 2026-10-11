@@ -161,8 +161,9 @@ func (e *Engine) experimentsKeys() {
 }
 
 // emitExposures sends one EvExposure per entry, with no request data (10 §4
-// step 7). It runs only for a response that is returned, the one that
-// carries the marked cookie, so an error does not spend the exposure.
+// step 7, FR-OBS-1). It runs only for a returned response whose cookie
+// carrying the mark was built, so neither an error nor an Encode failure
+// claims an exposure that would be repeated.
 func (e *Engine) emitExposures(xs []experiments.Exposure) {
 	if e.cfg.Observer == nil || len(xs) == 0 {
 		return
@@ -194,11 +195,12 @@ func (e *Engine) experimentResponse(c *keys.Classified, resp *Response) *Respons
 	resp.Header = h
 	cookied := false
 	if res.Changed {
-		e.emitExposures(res.Exposures)
 		// ponytail: an Encode failure (a key or id the load checks rule out, or
 		// a value past the cap with nothing left to drop) sends no cookie and
-		// the visitor is re-picked next request; add a log line if it is seen.
+		// no exposure, and the visitor is re-picked next request; add a log
+		// line if it is seen.
 		if v, ok := res.Cookie.Encode(x.SigningKeys[0]); ok {
+			e.emitExposures(res.Exposures)
 			sc := x.Cookie + "=" + v + "; Path=/; Max-Age=" + expCookieMaxAge + "; HttpOnly; SameSite=Lax"
 			if c.Forwarded.Scheme == "https" {
 				sc += "; Secure"

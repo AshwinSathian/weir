@@ -109,8 +109,9 @@ type Exposure struct {
 
 // VisitorHash is the 16 hex characters (64 bits) of SHA-256(id) that events
 // carry instead of the visitor id (10 §4 step 7). The id is the cookie's
-// bucketing input, so analytics get a stable handle that cannot be fed back
-// into a cookie.
+// bucketing input, so analytics get a stable handle; it cannot be fed back
+// into a cookie only because the cookie needs the MAC. The hash is not a
+// secret and the id is not either, so do not rely on its secrecy.
 func VisitorHash(id string) string {
 	sum := sha256.Sum256([]byte(id))
 	return hex.EncodeToString(sum[:8])

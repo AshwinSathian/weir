@@ -173,3 +173,66 @@ func TestAssignExposures(t *testing.T) {
 		t.Fatalf("no consent: %+v", r)
 	}
 }
+
+// 10 §4 step 7, E3, E4: a variant dropped from the config is re-picked and
+// exposed again (a new exposure); a winner buckets nobody; a marked cookie
+// stays quiet after the winner is removed again.
+func TestAssignExposureLifecycle(t *testing.T) {
+	c := assignConfig()
+	gone := Cookie{VisitorID: "v1", Assignments: []Assignment{{"checkout-copy", "zzz", true}}}
+	r := c.Assign("h", "/checkout", []string{"weir_v=" + enc(t, gone, keyA)}, rndOf(0))
+	if len(r.Exposures) != 1 || r.Exposures[0].Variant == "zzz" {
+		t.Fatalf("variant removed from config: %+v", r)
+	}
+	marked := Cookie{VisitorID: "v1", Assignments: []Assignment{{"checkout-copy", "b", true}}}
+	line := []string{"weir_v=" + enc(t, marked, keyA)}
+	c.Experiments[0].Winner = "control"
+	if r = c.Assign("h", "/checkout", line, rndOf(0)); len(r.Exposures) != 0 || r.Picks[0].Variant != "control" {
+		t.Fatalf("winner set: %+v", r)
+	}
+	c.Experiments[0].Winner = ""
+	if r = c.Assign("h", "/checkout", line, rndOf(0)); len(r.Exposures) != 0 || r.Changed || r.Picks[0].Variant != "b" {
+		t.Fatalf("winner unset again: %+v", r)
+	}
+}
+
+// E9, 10 §4 step 7: Encode drops the oldest assignment when the cookie
+// outgrows 512 bytes, and its mark goes with it. The dropped experiment is
+// re-picked identically on the next request and exposed again with the same
+// visitor hash, so analysis deduplicates on (experiment, variant, visitor).
+func TestExposureRepeatsAfterE9Drop(t *testing.T) {
+	long := strings.Repeat("v", maxNameLen)
+	c := Config{CookieName: "weir_v", SigningKeys: [][]byte{keyA}, Header: "Weir-Variant", MaxActive: maxActiveLimit}
+	for i := range maxActiveLimit {
+		c.Experiments = append(c.Experiments, Experiment{
+			Name: strings.Repeat(string(rune('a'+i)), maxNameLen), Salt: "s", Path: "/",
+			Variants: []Variant{{long, 1}, {strings.Repeat("w", maxNameLen), 1}},
+		})
+	}
+	first := c.Assign("h", "/", nil, rndOf(0.3))
+	if len(first.Exposures) != maxActiveLimit {
+		t.Fatalf("first visit exposures = %d, want %d", len(first.Exposures), maxActiveLimit)
+	}
+	v, ok := first.Cookie.Encode(keyA)
+	if !ok || len(v) > MaxCookieLen {
+		t.Fatalf("Encode ok=%v len=%d", ok, len(v))
+	}
+	again := c.Assign("h", "/", []string{"weir_v=" + v}, rndOf(0.9))
+	if len(again.Exposures) == 0 {
+		t.Fatalf("no assignment was dropped by the cap; the test cookie is too small: %d bytes", len(v))
+	}
+	for _, x := range again.Exposures {
+		if x.Visitor != VisitorHash(first.Cookie.VisitorID) {
+			t.Fatalf("re-exposure under another visitor: %+v", x)
+		}
+		var was string
+		for _, e := range first.Exposures {
+			if e.Experiment == x.Experiment {
+				was = e.Variant
+			}
+		}
+		if x.Variant != was {
+			t.Fatalf("%s re-picked %q, first visit gave %q", x.Experiment, x.Variant, was)
+		}
+	}
+}
