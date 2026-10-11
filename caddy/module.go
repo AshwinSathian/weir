@@ -46,6 +46,9 @@ type Handler struct {
 	Bypass      BypassConfig  `json:"bypass,omitempty"`
 	Limiter     LimiterConfig `json:"limiter,omitempty"`
 	Stale       StaleConfig   `json:"stale,omitempty"`
+	// Experiments is the A/B block (docs/10 §3). It changes which key a
+	// request maps to, so it is not part of the key-generation hash (08 §3).
+	Experiments *ExperimentsConfig `json:"experiments,omitempty"`
 	// MultiHost says the site serves more than one host or uses on-demand
 	// TLS. It turns on the per-host fairness caps at 25% (FR-FAIR-3) and is
 	// part of the store identity (08 §3, §4b).

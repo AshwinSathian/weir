@@ -142,6 +142,78 @@ type StaleConfig struct {
 	IfError         caddy.Duration `json:"if_error,omitempty"`
 }
 
+// ExperimentsConfig mirrors weir.ExperimentsConfig (docs/10 §3). Signing
+// keys are strings that may hold {env.VAR}; they are resolved when the engine
+// config is built, so the stored config never holds the secret, and an unset
+// variable expands to an empty key, which the engine refuses (T-35).
+type ExperimentsConfig struct {
+	Cookie                  string             `json:"cookie,omitempty"`
+	SigningKeys             []string           `json:"signing_keys,omitempty"`
+	Consent                 *ConsentConfig     `json:"consent,omitempty"`
+	Header                  string             `json:"header,omitempty"`
+	MaxActive               int                `json:"max_active,omitempty"`
+	DownstreamKeysOnVariant bool               `json:"downstream_keys_on_variant,omitempty"`
+	Experiments             []ExperimentConfig `json:"experiments,omitempty"`
+}
+
+// ConsentConfig mirrors weir.ExperimentConsent (E6).
+type ConsentConfig struct {
+	Cookie string `json:"cookie"`
+	Value  string `json:"value"`
+}
+
+// ExperimentConfig mirrors weir.ExperimentConfig. The first variant is the
+// control arm.
+type ExperimentConfig struct {
+	Name     string           `json:"name"`
+	Match    *ExperimentMatch `json:"match,omitempty"`
+	Salt     string           `json:"salt,omitempty"`
+	Variants []VariantConfig  `json:"variants,omitempty"`
+	Winner   string           `json:"winner,omitempty"`
+}
+
+// ExperimentMatch is the host and path matcher of one experiment (docs/10 E8).
+type ExperimentMatch struct {
+	Host string `json:"host,omitempty"`
+	Path string `json:"path,omitempty"`
+}
+
+// VariantConfig is one arm of an experiment.
+type VariantConfig struct {
+	Name   string `json:"name"`
+	Weight int    `json:"weight"`
+}
+
+// weirExperiments maps the adapter block onto weir.ExperimentsConfig. It
+// resolves {env.VAR} in the signing keys; no error or log line carries a key.
+func (x *ExperimentsConfig) weirExperiments() weir.ExperimentsConfig {
+	if x == nil {
+		return weir.ExperimentsConfig{}
+	}
+	repl := caddy.NewReplacer()
+	out := weir.ExperimentsConfig{
+		Cookie: x.Cookie, Header: x.Header, MaxActive: x.MaxActive,
+		DownstreamKeysOnVariant: x.DownstreamKeysOnVariant,
+	}
+	for _, k := range x.SigningKeys {
+		out.SigningKeys = append(out.SigningKeys, []byte(repl.ReplaceAll(k, "")))
+	}
+	if x.Consent != nil {
+		out.Consent = weir.ExperimentConsent{Cookie: x.Consent.Cookie, Value: x.Consent.Value}
+	}
+	for _, e := range x.Experiments {
+		ec := weir.ExperimentConfig{Name: e.Name, Salt: e.Salt, Winner: e.Winner}
+		if e.Match != nil {
+			ec.Host, ec.Path = e.Match.Host, e.Match.Path
+		}
+		for _, v := range e.Variants {
+			ec.Variants = append(ec.Variants, weir.VariantConfig{Name: v.Name, Weight: v.Weight})
+		}
+		out.Experiments = append(out.Experiments, ec)
+	}
+	return out
+}
+
 // decodeStrict decodes like Caddy does for module config: unknown keys are
 // an error, so a misspelled setting never silently keeps its default.
 func decodeStrict(raw []byte, v any) error {
@@ -196,6 +268,7 @@ func (h *Handler) weirConfig() weir.Config {
 			DefaultStaleIfError:         time.Duration(h.Stale.IfError),
 		},
 	}
+	cfg.Experiments = h.Experiments.weirExperiments()
 	if h.MultiHost {
 		// FR-FAIR-3: 25% of MaxConcurrent, at least 1.
 		cfg.Limiter.MaxPerHost = max(1, cmp.Or(h.Limiter.MaxConcurrent, defaultMaxConcurrent)/4)

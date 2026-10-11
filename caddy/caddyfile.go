@@ -2,7 +2,9 @@ package weircaddy
 
 import (
 	"fmt"
+	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/caddyserver/caddy/v2"
 	"github.com/caddyserver/caddy/v2/caddyconfig/caddyfile"
@@ -43,6 +45,11 @@ func parseCaddyfile(h httpcaddyfile.Helper) (caddyhttp.MiddlewareHandler, error)
 //	    bypass { cookies|headers <v>... }
 //	    limiter { max_concurrent|max_queue|max_per_partition <n>; max_queue_wait <duration> }
 //	    stale { while_revalidate|if_error <duration> }
+//	    experiments {
+//	        cookie|header <name>; max_active <n>; signing_keys <key>...; downstream_keys_on_variant
+//	        consent cookie <name> <value>
+//	        experiment <name> { match [host <h>] [path <p>]; salt <s>; variants <name>=<weight>...; winner <name> }
+//	    }
 //	}
 //
 // Every error names the Caddyfile line (the dispenser adds it).
@@ -132,6 +139,8 @@ func (h *Handler) blockKey(d *caddyfile.Dispenser, key string, seen map[string]b
 			"max_queue_wait":    func() error { return durArg(d, &h.Limiter.MaxQueueWait) },
 			"max_per_partition": func() error { return intArg(d, &h.Limiter.MaxPerPartition) },
 		})
+	case "experiments":
+		return experimentsBlock(d, h)
 	case "stale":
 		return subBlock(d, "stale", map[string]func() error{
 			"while_revalidate": func() error { return durArg(d, &h.Stale.WhileRevalidate) },
@@ -175,9 +184,105 @@ func (h *Handler) storeBlock(d *caddyfile.Dispenser) error {
 	return nil
 }
 
+// experimentsBlock parses `experiments { ... }` (docs/10 §3). Signing keys
+// are kept as written, so {env.VAR} placeholders reach the JSON and are
+// resolved at Provision; errors never quote a key token.
+func experimentsBlock(d *caddyfile.Dispenser, h *Handler) error {
+	x := &ExperimentsConfig{}
+	err := subBlock(d, "experiments", map[string]func() error{
+		"cookie":     func() error { return oneArg(d, &x.Cookie) },
+		"header":     func() error { return oneArg(d, &x.Header) },
+		"max_active": func() error { return intArg(d, &x.MaxActive) },
+		"signing_keys": func() error {
+			args := d.RemainingArgs()
+			if len(args) == 0 {
+				return d.Errf("signing_keys takes at least one key")
+			}
+			x.SigningKeys = args
+			return nil
+		},
+		"downstream_keys_on_variant": func() error { return flag(d, &x.DownstreamKeysOnVariant) },
+		"consent": func() error {
+			args := d.RemainingArgs()
+			if len(args) != 3 || args[0] != "cookie" {
+				return d.Errf("consent takes: cookie <name> <value>")
+			}
+			x.Consent = &ConsentConfig{Cookie: args[1], Value: args[2]}
+			return nil
+		},
+		"experiment": func() error { return experimentBlock(d, x) },
+	}, "experiment")
+	if err != nil {
+		return err
+	}
+	h.Experiments = x
+	return nil
+}
+
+func experimentBlock(d *caddyfile.Dispenser, x *ExperimentsConfig) error {
+	var e ExperimentConfig
+	if err := oneArg(d, &e.Name); err != nil {
+		return err
+	}
+	// oneArg consumed the name and the opening brace is next; subBlock
+	// expects no further argument.
+	err := subBlock(d, "experiment "+e.Name, map[string]func() error{
+		"match": func() error {
+			args := d.RemainingArgs()
+			if len(args) == 0 || len(args)%2 != 0 {
+				return d.Errf("match takes host <host> and/or path <path>")
+			}
+			m := &ExperimentMatch{}
+			for i := 0; i < len(args); i += 2 {
+				switch args[i] {
+				case "host":
+					if m.Host != "" {
+						return d.Errf("match host is set twice")
+					}
+					m.Host = args[i+1]
+				case "path":
+					if m.Path != "" {
+						return d.Errf("match path is set twice")
+					}
+					m.Path = args[i+1]
+				default:
+					return d.Errf("match takes host and path, not %q", args[i])
+				}
+			}
+			e.Match = m
+			return nil
+		},
+		"salt":   func() error { return oneArg(d, &e.Salt) },
+		"winner": func() error { return oneArg(d, &e.Winner) },
+		"variants": func() error {
+			args := d.RemainingArgs()
+			if len(args) == 0 {
+				return d.ArgErr()
+			}
+			for _, a := range args {
+				name, w, ok := strings.Cut(a, "=")
+				n, err := strconv.Atoi(w)
+				if !ok || name == "" {
+					return d.Errf("variants take name=weight, got %q", a)
+				}
+				if err != nil {
+					return d.Errf("variant %q: weight %q is not an integer", name, w)
+				}
+				e.Variants = append(e.Variants, VariantConfig{Name: name, Weight: n})
+			}
+			return nil
+		},
+	})
+	if err != nil {
+		return err
+	}
+	x.Experiments = append(x.Experiments, e)
+	return nil
+}
+
 // subBlock parses the nested block of one key. A block key is set once, and
 // so is each key inside it.
-func subBlock(d *caddyfile.Dispenser, name string, keys map[string]func() error) error {
+func subBlock(d *caddyfile.Dispenser, name string, keys map[string]func() error, repeat ...string) error {
 	if d.NextArg() {
 		return d.ArgErr()
 	}
@@ -191,7 +296,7 @@ func subBlock(d *caddyfile.Dispenser, name string, keys map[string]func() error)
 		if !ok {
 			return d.Errf("unknown key %q in %s block", k, name)
 		}
-		if seen[k] {
+		if seen[k] && !slices.Contains(repeat, k) {
 			return d.Errf("%q is set twice in %s block", k, name)
 		}
 		seen[k] = true

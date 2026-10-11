@@ -1,11 +1,11 @@
 # Status
 
-Updated: 2026-10-11
+Updated: 2026-10-12
 Phase: 3
-Current card: none
-Card state: awaiting-merge
-Branch: claude/gifted-mayer-b8afaw (designated session branch)
-PR: https://github.com/AshwinSathian/weir/pull/103
+Current card: P3-05
+Card state: in-progress
+Branch: claude/busy-tesla-iw6ola (designated session branch)
+PR: none yet (code and tests done; `/handoff` pending)
 Next card: P3-05 (`make next`)
 
 ## Waiting on Ashwin

@@ -1825,3 +1825,11 @@ Entry template:
 - Deviations: docs/10 step 7 and docs/04 §9.2 reworded; "Waiting on Ashwin" cleared.
 - Follow-ups: none.
 - Context: low
+
+## 2026-10-12 · P3-05 · in-progress
+- Branch / PR: claude/busy-tesla-iw6ola / none yet
+- Done: `experiments { ... }` block in the Caddyfile and JSON (`caddy/{config,caddyfile,module}.go`); signing keys resolved from `{env.VAR}` at config build; experiments stay out of the key-generation hash; docs/08 §2 row; runbook 7.9 on key rotation.
+- Tests: `TestCaddyfileExperiments`, `TestExperimentsSigningKeyPlaceholders`, `TestExperimentsExcludedFromKeyGenHash`, `TestE2EExperimentSplit`; caddy module lint, vet and race tests pass. `/handoff` (review, card mark, PR) not run yet.
+- Deviations: none
+- Follow-ups: run `/handoff`; the runbook's rollback claim for a bad key reload is untested.
+- Context: low
