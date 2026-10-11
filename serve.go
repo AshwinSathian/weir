@@ -99,7 +99,8 @@ func (e *Engine) serve(ctx context.Context, req *Request, origin Origin, c *keys
 		return e.pass(ctx, c.AsBypass(), origin, FwdBypass)
 	}
 	e.cr.observe(c.CanonicalHeader())
-	resp, err := e.cacheable(ctx, c, origin, nil)
+	now := time.Now() // read once for the lookup, freshness, and the miss-rate window
+	resp, err := e.cacheable(ctx, c, origin, nil, now)
 	se, follower := errors.AsType[sharedError](err)
 	if follower {
 		err = se.error
@@ -115,7 +116,7 @@ func (e *Engine) serve(ctx context.Context, req *Request, origin Origin, c *keys
 	// open: the origin is down, which is the breaker's event, and counting
 	// it would cap every busy path at one fetch just as the origin recovers.
 	if !errors.Is(err, ErrOnlyIfCached) && !errors.Is(err, ErrCircuitOpen) {
-		e.mr.Observe(c.PartitionH, c.Partition, !follower && (resp == nil || !resp.Cache.Hit && !resp.Cache.Collapsed))
+		e.mr.ObserveAt(now, c.PartitionH, c.Partition, !follower && (resp == nil || !resp.Cache.Hit && !resp.Cache.Collapsed))
 	}
 	return resp, err
 }
@@ -271,9 +272,8 @@ func (e *Engine) lookup(ctx context.Context, c *keys.Classified, now time.Time) 
 // cacheable serves a GET or HEAD from the store or through a coalesced
 // fetch (04 §6.2), validating a stale entry that has validators
 // (FR-SRV-3). prevCK is the coalescing key of the flight a follower
-// re-enters from (FR-COA-5), nil on the first pass.
-func (e *Engine) cacheable(ctx context.Context, c *keys.Classified, origin Origin, prevCK *store.Key) (*Response, error) {
-	now := time.Now()
+// re-enters from (FR-COA-5), nil on the first pass. now is the request time.
+func (e *Engine) cacheable(ctx context.Context, c *keys.Classified, origin Origin, prevCK *store.Key, now time.Time) (*Response, error) {
 	lk := e.lookup(ctx, c, now)
 	found := lk.entry       // the response this request found; it may always be replaced
 	var purged *store.Entry // an unusable response a marker may replace

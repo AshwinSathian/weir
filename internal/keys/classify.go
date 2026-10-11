@@ -114,7 +114,9 @@ func Classify(r *Request, c *Config) (Classified, error) {
 		path = normalizePath(path)
 	}
 	query := rewriteQuery(r.RawQuery, c)
-	origin := r.Scheme + "://" + host
+	// One allocation for both strings: Origin is the front of Partition.
+	partition := r.Scheme + "://" + host + path
+	origin := partition[:len(r.Scheme)+len("://")+len(host)]
 
 	// One map read per field: this runs on every request, hits included.
 	rng, ifRange, inm := h["Range"], h["If-Range"], h["If-None-Match"]
@@ -133,7 +135,7 @@ func Classify(r *Request, c *Config) (Classified, error) {
 		Origin:     origin,
 		TagPath:    path,
 		TagQuery:   query,
-		Partition:  origin + path,
+		Partition:  partition,
 		ReqCC:      httpcc.ParseRequest(h),
 	}
 	if len(out.Partition) > maxPartitionBytes {
