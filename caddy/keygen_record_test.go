@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
+	"time"
 
 	"github.com/AshwinSathian/weir/store"
 	"github.com/AshwinSathian/weir/store/memory"
@@ -59,7 +61,7 @@ type keyGenRun struct {
 func runKeyGen(t *testing.T, f *fakeRecorder, h [32]byte, keyChanged bool, purgeErr error) *keyGenRun {
 	t.Helper()
 	r := &keyGenRun{purgeErr: purgeErr}
-	r.err = reconcileServerKeyGen(t.Context(), f, h, keyChanged, func(context.Context) error {
+	_, r.err = reconcileServerKeyGen(t.Context(), f, h, keyChanged, func(context.Context) error {
 		r.purges++
 		f.mu.Lock()
 		r.recAtPurge = bytes.Clone(f.rec)
@@ -151,7 +153,7 @@ func TestReconcileServerKeyGenOutageAndMemory(t *testing.T) {
 	var sb strings.Builder
 	purges := 0
 	for _, kc := range []bool{false, true} {
-		if err := reconcileServerKeyGen(t.Context(), mem, tight, kc, func(context.Context) error { purges++; return nil }, warnLog(&sb), "n"); err != nil {
+		if _, err := reconcileServerKeyGen(t.Context(), mem, tight, kc, func(context.Context) error { purges++; return nil }, warnLog(&sb), "n"); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -170,5 +172,113 @@ func TestRecordedHashExcludesStoreSettings(t *testing.T) {
 	}
 	if keyGenHash(a.weirConfig()) != keyGenHash(b.weirConfig()) {
 		t.Fatal("a store setting reached the recorded forwarding hash")
+	}
+}
+
+// FR-STF-2, R-3, 08 §3: a check that failed at Provision is repeated in the
+// background until the server answers; the retry then purges once and records.
+// Stopping it ends the goroutine (the bubble would deadlock otherwise).
+func TestKeyGenCheckRetriedAfterOutage(t *testing.T) {
+	loose, tight := [32]byte{1}, [32]byte{2}
+	t.Run("retry purges and records once after the server returns", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			f := &fakeRecorder{rec: loose[:], checkErr: errors.New("down")}
+			var mu sync.Mutex
+			purges := 0
+			purge := func(context.Context) error { mu.Lock(); purges++; mu.Unlock(); return nil }
+			var sb strings.Builder
+			r := startKeyGenRetry(f, tight, purge, warnLog(&sb), "n")
+			time.Sleep(10 * time.Minute) // several failed attempts
+			mu.Lock()
+			if purges != 0 {
+				t.Fatalf("purged %d times while the server was down", purges)
+			}
+			mu.Unlock()
+			f.mu.Lock()
+			f.checkErr = nil
+			f.mu.Unlock()
+			time.Sleep(2 * keyGenRetryMax) // the next attempt
+			mu.Lock()
+			if purges != 1 {
+				t.Fatalf("purges = %d after the server returned, want 1", purges)
+			}
+			mu.Unlock()
+			f.mu.Lock()
+			if !bytes.Equal(f.rec, tight[:]) {
+				t.Fatalf("record = %x, want the new hash", f.rec)
+			}
+			f.mu.Unlock()
+			time.Sleep(time.Hour)
+			mu.Lock()
+			if purges != 1 {
+				t.Fatalf("purges = %d, the retry kept running", purges)
+			}
+			mu.Unlock()
+			r.stop()
+		})
+	})
+	t.Run("a failed purge is retried and the record keeps the old value", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			f := &fakeRecorder{rec: loose[:]}
+			n := 0
+			purge := func(context.Context) error {
+				n++
+				if n == 1 {
+					return errors.New("boom")
+				}
+				return nil
+			}
+			var sb strings.Builder
+			r := startKeyGenRetry(f, tight, purge, warnLog(&sb), "n")
+			time.Sleep(time.Hour)
+			r.stop() // synchronizes with the goroutine before the reads below
+			if n != 2 || !bytes.Equal(f.rec, tight[:]) {
+				t.Fatalf("purges = %d, record %x", n, f.rec)
+			}
+		})
+	})
+	t.Run("stop ends a retry that never succeeded without purging", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			f := &fakeRecorder{rec: loose[:], checkErr: errors.New("down")}
+			purges := 0
+			var sb strings.Builder
+			r := startKeyGenRetry(f, tight, func(context.Context) error { purges++; return nil }, warnLog(&sb), "n")
+			time.Sleep(time.Minute)
+			r.stop()
+			r.stop() // twice is fine
+			f.mu.Lock()
+			f.checkErr = nil
+			f.mu.Unlock()
+			time.Sleep(time.Hour)
+			if purges != 0 || !bytes.Equal(f.rec, loose[:]) {
+				t.Fatalf("a stopped retry acted: %d purges, record %x", purges, f.rec)
+			}
+		})
+	})
+}
+
+// reconcileServerKeyGen reports a skipped check so Provision can start the retry.
+func TestReconcileServerKeyGenReportsSkippedCheck(t *testing.T) {
+	loose, tight := [32]byte{1}, [32]byte{2}
+	var sb strings.Builder
+	noop := func(context.Context) error { return nil }
+	down := &fakeRecorder{rec: loose[:], checkErr: errors.New("down")}
+	if skipped, err := reconcileServerKeyGen(t.Context(), down, tight, false, noop, warnLog(&sb), "n"); !skipped || err != nil {
+		t.Fatalf("skipped = %v, err = %v; want skipped", skipped, err)
+	}
+	if !strings.Contains(sb.String(), "background retry is running") {
+		t.Fatalf("warning does not mention the retry: %q", sb.String())
+	}
+	up := &fakeRecorder{rec: loose[:]}
+	if skipped, _ := reconcileServerKeyGen(t.Context(), up, tight, false, noop, warnLog(&sb), "n"); skipped {
+		t.Fatal("a successful check reported skipped")
+	}
+	mem, err := memory.New(memory.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mem.Close()
+	if skipped, _ := reconcileServerKeyGen(t.Context(), mem, tight, false, noop, warnLog(&sb), "n"); skipped {
+		t.Fatal("a store with no record reported skipped")
 	}
 }

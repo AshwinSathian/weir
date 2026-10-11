@@ -61,7 +61,10 @@ type Handler struct {
 	// Cleanup run it at most once.
 	pool    *pooledStore
 	release func() error
-	closed  *atomic.Bool // set by Provision; a pointer so Handler stays copyable
+	// keyGenRetry is the background key-generation retry after a Provision
+	// whose check was skipped (08 §3); nil otherwise. Cleanup stops it first.
+	keyGenRetry *keyGenRetry
+	closed      *atomic.Bool // set by Provision; a pointer so Handler stays copyable
 	// admin is the registry entry for the admin API (08 §7); set last by a
 	// successful Provision, removed first by Cleanup.
 	admin *adminEntry
@@ -179,7 +182,8 @@ func (h *Handler) Provision(ctx caddy.Context) (err error) {
 		}
 		return nil
 	}
-	if err = reconcileServerKeyGen(ctx, p.store, fwdHash, keyChanged, purge, cfg.Logger, h.Name); err != nil {
+	skipped, err := reconcileServerKeyGen(ctx, p.store, fwdHash, keyChanged, purge, cfg.Logger, h.Name)
+	if err != nil {
 		return err
 	}
 	// Record the hash only now: a Provision that failed above must not
@@ -194,6 +198,14 @@ func (h *Handler) Provision(ctx caddy.Context) (err error) {
 	ms.addEngine(e)
 	p.sink.attach(ms)
 	engines.add(h.Name, h.admin)
+	if skipped {
+		// Started last: nothing after this can fail, so Cleanup always
+		// reaches stop. The retry's purge leaves the engine open (a failed
+		// retry is tried again), unlike the one Provision passes above.
+		h.keyGenRetry = startKeyGenRetry(p.store, fwdHash, func(ctx context.Context) error {
+			return e.Purge(ctx, weir.Purge{All: true, Mode: weir.PurgeHard})
+		}, cfg.Logger, h.Name)
+	}
 	return nil
 }
 
@@ -225,6 +237,9 @@ func (h *Handler) Validate() error {
 func (h *Handler) Cleanup() error {
 	if h.engine == nil || h.closed.Swap(true) {
 		return nil
+	}
+	if h.keyGenRetry != nil {
+		h.keyGenRetry.stop() // before Close: its purge needs an open engine
 	}
 	engines.remove(h.Name, h.admin) // before Close: no new admin call reaches a closing engine
 	ctx, cancel := context.WithTimeout(context.Background(), closeTimeout)

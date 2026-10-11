@@ -92,7 +92,7 @@ type keyGenRecorder interface {
 // when keyChanged. The check and the record call each get keyGenCallTimeout, so a
 // blackholed server delays a load by at most twice that per site; the purge gets
 // closeTimeout.
-func reconcileServerKeyGen(ctx context.Context, st store.Store, fwd [sha256.Size]byte, keyChanged bool, purge func(context.Context) error, log *slog.Logger, name string) error {
+func reconcileServerKeyGen(ctx context.Context, st store.Store, fwd [sha256.Size]byte, keyChanged bool, purge func(context.Context) error, log *slog.Logger, name string) (skipped bool, err error) {
 	rec, hasRec := st.(keyGenRecorder)
 	checked := false
 	if hasRec {
@@ -101,7 +101,8 @@ func reconcileServerKeyGen(ctx context.Context, st store.Store, fwd [sha256.Size
 		cancel()
 		switch {
 		case err != nil:
-			log.Warn("weir: key-generation record not checked; entries stored under older forwarding rules stay servable until the next start or reload with the server reachable (a background retry is card P25-07d)",
+			skipped = true
+			log.Warn("weir: key-generation record not checked; entries stored under older forwarding rules stay servable until the check succeeds (a background retry is running)",
 				"name", name, "error", err)
 		case changed:
 			checked, keyChanged = true, true
@@ -116,7 +117,7 @@ func reconcileServerKeyGen(ctx context.Context, st store.Store, fwd [sha256.Size
 		err := purge(pctx)
 		cancel()
 		if err != nil {
-			return err
+			return skipped, err
 		}
 	}
 	if checked {
@@ -126,5 +127,60 @@ func reconcileServerKeyGen(ctx context.Context, st store.Store, fwd [sha256.Size
 			log.Warn("weir: key-generation record not written; the next start checks again", "name", name, "error", err)
 		}
 	}
-	return nil
+	return skipped, nil
+}
+
+// Backoff of the background key-generation retry: doubling from the first
+// value to the cap, so an outage costs a few calls a minute, not a storm.
+const (
+	keyGenRetryFirst = time.Second
+	keyGenRetryMax   = 30 * time.Second
+)
+
+// keyGenRetry repeats the key-generation step in the background after a
+// Provision whose check could not be made (FR-STF-2, R-3). It narrows the
+// window in which entries stored under older forwarding rules stay servable
+// but cannot close it: they are servable from the moment the server returns
+// until the retry's purge lands. The handler owns it: Cleanup calls stop,
+// which waits for the goroutine, before the engine closes (hard rule 10).
+type keyGenRetry struct {
+	cancel context.CancelFunc
+	done   chan struct{}
+}
+
+// startKeyGenRetry runs reconcileServerKeyGen with backoff until the check
+// is made and the purge, if one is due, and the record write have run. A
+// failed purge is retried too. purge must not close the engine, unlike
+// Provision's.
+func startKeyGenRetry(st store.Store, fwd [sha256.Size]byte, purge func(context.Context) error, log *slog.Logger, name string) *keyGenRetry {
+	ctx, cancel := context.WithCancel(context.Background())
+	r := &keyGenRetry{cancel: cancel, done: make(chan struct{})}
+	go func() {
+		defer close(r.done)
+		wait := keyGenRetryFirst
+		for {
+			t := time.NewTimer(wait)
+			select {
+			case <-ctx.Done():
+				t.Stop()
+				return
+			case <-t.C:
+			}
+			skipped, err := reconcileServerKeyGen(ctx, st, fwd, false, purge, log, name)
+			switch {
+			case err != nil:
+				log.Warn("weir: key-generation purge failed; retrying", "name", name, "error", err)
+			case !skipped:
+				return
+			}
+			wait = min(2*wait, keyGenRetryMax)
+		}
+	}()
+	return r
+}
+
+// stop ends the retry and waits for it. It is safe to call more than once.
+func (r *keyGenRetry) stop() {
+	r.cancel()
+	<-r.done
 }
