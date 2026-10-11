@@ -376,8 +376,10 @@ func TestProvisionStartsAndCleanupStopsKeyGenRetry(t *testing.T) {
 		t.Fatal("Cleanup left the retry running")
 	}
 	m := mustLoad(t, newCtx(t), `{"name":"kgr-mem"}`)
-	defer m.Cleanup()
 	if m.keyGenRetry != nil {
 		t.Fatal("a memory site started a retry")
+	}
+	if err := m.Cleanup(); err != nil {
+		t.Fatal(err)
 	}
 }
