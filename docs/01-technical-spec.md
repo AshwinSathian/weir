@@ -558,7 +558,7 @@ Resolved on 2026-09-27:
 - OQ-1 single-range 206: D11, §13.1.
 - OQ-2 targeted fields: D12, §13.2.
 - OQ-3 adaptive limits: D13. Static in Phase 1; revisit with load-test data. The limiter reads its cap through one method so an adaptive policy can replace it.
-- OQ-4 experiment bucketing: decisions E1 to E7 in [10-experiments-spec.md](10-experiments-spec.md).
+- OQ-4 experiment bucketing: decisions E1 to E9 in [10-experiments-spec.md](10-experiments-spec.md).
 
 Open: none that block any milestone before Phase 3.
 

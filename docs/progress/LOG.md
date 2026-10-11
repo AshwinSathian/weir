@@ -931,7 +931,7 @@ Entry template:
 - Context: low.
 
 ## 2026-10-07 · M10-02 · in-progress (awaiting /handoff)
-- Branch / PR: claude/optimistic-davinci-9ac46r / none yet
+- Branch / PR: claude/optimistic-davinci-9ac46r / https://github.com/AshwinSathian/weir/pull/98
 - Done: `observe/prom` module (client_golang v1.24.1, approved): `Observer` (counters, fetch histogram), `Collector` (gauges from `Engine.Stats`); `go.work`; Makefile `modules` target (vet, lint, race test per submodule with GOWORK=off) wired into `make check`; CI cache path.
 - Tests: prom_test.go (names and labels per 04 §9.3, lint, concurrency, unknown kinds). Race tests, vet, gofmt pass; root `TestNoThirdPartyImports` passes; trace 130/152. Lint unrun locally (golangci-lint built with Go 1.25/1.26, config targets 1.27).
 - Deviations: none to normative docs. `gateway_failure` = status 502, 503 or 504 (04 §9.3 does not define it); go.mod uses `replace => ../..` until the root is tagged.
@@ -957,7 +957,7 @@ Entry template:
 - Context: low.
 
 ## 2026-10-07 · M10-03 · done
-- Branch / PR: claude/gifted-meitner-19l6l6 / none yet
+- Branch / PR: claude/gifted-meitner-19l6l6 / https://github.com/AshwinSathian/weir/pull/98
 - Done: `loadtest/` (tag `load`): capacity-model origin, log-linear histograms, goroutine/breaker/origin-rate sampler, the five 07 §9 scenarios; `make load` (about 5 minutes, `WEIR_LOAD_SCALE` for smoke runs); results in docs/benchmarks.md.
 - Tests: all five scenarios pass on a 4-core box, goroutine check before and after Close. Root race tests, vet (also with `-tags load`), gofmt pass; trace 130/152. Lint unrun locally (Go 1.25 build); CI must confirm.
 - Deviations: 07 §9 got a notes paragraph. Steady hits paces the load to half the saturated rate (Ashwin chose this when asked: 64 closed-loop goroutines on 4 cores measure run-queue wait, p99 3.1 ms). Synchronized expiry ignores the scale for `max-age`. Flood p99 tolerance has a 50 µs floor (reviewer finding, bucket noise).
@@ -974,7 +974,7 @@ Entry template:
 - Context: low.
 
 ## 2026-10-07 · M10-04 · blocked
-- Branch / PR: claude/zealous-ritchie-wdpztv / none yet
+- Branch / PR: claude/zealous-ritchie-wdpztv / https://github.com/AshwinSathian/weir/pull/98
 - Done: `.github/workflows/nightly.yml` (fuzz matrix, 5 min per target, crasher artifacts; cache-tests job), `scripts/cache-tests.sh` (suite pinned to d644cf4, rerun-once, `UPDATE=1`), `make cache-tests`, `testdata/cache-tests-baseline.json` (260 pass, 105 fail), docs/cache-tests-expected-failures.md, Go version matrix in ci.yml (D42), `-forward-allow` flag on examples/weirproxy.
 - Tests: three full local suite runs gave identical pass/fail; a doctored baseline made the script fail. `make check` and card-reviewer not run: `/handoff` must be run by Ashwin.
 - Deviations: 07 §8 paragraph added; weirproxy flag is outside the card's file list (strict forwarding hides the suite's headers). Only 79 of 105 failures cite a decision or requirement; 27 are listed as unexplained.
@@ -1067,7 +1067,7 @@ Entry template:
 - Context: medium.
 
 ## 2026-10-09 · M10-10 · blocked
-- Branch / PR: claude/admiring-curie-sv9a2w / none yet
+- Branch / PR: claude/admiring-curie-sv9a2w / https://github.com/AshwinSathian/weir/pull/98
 - Done: `respond` answers a matching client `If-None-Match` or `If-Modified-Since` with a 304 for any response built from a stored or just-stored entry (revalidated, cold miss, creator, followers), judged against the final entry. FR-SRV-2 widened in docs/01, LLD §6.10 note, `conditional-lm-stale` now passes (baseline 265/100).
 - Tests: TestClientConditionalAfterRevalidation, TestClientConditionalUsesFinalEntry, TestClientConditionalColdMissAndFollowers. Root race tests, vet, gofmt, trace-strict pass. Lint unrun (Go 1.25 binary); CI must confirm.
 - Deviations: docs/01 FR-SRV-2 wording and date (approved 2026-10-08 per the card); docs/04 note.
@@ -1173,7 +1173,7 @@ Entry template:
 - Context: low.
 
 ## 2026-10-09 · M13-02 · in-progress (handoff pending)
-- Branch / PR: claude/cool-maxwell-y4bqri / none yet
+- Branch / PR: claude/cool-maxwell-y4bqri / https://github.com/AshwinSathian/weir/pull/98
 - Done: `memory.New` loads `SnapshotPath` (store/memory/snapshot_load.go): CRC/decode failures skipped and counted, expired dropped, MaxBytes respected in file order, hard epochs restored, global soft epoch at load, file removed (only when the magic matches). `Engine.Close` uses the store's `CloseContext` when it owns the store. `Set` and the loader share `put`.
 - Tests: TestSnapshotLoadRoundTrip, TestSnapshotLoadIsSoftStale, TestSnapshotHardEpochSurvives, TestSnapshotCorruptRecordsSkipped, TestSnapshotIncompleteIgnored, TestSnapshotLoadRespectsMaxBytes, TestSnapshotLoadHostileLength, FuzzSnapshotLoad. Race tests pass; lint unrun (container golangci-lint is Go 1.25).
 - Deviations: none. Load counts are unexported (`snapLoad`); a public accessor needs approval.
@@ -1405,7 +1405,7 @@ Entry template:
 - Declined: reserving the grant under a lock now (no concurrent provisioning exists); skipping every superseded store (would let a swap exceed 40% while both live).
 
 ## 2026-10-10 · P2-05 · blocked
-- Branch / PR: claude/wizardly-ride-guhrru / none yet
+- Branch / PR: claude/wizardly-ride-guhrru / https://github.com/AshwinSathian/weir/pull/98
 - Done: `caddy/registry.go` (engines per name, removal by identity, `purgeTap` observer), `caddy/admin.go` (`admin.api.weir`: purge, mode, stats; bodies bounded), Provision/Cleanup wiring, 08 §7 JSON shapes and status mapping.
 - Tests: admin_test.go (all nine card tests plus invalid-input, closed-engine 503), `TestE2EAdminPurge` under caddytest. Race and shuffle tests, lint on Go 1.27 and `make trace-strict` pass; `make check` not run as one command (lint toolchain, see STATUS).
 - Deviations: scrubbed count read from `EvPurge` Status through `purgeTap` because `Engine.Purge` returns only an error (P2-06 must chain its observer behind it); an empty purge is a 400 at the adapter; documented in 08 §7.
@@ -1508,7 +1508,7 @@ Entry template:
 - Context: low
 
 ## 2026-10-10 · P25-01b · blocked
-- Branch / PR: claude/brave-hamilton-yomx12 / none yet
+- Branch / PR: claude/brave-hamilton-yomx12 / https://github.com/AshwinSathian/weir/pull/98
 - Done: `store/valkey` Store skeleton (store.go, client.go): `New` validates only, lazy single-flight connect at most once per second, `CallTimeout` default, closed/ctx checks before dialing, policy check on every node, `go.work` entry. Get/Set/Delete/epochs are placeholders returning `ErrUnavailable`.
 - Tests: TestNewBadConfigFails, TestNewUnreachableServerSucceeds, TestReconnectRateLimited, TestInfo, TestCloseTwice, TestCloseDuringConnect, TestNoDialAfterClose, TestCanceledContextDoesNotDial, TestPolicyCheck and others; module lint, vet, race tests pass (go1.27 toolchain); trace-strict passes.
 - Deviations: `New` returns `*Store` (as `memory.New`), not `store.Store`; errors use the `store: valkey:` prefix, not `weir:`.
@@ -1642,7 +1642,7 @@ Entry template:
 - Context: low
 
 ## 2026-10-10 · P25-06 · in-progress
-- Branch / PR: card/P25-06-scrubber-scan / none yet
+- Branch / PR: card/P25-06-scrubber-scan / https://github.com/AshwinSathian/weir/pull/98
 - Done: `store/valkey/scrub.go` (`Scrub` via ROLE, per-primary SCAN loop, GET/DEL pipelines, entry-key filter); client seam methods; second CI Valkey service for the storm; docs 05 §7 and 09 §7.
 - Tests: TestScrub* (fake), TestScrubByTag, TestScrubCancelled, TestEngineEagerHardPurgeScrubs, TestEvictionStormEngineStaysCorrect, TestAllKeysPolicyRefused (integration, pass with `-race` on redis 7.0.15); trace 146/146; lint not run (Go 1.25 build).
 - Deviations: manual SCAN loop instead of `valkey.NewScanner` (per-call timeouts); Touch list short by client.go, store.go, CI, Makefile, engine_integration_test.go.
@@ -1743,4 +1743,12 @@ Entry template:
 - Tests: `TestKeyGenRetryRecordWriteLoggingAndStop` (4 subtests), `TestProvisionStartsAndCleanupStopsKeyGenRetry`; gofmt, vet, trace 146/146, root and `caddy` race tests pass; lint not run here.
 - Deviations: 08 §3 and runbook only.
 - Follow-ups: `validate` signal; the "differ" Warn repeats while a purge keeps failing.
+- Context: low
+
+## 2026-10-11 · P3-00 · done
+- Branch / PR: claude/great-bardeen-t56hcm (the session's designated branch) / https://github.com/AshwinSathian/weir/pull/98
+- Done: docs/10 is v1.0. Ashwin decided E8 (matchers stay path and host only) and E9 (prune unconfigured assignments on every cookie rewrite, 512-byte cap, oldest dropped first). Cards P3-01 to P3-05 written in docs/cards/20-later.md; E1 to E9 references updated in docs/01, docs/README and PLAN.
+- Tests: none (docs only); trace 146/146; `make check` stops at the golangci-lint Go-version mismatch (known).
+- Deviations: none. The card-reviewer found a must-fix: the experiment cookie would reach the origin unkeyed under ForwardAll. Fixed in 10 §4 step 4 and P3-02 (ask-first note kept: an addition to the forwarding rules).
+- Follow-ups: P3-01 may need a public Config field, so ask first. `/handoff` was not run (reserved for the user); PR still to open.
 - Context: low

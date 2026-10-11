@@ -202,7 +202,7 @@ Goal: prove the store interface has no in-process assumptions and unlock multi-n
 
 ### Phase 3: Experiment dimensions (~4 weeks, after Phase 2.5)
 
-Spec: [docs/10-experiments-spec.md](docs/10-experiments-spec.md) (decisions E1 to E7 locked). First task: finalize the spec's open items and write tests for T-35 and T-36.
+Spec: [docs/10-experiments-spec.md](docs/10-experiments-spec.md) (decisions E1 to E9 locked, v1.0). Cards P3-01 to P3-05 in docs/cards/20-later.md; the T-35 and T-36 tests come with P3-02 and P3-03.
 
 ## Testing strategy
 
@@ -218,7 +218,7 @@ Spec: [docs/10-experiments-spec.md](docs/10-experiments-spec.md) (decisions E1 t
 ## Open questions
 
 - [x] OQ-1 to OQ-4 and OQ-C1 to OQ-C3: resolved 2026-09-27 (decisions D11 to D24 in [01 §2](docs/01-technical-spec.md), E1 to E7 in [10](docs/10-experiments-spec.md)).
-- [ ] Phase 3 open items in [10 §6](docs/10-experiments-spec.md). Owner: Ashwin. Target: Phase 3 kickoff.
+- [x] Phase 3 open items in [10 §6](docs/10-experiments-spec.md). Owner: Ashwin. Target: Phase 3 kickoff.
 
 ## Appendix
 

@@ -1,7 +1,7 @@
-# Weir experiment dimensions specification (draft)
+# Weir experiment dimensions specification
 
-Status: draft v0.5. Phase 3. Decisions below were made with the project owner on 2026-09-27 and are locked; mechanics are finalized when Phase 3 starts.
-Date: 2026-09-27
+Status: v1.0. Phase 3. E1 to E7 were decided with the project owner on 2026-09-27; E8 and E9 on 2026-10-11 (P3-00). All are locked.
+Date: 2026-10-11
 Depends on: [01-technical-spec.md](01-technical-spec.md), [02-architecture.md §7](02-architecture.md), [06-threat-model.md](06-threat-model.md)
 Seed: [00-design-doc.md §10](00-design-doc.md) (titled "Phase 2" there; it is Phase 3, see [09 §6](09-research-notes.md))
 
@@ -15,11 +15,13 @@ Before the cache lookup, Weir assigns the visitor to a variant of every experime
 |---|---|
 | E1 | Bucketing identifier: a first-party visitor cookie set by Weir (`HttpOnly`, `Secure` on https, `SameSite=Lax`, `Path=/`). No fingerprinting. |
 | E2 | The cookie is HMAC-signed. A bad or missing signature means "no assignment" and the visitor is reassigned. |
-| E3 | Assignments are sticky: the cookie records each experiment's assigned variant; weight changes affect only visitors without an assignment. |
+| E3 | Assignments are sticky: the cookie records each experiment's assigned variant; weight changes affect only visitors without an assignment. The one exception is an assignment dropped under E9. |
 | E4 | The variant is a key dimension and is forwarded as a request header. Forwarded request equals keyed request (P2). |
 | E5 | Experiments are static configuration; changes arrive through a config reload. |
 | E6 | Consent gate: the operator can name a consent signal. When configured and absent, the visitor gets the control variant, no cookie is set, and no exposure is recorded. When no consent signal is configured, Weir buckets normally and logs a one-time warning at start. |
 | E7 | Responses on experiment-matched requests are rewritten for downstream caches to `Cache-Control: private` (dropping `public` and `s-maxage`) and lose `CDN-Cache-Control`, unless the operator declares that downstream caches key on the variant. Weir's own stored copy keeps the origin's directives. |
+| E8 | Matchers are path and host only. Both are already key inputs, so matching adds no unkeyed input. Header-presence matchers are out of scope; one would need its header keyed and normalized (P2) and a new threat row, so it starts as a new decision with a concrete use. |
+| E9 | On every cookie rewrite, assignments for experiments that are no longer configured are dropped. The whole cookie value (`v1.` through the MAC) is capped at 512 bytes. Assignments are stored in the order they were created (new ones appended); if the value still exceeds the cap, assignments are dropped from the front. A dropped assignment is re-picked on the next request, so that visitor may change variant (the exception to E3). |
 
 ## 3. Configuration shape
 
@@ -43,9 +45,9 @@ experiments {
 ## 4. Mechanics
 
 1. Match experiments against the validated request by path and normalized host (decided 2026-09-27); both are already key inputs, so matching introduces no unkeyed input. More than `max_active` matches is a configuration error caught at load, not a runtime condition, when the matchers overlap statically; at runtime the first `max_active` in config order apply.
-2. Read and verify the cookie. The value is `v1.<visitor-id>.<assignments>.<mac>`, with assignments as `exp:variant` pairs; MAC is HMAC-SHA-256 over the rest with the first key, verified against every configured key (rotation).
+2. Read and verify the cookie. The value is `v1.<visitor-id>.<assignments>.<mac>`, with assignments as `exp:variant` pairs in creation order, each followed by `!` once its exposure has been recorded (step 7); MAC is HMAC-SHA-256 over the rest with the first key, verified against every configured key (rotation).
 3. For each matching experiment: `winner` set means that variant; an existing assignment with a variant that still exists is kept (E3); otherwise, if consent allows, `variant = pick(weights, SHA-256(salt || visitor-id))`, else control.
-4. Append dimensions `(experiment, variant)` in config order to the primary key (new tag bytes in the key encoding) and set the forwarded header `Weir-Variant: exp=variant;exp2=variant` after deleting any client-supplied value in every forwarding mode.
+4. Remove the experiment cookie from the forwarded `Cookie` header in every forwarding mode (it carries the visitor id and every assignment and is not a key input, so under `ForwardAll` it would reach the origin unkeyed, INV-1); a config whose `Key.Cookies` names the experiment cookie is rejected at load. Append dimensions `(experiment, variant)` in config order to the primary key (new tag bytes in the key encoding) and set the forwarded header `Weir-Variant: exp=variant;exp2=variant` after deleting any client-supplied value in every forwarding mode.
 5. Serve normally. On the way out, if an assignment was created or changed, add `Set-Cookie` to the response given to this client only. The stored entry never contains it (the engine adds it after the entry is built).
 6. Apply E7 to the outgoing response.
 7. Emit `EvExposure{experiment, variant, visitor}` once per visitor per experiment (decided 2026-09-27): when the assignment is created, or when the signed cookie lacks the experiment's exposed mark, which is then added. `visitor` is a SHA-256 prefix of the visitor id so analysis can deduplicate clients that refuse cookies (they would otherwise count as a new exposure on every request). Hits are included, so analytics do not depend on the origin seeing the request.
@@ -61,8 +63,6 @@ experiments {
 - Crawlers without cookies get a fresh assignment per request and a `Set-Cookie` they ignore; responses they receive are still cache hits for their variant.
 - Ending an experiment: set `winner`; existing sticky assignments are overridden. Remove the experiment in a later reload once traffic has moved.
 
-## 6. Open items for Phase 3 kickoff
+## 6. Open items
 
-- Matchers beyond path and host (header presence) would need their headers keyed and normalized; revisit only with a concrete use.
-
-- Cookie size limit with many historical assignments: prune assignments for experiments no longer configured on every rewrite.
+None. The two items open at kickoff are E8 and E9. Implementation is split into cards P3-01 to P3-05 in [cards/20-later.md](cards/20-later.md).
