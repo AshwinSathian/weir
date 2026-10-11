@@ -226,7 +226,7 @@ Each phase began with one planning card that verified the spec against current u
 - Touch: docs/10-experiments-spec.md (v1.0), docs/cards/20-later.md
 - AC: open items in 10 §6 resolved with the user; cards written
 
-### [ ] P3-01 Experiment config and signed assignment cookie
+### [x] P3-01 Experiment config and signed assignment cookie
 - Plan: Phase 3 · Size: M · Depends on: P3-00
 - Read: 10 §2 E1 to E3, E8, E9, §3, §4 steps 1 to 3; 04 §1.1 (Config); 06 T-35
 - Touch: internal/experiments/{config,cookie,pick}.go (new, stdlib only) and one test file each (6 files; the docs/04 Config fields come with P3-02, where Config is wired)

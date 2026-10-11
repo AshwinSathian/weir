@@ -48,7 +48,12 @@ type Config struct {
 }
 
 // Control returns the name of the control variant.
-func (e *Experiment) Control() string { return e.Variants[0].Name }
+func (e *Experiment) Control() string {
+	if len(e.Variants) == 0 {
+		return ""
+	}
+	return e.Variants[0].Name
+}
 
 // Matches reports whether the experiment applies to a request. host must be
 // the normalized host the key uses and path the validated path, so matching
@@ -72,7 +77,7 @@ func (c *Config) Active(host, path string) []*Experiment {
 		e := &c.Experiments[i]
 		if e.Matches(host, path) {
 			out = append(out, e)
-			if len(out) == c.MaxActive {
+			if len(out) >= c.MaxActive {
 				break
 			}
 		}
@@ -163,8 +168,10 @@ func (e *Experiment) validate() error {
 func (e *Experiment) validateMatcher() error {
 	for i := 0; i < len(e.Host); i++ {
 		b := e.Host[i]
-		if !(b >= 'a' && b <= 'z' || b >= '0' && b <= '9' || b == '-' || b == '.') {
-			return cfgErr("experiment %q: host %q must be lower case without port or wildcard", e.Name, e.Host)
+		// The key's normalized host keeps a non-default port and a bracketed
+		// IPv6 literal, so the matcher must be able to name them (E8).
+		if !(b >= 'a' && b <= 'z' || b >= '0' && b <= '9' || b == '-' || b == '.' || b == ':' || b == '[' || b == ']') {
+			return cfgErr("experiment %q: host %q must be the lower case normalized host, without wildcard", e.Name, e.Host)
 		}
 	}
 	if e.Path == "" {

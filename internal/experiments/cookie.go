@@ -80,9 +80,9 @@ func parseAssignments(s string) ([]Assignment, bool) {
 		return nil, true
 	}
 	var out []Assignment
-	for s != "" {
+	for more := true; more; {
 		var item string
-		item, s, _ = strings.Cut(s, "+")
+		item, s, more = strings.Cut(s, "+")
 		item, exposed := strings.CutSuffix(item, string(exposedMark))
 		exp, variant, found := strings.Cut(item, ":")
 		if !found || !isToken(exp, maxNameLen) || !isToken(variant, maxNameLen) {
@@ -176,7 +176,8 @@ func sign(key []byte, body string) []byte {
 
 // NewVisitorID builds a fresh visitor id from rnd (Config.Rand, [0,1)), 106
 // bits in 22 token characters. The id is not a secret; the MAC is what
-// makes the cookie trustworthy.
+// makes the cookie trustworthy. A Rand outside [0,1) is a contract breach
+// and yields a constant id, so every such visitor shares one bucket.
 func NewVisitorID(rnd func() float64) string {
 	var raw [16]byte
 	for i := 0; i < 2; i++ {

@@ -41,7 +41,9 @@ func TestConfigValidate(t *testing.T) {
 		{"winner not a variant", func(c *Config) { c.Experiments[0].Winner = "zzz" }, "winner"},
 		{"winner is a variant", func(c *Config) { c.Experiments[0].Winner = "b" }, ""},
 		{"upper case host", func(c *Config) { c.Experiments[1].Host = "Shop.Example" }, "host"},
-		{"host with port", func(c *Config) { c.Experiments[1].Host = "shop.example:8080" }, "host"},
+		{"host with port", func(c *Config) { c.Experiments[1].Host = "shop.example:8080" }, ""},
+		{"ipv6 host", func(c *Config) { c.Experiments[1].Host = "[::1]:8080" }, ""},
+		{"host wildcard", func(c *Config) { c.Experiments[1].Host = "*.example" }, "host"},
 		{"relative path", func(c *Config) { c.Experiments[0].Path = "checkout" }, "path"},
 		{"star in the middle", func(c *Config) { c.Experiments[0].Path = "/a*b" }, "path"},
 		{"three overlapping above max_active", func(c *Config) {

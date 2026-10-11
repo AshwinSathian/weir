@@ -1752,3 +1752,11 @@ Entry template:
 - Deviations: none. The card-reviewer found a must-fix: the experiment cookie would reach the origin unkeyed under ForwardAll. Fixed in 10 §4 step 4 and P3-02 (ask-first note kept: an addition to the forwarding rules).
 - Follow-ups: P3-01 may need a public Config field, so ask first. `/handoff` was not run (reserved for the user); PR still to open.
 - Context: low
+
+## 2026-10-11 · P3-01 · done
+- Branch / PR: claude/gracious-shannon-w5n6k7 (the session's designated branch) / PR in STATUS
+- Done: `internal/experiments` (stdlib only): `Config.Validate` (names, key length, overlap above `max_active`, variant product above `Key.MaxVariants × 4`, checked over every host and path stem), `Matches`/`Active`; the HMAC-signed `v1` cookie (`ParseCookie`, `Encode` with the 512-byte cap, `Prune`, `Set`, `NewVisitorID`); `Pick`.
+- Tests: the seven named in the card plus `TestCookieSet`, `TestConfigValidate`, `TestMatchAndActive`. The fuzzer found a `base64.Decode` panic on an over-long MAC (fixed, seed kept); the card-reviewer's point that the target never got past the MAC led to a signing mode, which found that a trailing `+` was accepted (fixed). Race tests, vet, gofmt, trace 146/146 pass; `make check` stops at the known golangci-lint Go-version mismatch.
+- Deviations: none in docs. New load-time limits not in docs/10: signing key at least 16 bytes, names at most 32 token bytes, weight 1 to 1000, total weight at most 10000. Host matchers accept the normalized form with a port or IPv6 literal.
+- Follow-ups: ask Ashwin (STATUS): the first listed variant is the control, which docs/10 does not say; `Pick` hashes `salt || id` without a separator, as the spec reads. Document the new limits in docs/10 §3 with the P3-02 edit. P3-02 sets the defaults and the public `Config` shape (ask first).
+- Context: low

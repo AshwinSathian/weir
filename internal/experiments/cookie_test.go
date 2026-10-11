@@ -1,6 +1,7 @@
 package experiments
 
 import (
+	"encoding/base64"
 	"strings"
 	"testing"
 )
@@ -156,9 +157,17 @@ func FuzzParseCookie(f *testing.F) {
 		"", "v1.", "v1..", "v1...", "v1....", "v1.a.b:c.", "v1.a.+.x", "v1.a.:.x", "v1.a.b:c!!.x",
 		"v1.a.b:c+b:d.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "\x00v1.a..b", strings.Repeat("v1.", 200),
 	} {
-		f.Add(s)
+		f.Add(s, false)
 	}
-	f.Fuzz(func(t *testing.T, in string) {
+	for _, s := range []string{"v1.a.b:c+.", "v1.a.b:c!!.", "v1.a.+b:c.", "v1.a.b:c++d:e.", "v1.a.b::c.", "v1.a.!.", "v1.a.b:c!+d:e!."} {
+		f.Add(s, true)
+	}
+	f.Fuzz(func(t *testing.T, in string, sign bool) {
+		// With sign set, in is "v1.<id>.<assignments>." and gets a valid MAC,
+		// so the fuzzer reaches the assignment grammar behind the HMAC.
+		if sign {
+			in += base64.RawURLEncoding.EncodeToString(signBody(keyA, in[:max(len(in)-1, 0)]))
+		}
 		c, ok := ParseCookie(in, keys)
 		if !ok {
 			if c.VisitorID != "" || c.Assignments != nil {
@@ -169,11 +178,15 @@ func FuzzParseCookie(f *testing.F) {
 		if len(in) > MaxCookieLen {
 			t.Fatalf("accepted %d bytes", len(in))
 		}
-		// A cookie that verifies under keyA re-encodes identically; one that
-		// verified under keyB at least round-trips to the same content.
-		again, ok := ParseCookie(c.Encode(keyA), keys)
-		if !ok || again.VisitorID != c.VisitorID || len(again.Assignments) != len(c.Assignments) {
-			t.Fatalf("round trip lost data: %+v vs %+v", c, again)
+		again := c.Encode(keyA)
+		if sign && again != in {
+			t.Fatalf("accepted non-canonical input %q, canonical form %q", in, again)
+		}
+		back, ok := ParseCookie(again, keys)
+		if !ok || back.VisitorID != c.VisitorID || len(back.Assignments) != len(c.Assignments) {
+			t.Fatalf("round trip lost data: %+v vs %+v", c, back)
 		}
 	})
 }
+
+func signBody(key []byte, body string) []byte { return sign(key, body) }

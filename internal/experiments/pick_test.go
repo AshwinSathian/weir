@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-// FR-EXP: E3, T-35. Pick is a pure function of (salt, id).
+// E3, T-35: Pick is a pure function of (salt, id) and follows the weights.
 func TestPickDistribution(t *testing.T) {
 	variants := []Variant{{"control", 50}, {"b", 30}, {"c", 20}}
 	const n = 100000
