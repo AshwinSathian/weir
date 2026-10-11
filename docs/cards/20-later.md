@@ -244,7 +244,7 @@ Each phase began with one planning card that verified the spec against current u
 - Out of scope: Set-Cookie and E7 (P3-03); exposure events (P3-04)
 - Notes: security-sensitive (`internal/keys`): answer the 06 section 6 checklist in the commit body. P3-01 notes: when deleting a client-supplied variant header, also delete any client header whose name equals the configured one after `_` is mapped to `-` and case is folded (T-35; CGI-style origins). `Cookie.Encode` returns `(string, bool)` and refuses short keys; `MarkExposed` exists for step 7. The config has no defaults yet: pick them here (cookie name, header, `max_active`) and ask before adding the public field. Mind allocations on the hit path: `Active` allocates one slice and `sign` builds an HMAC per key per request (`-benchmem`).
 
-### [ ] P3-03 Set-Cookie and downstream cache rewrite
+### [x] P3-03 Set-Cookie and downstream cache rewrite
 - Plan: Phase 3 · Size: S · Depends on: P3-02
 - Read: 10 §2 E7, §4 steps 5, 6; 01 FR-TCC-4; 06 T-36
 - Touch: serve.go response stage, tests

@@ -181,8 +181,10 @@ func TestDownstreamPrivateWithoutOriginCacheControl(t *testing.T) {
 	})
 }
 
-// E7: with DownstreamKeysOnVariant the origin's directives pass through, but
-// the assignment cookie is still added.
+// E7: with DownstreamKeysOnVariant the origin's directives pass through for a
+// returning visitor. A response that carries the new assignment cookie is
+// still private, because a cache that keys on the variant but not on the
+// cookie would hand one visitor id to everyone (T-36).
 func TestDownstreamVariantAwareKeepsDirectives(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		o := headerOrigin(t, http.Header{
@@ -194,13 +196,17 @@ func TestDownstreamVariantAwareKeepsDirectives(t *testing.T) {
 		e := newEngine(t, cfg)
 		defer closeEngine(t, e)
 
-		resp, _ := serve(t, e, expReq("/checkout", nil), o)
-		d := ccDirectives(resp)
-		if !d["public"] || !d["s-maxage=120"] || d["private"] || resp.Header.Get("Cdn-Cache-Control") != "max-age=300" {
-			t.Fatalf("headers were rewritten: %q", resp.Header)
+		first, _ := serve(t, e, expReq("/checkout", nil), o)
+		if d := ccDirectives(first); !d["private"] || d["public"] || d["s-maxage=120"] || len(expCookieOf(first)) != 1 {
+			t.Fatalf("cookie-bearing response: %q", first.Header)
 		}
-		if len(expCookieOf(resp)) != 1 {
-			t.Fatalf("Set-Cookie = %q, want one weir_v", resp.Header["Set-Cookie"])
+		h := http.Header{"Cookie": {visitor(t, "v", "b")}}
+		for range 2 { // miss, then hit
+			resp, _ := serve(t, e, expReq("/checkout", h), o)
+			d := ccDirectives(resp)
+			if !d["public"] || !d["s-maxage=120"] || d["private"] || resp.Header.Get("Cdn-Cache-Control") != "max-age=300" {
+				t.Fatalf("headers were rewritten: %q", resp.Header)
+			}
 		}
 	})
 }
@@ -226,6 +232,30 @@ func TestStoredCopyKeepsOriginDirectives(t *testing.T) {
 		}
 		if n := o.Calls("/checkout"); n != 1 {
 			t.Fatalf("origin calls = %d, want 1", n)
+		}
+	})
+}
+
+// E7: an Origin that returns non-canonical map keys cannot keep a second
+// Cache-Control or a CDN-Cache-Control next to the rewrite.
+func TestDownstreamRewriteCoversNonCanonicalKeys(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		o := testorigin.NewChecked(t, 64, 16)
+		o.Default(testorigin.Behavior{Func: func(*weir.Request) (*weir.Response, error) {
+			return &weir.Response{StatusCode: 200, Header: http.Header{"cache-control": {"public, max-age=60"}, "cdn-cache-control": {"max-age=9"}},
+				Body: io.NopCloser(strings.NewReader("ok"))}, nil
+		}})
+		e := newEngine(t, expConfig())
+		defer closeEngine(t, e)
+
+		resp, _ := serve(t, e, expReq("/checkout", http.Header{"Cookie": {visitor(t, "v", "b")}}), o)
+		for k := range resp.Header {
+			if strings.EqualFold(k, "cdn-cache-control") {
+				t.Fatalf("%s survived", k)
+			}
+		}
+		if d := ccDirectives(resp); d["public"] || !d["private"] {
+			t.Fatalf("Cache-Control = %q", resp.Header)
 		}
 	})
 }

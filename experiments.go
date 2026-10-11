@@ -26,8 +26,9 @@ type ExperimentsConfig struct {
 
 	// DownstreamKeysOnVariant declares that every cache in front of Weir keys
 	// on the variant (Weir-Variant, or the experiment cookie). Only then do
-	// matched responses keep public, s-maxage and CDN-Cache-Control; by
-	// default they are rewritten to private (E7, T-36).
+	// matched responses keep public, s-maxage and CDN-Cache-Control, except
+	// the one that sets the assignment cookie; by default all are rewritten
+	// to private (E7, T-36).
 	DownstreamKeysOnVariant bool
 }
 
@@ -177,6 +178,7 @@ func (e *Engine) experimentResponse(c *keys.Classified, resp *Response) *Respons
 		h = http.Header{}
 	}
 	resp.Header = h
+	cookied := false
 	if res.Changed {
 		if v, ok := res.Cookie.Encode(x.SigningKeys[0]); ok {
 			sc := x.Cookie + "=" + v + "; Path=/; Max-Age=" + expCookieMaxAge + "; HttpOnly; SameSite=Lax"
@@ -185,11 +187,16 @@ func (e *Engine) experimentResponse(c *keys.Classified, resp *Response) *Respons
 			}
 			old := h["Set-Cookie"]
 			h["Set-Cookie"] = append(old[:len(old):len(old)], sc)
+			cookied = true
 		}
 	}
-	if !x.DownstreamKeysOnVariant {
-		h["Cache-Control"] = []string{privateCacheControl(h["Cache-Control"])}
-		delete(h, "Cdn-Cache-Control")
+	// T-36: a response carrying the new cookie is private even when the
+	// operator's caches key on the variant, since they need not key on the
+	// cookie and would hand one visitor id to everyone.
+	if !x.DownstreamKeysOnVariant || cookied {
+		cc := foldHeader(h, "Cache-Control")
+		h["Cache-Control"] = []string{privateCacheControl(cc)}
+		foldHeader(h, "Cdn-Cache-Control")
 	}
 	return resp
 }
@@ -202,6 +209,7 @@ func privateCacheControl(lines []string) string {
 	private := false
 	for _, l := range lines {
 		start, quoted := 0, false
+		aware := balancedQuotes(l) // an unbalanced line is split on every comma, as a lenient parser would
 		emit := func(end int) {
 			d := strings.TrimSpace(l[start:end])
 			if d == "" {
@@ -219,7 +227,7 @@ func privateCacheControl(lines []string) string {
 		for i := 0; i < len(l); i++ {
 			switch l[i] {
 			case '"':
-				quoted = !quoted
+				quoted = aware && !quoted
 			case '\\':
 				if quoted {
 					i++
@@ -237,4 +245,31 @@ func privateCacheControl(lines []string) string {
 		kept = append(kept, "private")
 	}
 	return strings.Join(kept, ", ")
+}
+
+// foldHeader removes every spelling of name from h (an Origin may return
+// non-canonical keys) and returns the lines it held.
+func foldHeader(h http.Header, name string) []string {
+	var lines []string
+	for k, v := range h {
+		if strings.EqualFold(k, name) {
+			lines = append(lines, v...)
+			delete(h, k)
+		}
+	}
+	return lines
+}
+
+// balancedQuotes reports whether every quoted string in l is closed.
+func balancedQuotes(l string) bool {
+	open := false
+	for i := 0; i < len(l); i++ {
+		switch {
+		case l[i] == '\\' && open:
+			i++
+		case l[i] == '"':
+			open = !open
+		}
+	}
+	return !open
 }

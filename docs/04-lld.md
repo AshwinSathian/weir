@@ -139,7 +139,7 @@ type ExperimentsConfig struct {
 	Consent     ExperimentConsent
 	Experiments []ExperimentConfig
 
-	DownstreamKeysOnVariant bool // caches in front key on the variant: matched responses keep public, s-maxage and CDN-Cache-Control (docs/10 E7)
+	DownstreamKeysOnVariant bool // caches in front key on the variant: matched responses keep public, s-maxage and CDN-Cache-Control, except those setting the cookie (docs/10 E7)
 }
 type ExperimentConsent struct{ Cookie, Value string } // Value is one '&', '|' or ',' separated element of the cookie value; zero value: no gate (logs a warning at New)
 type ExperimentConfig struct {
