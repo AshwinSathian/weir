@@ -327,7 +327,9 @@ func safeFetch(ctx context.Context, origin Origin, req *Request) (resp *Response
 
 // readBounded reads up to n bytes. A body whose Read panics (an Origin bug)
 // becomes an error here, so the caller closes it and the connection is not
-// leaked; runFlight's recover alone could not reach the body (NFR-2).
+// leaked; runFlight's recover alone could not reach the body (NFR-2). It
+// covers the buffered read only; a body streamed to the client reads on the
+// caller's goroutine.
 func readBounded(r io.Reader, n int64) (b []byte, err error) {
 	defer func() {
 		if p := recover(); p != nil {

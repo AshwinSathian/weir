@@ -22,14 +22,14 @@ All planned phases are implemented and tested: the engine (Phase 1), the Phase 1
 go get github.com/AshwinSathian/weir@v1.0.0                    # the engine, weirhttp, the memory store
 go get github.com/AshwinSathian/weir/observe/prom@v1.0.0       # Prometheus metrics
 go get github.com/AshwinSathian/weir/store/valkey@v1.0.0       # shared store for several nodes
-xcaddy build --with github.com/AshwinSathian/weir/caddy@v1.0.0 # Caddy with the weir handler
+xcaddy build --with github.com/AshwinSathian/weir@v1.0.0 --with github.com/AshwinSathian/weir/caddy@v1.0.0   # Caddy with the weir handler
 ```
 
-The four modules are tagged together and share a version number: use the same one for all of them. Building Caddy needs a Go 1.27 toolchain (`GOTOOLCHAIN=auto` fetches it).
+The four modules are tagged together and share a version number: use the same one for all of them. `caddy` is tested only against the root module at its own version, so xcaddy gets both pinned. Building Caddy needs a Go 1.27 toolchain (`GOTOOLCHAIN=auto` fetches it).
 
 ## Stability
 
-From `v1.0.0` the exported Go API of the root module, `store`, `store/memory`, `store/storetest`, `weirhttp` and `observe/prom` follows semantic versioning, as do the `weir_*` metric names and labels, the `Cache-Status` parameters, the Caddyfile directives and the Caddy JSON field names. Event kinds and `Event` fields may be added in a minor release. Construct structs with field names: fields can be added in a minor release. Defaults that protect (strict forwarding, `Vary` handling, stale serving) change only in a major release.
+From `v1.0.0` the exported Go API of the root module, `store`, `store/memory`, `store/storetest`, `weirhttp` and `observe/prom` follows semantic versioning, as do the metric families and labels documented in docs/04 §9.3, the `Cache-Status` parameter names, the Caddyfile directives and the Caddy JSON field names. Free-text values (the `detail` and `fwd` strings, `Event.Reason`) and event kinds may gain new values in a minor release, so match on them with a default case. Construct structs with field names: fields can be added in a minor release. Defaults that protect (strict forwarding, `Vary` handling, stale serving) change only in a major release.
 
 ## Why another cache
 

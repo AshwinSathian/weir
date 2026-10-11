@@ -65,12 +65,14 @@ func (g *storeGuard) get(ctx context.Context, k store.Key) (*store.Entry, error)
 }
 
 // servableStatus reports whether a response or negative entry carries a
-// status an HTTP server can write. Other kinds have none.
+// status the engine could have stored: safeFetch rejects anything below 200,
+// and net/http cannot write a final status below 100 at all. Other kinds
+// have none.
 func servableStatus(ent *store.Entry) bool {
 	if ent == nil || (ent.Kind != store.KindResponse && ent.Kind != store.KindNegative) {
 		return true
 	}
-	return ent.Status >= 100 && ent.Status <= 999
+	return ent.Status >= 200 && ent.Status <= 999
 }
 
 func (g *storeGuard) set(ctx context.Context, k store.Key, ent *store.Entry) error {

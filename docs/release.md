@@ -20,31 +20,36 @@ The definition of done is [docs/07 §12](07-testing-strategy.md). Where each ite
 
 Run `release-gate` on the release candidate commit, not on a branch that will still change. Any code change after a green gate restarts the gate for the affected checks.
 
+## Where the pinned commits live
+
+`main` keeps the `replace` directives and `go.work`, so every change to the root module is tested against the sub-modules in the same pull request (`make check` runs each sub-module with `GOWORK=off`, which only works while they point at the working tree). The pinned `go.mod` files, which have no `replace`, exist only on a release branch, `release/v1.0.0`, cut from the release candidate commit on `main`. Tags go on commits of that branch. Merge nothing from it back into `main`.
+
 ## Order
 
-1. Merge everything. `main` is the release candidate.
-2. Rehearse with a release candidate tag. Module proxy entries are immutable, so do the whole sequence below once with `v1.0.0-rc.1` (every module), fix what breaks, and only then tag `v1.0.0`. A bad `v1.0.0` can only be retracted, never replaced.
-3. Tag the root: `git tag -a v1.0.0 -m "weir v1.0.0" && git push origin v1.0.0`. Check from outside the repository: `GOWORK=off GOFLAGS=-mod=mod go list -m github.com/AshwinSathian/weir@v1.0.0`.
-4. Pin and tag the leaf modules. For `observe/prom` and `store/valkey`:
+1. Merge everything. `main` is the release candidate; the gate above ran on it.
+2. `git switch -c release/v1.0.0` from that commit.
+3. Rehearse with a release candidate tag before the real one. Module proxy entries are immutable, so run steps 4 to 7 once with `v1.0.0-rc.1` for every module, fix what breaks (on `main`, then recut the release branch), and only then use `v1.0.0`. A bad `v1.0.0` can only be retracted, never replaced. Delete the rc branch afterwards; the rc tags stay.
+4. Tag the root on the release branch: `git tag -a v1.0.0 -m "weir v1.0.0" && git push origin release/v1.0.0 v1.0.0`. Check from outside the repository: `GOWORK=off GOFLAGS=-mod=mod go list -m github.com/AshwinSathian/weir@v1.0.0`.
+5. Pin and tag the leaf modules. For `observe/prom` and `store/valkey`:
    ```sh
    scripts/release-pin.sh v1.0.0 observe/prom
    scripts/release-pin.sh v1.0.0 store/valkey
    git add observe/prom store/valkey && git commit -m "chore(release): pin sub-modules to v1.0.0"
    ```
-   Push the commit, then tag it with the directory as the prefix: `git tag -a observe/prom/v1.0.0` and `git tag -a store/valkey/v1.0.0`, and push both tags.
-5. Pin and tag `caddy`, which needs all three:
+   `release-pin.sh` runs `go mod tidy` and `go vet` against the module proxy. If it fails right after you pushed a tag, the proxy has not seen it yet (or cached a 404): wait a few minutes and run it again. Push the branch, then tag the commit with the directory as the prefix: `git tag -a observe/prom/v1.0.0` and `git tag -a store/valkey/v1.0.0`, and push both tags.
+6. Pin and tag `caddy`, which needs all three:
    ```sh
    scripts/release-pin.sh v1.0.0 caddy observe/prom store/valkey
    ```
    Commit, push, then tag `caddy/v1.0.0`.
-6. `make release-check` must pass on the tagged commits: no `replace` and no `v0.0.0` left in any sub-module. `go.work` stays for development.
-7. Make CI test what users do. In the `caddy-build` job of `.github/workflows/ci.yml`, replace the four `--with X=./path` overrides by `--with github.com/AshwinSathian/weir/caddy@v1.0.0` and update the comment above it.
-8. Smoke test in an empty directory: `go mod init smoke`, then `go get github.com/AshwinSathian/weir@v1.0.0 github.com/AshwinSathian/weir/observe/prom@v1.0.0 github.com/AshwinSathian/weir/store/valkey@v1.0.0`, then `xcaddy build --with github.com/AshwinSathian/weir/caddy@v1.0.0` and `./caddy list-modules | grep weir`.
-9. Publish a GitHub release for `v1.0.0` from the CHANGELOG section. Replace "(unreleased)" in [CHANGELOG.md](../CHANGELOG.md) with the date.
+7. `make release-check` must pass on the final commit of the branch (the `caddy` one): no `replace` and no `v0.0.0` left in any sub-module. It fails on the earlier commits by design, because `caddy/go.mod` is not pinned yet.
+8. Make CI test what users do. On `main`, add a job to `.github/workflows/ci.yml` that runs `xcaddy build --with github.com/AshwinSathian/weir/caddy@v1.0.0` with no `=path` overrides, next to the existing `caddy-build` job (which keeps testing the working tree).
+9. Smoke test in an empty directory: `go mod init smoke`, then `go get github.com/AshwinSathian/weir@v1.0.0 github.com/AshwinSathian/weir/observe/prom@v1.0.0 github.com/AshwinSathian/weir/store/valkey@v1.0.0`, then `xcaddy build --with github.com/AshwinSathian/weir/caddy@v1.0.0` and `./caddy list-modules | grep weir`.
+10. Publish a GitHub release for `v1.0.0` from the CHANGELOG section. On `main`, replace "(unreleased)" in [CHANGELOG.md](../CHANGELOG.md) with the date and move the README Install block's version if it changed.
 
 ## Keeping the modules in step
 
-`caddy` imports the root module's `internal/keys` (a legal import by path, but not a stable API). A `caddy` release therefore works only with the root version it was built and tested against. For every later release, tag all four modules, even when only one changed, or pin `caddy` to the exact root version it was tested with. The README tells users to use one version for all modules.
+`caddy` imports the root module's `internal/keys` (a legal import by path, but not a stable API). A `caddy` release therefore works only with the root version it was built and tested against, and no `go.mod` can enforce that: Go selects the highest root version in the build, so `caddy@v1.0.0` built together with `weir@v1.1.0` may not compile if `internal/keys` changed. For every later release, tag all four modules, even when only one changed, and tell users to build with `xcaddy build --with .../weir@vX --with .../weir/caddy@vX` at one version. Removing the import (by exporting what `caddy` needs from a public package) would lift the constraint and is a candidate for v1.1.
 
 ## If a tag is wrong
 

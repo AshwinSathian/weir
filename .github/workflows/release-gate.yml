@@ -73,12 +73,14 @@ jobs:
       - name: fuzz ${{ matrix.target }}
         env:
           FUZZTIME: ${{ inputs.fuzztime }}
-        run: go test -run='^$' -fuzz="^${{ matrix.target }}\$" -fuzztime="$FUZZTIME" "${{ matrix.pkg }}"
+          TARGET: ${{ matrix.target }}
+          PKG: ${{ matrix.pkg }}
+        run: go test -run='^$' -fuzz="^${TARGET}\$" -fuzztime="$FUZZTIME" "$PKG"
       - name: upload crashers
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: crasher-${{ matrix.target }}
+          name: crasher-${{ strategy.job-index }}-${{ matrix.target }}
           path: "**/testdata/fuzz/${{ matrix.target }}/*"
           if-no-files-found: warn
 
@@ -97,4 +99,5 @@ jobs:
         run: |
           out="$(go test -run '^$' -bench '^BenchmarkServeHitSmall$' -benchmem -count 3 .)"
           echo "$out"
-          echo "$out" | awk '/BenchmarkServeHitSmall/ { if ($(NF-1)+0 > 16) { print "allocs/op over 16: " $(NF-1); bad=1 } } END { exit bad }'
+          # Fail closed: a renamed or skipped benchmark prints no line and must not pass.
+          echo "$out" | awk '/^BenchmarkServeHitSmall/ { seen++; if ($(NF-1)+0 > 16) { print "allocs/op over 16: " $(NF-1); bad=1 } } END { if (!seen) { print "no BenchmarkServeHitSmall result"; exit 1 } exit bad }'
