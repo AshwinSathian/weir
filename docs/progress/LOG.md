@@ -1865,3 +1865,11 @@ Entry template:
 - Deviations: FR-KEY-4 (`%2E` stays escaped); T-1 and docs/08 wording; docs/07 §11.3 wording. Reviewer findings that match documented decisions were left alone (HEAD+Range pass-through FR-FWD-4, exposure in bypass mode docs/10 §4, Surrogate-Control not rewritten E7, Valkey password placeholders).
 - Follow-ups for Ashwin (not done, they change a requirement, default or public contract): If-Match and If-Unmodified-Since are ignored on hits (RFC 9110 §13.1); unkeyed Pragma, Cache-Control and X-Request-Id responses are stored under the shared key (T-1/D29); QuerySort reorders values of repeated names (FR-KEY-5); Entry.Size undercounts real memory up to 16x for many tiny header values (04 §2, 05); Valkey Get decodes up to 512 MiB per record (needs a MaxObjectBytes setting); the key-generation purge precedes old-engine shutdown on reload (docs/08 §3); follower timeout fans out to uncoalesced fetches (FR-COA-4); cookie tossing on the experiment cookie (`__Host-` name). Also: apply a mode for `__Host-`, `apidiff` job, `Event.Count`.
 - Context: high
+
+## 2026-10-11 · reference-run · done
+- Branch / PR: claude/magical-carson-rwdd4q (restarted from main after PR 105 merged) / see STATUS
+- Done: recorded Ashwin's reference machine run (M4 Pro, Go 1.27.1): `make check` clean, `make load` all five scenarios and the GC test pass (GC 1.08 µs per request at 1M entries, gate 2 µs), `BenchmarkServeHitSmall` median 1 286 ns/op, 14 allocs/op. docs/benchmarks.md section and raw file added; NFR-5 ceiling set to 1.9 µs (1.5 times the median); D36 notes the 1.08 µs.
+- Tests: none (docs only).
+- Deviations: docs/01 NFR-5 and D36 text, as NFR-5 itself prescribes.
+- Follow-ups: +52% against the M1 row (847 ns/op, same machine class) exceeds the 20% rule; a back-to-back M1/M10/HEAD run with benchstat on the M4 Pro is needed. A Linux A/B shows M10 to HEAD is only +6%. Still to come from Ashwin: release-gate results, cache-tests rerun if different, tag and smoke test results.
+- Context: low

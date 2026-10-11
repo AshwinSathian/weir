@@ -4,13 +4,13 @@ Updated: 2026-10-11
 Phase: release
 Current card: none
 Card state: ready
-Branch: claude/magical-carson-rwdd4q (release prep and review fixes)
-PR: https://github.com/AshwinSathian/weir/pull/105
+Branch: claude/magical-carson-rwdd4q (reference run results)
+PR: see the PR list (results PR after #105, which is merged)
 Next card: none (all cards done; M16-02 deferred)
 
 ## Waiting on Ashwin
 
-- Run `make load` on the reference machine and record it in docs/benchmarks.md (docs/07 §12). Judge `BenchmarkServeHitSmall` ns/op there against 1.5 times the median (01 NFR-5).
+- Benchmark `73e4d2e` (M1), `b909550` (M10) and HEAD back to back on the M4 Pro (`-count 10`, `benchstat`) to explain the +52% in `BenchmarkServeHitSmall` since the M1 row (docs/benchmarks.md, reference run).
 - Run the `release-gate` workflow (Actions, manual) on the candidate commit: engine tests 100x under race, one hour of fuzzing per target.
 - Decide whether to open a PR for the release-prep branch, then follow docs/release.md (release branch, rc rehearsal, tags in order: root, observe/prom and store/valkey, caddy).
 - Confirm the decisions taken for you: D24 amended, D43 added, README Stability promises, signing key caps, `servableStatus` miss.

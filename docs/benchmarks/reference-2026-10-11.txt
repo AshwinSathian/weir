@@ -1,0 +1,104 @@
+# Reference machine run, recorded 2026-10-11 (commit 138d4ff, the merge of PR 105)
+# Apple M4 Pro, 12 cores, macOS (Darwin), Go 1.27.1 darwin/arm64
+# Commands: make check; make load; go test -run '^$' -bench 'ServeHitSmall' -benchmem -count 6 .
+# make check: 0 lint issues in all four modules, all tests passed, trace 146/146.
+
+$ make load
+=== RUN   TestGCAt1MEntries
+    gc_test.go:213: 
+        gc at scale (scale 1, 12 CPU, go1.27.1)
+          entries (small / large)            10000 / 1000000
+          heap in use / live after fill      31 / 25 MiB / 2415 / 2099 MiB
+          hit ratio (paced)                  1.0000 / 1.0000
+          GC CPU per forced cycle            9.64 ms (6 cycles, every 5s) / 1298.93 ms (6 cycles, every 5s)
+          paced 20000/s p50                  4.608µs / 3.84µs
+          paced p99 with forced cycles       36.864µs / 36.864µs
+          paced max                          1.968834ms / 11.918667ms
+          saturated requests                 61364940 / 43401710
+          saturated alloc per request        1816.18 B / 1823.93 B
+          saturated non-GC CPU per request   11.02 µs / 14.65 µs
+          saturated natural cycles in window 4127 / 36
+          saturated GC share, runtime-reported 3.12% / 6.22%
+          saturated GC µs per request        0.66 µs / 1.08 µs
+          saturated GC share, projected      5.65% / 6.84%
+--- PASS: TestGCAt1MEntries (182.98s)
+=== RUN   TestSteadyHits
+    scenarios_test.go:88: 
+        steady hits (scale 1, 12 CPU, go1.27.1)
+          requests                           26291661
+          paced target (50% of saturated)    441853
+          achieved rate                      438185
+          hit ratio                          1.0000
+          p50                                2.048µs
+          p99 per window                     [18.432µs 18.432µs 20.48µs 22.528µs 18.432µs 18.432µs]
+          p99 median window                  18.432µs
+          p99 overall                        18.432µs
+          max                                9.834084ms
+          origin calls after warm            0
+--- PASS: TestSteadyHits (75.16s)
+=== RUN   TestSynchronizedExpiry
+    scenarios_test.go:139: 
+        synchronized expiry (scale 1, 12 CPU, go1.27.1)
+          keys                               10000
+          max-age                            1m0s
+          storing phase                      1.7s
+          elapsed                            1m20s
+          origin peak in-flight              32
+          origin peak calls/s                1485
+          limit calls/s (20%)                2000
+          refetched after storing            10000
+          client errors                      0
+          peak queue                         0
+--- PASS: TestSynchronizedExpiry (81.92s)
+=== RUN   TestBustingFloodWithNormalTraffic
+    scenarios_test.go:210: 
+        busting flood plus normal traffic (scale 1, 12 CPU, go1.27.1)
+          normal p99 alone                   36.864µs
+          normal p99 under flood             40.96µs
+          normal p50 alone / flood           7.68µs / 6.656µs
+          normal hit ratio under flood       1.0000
+          flood requests / shed errors       99976 / 71151
+          flood client drops                 0
+          normal offered (target ~500/s)     499/s, drops 0
+          flood peak in-flight               8
+          MaxPerPartition                    8
+--- PASS: TestBustingFloodWithNormalTraffic (41.67s)
+=== RUN   TestOriginBrownout
+    scenarios_test.go:275: 
+        origin brownout (x20 latency) (scale 1, 12 CPU, go1.27.1)
+          2xx / total before                 12063 / 12063
+          2xx / total during                 57600 / 57600
+          2xx / total after                  20064 / 20064
+          stale served during                52975
+          client errors during               0
+          breaker open events                18
+          breaker state at end               closed
+          peak goroutines                    48
+          origin shed events                 0
+--- PASS: TestOriginBrownout (47.58s)
+=== RUN   TestStoreFlap
+    scenarios_test.go:385: 
+        store flap (50% failing) (scale 1, 12 CPU, go1.27.1)
+          requests                           10848912
+          client errors                      0
+          slowest request                    47.10625ms
+          bound                              208.76288ms
+          store breaker open / closed        14 / 8
+          store errors                       492
+--- PASS: TestStoreFlap (43.21s)
+PASS
+ok  	github.com/AshwinSathian/weir/loadtest	472.995s
+
+$ go test -run '^$' -bench 'ServeHitSmall' -benchmem -count 6 .
+goos: darwin
+goarch: arm64
+pkg: github.com/AshwinSathian/weir
+cpu: Apple M4 Pro
+BenchmarkServeHitSmall-12         550099              1856 ns/op            1640 B/op         14 allocs/op
+BenchmarkServeHitSmall-12         955162              1247 ns/op            1640 B/op         14 allocs/op
+BenchmarkServeHitSmall-12         963187              1304 ns/op            1640 B/op         14 allocs/op
+BenchmarkServeHitSmall-12         966877              1268 ns/op            1640 B/op         14 allocs/op
+BenchmarkServeHitSmall-12         948403              1267 ns/op            1640 B/op         14 allocs/op
+BenchmarkServeHitSmall-12         951792              1545 ns/op            1640 B/op         14 allocs/op
+PASS
+ok  	github.com/AshwinSathian/weir	7.888s
