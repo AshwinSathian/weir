@@ -10,7 +10,7 @@ Next card: none (all cards done; M16-02 deferred)
 
 ## Waiting on Ashwin
 
-- Benchmark `73e4d2e` (M1), `b909550` (M10) and HEAD back to back on the M4 Pro (`-count 10`, `benchstat`) to explain the +52% in `BenchmarkServeHitSmall` since the M1 row (docs/benchmarks.md, reference run).
+- Confirm the decision to accept the +32% growth in `BenchmarkServeHitSmall` since M1 (docs/benchmarks.md, reference run); the 20% rule now measures from the reference run.
 - Run the `release-gate` workflow (Actions, manual) on the candidate commit: engine tests 100x under race, one hour of fuzzing per target.
 - Decide whether to open a PR for the release-prep branch, then follow docs/release.md (release branch, rc rehearsal, tags in order: root, observe/prom and store/valkey, caddy).
 - Confirm the decisions taken for you: D24 amended, D43 added, README Stability promises, signing key caps, `servableStatus` miss.

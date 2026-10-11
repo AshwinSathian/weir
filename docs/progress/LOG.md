@@ -1873,3 +1873,11 @@ Entry template:
 - Deviations: docs/01 NFR-5 and D36 text, as NFR-5 itself prescribes.
 - Follow-ups: +52% against the M1 row (847 ns/op, same machine class) exceeds the 20% rule; a back-to-back M1/M10/HEAD run with benchstat on the M4 Pro is needed. A Linux A/B shows M10 to HEAD is only +6%. Still to come from Ashwin: release-gate results, cache-tests rerun if different, tag and smoke test results.
 - Context: low
+
+## 2026-10-11 · reference-run · review-fixes
+- Branch / PR: claude/magical-carson-rwdd4q / https://github.com/AshwinSathian/weir/pull/106
+- Done: Ashwin's back-to-back `benchstat` (M1 926 ns, M10 1 150 ns, release candidate 1 223 ns, 10 runs each). The earlier +52% compared against a stale M1 row; the real growth since M1 is +32% (+24% by M10, +6% since). The +160 B/op is `keys.Classified` growing from 408 to 528 bytes, which crosses an allocator size class (allocs stay 14). Recorded in docs/benchmarks.md with the raw output; decision to accept for v1 proposed, baseline for the 20% rule is the reference run.
+- Tests: none (docs only).
+- Deviations: docs/01 NFR-5 wording.
+- Follow-ups: trimming `Classified` below 512 bytes is a v1.1 candidate; Ashwin to confirm the accept decision.
+- Context: low

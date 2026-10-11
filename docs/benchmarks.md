@@ -194,9 +194,17 @@ The D36 gate (at most 2 µs of GC per request at 1M entries) holds with 1.08 µs
 
 The median is 1.29 µs and the allocation count is 14, inside the bound of 16. NFR-5 sets the ns/op ceiling at 1.5 times this median, 1.9 µs (docs/01 updated). Runs 1 and 6 are noisy; the four quiet runs sit within 1 247 to 1 304.
 
-**Open question: growth since M1.** The M1 row above (same machine class, Go 1.27.1) is 847 ns/op and 1 480 B/op; this run is 1 286 ns/op and 1 640 B/op, +52% in time and +160 B, with 14 allocs/op in both. NFR-5 says a regression over 20% against the previous recorded run on the same machine fails review. Two other measurements bear on it:
+**Growth since M1, measured back to back.** The M1 row above (847 ns/op) was taken on another day and is not comparable with this run: `73e4d2e`, `b909550` (M10) and `138d4ff` rerun on the same machine in one session with `-count 10` and compared with `benchstat` (raw: [benchmarks/reference-2026-10-11-benchstat.txt](benchmarks/reference-2026-10-11-benchstat.txt)):
 
-- On the 4-core Linux box, M1 to M10 was +18% (table above), and a back-to-back run of `b909550` (M10) against this commit on that box gave 2.75 µs against 2.92 µs, +6% and the same 14 allocs/op. So the sum of the two recorded steps is about +25%, not +52%.
-- The M1 run may have been taken under different conditions (thermal state, background load). Runs 1 and 6 above show how much this box moves.
+| Commit | ns/op | vs M1 | B/op | allocs/op |
+|---|---:|---:|---:|---:|
+| M1 `73e4d2e` | 926 ± 1% | | 1 480 | 14 |
+| M10 `b909550` | 1 150 ± 1% | +24% (p<0.001) | 1 480 | 14 |
+| release candidate `138d4ff` | 1 223 ± 3% | +32% (p<0.001) | 1 640 | 14 |
 
-Settling it needs `73e4d2e` (M1), `b909550` (M10) and this commit benchmarked back to back on the M4 Pro with `-count 10` and compared with `benchstat`. Until then the 20% rule is measured from this run, and the +52% is recorded and not accepted or explained.
+So the +52% in the first table was a comparison with a stale number; the real growth since M1 is +32%, still over the 20% line in NFR-5. It has two parts:
+
+- M1 to M10, +24%: the miss-rate tracker, the breaker and the event plumbing, which arrived after M1. The M10 review already measured +18% on the Linux box, called it the edge of the rule and accepted it (section above). Allocations and bytes are unchanged.
+- M10 to the release candidate, +6% (the same +6% as on the Linux box): `keys.Classified`, which `Serve` allocates once per request, grew from 408 to 528 bytes as range, experiment and conditional fields were added. That moves it up an allocator size class, which accounts for all of the +160 B/op (an allocation profile shows the whole difference in `(*Engine).Serve`, and the count of 14 allocations did not change); the extra bytes to zero and copy account for the time.
+
+Decision for v1: accept. The hit path is still 1.2 µs with 14 allocations, about 1.5x under the 1.9 µs ceiling that this run sets, and the growth buys features that are in the spec. From this run on, the 20% rule is measured against the reference run above, so the next regression is judged against 1.29 µs. If the Classified size is worth recovering, trimming it below 512 bytes would drop it to the 512-byte size class (about 128 B/op less) and is a candidate for v1.1, with no behavior change.

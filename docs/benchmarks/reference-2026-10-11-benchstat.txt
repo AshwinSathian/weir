@@ -1,0 +1,23 @@
+# benchstat of BenchmarkServeHitSmall on the reference machine, 2026-10-11
+# Apple M4 Pro, 12 cores, Go 1.27.1 darwin/arm64, -count 10 per commit, run back to back.
+#   73e4d2e  M1 (PR 29 merge)
+#   b909550  M10 (PR 60 merge)
+#   main     138d4ff, the v1.0.0 release candidate
+
+goos: darwin
+goarch: arm64
+pkg: github.com/AshwinSathian/weir
+cpu: Apple M4 Pro
+                 │ /tmp/bench-73e4d2e.txt │        /tmp/bench-b909550.txt        │         /tmp/bench-main.txt          │
+                 │         sec/op         │    sec/op     vs base                │    sec/op     vs base                │
+ServeHitSmall-12              926.0n ± 1%   1150.0n ± 1%  +24.18% (p=0.000 n=10)   1223.0n ± 3%  +32.07% (p=0.000 n=10)
+
+                 │ /tmp/bench-73e4d2e.txt │      /tmp/bench-b909550.txt      │         /tmp/bench-main.txt          │
+                 │          B/op          │     B/op      vs base            │     B/op      vs base                │
+ServeHitSmall-12             1.445Ki ± 0%   1.445Ki ± 0%  ~ (p=1.000 n=10) ¹   1.602Ki ± 0%  +10.81% (p=0.000 n=10)
+¹ all samples are equal
+
+                 │ /tmp/bench-73e4d2e.txt │     /tmp/bench-b909550.txt     │      /tmp/bench-main.txt       │
+                 │       allocs/op        │ allocs/op   vs base            │ allocs/op   vs base            │
+ServeHitSmall-12               14.00 ± 0%   14.00 ± 0%  ~ (p=1.000 n=10) ¹   14.00 ± 0%  ~ (p=1.000 n=10) ¹
+¹ all samples are equal
