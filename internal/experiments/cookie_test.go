@@ -292,3 +292,24 @@ func TestCookieCopiesDoNotAlias(t *testing.T) {
 		t.Error("Prune(nil) reported a drop")
 	}
 }
+
+// T-35, E2: ParseCookieKeyed says whether the first key verified, so a
+// cookie under a rotated-out key can be re-signed.
+func TestParseCookieKeyedReportsPrimary(t *testing.T) {
+	k1, k2 := []byte(strings.Repeat("a", 32)), []byte(strings.Repeat("b", 32))
+	c := Cookie{VisitorID: "v1"}
+	c.Set("x", "b")
+	for _, tt := range []struct {
+		name    string
+		signed  []byte
+		primary bool
+	}{{"first key", k1, true}, {"rotated-out key", k2, false}} {
+		t.Run(tt.name, func(t *testing.T) {
+			v, _ := c.Encode(tt.signed)
+			got, primary, ok := ParseCookieKeyed(v, [][]byte{k1, k2})
+			if !ok || primary != tt.primary || got.VisitorID != "v1" {
+				t.Fatalf("ok=%v primary=%v cookie=%+v", ok, primary, got)
+			}
+		})
+	}
+}

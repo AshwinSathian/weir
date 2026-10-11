@@ -18,8 +18,10 @@ func TestPrivateCacheControl(t *testing.T) {
 		{"case-insensitive across lines", []string{"PUBLIC", "S-MaxAge=1, no-transform"}, "no-transform, private"},
 		{"existing private kept once", []string{"private, max-age=5"}, "private, max-age=5"},
 		{"field-qualified private gets a broad one", []string{`private="set-cookie, x", max-age=5`}, `private="set-cookie, x", max-age=5, private`},
-		{"quoted comma is not a separator", []string{`ext="a, public", public`}, `ext="a, public", private`},
-		{"unterminated quote falls back to a plain split", []string{`ext="a, public, s-maxage=9`, `\`}, `ext="a, \, private`},
+		{"a member with a trailing quote is not bare public", []string{`ext="a, public", public`}, `ext="a, public", private`},
+		{"escaped quote does not hide members", []string{`public, ext="a\", public, s-maxage=9, x="`}, `ext="a\", x=", private`},
+		{"s-maxage inside a quoted value", []string{`ext="a, s-maxage=9, b", max-age=1`}, `ext="a, b", max-age=1, private`},
+		{"unterminated quote", []string{`ext="a, public, s-maxage=9`, `\`}, `ext="a, \, private`},
 		{"empty members", []string{",, ,"}, "private"},
 	}
 	for _, tt := range tests {
@@ -35,7 +37,7 @@ func TestPrivateCacheControl(t *testing.T) {
 // or s-maxage member even for a parser that splits on every comma, and has
 // an unqualified private.
 func FuzzPrivateCacheControl(f *testing.F) {
-	for _, s := range []string{"public, max-age=5", `ext="a, public`, `private="x", s-maxage=1`, `\"`, ",,", ""} {
+	for _, s := range []string{"public, max-age=5", `ext="a, public`, `ext="a\", public, s-maxage=9, x="`, `private="x", s-maxage=1`, `\"`, ",,", ""} {
 		f.Add(s, "")
 	}
 	f.Fuzz(func(t *testing.T, a, b string) {
@@ -45,16 +47,9 @@ func FuzzPrivateCacheControl(f *testing.F) {
 			name, _, _ := strings.Cut(strings.TrimSpace(d), "=")
 			switch strings.ToLower(strings.TrimSpace(name)) {
 			case "s-maxage":
-				// ponytail: a quoted member holding ", s-maxage" is data to a
-				// quote-aware parser; the plain split here flags it, so only
-				// unquoted outputs are held to the property.
-				if !strings.Contains(out, `"`) {
-					t.Fatalf("s-maxage survived: %q", out)
-				}
+				t.Fatalf("s-maxage survived: %q", out)
 			case "public":
-				if !strings.Contains(out, `"`) {
-					t.Fatalf("public survived: %q", out)
-				}
+				t.Fatalf("public survived: %q", out)
 			case "private":
 				private = true
 			}

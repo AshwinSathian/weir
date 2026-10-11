@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/AshwinSathian/weir"
+	"github.com/AshwinSathian/weir/internal/experiments"
 	"github.com/AshwinSathian/weir/internal/testorigin"
 )
 
@@ -258,4 +259,150 @@ func TestDownstreamRewriteCoversNonCanonicalKeys(t *testing.T) {
 			t.Fatalf("Cache-Control = %q", resp.Header)
 		}
 	})
+}
+
+var expOldKey = []byte("fedcba9876543210fedcba9876543210-old-key")
+
+// T-35, E2: a cookie signed under a rotated-out key is re-signed with the
+// first key (same visitor, same assignment), so the old key can be dropped
+// later without re-bucketing anyone. A cookie already under the first key is
+// left alone, and without consent nothing is written.
+func TestSetCookieResignsOldKeyCookie(t *testing.T) {
+	old := func() string {
+		c := experimentsCookieFor(t, "keep-me", "b", expOldKey)
+		return "weir_v=" + c
+	}
+	rotated := func(consent bool) weir.Config {
+		cfg := expConfig()
+		cfg.Experiments.SigningKeys = [][]byte{expKey, expOldKey}
+		if consent {
+			cfg.Experiments.Consent = weir.ExperimentConsent{Cookie: "cmp", Value: "analytics=yes"}
+		}
+		return cfg
+	}
+	t.Run("old key is re-signed", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			o := headerOrigin(t, http.Header{"Cache-Control": {"max-age=60"}})
+			e := newEngine(t, rotated(false))
+			defer closeEngine(t, e)
+			resp, _ := serve(t, e, expReq("/checkout", http.Header{"Cookie": {old()}}), o)
+			cs := expCookieOf(resp)
+			if len(cs) != 1 || !strings.Contains(cs[0], ".keep-me.checkout-copy:b.") {
+				t.Fatalf("Set-Cookie = %q, want the same visitor and variant", cs)
+			}
+			if cookiePair(cs[0]) == old() {
+				t.Fatal("cookie was not re-signed")
+			}
+			again, _ := serve(t, e, expReq("/checkout", http.Header{"Cookie": {cookiePair(cs[0])}}), o)
+			if got := expCookieOf(again); len(got) != 0 {
+				t.Fatalf("first-key cookie was rewritten: %q", got)
+			}
+		})
+	})
+	t.Run("no consent writes nothing", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			o := headerOrigin(t, http.Header{"Cache-Control": {"max-age=60"}})
+			e := newEngine(t, rotated(true))
+			defer closeEngine(t, e)
+			resp, _ := serve(t, e, expReq("/checkout", http.Header{"Cookie": {old()}}), o)
+			if got := expCookieOf(resp); len(got) != 0 {
+				t.Fatalf("Set-Cookie without consent: %q", got)
+			}
+		})
+	})
+}
+
+// E7, 10 §4 step 6: the rewrite covers every response class: a Range pass-through
+// (206), an unsatisfiable range (416), a bypassed engine, and concurrent followers
+// of one fetch, each of which gets its own cookie.
+func TestExperimentResponseClasses(t *testing.T) {
+	origin := func(t *testing.T) *testorigin.Origin {
+		return headerOrigin(t, http.Header{"Cache-Control": {"public, max-age=60, s-maxage=9"}, "Cdn-Cache-Control": {"max-age=1"}})
+	}
+	check := func(t *testing.T, name string, resp *weir.Response, cookie bool) {
+		t.Helper()
+		if d := ccDirectives(resp); d["public"] || d["s-maxage=9"] || !d["private"] || resp.Header.Get("Cdn-Cache-Control") != "" {
+			t.Fatalf("%s: Cache-Control = %q", name, resp.Header)
+		}
+		if got := len(expCookieOf(resp)); cookie && got != 1 || !cookie && got != 0 {
+			t.Fatalf("%s: weir_v cookies = %d", name, got)
+		}
+	}
+	t.Run("range request", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			o := origin(t)
+			e := newEngine(t, expConfig())
+			defer closeEngine(t, e)
+			ck := http.Header{"Cookie": {visitor(t, "v", "b")}}
+			serve(t, e, expReq("/checkout", ck), o)
+			r := expReq("/checkout", http.Header{"Cookie": ck["Cookie"], "Range": {"bytes=0-0"}})
+			resp, _ := serve(t, e, r, o)
+			if resp.StatusCode != http.StatusPartialContent {
+				t.Fatalf("status = %d, want 206", resp.StatusCode)
+			}
+			check(t, "206", resp, false)
+			r = expReq("/checkout", http.Header{"Cookie": ck["Cookie"], "Range": {"bytes=900-"}})
+			resp, _ = serve(t, e, r, o)
+			if resp.StatusCode != http.StatusRequestedRangeNotSatisfiable {
+				t.Fatalf("status = %d, want 416", resp.StatusCode)
+			}
+			check(t, "416", resp, false)
+		})
+	})
+	t.Run("bypass mode", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			o := origin(t)
+			e := newEngine(t, expConfig())
+			defer closeEngine(t, e)
+			if err := e.SetMode(weir.ModeBypass, time.Minute); err != nil {
+				t.Fatal(err)
+			}
+			resp, _ := serve(t, e, expReq("/checkout", http.Header{"Cookie": {visitor(t, "v", "b")}}), o)
+			check(t, "bypass", resp, false)
+		})
+	})
+	t.Run("followers each get their own cookie", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			o := origin(t)
+			e := newEngine(t, expConfig())
+			defer closeEngine(t, e)
+			cookies := make(chan string, 8)
+			for range 8 {
+				go func() {
+					resp, err := e.Serve(t.Context(), expReq("/checkout", nil), o)
+					if err != nil {
+						cookies <- "error"
+						return
+					}
+					defer resp.Body.Close()
+					c := expCookieOf(resp)
+					if len(c) != 1 || ccDirectives(resp)["public"] {
+						cookies <- "bad"
+						return
+					}
+					cookies <- cookiePair(c[0])
+				}()
+			}
+			seen := map[string]bool{}
+			for range 8 {
+				c := <-cookies
+				if c == "error" || c == "bad" || seen[c] {
+					t.Fatalf("follower cookie %q (seen %v)", c, seen)
+				}
+				seen[c] = true
+			}
+		})
+	})
+}
+
+// experimentsCookieFor signs a cookie for visitor id holding variant under key.
+func experimentsCookieFor(t *testing.T, id, variant string, key []byte) string {
+	t.Helper()
+	c := experiments.Cookie{VisitorID: id}
+	c.Set("checkout-copy", variant)
+	v, ok := c.Encode(key)
+	if !ok {
+		t.Fatal("encode refused")
+	}
+	return v
 }

@@ -180,6 +180,9 @@ func (e *Engine) experimentResponse(c *keys.Classified, resp *Response) *Respons
 	resp.Header = h
 	cookied := false
 	if res.Changed {
+		// ponytail: an Encode failure (a key or id the load checks rule out, or
+		// a value past the cap with nothing left to drop) sends no cookie and
+		// the visitor is re-picked next request; add a log line if it is seen.
 		if v, ok := res.Cookie.Encode(x.SigningKeys[0]); ok {
 			sc := x.Cookie + "=" + v + "; Path=/; Max-Age=" + expCookieMaxAge + "; HttpOnly; SameSite=Lax"
 			if c.Forwarded.Scheme == "https" {
@@ -202,44 +205,29 @@ func (e *Engine) experimentResponse(c *keys.Classified, resp *Response) *Respons
 }
 
 // privateCacheControl drops public and s-maxage from Cache-Control lines and
-// makes sure an unqualified private is present. Directives are split on
-// commas outside quotes; anything else is kept as sent.
+// makes sure an unqualified private is present. Every comma separates
+// members, quoted or not: a downstream parser that ignores quoting or
+// escapes must not find a bare public or s-maxage either (T-36). That can
+// mangle a quoted extension value that contains those words, which no
+// origin sends.
 func privateCacheControl(lines []string) string {
 	var kept []string
 	private := false
 	for _, l := range lines {
-		start, quoted := 0, false
-		aware := balancedQuotes(l) // an unbalanced line is split on every comma, as a lenient parser would
-		emit := func(end int) {
-			d := strings.TrimSpace(l[start:end])
+		for d := range strings.SplitSeq(l, ",") {
+			d = strings.TrimSpace(d)
 			if d == "" {
-				return
+				continue
 			}
 			name, _, _ := strings.Cut(d, "=")
 			switch strings.ToLower(strings.TrimSpace(name)) {
 			case "public", "s-maxage":
-				return
+				continue
 			case "private":
 				private = private || d == name // a field-qualified private is not the broad one
 			}
 			kept = append(kept, d)
 		}
-		for i := 0; i < len(l); i++ {
-			switch l[i] {
-			case '"':
-				quoted = aware && !quoted
-			case '\\':
-				if quoted {
-					i++
-				}
-			case ',':
-				if !quoted {
-					emit(i)
-					start = i + 1
-				}
-			}
-		}
-		emit(len(l))
 	}
 	if !private {
 		kept = append(kept, "private")
@@ -258,18 +246,4 @@ func foldHeader(h http.Header, name string) []string {
 		}
 	}
 	return lines
-}
-
-// balancedQuotes reports whether every quoted string in l is closed.
-func balancedQuotes(l string) bool {
-	open := false
-	for i := 0; i < len(l); i++ {
-		switch {
-		case l[i] == '\\' && open:
-			i++
-		case l[i] == '"':
-			open = !open
-		}
-	}
-	return !open
 }

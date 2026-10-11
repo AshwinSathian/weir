@@ -104,10 +104,19 @@ func (c *Config) Assign(host, path string, cookieLines []string, rnd func() floa
 		return Result{}
 	}
 	var res Result
+	rotated := false
 	if v, ok := CookieValue(cookieLines, c.CookieName); ok {
-		res.Cookie, _ = ParseCookie(v, c.SigningKeys) // T-35: a bad MAC leaves the zero Cookie
+		var primary, ok bool
+		res.Cookie, primary, ok = ParseCookieKeyed(v, c.SigningKeys) // T-35: a bad MAC leaves the zero Cookie
+		rotated = ok && !primary
 	}
 	consent := !c.Consent.Configured() || c.Consent.Granted(cookieLines)
+	// Signed under a rotated-out key: re-sign with the first key and restart
+	// the Max-Age, so removing the old key later does not re-bucket the
+	// visitor. Without consent nothing is written (E6).
+	if rotated && consent {
+		res.Changed = true
+	}
 	res.Picks = make([]Choice, 0, len(active))
 	for _, e := range active {
 		res.Picks = append(res.Picks, Choice{e.Name, c.choose(e, &res, consent, rnd)})
