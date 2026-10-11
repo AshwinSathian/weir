@@ -30,7 +30,7 @@ type nextOrigin struct {
 // errNextFailed is what the engine and handle_errors see when next fails.
 // next's own error stays out of the message: it can carry upstream addresses
 // and Caddy internals that {http.error.message} would show to clients.
-var errNextFailed = errors.New("next handler failed")
+var errNextFailed = errors.New("weir: next handler failed")
 
 func newNextOrigin(next caddyhttp.Handler, base *http.Request, log *slog.Logger) nextOrigin {
 	o := nextOrigin{next: next, base: base, log: log}

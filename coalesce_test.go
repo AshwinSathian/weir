@@ -788,3 +788,29 @@ func TestCoalesceSharesNoCacheResponse(t *testing.T) {
 		}
 	})
 }
+
+type closeSpyPanicBody struct{ closed *atomic.Bool }
+
+func (closeSpyPanicBody) Read([]byte) (int, error) { panic("body read") }
+func (b closeSpyPanicBody) Close() error           { b.closed.Store(true); return nil }
+
+// NFR-2: an origin body whose Read panics must not leak the connection; the
+// engine closes it on the way out.
+func TestPanicInBodyReadClosesBody(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var closed atomic.Bool
+		o := testorigin.NewChecked(t, 64, 16)
+		o.Default(testorigin.Behavior{Func: func(*weir.Request) (*weir.Response, error) {
+			return &weir.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: closeSpyPanicBody{&closed}}, nil
+		}})
+		e := newEngine(t, cacheCfg)
+		defer closeEngine(t, e)
+		_, err := e.Serve(t.Context(), getReq("/a"), o)
+		if _, ok := errors.AsType[*weir.OriginError](err); !ok {
+			t.Fatalf("err = %v, want *OriginError", err)
+		}
+		if !closed.Load() {
+			t.Fatal("origin body was not closed after its Read panicked")
+		}
+	})
+}

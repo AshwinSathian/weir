@@ -244,6 +244,7 @@ func TestE2ECoalesceColdKey(t *testing.T) {
 		}()
 	}
 	eventually(t, "the leader to reach the origin", func() bool { return o.calls.Load() == 1 })
+	// Fixed pause (real clock, caddytest): lets the followers join the leader's flight before the gate opens; polls cannot see a joined follower.
 	time.Sleep(300 * time.Millisecond)
 	close(gate)
 

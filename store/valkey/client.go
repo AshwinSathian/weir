@@ -135,7 +135,7 @@ func (v valkeyClient) primaries(ctx context.Context) ([]string, error) {
 	for addr, n := range v.c.Nodes() {
 		arr, err := n.Do(ctx, n.B().Role().Build()).ToArray()
 		if err != nil {
-			return nil, fmt.Errorf("role on %s: %w", addr, err)
+			return nil, fmt.Errorf("store: valkey: role on %s: %w", addr, err)
 		}
 		if len(arr) == 0 {
 			continue
@@ -151,7 +151,7 @@ func (v valkeyClient) primaries(ctx context.Context) ([]string, error) {
 func (v valkeyClient) scanNode(ctx context.Context, addr string, cursor uint64, match string, count int64) ([]string, uint64, error) {
 	n, ok := v.c.Nodes()[addr]
 	if !ok {
-		return nil, 0, fmt.Errorf("node %s left the cluster", addr)
+		return nil, 0, fmt.Errorf("store: valkey: node %s left the cluster", addr)
 	}
 	e, err := n.Do(ctx, n.B().Scan().Cursor(cursor).Match(match).Count(count).Build()).AsScanEntry()
 	return e.Elements, e.Cursor, err
@@ -266,7 +266,7 @@ func (v valkeyClient) policies(ctx context.Context) (map[string]string, error) {
 	for addr, n := range v.c.Nodes() {
 		m, err := n.Do(ctx, n.B().ConfigGet().Parameter("maxmemory-policy").Build()).AsStrMap()
 		if err != nil {
-			return nil, fmt.Errorf("config get maxmemory-policy on %s: %w", addr, err)
+			return nil, fmt.Errorf("store: valkey: config get maxmemory-policy on %s: %w", addr, err)
 		}
 		out[addr] = m["maxmemory-policy"]
 	}

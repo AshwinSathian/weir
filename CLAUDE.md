@@ -75,7 +75,7 @@ Once `go.work` exists (M10-02), `make check` also runs each module with `GOWORK=
 These come from the architecture principles. Breaking one is a bug even if tests pass.
 
 1. The root module imports only the Go standard library (P7, NFR-6). No exceptions, including test-only imports. Dependencies belong in separate modules (`observe/prom`, `caddy`, `store/valkey`).
-2. `Origin.Fetch` is called in exactly one function, `(*Engine).fetch` in `fetch.go` (P3). Every path to the origin goes through it: foreground, background, warm, pass-through, errors.
+2. `Origin.Fetch` is called in exactly one place, `safeFetch` in `fetch.go`, and only `(*Engine).fetch` calls that (P3). Every path to the origin goes through `fetch`: foreground, background, warm, pass-through, errors. `originrule_test.go` enforces it.
 3. Stored entries are immutable (P4). Never write to a `*store.Entry`, its `Header` map, or its `Body` slice after `Set`. To change an entry, build a new one. Response headers served to callers are cloned maps.
 4. The forwarded request equals the keyed request (P2, INV-1). Anything the origin can see on a cacheable request is keyed or explicitly allowed. Normalization rewrites the request, never just the key.
 5. Every map, queue and table has a stated bound (P5, NFR-3). If you add a structure whose size depends on request input, state its bound in the LLD and test it.

@@ -174,7 +174,7 @@ func (e *Engine) fetch(ctx context.Context, c *keys.Classified, origin Origin, c
 		return res
 	}
 	limit := e.cfg.Storable.MaxObjectBytes
-	body, rerr := io.ReadAll(io.LimitReader(resp.Body, limit+1))
+	body, rerr := readBounded(resp.Body, limit+1)
 	res.respTime = time.Now()
 	stampDate(resp.Header, res.respTime)
 	if rerr != nil { // a truncated body is never stored or served
@@ -323,6 +323,18 @@ func safeFetch(ctx context.Context, origin Origin, req *Request) (resp *Response
 	}
 	normalizeResponse(resp)
 	return resp, nil
+}
+
+// readBounded reads up to n bytes. A body whose Read panics (an Origin bug)
+// becomes an error here, so the caller closes it and the connection is not
+// leaked; runFlight's recover alone could not reach the body (NFR-2).
+func readBounded(r io.Reader, n int64) (b []byte, err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			b, err = nil, fmt.Errorf("weir: origin body panic: %v", p)
+		}
+	}()
+	return io.ReadAll(io.LimitReader(r, n))
 }
 
 func closeBody(r *Response) {
