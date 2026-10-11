@@ -226,7 +226,7 @@ Each phase began with one planning card that verified the spec against current u
 - Touch: docs/10-experiments-spec.md (v1.0), docs/cards/20-later.md
 - AC: open items in 10 §6 resolved with the user; cards written
 
-### [ ] P3-01 Experiment config and signed assignment cookie
+### [x] P3-01 Experiment config and signed assignment cookie
 - Plan: Phase 3 · Size: M · Depends on: P3-00
 - Read: 10 §2 E1 to E3, E8, E9, §3, §4 steps 1 to 3; 04 §1.1 (Config); 06 T-35
 - Touch: internal/experiments/{config,cookie,pick}.go (new, stdlib only) and one test file each (6 files; the docs/04 Config fields come with P3-02, where Config is wired)
@@ -242,7 +242,7 @@ Each phase began with one planning card that verified the spec against current u
 - Tests: `TestVariantIsKeyDimension` (two variants, two entries, never mixed), `TestWeirVariantAlwaysReplaced` (every forwarding mode including `ForwardAll`), `TestExperimentCookieNeverForwarded` (all modes, other cookies kept; load rejects `Key.Cookies` naming it), `TestForwardedEqualsKeyed` with experiments, `TestConsentAbsentGetsControl`, `TestWinnerOverridesAssignment`
 - AC: dimensions `(experiment, variant)` appended in config order with a new tag byte; a client `Weir-Variant` never reaches the origin or the key; the experiment cookie is removed from the forwarded `Cookie` header in every mode; first `max_active` matches apply; consent gate per E6 including the one-time start warning; fuzz seeds for the new key input shape
 - Out of scope: Set-Cookie and E7 (P3-03); exposure events (P3-04)
-- Notes: security-sensitive (`internal/keys`): answer the 06 section 6 checklist in the commit body.
+- Notes: security-sensitive (`internal/keys`): answer the 06 section 6 checklist in the commit body. P3-01 notes: when deleting a client-supplied variant header, also delete any client header whose name equals the configured one after `_` is mapped to `-` and case is folded (T-35; CGI-style origins). `Cookie.Encode` returns `(string, bool)` and refuses short keys; `MarkExposed` exists for step 7. The config has no defaults yet: pick them here (cookie name, header, `max_active`) and ask before adding the public field. Mind allocations on the hit path: `Active` allocates one slice and `sign` builds an HMAC per key per request (`-benchmem`).
 
 ### [ ] P3-03 Set-Cookie and downstream cache rewrite
 - Plan: Phase 3 · Size: S · Depends on: P3-02
@@ -267,6 +267,7 @@ Each phase began with one planning card that verified the spec against current u
 - Tests: `TestCaddyfileExperiments`, `TestExperimentsExcludedFromKeyGenHash` (a reload changing experiments does not purge), `TestE2EExperimentSplit` (caddytest)
 - AC: the `experiments { ... }` block parses to JSON and back; signing keys from placeholders; reload changes experiments without a global purge; runbook entry for rotating signing keys
 - Out of scope: new matcher kinds (E8)
+- Notes: the runbook entry states the load rules from 10 §3: every signing key is at least 32 bytes, and an unset `{env.WEIR_EXP_KEY_PREV}` expands to an empty key and fails the load (fail closed); rotate by adding the new key first, then promoting it.
 
 ## Deferred
 

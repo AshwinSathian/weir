@@ -1,6 +1,6 @@
 # Weir experiment dimensions specification
 
-Status: v1.0. Phase 3. E1 to E7 were decided with the project owner on 2026-09-27; E8 and E9 on 2026-10-11 (P3-00). All are locked.
+Status: v1.1. Phase 3. E1 to E7 were decided with the project owner on 2026-09-27; E8 and E9 on 2026-10-11 (P3-00). All are locked. v1.1 (P3-01) adds the clarifications in §3 and §4 (control variant, load-time limits, cookie grammar, hash separator) that the first implementation needed.
 Date: 2026-10-11
 Depends on: [01-technical-spec.md](01-technical-spec.md), [02-architecture.md §7](02-architecture.md), [06-threat-model.md](06-threat-model.md)
 Seed: [00-design-doc.md §10](00-design-doc.md) (titled "Phase 2" there; it is Phase 3, see [09 §6](09-research-notes.md))
@@ -42,11 +42,20 @@ experiments {
 }
 ```
 
+Rules checked at load (P3-01, `internal/experiments`):
+
+- The first listed variant is the control (E6): `variants control=50 b=50`. Order matters; there is no separate control key.
+- Names (experiment, variant, cookie name) are 1 to 32 bytes of `[A-Za-z0-9_-]`. Weights are 1 to 1000 and add up to at most 10000; an experiment has 2 to 16 variants; at most 64 experiments; `max_active` is 1 to 8 (it bounds the forwarded header and the key dimensions, NFR-3). A salt is 1 to 64 printable ASCII bytes without spaces.
+- Every signing key is at least 32 bytes and at least one is required. An unset `{env.WEIR_EXP_KEY_PREV}` expands to an empty key and fails the load, on purpose: a short key must never sign or verify (T-35).
+- The forwarded header name must not be a request header Weir relies on (`Cookie`, `Host`, `Authorization`, framing headers, `Cache-Control` and similar), must not start with `Proxy-`, and must not contain `_`, because CGI-style origins map `Weir_Variant` and `Weir-Variant` to one variable.
+- Matchers use the spellings the key writes: a host is lower case with no trailing dot, compressed IPv6 and no leading-zero port (it may carry a non-default port); a path starts with `/`, has no `?`, `#` or non-ASCII, and its escapes are upper case and not decodable to an unreserved byte. A path ending in `*` is a prefix match, so `/checkout*` also matches `/checkoutx`; use `/checkout/*` to stop at a segment boundary. A matcher that could never match is a load error.
+- A winner experiment still contributes its dimension to the key and the header (one value), so entries stay partitioned and the origin sees what was keyed.
+
 ## 4. Mechanics
 
 1. Match experiments against the validated request by path and normalized host (decided 2026-09-27); both are already key inputs, so matching introduces no unkeyed input. More than `max_active` matches is a configuration error caught at load, not a runtime condition, when the matchers overlap statically; at runtime the first `max_active` in config order apply.
-2. Read and verify the cookie. The value is `v1.<visitor-id>.<assignments>.<mac>`, with assignments as `exp:variant` pairs in creation order, each followed by `!` once its exposure has been recorded (step 7); MAC is HMAC-SHA-256 over the rest with the first key, verified against every configured key (rotation).
-3. For each matching experiment: `winner` set means that variant; an existing assignment with a variant that still exists is kept (E3); otherwise, if consent allows, `variant = pick(weights, SHA-256(salt || visitor-id))`, else control.
+2. Read and verify the cookie. The value is `v1.<visitor-id>.<assignments>.<mac>`, with assignments as `exp:variant` pairs joined by `+` in creation order (empty when there are none), each followed by `!` once its exposure has been recorded (step 7); the visitor id is 1 to 64 token bytes; MAC is the unpadded base64url (canonical bits only) of HMAC-SHA-256 over everything before it with the first key, verified against every configured key (rotation). A value that is not the canonical spelling of what it decodes to is "no assignment".
+3. For each matching experiment: `winner` set means that variant; an existing assignment with a variant that still exists is kept (E3); otherwise, if consent allows, `variant = pick(weights, SHA-256(salt || 0x00 || visitor-id))` (the NUL keeps salt and id apart; salts cannot contain it), else control (the first listed variant).
 4. Remove the experiment cookie from the forwarded `Cookie` header in every forwarding mode (it carries the visitor id and every assignment and is not a key input, so under `ForwardAll` it would reach the origin unkeyed, INV-1); a config whose `Key.Cookies` names the experiment cookie is rejected at load. Append dimensions `(experiment, variant)` in config order to the primary key (new tag bytes in the key encoding) and set the forwarded header `Weir-Variant: exp=variant;exp2=variant` after deleting any client-supplied value in every forwarding mode.
 5. Serve normally. On the way out, if an assignment was created or changed, add `Set-Cookie` to the response given to this client only. The stored entry never contains it (the engine adds it after the entry is built).
 6. Apply E7 to the outgoing response.

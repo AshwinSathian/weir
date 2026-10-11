@@ -1,22 +1,21 @@
 # Status
 
 Updated: 2026-10-11
-Phase: 1
+Phase: 3
 Current card: none
 Card state: awaiting-merge
-Branch: claude/great-bardeen-t56hcm (designated session branch)
-PR: https://github.com/AshwinSathian/weir/pull/98
-Next card: P3-01 (`make next`)
+Branch: claude/gracious-shannon-w5n6k7 (designated session branch)
+PR: https://github.com/AshwinSathian/weir/pull/100
+Next card: P3-02 (`make next`)
 
 ## Waiting on Ashwin
 
-Nothing.
+Nothing. The control-variant and hash-separator questions were decided in the PR 100 review (first listed variant; `salt || 0x00 || id`) and are in docs/10 v1.1.
 
 ## Notes for the next session
 
-- P25-07d is done: `keyGenRetry` in `caddy/keygen.go`, started last in `Provision` when the check was skipped, stopped first in `Cleanup`. 08 §3 and runbook 8.7 describe it. No config field was added.
-- `make check` stops at golangci-lint here (installed binary built with Go 1.25, module targets 1.27). gofmt, vet, `go test -race -shuffle=on` in the root and `caddy` modules and trace 146/146 pass. CI is the lint gate.
-- Adversarial review of PR 97 done (decisions delegated by Ashwin; "Waiting on Ashwin" was empty). Implemented: a failed record write is retried too; retry attempts log at Debug, a failing purge once per distinct error; a cancelled attempt logs nothing; `TestProvisionStartsAndCleanupStopsKeyGenRetry` covers the wiring with a real handler, no seam needed.
-- Open follow-up: a way for `caddy validate` to skip the purge (needs a signal from Caddy). The "forwarding rules differ" Warn still repeats while a purge keeps failing (rare).
-- `TestE2EPurgeHerd` (real-clock caddytest) failed once in about six runs and passed on rerun, also on the parent commit; treat it as a known flake.
-- P3-00 is done (docs only, committed on the designated branch, no PR opened yet). Spec 10 is v1.0 with E8 and E9. Next is P3-01; ask before adding any public Config field.
+- P3-01 is done: `internal/experiments` has config, cookie and pick, nothing wired into the engine. `Validate` fills in no defaults; P3-02 decides them and the public shape (ask first).
+- The load limits are now in docs/10 §3 (v1.1). Consent (E6) is not in the package yet; it belongs to P3-02, with the defaults and the public shape (ask first). See the P3-02 card notes for the header-spoofing and allocation points from the review.
+- Lint can run here: `GOTOOLCHAIN=go1.27.0 GOBIN=/tmp/lintbin go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0` from a scratch directory, then `GOTOOLCHAIN=go1.27.0 /tmp/lintbin/golangci-lint run` (the installed binary is built with Go 1.25 and refuses the module). Run it before pushing.
+- `TestE2EPurgeHerd` (real-clock caddytest) is a known flake.
+- Open follow-up from P25-07d: a way for `caddy validate` to skip the purge (needs a signal from Caddy).

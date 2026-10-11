@@ -1752,3 +1752,28 @@ Entry template:
 - Deviations: none. The card-reviewer found a must-fix: the experiment cookie would reach the origin unkeyed under ForwardAll. Fixed in 10 §4 step 4 and P3-02 (ask-first note kept: an addition to the forwarding rules).
 - Follow-ups: P3-01 may need a public Config field, so ask first. `/handoff` was not run (reserved for the user); PR still to open.
 - Context: low
+
+## 2026-10-11 · P3-01 · done
+- Branch / PR: claude/gracious-shannon-w5n6k7 (the session's designated branch) / https://github.com/AshwinSathian/weir/pull/100
+- Done: `internal/experiments` (stdlib only): `Config.Validate` (names, key length, overlap above `max_active`, variant product above `Key.MaxVariants × 4`, checked over every host and path stem), `Matches`/`Active`; the HMAC-signed `v1` cookie (`ParseCookie`, `Encode` with the 512-byte cap, `Prune`, `Set`, `NewVisitorID`); `Pick`.
+- Tests: the seven named in the card plus `TestCookieSet`, `TestConfigValidate`, `TestMatchAndActive`. The fuzzer found a `base64.Decode` panic on an over-long MAC (fixed, seed kept); the card-reviewer's point that the target never got past the MAC led to a signing mode, which found that a trailing `+` was accepted (fixed). Race tests, vet, gofmt, trace 146/146 pass; `make check` stops at the known golangci-lint Go-version mismatch.
+- Deviations: none in docs. New load-time limits not in docs/10: signing key at least 16 bytes, names at most 32 token bytes, weight 1 to 1000, total weight at most 10000. Host matchers accept the normalized form with a port or IPv6 literal.
+- Follow-ups: ask Ashwin (STATUS): the first listed variant is the control, which docs/10 does not say; `Pick` hashes `salt || id` without a separator, as the spec reads. Document the new limits in docs/10 §3 with the P3-02 edit. P3-02 sets the defaults and the public `Config` shape (ask first).
+- Context: low
+
+## 2026-10-11 · P3-01 · review-fixes
+- Branch / PR: claude/gracious-shannon-w5n6k7 / https://github.com/AshwinSathian/weir/pull/100
+- Done: adversarial review (independent card-reviewer) of PR 100, decisions delegated by Ashwin. Must-fix: the MAC had four accepted spellings (non-strict base64; now `Strict()`, fuzz checks canonical form unconditionally); an empty or short key verified and signed (keys under 32 bytes now skipped, `Encode` returns `(string, bool)`); header names could be `Cookie`, `Host`, framing headers or contain `_` (denylist and no underscore). Also: matchers that could never match are load errors (trailing dot, uncompressed IPv6, non-normalized escapes, `?`); caps on `max_active` (8), experiments (64), variants (16), salt; saturating product math; `Set`/`MarkExposed` copy on write; `Pick` rejects weights below 1; T-27 citation corrected to T-15/FR-KEY-10.
+- Decisions: first listed variant is the control; hash input is `salt || 0x00 || id` (golden vector computed outside Go); load limits documented in docs/10 §3 (now v1.1), T-35 row updated, P3-02 and P3-05 card notes added; key minimum raised to 32 bytes.
+- Tests: `TestCookieRefusesShortKeys`, `TestCookieMACHasOneSpelling`, `TestCookieEncodeRefusals`, `TestCookieCopiesDoNotAlias`, `TestPickGolden`, many `TestConfigValidate` cases; fuzz target now signs its input and checks canonical form. Race tests, vet, gofmt and trace pass; 45 s fuzz clean.
+- Deviations: docs/10 v1.1 (clarifications and the hash separator; no requirement or default changed).
+- Follow-ups: P3-02 sets defaults and the public shape (ask first), deletes `_`/`-` header variants, watches allocations on the hit path.
+- Context: low
+
+## 2026-10-11 · P3-01 · review-fixes
+- Branch / PR: claude/gracious-shannon-w5n6k7 / https://github.com/AshwinSathian/weir/pull/100
+- Done: fixed the 10 golangci-lint findings CI reported in `internal/experiments` (gosec G115 conversions, prealloc, revive `max` shadowing and unused parameter, staticcheck De Morgan and SA4000). The earlier handoffs never ran lint because the local binary refuses the module.
+- Tests: golangci-lint v2.14.0 built with Go 1.27.0 reports 0 issues repo-wide; race tests, gofmt and trace pass; 20 s fuzz clean.
+- Deviations: none
+- Follow-ups: STATUS now records how to run lint locally; run it before every push.
+- Context: low
