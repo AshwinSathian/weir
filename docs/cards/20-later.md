@@ -226,47 +226,57 @@ Each phase began with one planning card that verified the spec against current u
 - Touch: docs/10-experiments-spec.md (v1.0), docs/cards/20-later.md
 - AC: open items in 10 §6 resolved with the user; cards written
 
-### [ ] P3-01 Experiment config and signed assignment cookie
-- Plan: Phase 3 · Size: M · Depends on: P3-00
-- Read: 10 §2 E1 to E3, E8, E9, §3, §4 steps 1 to 3; 04 §1.1 (Config); 06 T-35
-- Touch: internal/experiments/{config,cookie,pick}.go (new, stdlib only) and one test file each (6 files; the docs/04 Config fields come with P3-02, where Config is wired)
-- Tests: `TestCookieRoundTrip`, `TestCookieRejectsBadMAC`, `TestCookieKeyRotation`, `TestPickDistribution` (weights within 3 sigma over 100k ids from a counter, so the test is deterministic), `TestPruneUnconfigured`, `TestCookieCap512`, `FuzzParseCookie` with seeds
-- AC: `v1.<visitor-id>.<assignments>.<mac>` parses and verifies against every key; a bad or missing MAC yields "no assignment"; pick is deterministic for (salt, visitor-id); pruning per E9; config load rejects overlapping matchers above `max_active` and variant products above `Key.MaxVariants × 4`; no panics on any input (NFR-2)
-- Out of scope: the engine, keys and headers (P3-02); Set-Cookie (P3-03)
-- Notes: constant-time MAC compare (`hmac.Equal`). Randomness for new visitor ids from `Config.Rand`. The config shape in 10 §3 is decided; whether it appears as a public `Config` field or an option is not, and is an API change: ask first (P3-02 wires it). Cookie grammar: assignments in creation order, `!` suffix marks recorded exposure, 512-byte cap on the whole value (E9).
+### [ ] P3-01 Signed assignment cookie and pick
+- Plan: Phase 3 · Size: S · Depends on: P3-00
+- Read: 10 §2 E1, E2, E3, E9, E10, E11, E16; 06 T-35, T-50
+- Touch: internal/experiments/{cookie,pick}.go (new, stdlib only) and one test file each (4 files)
+- Tests: `TestCookieRoundTrip`, `TestCookieRejectsBadMAC`, `TestCookieKeyRotation` (a cookie verified with a non-first key is flagged for re-issue), `TestCookieRejectsOldVersion`, `TestCookieRejectsOverlong` (before any MAC work), `TestDuplicateAssignmentCookieMeansNone`, `TestPruneUnconfigured`, `TestCookieCap512` (front dropped), `TestPickDistribution` (counter ids; weight sets 50/50, 90/10, 1/1/1/97; bound 3·sqrt(n·p·(1-p)), deterministic), `FuzzParseCookie` with seeds
+- AC: grammar and MAC exactly as in E10; verification with `hmac.Equal` against every key; pick as in E16; names validated against `[a-z0-9-]{1,32}`; one-pass byte parse, no `fmt`, `regexp` or `strings.Split`; no panics on any input (NFR-2); ids from `crypto/rand` through an unexported seam so tests are deterministic
+- Out of scope: config types and validation (P3-03), key and forwarding changes (P3-02)
+- Notes: constant-time compare only for the MAC. The package takes plain values, not root types.
 
-### [ ] P3-02 Variant key dimension and forwarded header
+### [ ] P3-02 Variant key dimension, forwarded header and cookie stripping
 - Plan: Phase 3 · Size: M · Depends on: P3-01
-- Read: 10 §4 steps 1 to 4; 02 P2, §7; 04 §3.2, §3.5; 06 T-35
-- Touch: internal/keys/encode.go, forward.go, request.go, experiments.go in the root package (new: match and assign step), docs/04 (Config fields), tests
-- Tests: `TestVariantIsKeyDimension` (two variants, two entries, never mixed), `TestWeirVariantAlwaysReplaced` (every forwarding mode including `ForwardAll`), `TestExperimentCookieNeverForwarded` (all modes, other cookies kept; load rejects `Key.Cookies` naming it), `TestForwardedEqualsKeyed` with experiments, `TestConsentAbsentGetsControl`, `TestWinnerOverridesAssignment`
-- AC: dimensions `(experiment, variant)` appended in config order with a new tag byte; a client `Weir-Variant` never reaches the origin or the key; the experiment cookie is removed from the forwarded `Cookie` header in every mode; first `max_active` matches apply; consent gate per E6 including the one-time start warning; fuzz seeds for the new key input shape
-- Out of scope: Set-Cookie and E7 (P3-03); exposure events (P3-04)
-- Notes: security-sensitive (`internal/keys`): answer the 06 section 6 checklist in the commit body.
+- Read: 10 §2 E4, E12, E13, E19, §4 steps 1, 4; 02 P2, §7; 04 §3.2, §3.5; 01 FR-BYP-1, FR-FWD-2, FR-FWD-3; 06 T-35, T-47, T-49 and §6
+- Touch: internal/keys/{encode,forward,request}.go, one new test file, docs/04 §3.2 (tags 0x30, 0x31)
+- Tests: `TestVariantIsKeyDimension`, `TestKeyInjectivityWithExperiments` (extend the property test), `TestPurgeURICoversAllVariants`, `TestWeirVariantAlwaysReplaced` (every mode incl. `ForwardAll`, pass and bypass), `TestWeirVariantUnderscoreAliasRemoved`, `TestExperimentCookieNeverForwarded` (all modes, other cookies kept, duplicates and percent-encoded spellings removed), `TestForwardedEqualsKeyed`, fuzz seeds for the new input shapes
+- AC: `KeyInput` carries `(experiment, variant)` pairs; the encoder sorts by experiment name and emits tags 0x30 and 0x31; the header value is `exp=variant;...` sorted by name; header and cookie removal are as wide as FR-BYP-1 and apply in every mode and class; the URI tag excludes experiment fields
+- Out of scope: Config, matching and consent (P3-03)
+- Notes: security-sensitive (`internal/keys`): answer the 06 §6 checklist in the commit body, including "key version not bumped, new tags appear only on matched requests".
 
-### [ ] P3-03 Set-Cookie and downstream cache rewrite
-- Plan: Phase 3 · Size: S · Depends on: P3-02
-- Read: 10 §2 E7, §4 steps 5, 6; 01 FR-TCC-4; 06 T-36
-- Touch: serve.go response stage, tests
-- Tests: `TestSetCookieNeverStored`, `TestSetCookiePerClientOnly` (hit path too), `TestDownstreamRewrittenPrivate`, `TestDownstreamVariantAwareKeepsDirectives`, `TestStoredCopyKeepsOriginDirectives`
-- AC: a created or changed assignment adds `Set-Cookie` (HttpOnly, SameSite=Lax, Path=/, Secure on https) to that client's response only; matched responses drop `public` and `s-maxage` and gain `private`, lose `CDN-Cache-Control`, unless the operator declared variant-aware downstream; the stored entry is unchanged (P4: build a new header map)
-- Out of scope: exposure events (P3-04)
+### [ ] P3-03 Config, matching and assignment in the engine
+- Plan: Phase 3 · Size: M · Depends on: P3-02
+- Read: 10 §2 E5, E6, E8, E11, E12, E14, E15, E18, E19, §3, §4 steps 1 to 4; 04 §1.1 (Config); 01 §Config table
+- Touch: config.go (`ExperimentsConfig`, validation), experiments.go (new: match and assign), serve.go (call site), tests, docs/04 §1.1 and 01 config table
+- Tests: `TestConfigRejectsWeakKeys`, `TestKeysRedacted`, `TestConfigRejectsBadNames`, `TestConfigRejectsCardinality`, `TestConfigRejectsKeyedHeaderName`, `TestConfigRejectsCookieInKeyOrBypass`, `TestMatchPathHostNormalized`, `TestConsentAbsentGetsControl`, `TestWinnerAppliesWithoutConsent`, `TestWinnerOverridesAssignment`, `TestPassBypassWarmClasses` (E19 table, one subtest per row), `TestSWRRefreshKeepsVariant`, `TestStaleIfErrorStaysInVariant`, `TestConsentWarningAtEveryStart`, `BenchmarkHitWithExperiments` (allocation budget documented)
+- AC: `Config.Experiments *ExperimentsConfig` (nil off); errors wrap `ErrInvalidConfig`; every E5/E6/E11/E12/E14/E18/E19 rule above is enforced; the hit path does one pass over cookie bytes and no `fmt`
+- Out of scope: Set-Cookie and E7 (P3-04), events (P3-05)
+- Notes: the public Config shape was decided in the PR 98 review (10 §3); anything beyond it asks first.
 
-### [ ] P3-04 EvExposure
+### [ ] P3-04 Set-Cookie and downstream cache rewrite
 - Plan: Phase 3 · Size: S · Depends on: P3-03
-- Read: 10 §4 step 7; 04 §9.2 (events)
-- Touch: events, assignment step, tests, docs/04 §9.2
-- Tests: `TestExposureOncePerVisitor`, `TestExposureOnHit`, `TestExposureNoneWithoutConsent`, `TestExposureVisitorIsHashPrefix`
-- AC: the catalog entry is added to 04 §9.2; one `EvExposure{experiment, variant, visitor}` per visitor per experiment (on creation or when the signed exposed mark is missing, which is then added); visitor is a SHA-256 prefix; events carry no other request data
-- Out of scope: any analytics sink
+- Read: 10 §2 E1, E6, E7, E11, E15, §4 steps 5, 6; 01 FR-TCC-4, FR-SRV-2; 06 T-36, T-48
+- Touch: serve.go response stage, one test file
+- Tests: `TestSetCookieNeverStored`, `TestSetCookiePerClientOnly` (hit path too), `TestSetCookieNotSharedWithFlightFollowers`, `TestSetCookieOnEveryPath` (hit, miss, follower, revalidated, stale, negative, 304), `TestCookieReissuedAfterRotation`, `TestConsentWithdrawalExpiresCookie`, `TestDownstreamRewrittenPrivate`, `TestE7On304`, `TestE7OnStaleAndNegative`, `TestE7ExistingNoStoreKept`, `TestStoredCopyKeepsOriginDirectives`, `TestDownstreamKeysOnCookieSkipsRewrite`
+- AC: cookie attributes per E1; Set-Cookie triggers per §4 step 5; E7 exactly as written, applied to every response of a matched request; stored entries unchanged and response headers served to callers are clones (P4)
+- Out of scope: events (P3-05)
 
-### [ ] P3-05 Caddy adapter: experiments block
-- Plan: Phase 3 · Size: M · Depends on: P3-04
-- Read: 10 §3; 08 §2 (configuration surface), §3 (key-generation hash)
-- Touch: caddy/{caddyfile,config,module}.go, one test file, docs/08, docs/runbook.md (7 files at the limit; split the caddytest e2e into P3-05b if it grows)
+### [ ] P3-05 EvExposure
+- Plan: Phase 3 · Size: S · Depends on: P3-04
+- Read: 10 §2 E17; 04 §9.1, §9.2; 06 T-51
+- Touch: event types, assignment step, one test file, docs/04 §9.1 and §9.2
+- Tests: `TestExposureOncePerVisitor`, `TestExposureOnHit`, `TestExposureOnlyGetBelow500`, `TestExposureNoneWithoutConsent`, `TestExposureVisitorIsPerExperimentHash`, `TestExposureNoneForWinner`
+- AC: `Event` gains `Experiment`, `Variant`, `Visitor` (documented non-label fields) and the 04 §9.2 sentence about Partition covers them; one event per visitor per experiment per E17; no other request data in events
+- Out of scope: any analytics sink
+- Notes: ASK THE USER FIRST only if the field set differs from E17 (public API).
+
+### [ ] P3-06 Caddy adapter: experiments block
+- Plan: Phase 3 · Size: M · Depends on: P3-05
+- Read: 10 §3, §5; 08 §2 (configuration surface), §3 (key-generation hash)
+- Touch: caddy/{caddyfile,config,module}.go, one test file, docs/08, docs/runbook.md (6 files)
 - Tests: `TestCaddyfileExperiments`, `TestExperimentsExcludedFromKeyGenHash` (a reload changing experiments does not purge), `TestE2EExperimentSplit` (caddytest)
-- AC: the `experiments { ... }` block parses to JSON and back; signing keys from placeholders; reload changes experiments without a global purge; runbook entry for rotating signing keys
-- Out of scope: new matcher kinds (E8)
+- AC: the `experiments { ... }` block parses to JSON and back and maps onto `ExperimentsConfig`; signing keys from placeholders; reload changes experiments without a global purge; runbook entries: rotation order, same keys and salts on every node, `__Host-` name, loud warning for `downstream_keys_on_cookie`, name reuse needs a purge, per-origin ETag and no `Vary: Weir-Variant`
+- Out of scope: new matcher kinds (E8). Split the caddytest e2e into P3-06b if the card grows past M.
 
 ## Deferred
 

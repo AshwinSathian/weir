@@ -348,3 +348,18 @@ Nightly: fuzzing (§5), cache-tests (§8), load tests (§9).
 - Load scenarios in §9 pass on the reference machine.
 - cache-tests baseline recorded with every failure explained.
 - NFR-5 budgets met or the spec updated with measured numbers and a reason.
+
+## 13. Phase 3: experiment dimensions
+
+Rows below are filled in by the P3 cards; names are binding. Pass criteria: every listed test passes under `-race`, and `FuzzParseCookie` runs 1 hour cumulatively without a crasher.
+
+| Threat | Tests | Card |
+|---|---|---|
+| T-35 | `TestCookieRejectsBadMAC`, `TestCookieKeyRotation`, `TestCookieRejectsOldVersion`, `TestWeirVariantAlwaysReplaced` | P3-01, P3-02 |
+| T-36 | `TestDownstreamRewrittenPrivate`, `TestE7On304`, `TestE7OnStaleAndNegative`, `TestE7ExistingNoStoreKept`, `TestDownstreamKeysOnCookieSkipsRewrite` | P3-04 |
+| T-46 | `TestConfigRejectsWeakKeys`, `TestKeysRedacted` | P3-03 |
+| T-47 | `TestWeirVariantUnderscoreAliasRemoved` | P3-02 |
+| T-48 | `TestSetCookieNotSharedWithFlightFollowers` | P3-04 |
+| T-49 | `TestExperimentCookieNeverForwarded` | P3-02 |
+| T-50 | `TestDuplicateAssignmentCookieMeansNone` | P3-01 |
+| T-51 | `TestExposureOnlyGetBelow500` | P3-05 |

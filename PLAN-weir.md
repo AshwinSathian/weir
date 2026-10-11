@@ -202,7 +202,7 @@ Goal: prove the store interface has no in-process assumptions and unlock multi-n
 
 ### Phase 3: Experiment dimensions (~4 weeks, after Phase 2.5)
 
-Spec: [docs/10-experiments-spec.md](docs/10-experiments-spec.md) (decisions E1 to E9 locked, v1.0). Cards P3-01 to P3-05 in docs/cards/20-later.md; the T-35 and T-36 tests come with P3-02 and P3-03.
+Spec: [docs/10-experiments-spec.md](docs/10-experiments-spec.md) (decisions E1 to E19 locked, v1.1). Cards P3-01 to P3-06 in docs/cards/20-later.md; test names per threat in docs/07 §13. Decisions E10 to E19 came from the PR 98 review.
 
 ## Testing strategy
 
