@@ -4,8 +4,8 @@ Updated: 2026-10-11
 Phase: release
 Current card: none
 Card state: ready
-Branch: claude/magical-carson-rwdd4q (release-prep commits, no PR yet)
-PR: none
+Branch: claude/magical-carson-rwdd4q (release prep and review fixes)
+PR: opened at the end of the R-07 session (see the PR list)
 Next card: none (all cards done; M16-02 deferred)
 
 ## Waiting on Ashwin
@@ -14,6 +14,8 @@ Next card: none (all cards done; M16-02 deferred)
 - Run the `release-gate` workflow (Actions, manual) on the candidate commit: engine tests 100x under race, one hour of fuzzing per target.
 - Decide whether to open a PR for the release-prep branch, then follow docs/release.md (release branch, rc rehearsal, tags in order: root, observe/prom and store/valkey, caddy).
 - Confirm the decisions taken for you: D24 amended, D43 added, README Stability promises, signing key caps, `servableStatus` miss.
+
+- Decide on the review follow-ups listed in the last LOG entry (If-Match handling, unkeyed Pragma/Cache-Control storage, QuerySort order, Entry.Size accounting, Valkey record size limit).
 
 ## Notes for the next session
 

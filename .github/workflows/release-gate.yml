@@ -20,7 +20,13 @@ permissions:
 jobs:
   repeat:
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        # One job per group so none has to fit the whole suite: the root
+        # package alone takes about 15 s per race run on a quiet 4-core box.
+        pkgs: [".", "./internal/...", "./store/...", "./weirhttp/..."]
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -32,7 +38,8 @@ jobs:
       - name: engine-level tests, repeated
         env:
           COUNT: ${{ inputs.count }}
-        run: go test -race -shuffle=on -count="$COUNT" -timeout 170m . ./internal/... ./store/... ./weirhttp/...
+          PKGS: ${{ matrix.pkgs }}
+        run: go test -race -shuffle=on -count="$COUNT" -timeout 230m $PKGS
 
   fuzz-targets:
     runs-on: ubuntu-latest
@@ -60,7 +67,7 @@ jobs:
   fuzz:
     needs: fuzz-targets
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 350 # fuzztime up to about 5 h; GitHub-hosted jobs stop at 6 h
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.fuzz-targets.outputs.matrix) }}

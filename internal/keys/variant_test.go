@@ -104,3 +104,16 @@ func names0(names []string) string {
 	}
 	return names[0]
 }
+
+// FR-KEY-11, T-15: every line of a multi-line Vary value is keyed, not just
+// the first. An origin that reads a later line answers these differently.
+func TestVariantKeyCoversEveryLine(t *testing.T) {
+	names := []string{"X-A"}
+	p := store.Key{1}
+	a := VariantKey(p, names, http.Header{"X-A": {"en", "fr"}})
+	b := VariantKey(p, names, http.Header{"X-A": {"en", "de"}})
+	c := VariantKey(p, names, http.Header{"X-A": {"en", "fr", "x"}})
+	if a == b || a == c || b == c {
+		t.Fatalf("keys collide: %x %x %x", a[:4], b[:4], c[:4])
+	}
+}

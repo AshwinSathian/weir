@@ -34,23 +34,21 @@ func TestOriginReachedOnlyThroughFetch(t *testing.T) {
 				continue
 			}
 			ast.Inspect(fd.Body, func(n ast.Node) bool {
-				call, ok := n.(*ast.CallExpr)
-				if !ok {
-					return true
-				}
-				switch fn := call.Fun.(type) {
+				switch x := n.(type) {
 				case *ast.SelectorExpr:
-					if fn.Sel.Name == "Fetch" {
+					// Any mention of .Fetch, a call or a method value
+					// (f := o.Fetch), counts.
+					if x.Sel.Name == "Fetch" {
 						fetchCalls++
 						if fd.Name.Name != "safeFetch" {
-							t.Errorf("%s: .Fetch called in %s, want safeFetch", fset.Position(call.Pos()), fd.Name.Name)
+							t.Errorf("%s: .Fetch used in %s, want safeFetch", fset.Position(x.Pos()), fd.Name.Name)
 						}
 					}
-				case *ast.Ident:
-					if fn.Name == "safeFetch" {
+				case *ast.CallExpr:
+					if id, ok := x.Fun.(*ast.Ident); ok && id.Name == "safeFetch" {
 						safeCalls++
 						if fd.Name.Name != "fetch" {
-							t.Errorf("%s: safeFetch called in %s, want (*Engine).fetch", fset.Position(call.Pos()), fd.Name.Name)
+							t.Errorf("%s: safeFetch called in %s, want (*Engine).fetch", fset.Position(x.Pos()), fd.Name.Name)
 						}
 					}
 				}

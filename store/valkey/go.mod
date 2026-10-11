@@ -9,6 +9,7 @@ require (
 
 require golang.org/x/sys v0.47.0 // indirect
 
-// ponytail: the root module has no release tag yet; once one exists, require it
-// and drop this replace (a replace is ignored by importers of this module).
+// ponytail: the root v0.1.0 tag predates the APIs this module uses; the
+// release branch pins a v1 tag and drops this replace (docs/release.md; a
+// replace is ignored by importers of this module).
 replace github.com/AshwinSathian/weir => ../..

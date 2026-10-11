@@ -39,11 +39,10 @@ type rfcStep struct {
 }
 
 // rfcRow is one normative statement of RFC 9111 (or 5861, 9211) that Weir
-// implements. Rows tagged with a later milestone are skipped until it lands.
+// implements.
 type rfcRow struct {
 	sec   string // RFC section
 	name  string
-	tag   string // milestone that makes the row pass; "" for M1
 	cfg   func(*weir.Config)
 	steps []rfcStep
 }
@@ -325,7 +324,7 @@ var rfcRows = []rfcRow{
 		{method: "POST", origin: bh(201, "", "Location", "https://other.example/other"), status: 201, calls: 2},
 		{host: "other.example", path: "/other", calls: 2},
 	}},
-	{sec: "9875 §3", name: "Cache-Group-Invalidation invalidates the group", tag: "M9", steps: []rfcStep{
+	{sec: "9875 §3", name: "Cache-Group-Invalidation invalidates the group", steps: []rfcStep{
 		{path: "/other", origin: bh(200, "a", "Cache-Control", "max-age=60", "Cache-Groups", `"g"`), calls: 1},
 		{method: "POST", origin: bh(200, "", "Cache-Group-Invalidation", `"g"`), calls: 2},
 		{path: "/other", origin: bh(200, "a", "Cache-Control", "max-age=60"), calls: 3},
@@ -432,9 +431,6 @@ var rfcRows = []rfcRow{
 func TestRFC9111(t *testing.T) {
 	for _, row := range rfcRows {
 		t.Run(row.sec+" "+row.name, func(t *testing.T) {
-			if row.tag != "" {
-				t.Skipf("needs %s", row.tag)
-			}
 			synctest.Test(t, func(t *testing.T) { runRFCRow(t, row) })
 		})
 	}

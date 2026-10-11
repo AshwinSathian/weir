@@ -155,6 +155,7 @@ func TestStoreGuardTreatsUnservableStatusAsMiss(t *testing.T) {
 		{"response 999", &store.Entry{Kind: store.KindResponse, Status: 999}, true},
 		{"response without a status", &store.Entry{Kind: store.KindResponse}, false},
 		{"response 99", &store.Entry{Kind: store.KindResponse, Status: 99}, false},
+		{"response 1000", &store.Entry{Kind: store.KindResponse, Status: 1000}, false},
 		{"response 100", &store.Entry{Kind: store.KindResponse, Status: 100}, false},
 		{"response 199", &store.Entry{Kind: store.KindResponse, Status: 199}, false},
 		{"negative 150", &store.Entry{Kind: store.KindNegative, Status: 150}, false},

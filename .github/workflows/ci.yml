@@ -28,6 +28,10 @@ jobs:
             **/go.sum
       - name: make check
         run: make check
+      # 32-bit: test code with untyped constants over 2^31 compiled only on
+      # 64-bit until a vet run here caught it.
+      - name: vet on 32-bit
+        run: GOARCH=386 go vet ./...
       - name: govulncheck
         run: make vuln
 
