@@ -1795,7 +1795,7 @@ Entry template:
 - Context: medium
 
 ## 2026-10-11 · P3-03 · done
-- Branch / PR: claude/vigilant-tesla-7nuval / pending
+- Branch / PR: claude/vigilant-tesla-7nuval / https://github.com/AshwinSathian/weir/pull/102
 - Done: `experimentResponse` in experiments.go (hooked in `Serve`): assignment `Set-Cookie` for a created or changed assignment only, E7 rewrite to private, `CDN-Cache-Control` removed, header map cloned (P4). New `ExperimentsConfig.DownstreamKeysOnVariant`.
 - Tests: `TestSetCookiePerClientOnly`, `TestSetCookieNeverStored`, `TestDownstreamRewrittenPrivate`, `TestDownstreamVariantAwareKeepsDirectives`, `TestStoredCopyKeepsOriginDirectives`, plus Secure-on-https, no-origin-CC, non-canonical keys, `TestPrivateCacheControl`, `FuzzPrivateCacheControl`. `make check` passes.
 - Deviations: docs/10 v1.4, docs/04 §1, docs/06 T-36 row. Review fixes: a response that sets the cookie is private even with `DownstreamKeysOnVariant`; unbalanced-quote lines split on every comma; non-canonical header keys folded. Max-Age 90 days comes from the PR 99 text, not an earlier spec line.

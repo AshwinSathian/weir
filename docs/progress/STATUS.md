@@ -5,7 +5,7 @@ Phase: 3
 Current card: none
 Card state: awaiting-merge
 Branch: claude/vigilant-tesla-7nuval (designated session branch)
-PR: pending
+PR: https://github.com/AshwinSathian/weir/pull/102
 Next card: P3-04 (`make next`)
 
 ## Waiting on Ashwin
