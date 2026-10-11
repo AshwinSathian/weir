@@ -439,7 +439,11 @@ func FuzzRequestFrom(f *testing.F) {
 		if !ok || strings.HasPrefix(r.RequestURI, "/") || i < 0 {
 			return
 		}
-		if want := strings.Replace(rest[i:], "?", "", 1); req.Path+req.RawQuery != want {
+		want := strings.Replace(rest[i:], "?", "", 1)
+		if rest[i] == '?' { // an empty http path is "/" (RFC 9110 §4.2.3)
+			want = "/" + want
+		}
+		if req.Path+req.RawQuery != want {
 			t.Fatalf("target %q: path %q query %q, want the raw bytes %q", r.RequestURI, req.Path, req.RawQuery, rest[i:])
 		}
 	})
