@@ -1,6 +1,7 @@
 package weir
 
 import (
+	"bytes"
 	"fmt"
 	"log/slog"
 	"math"
@@ -35,8 +36,9 @@ type Config struct {
 	Timeouts      TimeoutsConfig
 	Warm          WarmConfig
 	Limits        LimitsConfig
-	CacheStatus   string // Cache-Status member name (FR-SRV-9); "": "Weir"
-	NoCacheStatus bool   // omit the Cache-Status header (T-27)
+	Experiments   ExperimentsConfig // zero value: no A/B bucketing (docs/10)
+	CacheStatus   string            // Cache-Status member name (FR-SRV-9); "": "Weir"
+	NoCacheStatus bool              // omit the Cache-Status header (T-27)
 	Observer      Observer
 	Logger        *slog.Logger   // nil: discard
 	Rand          func() float64 // [0, 1); safe for concurrent use; nil: rand.Float64
@@ -221,6 +223,11 @@ func (c *Config) copySlices() {
 		*p = slices.Clone(*p)
 	}
 	c.Storable.Statuses = slices.Clone(c.Storable.Statuses)
+	c.Experiments.SigningKeys = slices.Clone(c.Experiments.SigningKeys)
+	for i, k := range c.Experiments.SigningKeys {
+		c.Experiments.SigningKeys[i] = bytes.Clone(k) // the caller may zero or rotate its keys
+	}
+	c.Experiments.Experiments = slices.Clone(c.Experiments.Experiments)
 }
 
 func (c *Config) applyDefaults() {
@@ -307,6 +314,7 @@ func (c *Config) applyDefaults() {
 	orInt(&lim.MaxGroups, 32)
 	orInt(&lim.MaxGroupBytes, 128)
 
+	c.Experiments.applyDefaults()
 	if c.CacheStatus == "" {
 		c.CacheStatus = "Weir"
 	}
@@ -426,6 +434,9 @@ func (c *Config) validate() error {
 	}
 	if c.Forward.Mode > ForwardAll {
 		return invalid("Forward.Mode", "unknown mode")
+	}
+	if err := c.validateExperiments(); err != nil {
+		return err
 	}
 	if l := &c.Limiter; l.ReserveForeground > 0 && l.ReserveForeground >= l.MaxConcurrent {
 		// No slot would be left for background refresh or Warm (FR-LIM-4).

@@ -1,7 +1,7 @@
 # Weir low-level design
 
 Status: v1.0
-Date: 2026-10-10
+Date: 2026-10-11
 Depends on: [01-technical-spec.md](01-technical-spec.md), [02-architecture.md](02-architecture.md), [03-hld.md](03-hld.md)
 
 This document is written for the person (or agent) implementing a milestone. It gives exact type definitions, algorithms, locking rules and pseudo-code. Code may differ in naming of unexported identifiers; exported names, behavior, bounds and locking rules may not change without updating this document in the same commit.
@@ -30,6 +30,7 @@ type Config struct {
 	Timeouts      TimeoutsConfig
 	Warm          WarmConfig
 	Limits        LimitsConfig
+	Experiments   ExperimentsConfig // zero value: off (docs/10)
 	CacheStatus   string // Cache-Status member name; "": "Weir"
 	NoCacheStatus bool   // omit the Cache-Status header (T-27)
 	Observer      Observer
@@ -128,6 +129,25 @@ type MissRateConfig struct {
 type CacheGroupsConfig struct{ Ignore bool } // zero value honors RFC 9875; Ignore switches off Cache-Group-Invalidation only
 type ClientConfig struct{ HonorRevalidation bool }
 type WarmConfig struct{ Concurrency int } // 0: min(4, MaxConcurrent-ReserveForeground); at most that
+
+// Experiments (docs/10). On when Experiments or SigningKeys is non-empty.
+type ExperimentsConfig struct {
+	Cookie      string   // "": "weir_v"
+	SigningKeys [][]byte // each at least 32 bytes; first signs, all verify
+	Header      string   // "": "Weir-Variant"; no '_'
+	MaxActive   int      // 0: 4; at most 8
+	Consent     ExperimentConsent
+	Experiments []ExperimentConfig
+}
+type ExperimentConsent struct{ Cookie, Value string } // Value is one '&', '|' or ',' separated element of the cookie value; zero value: no gate (logs a warning at New)
+type ExperimentConfig struct {
+	Name, Salt, Winner, Host, Path string
+	Variants                       []VariantConfig // the first is the control
+}
+type VariantConfig struct {
+	Name   string
+	Weight int
+}
 
 type TimeoutsConfig struct {
 	Origin     time.Duration // 0: 30s
@@ -380,6 +400,8 @@ for each name in Key.Cookies (config order):
     field(0x20, name); presence(0 or 1); if 1: field(0x21, value)
 for each cookie left unmatched (a caller bug; see note):
     field(0x20, name); 0x01; field(0x21, value)
+for each experiment dimension (config order, none when no experiment matches):
+    field(0x30, experiment); field(0x31, variant)
 Primary = sha256(buf)
 
 field(tag, b) = tag byte, uvarint(len(b)), b

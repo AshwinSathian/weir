@@ -97,6 +97,7 @@ func New(cfg Config) (*Engine, error) {
 	}
 	warnForwarding(c)
 	e := &Engine{cfg: c, kcfg: keysConfig(&c), sg: newStoreGuard(c.Store, c.Timeouts.Store, c.Observer), ownStore: own, cr: newCookieReport(&c), closeDone: make(chan struct{})}
+	e.experimentsKeys()
 	l := &c.Limiter
 	e.lim = limiter.New(limiter.Config{
 		Max: l.MaxConcurrent, MaxQueue: l.MaxQueue, PerPartition: l.MaxPerPartition, PerHost: l.MaxPerHost,

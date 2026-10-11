@@ -1,6 +1,6 @@
 # Weir experiment dimensions specification
 
-Status: v1.1. Phase 3. E1 to E7 were decided with the project owner on 2026-09-27; E8 and E9 on 2026-10-11 (P3-00). All are locked. v1.1 (P3-01) adds the clarifications in §3 and §4 (control variant, load-time limits, cookie grammar, hash separator) that the first implementation needed.
+Status: v1.2. Phase 3. E1 to E7 were decided with the project owner on 2026-09-27; E8 and E9 on 2026-10-11 (P3-00). All are locked. v1.2 (P3-02) records the public config shape, the defaults and the consent rule in §3. v1.1 (P3-01) adds the clarifications in §3 and §4 (control variant, load-time limits, cookie grammar, hash separator) that the first implementation needed.
 Date: 2026-10-11
 Depends on: [01-technical-spec.md](01-technical-spec.md), [02-architecture.md §7](02-architecture.md), [06-threat-model.md](06-threat-model.md)
 Seed: [00-design-doc.md §10](00-design-doc.md) (titled "Phase 2" there; it is Phase 3, see [09 §6](09-research-notes.md))
@@ -49,6 +49,9 @@ Rules checked at load (P3-01, `internal/experiments`):
 - Every signing key is at least 32 bytes and at least one is required. An unset `{env.WEIR_EXP_KEY_PREV}` expands to an empty key and fails the load, on purpose: a short key must never sign or verify (T-35).
 - The forwarded header name must not be a request header Weir relies on (`Cookie`, `Host`, `Authorization`, framing headers, `Cache-Control` and similar), must not start with `Proxy-`, and must not contain `_`, because CGI-style origins map `Weir_Variant` and `Weir-Variant` to one variable.
 - Matchers use the spellings the key writes: a host is lower case with no trailing dot, compressed IPv6 and no leading-zero port (it may carry a non-default port); a path starts with `/`, has no `?`, `#` or non-ASCII, and its escapes are upper case and not decodable to an unreserved byte. A path ending in `*` is a prefix match, so `/checkout*` also matches `/checkoutx`; use `/checkout/*` to stop at a segment boundary. A matcher that could never match is a load error.
+- Public shape (P3-02, decided with the project owner): `Config.Experiments` of type `ExperimentsConfig` (docs/04 §1). It is off when it has no experiments and no signing keys. Defaults when on: cookie `weir_v`, header `Weir-Variant`, `max_active` 4. Signing keys have no default.
+- Consent (E6): `consent cookie NAME VALUE` is `ExperimentConsent{Cookie, Value}`. The request has consent when the cookie `NAME` is present, has one value across its occurrences, and one element of its value, split on `&`, `|` and `,` without URL decoding, equals `VALUE`. Without consent the visitor gets the control variant even if the cookie holds an assignment (consent withdrawn), and nothing is recorded. A winner applies before the consent check, since it buckets nobody. `New` logs one warning when no gate is configured.
+- The key encoding appends the dimensions last, only when an experiment matches, so keys of unmatched requests are unchanged and `weir/key/v1` stays.
 - A winner experiment still contributes its dimension to the key and the header (one value), so entries stay partitioned and the origin sees what was keyed.
 
 ## 4. Mechanics

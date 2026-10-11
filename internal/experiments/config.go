@@ -62,6 +62,7 @@ type Config struct {
 	SigningKeys [][]byte // the first signs, all verify (rotation)
 	Header      string
 	MaxActive   int
+	Consent     Consent // optional gate (E6)
 	Experiments []Experiment
 }
 
@@ -144,6 +145,9 @@ func (c *Config) Validate(keyMaxVariants int) error {
 	}
 	if c.MaxActive < 1 || c.MaxActive > maxActiveLimit {
 		return cfgErr("max_active must be 1 to %d", maxActiveLimit)
+	}
+	if err := c.Consent.validate(c.CookieName); err != nil {
+		return err
 	}
 	if len(c.Experiments) > maxExperiments {
 		return cfgErr("more than %d experiments", maxExperiments)
