@@ -1,0 +1,57 @@
+# Hit path optimization, 2026-10-11. 4 vCPU Intel Xeon 2.1 GHz Linux container (not the reference machine), Go 1.27.0 linux/amd64, -count 10 (KeyBuild: 15).
+# base = 138d4ff (release candidate), new = this branch after "serve a stored body from one allocation" (KeyBuild and AcceptEncoding were measured at the earlier commit that changed them).
+
+## BenchmarkServeHitSmall
+goos: linux
+goarch: amd64
+pkg: github.com/AshwinSathian/weir
+cpu: Intel(R) Xeon(R) Processor @ 2.10GHz
+                │ /tmp/b-base.txt │            /tmp/b-7.txt             │
+                │     sec/op      │   sec/op     vs base                │
+ServeHitSmall-4       3.016µ ± 6%   2.108µ ± 4%  -30.11% (p=0.000 n=10)
+
+                │ /tmp/b-base.txt │            /tmp/b-7.txt             │
+                │      B/op       │     B/op      vs base               │
+ServeHitSmall-4      1.602Ki ± 0%   1.500Ki ± 0%  -6.34% (p=0.000 n=10)
+
+                │ /tmp/b-base.txt │            /tmp/b-7.txt            │
+                │    allocs/op    │ allocs/op   vs base                │
+ServeHitSmall-4        14.00 ± 0%   12.00 ± 0%  -14.29% (p=0.000 n=10)
+
+## BenchmarkKeyBuild (internal/keys)
+goos: linux
+goarch: amd64
+pkg: github.com/AshwinSathian/weir/internal/keys
+cpu: Intel(R) Xeon(R) Processor @ 2.10GHz
+           │ /tmp/kb-base.txt │          /tmp/kb-new3.txt           │
+           │      sec/op      │   sec/op     vs base                │
+KeyBuild-4        2.577µ ± 3%   1.770µ ± 3%  -31.32% (p=0.000 n=15)
+
+           │ /tmp/kb-base.txt │        /tmp/kb-new3.txt        │
+           │       B/op       │    B/op     vs base            │
+KeyBuild-4         536.0 ± 0%   536.0 ± 0%  ~ (p=1.000 n=15) ¹
+¹ all samples are equal
+
+           │ /tmp/kb-base.txt │        /tmp/kb-new3.txt        │
+           │    allocs/op     │ allocs/op   vs base            │
+KeyBuild-4         9.000 ± 0%   9.000 ± 0%  ~ (p=1.000 n=15) ¹
+¹ all samples are equal
+
+## BenchmarkAcceptEncoding (internal/keys)
+goos: linux
+goarch: amd64
+pkg: github.com/AshwinSathian/weir/internal/keys
+cpu: Intel(R) Xeon(R) Processor @ 2.10GHz
+                 │ /tmp/ae-base.txt │           /tmp/ae-new.txt            │
+                 │      sec/op      │    sec/op     vs base                │
+AcceptEncoding-4        355.9n ± 5%   293.1n ± 11%  -17.63% (p=0.000 n=10)
+
+                 │ /tmp/ae-base.txt │        /tmp/ae-new.txt         │
+                 │       B/op       │    B/op     vs base            │
+AcceptEncoding-4         0.000 ± 0%   0.000 ± 0%  ~ (p=1.000 n=10) ¹
+¹ all samples are equal
+
+                 │ /tmp/ae-base.txt │        /tmp/ae-new.txt         │
+                 │    allocs/op     │ allocs/op   vs base            │
+AcceptEncoding-4         0.000 ± 0%   0.000 ± 0%  ~ (p=1.000 n=10) ¹
+¹ all samples are equal

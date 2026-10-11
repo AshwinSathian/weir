@@ -208,3 +208,22 @@ So the +52% in the first table was a comparison with a stale number; the real gr
 - M10 to the release candidate, +6% (the same +6% as on the Linux box): `keys.Classified`, which `Serve` allocates once per request, grew from 408 to 528 bytes as range, experiment and conditional fields were added. That moves it up an allocator size class, which accounts for all of the +160 B/op (an allocation profile shows the whole difference in `(*Engine).Serve`, and the count of 14 allocations did not change); the extra bytes to zero and copy account for the time.
 
 Decision for v1: accept. The hit path is still 1.2 µs with 14 allocations, about 1.5x under the 1.9 µs ceiling that this run sets, and the growth buys features that are in the spec. From this run on, the 20% rule is measured against the reference run above, so the next regression is judged against 1.29 µs. If the Classified size is worth recovering, trimming it below 512 bytes would drop it to the 512-byte size class (about 128 B/op less) and is a candidate for v1.1, with no behavior change.
+
+## Hit path optimization (2026-10-11)
+
+After the reference run showed +32% against M1, the hit path was profiled and trimmed. Measured on the 4-core Linux box (not the reference machine), `-count 10`, `benchstat`, base `138d4ff`; raw output: [benchmarks/hit-path-opt-linux4.txt](benchmarks/hit-path-opt-linux4.txt).
+
+| Benchmark | base | now | change | allocs/op |
+|---|---:|---:|---|---:|
+| `BenchmarkServeHitSmall` | 3.02 µs | 2.11 µs | -30% (p<0.001) | 14 → 12 |
+| `BenchmarkKeyBuild` | 2.58 µs | 1.77 µs | -31% | 9 → 9 |
+| `BenchmarkAcceptEncoding` | 356 ns | 293 ns | -18% | 0 → 0 |
+
+B/op fell from 1 640 to 1 536. What changed, in order of gain:
+
+- `forwardHeader` no longer deletes about thirty names a strict forward cannot hold (with no `Allow` and no `Key.Headers` the map only ever holds the default-forward fields); a Connection option still removes what it names.
+- The URI and origin tags are computed on use. A hit reads the tags stored on the entry, so `Classify` no longer hashes two SHA-256 tags per request, and `Classified` drops under 512 bytes, one allocator size class.
+- One `time.Now` per request instead of three, and not under the miss-rate mutex.
+- Fewer map reads (Range, If-Range, If-None-Match, Cache-Control read once; `IsUpgrade` indexes instead of canonicalizing constant keys), one canonical-key scan per request, one allocation for origin and partition, one for the stored body, and an early exit in the Accept-Encoding parser.
+
+Every change to `internal/keys` is held to the old behavior by a differential fuzz target that keeps the previous implementation in the test files (`FuzzForwardHeaderMatchesReference`, `FuzzAcceptEncodingMatchesReference`, `FuzzIsCanonicalKey`) next to `FuzzForwardEqualsKey`. The numbers on the M4 Pro are not measured yet: rerun the three-commit comparison there (`73e4d2e`, `b909550`, the tip of this branch) before changing the baseline in this file. Until then the reference run above stays the 20% baseline.

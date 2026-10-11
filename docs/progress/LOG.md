@@ -1881,3 +1881,11 @@ Entry template:
 - Deviations: docs/01 NFR-5 wording.
 - Follow-ups: trimming `Classified` below 512 bytes is a v1.1 candidate; Ashwin to confirm the accept decision.
 - Context: low
+
+## 2026-10-11 · hit-path · done
+- Branch / PR: claude/magical-carson-rwdd4q / https://github.com/AshwinSathian/weir/pull/106
+- Done: one attempt to recover the +32% in `BenchmarkServeHitSmall`. Profiled the hit path and trimmed it: `forwardHeader` skips deletes a strict forward cannot need, URI and origin tags are computed on use (`Classified` under 512 bytes), one clock read per request, fewer map reads, one canonical-key scan, one allocation for origin and partition, one for the stored body, early exit in the Accept-Encoding parser. Linux box: 3.02 µs to 2.11 µs (-30%), 14 to 12 allocs/op; `BenchmarkKeyBuild` -31%.
+- Tests: `FuzzForwardHeaderMatchesReference`, `FuzzAcceptEncodingMatchesReference`, `FuzzIsCanonicalKey` (each keeps the old implementation in a test file and holds the new one equal); `make check` passes; keys fuzz sweep and a 0.1-scale load smoke run clean.
+- Deviations: none in the docs' requirements; `Classified.URITag` and `OriginTag` became methods (internal package).
+- Follow-ups: Ashwin to rerun the three-commit benchstat on the M4 Pro with the branch tip, then I update the baseline in docs/benchmarks.md; remaining cost is mostly inherent (header map clone for P4, Cache-Status string, the forwarded map).
+- Context: high

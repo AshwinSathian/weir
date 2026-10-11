@@ -10,7 +10,7 @@ Next card: none (all cards done; M16-02 deferred)
 
 ## Waiting on Ashwin
 
-- Confirm the decision to accept the +32% growth in `BenchmarkServeHitSmall` since M1 (docs/benchmarks.md, reference run); the 20% rule now measures from the reference run.
+- Rerun the benchstat comparison on the M4 Pro with the tip of this branch (see docs/benchmarks.md, "Hit path optimization"), then decide whether the +32% is still an issue. Original: confirm the decision to accept the +32% growth in `BenchmarkServeHitSmall` since M1 (docs/benchmarks.md, reference run); the 20% rule now measures from the reference run.
 - Run the `release-gate` workflow (Actions, manual) on the candidate commit: engine tests 100x under race, one hour of fuzzing per target.
 - Decide whether to open a PR for the release-prep branch, then follow docs/release.md (release branch, rc rehearsal, tags in order: root, observe/prom and store/valkey, caddy).
 - Confirm the decisions taken for you: D24 amended, D43 added, README Stability promises, signing key caps, `servableStatus` miss.
