@@ -1809,3 +1809,11 @@ Entry template:
 - Deviations: docs/10 v1.5.
 - Follow-ups: P3-05 runbook states the 90-day old-key retention.
 - Context: medium
+
+## 2026-10-11 · P3-04 · done
+- Branch / PR: claude/gifted-mayer-b8afaw / PR_URL
+- Done: `EvExposure` and `Event.Experiment/Variant/Visitor`; `Assign` returns `Exposures` and marks them in the cookie; `emitExposures` in experiments.go. Visitor is 16 hex chars of SHA-256 of the id. Winner, Warm, errors and no-consent emit none.
+- Tests: `TestExposureOncePerVisitor`, `TestExposureOnHit`, `TestExposureNoneWithoutConsent`, `TestExposureVisitorIsHashPrefix`, `TestAssignExposures`, EvExposure scenario in `TestEveryEventKindEmitted`. Race tests and pinned lint pass; trace 146/146. `make check` itself not run (old lint binary).
+- Deviations: docs/04 §9.1/§9.2 and docs/10 §4 step 7 details. Review should-fix: the "analysis deduplicates refusing clients" claim was false and is reworded; the original rationale is raised under Waiting on Ashwin.
+- Follow-ups: none new; P3-05 next.
+- Context: medium; size S was right. The PR is on the designated session branch, not a card branch.
