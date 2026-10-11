@@ -2,7 +2,10 @@ package keys
 
 // normalizePath applies Key.NormalizePath (FR-KEY-4): percent-encoded
 // unreserved characters are decoded and other escapes uppercased (RFC 3986
-// §6.2.2.1-6.2.2.2). Dot-segments are never resolved. The caller keys and
+// §6.2.2.1-6.2.2.2), except '.', whose escape stays (uppercased): decoding
+// "%2e%2e" would build a ".." segment that an ACL or WAF in front of Weir
+// never saw, and the origin may then resolve it (T-1). Dot-segments are never
+// resolved. The caller keys and
 // forwards the result (P2). A path with a malformed escape, which Validate
 // rejects, comes back unchanged: decoding around a stray '%' could form a
 // new escape and make the result depend on how often it ran.
@@ -15,7 +18,7 @@ func normalizePath(p string) string {
 		if i+2 >= len(p) || !isHex(p[i+1]) || !isHex(p[i+2]) {
 			return p
 		}
-		if c := unhex(p[i+1])<<4 | unhex(p[i+2]); unreserved(c) || isLowerHex(p[i+1]) || isLowerHex(p[i+2]) {
+		if c := unhex(p[i+1])<<4 | unhex(p[i+2]); decodable(c) || isLowerHex(p[i+1]) || isLowerHex(p[i+2]) {
 			changed = true
 		}
 		i += 2
@@ -30,7 +33,7 @@ func normalizePath(p string) string {
 			continue
 		}
 		c := unhex(p[i+1])<<4 | unhex(p[i+2])
-		if unreserved(c) {
+		if decodable(c) {
 			b = append(b, c)
 		} else {
 			b = append(b, '%', upperHex(p[i+1]), upperHex(p[i+2]))
@@ -39,6 +42,9 @@ func normalizePath(p string) string {
 	}
 	return string(b)
 }
+
+// decodable reports whether normalizePath turns the escape of c into c.
+func decodable(c byte) bool { return c != '.' && unreserved(c) }
 
 // unreserved reports RFC 3986 §2.3 unreserved characters.
 func unreserved(c byte) bool {

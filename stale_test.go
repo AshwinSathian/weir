@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -379,6 +380,39 @@ func TestBreakerHalfOpenRetryHint(t *testing.T) {
 		close(gate)
 		if err := <-probe; err != nil {
 			t.Fatalf("probe: %v", err)
+		}
+	})
+}
+
+// FR-CB-4, NFR-2: a probe whose origin call never reaches a verdict (the
+// origin goroutine exits with runtime.Goexit) is released, not leaked. A
+// leaked probe holds the half-open breaker shut until MaxOpenFor ends with a
+// healthy origin.
+func TestBreakerReleasesProbeOnGoexit(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		o := testorigin.NewChecked(t, 64, 16)
+		o.Default(ccBehavior(http.StatusServiceUnavailable, "", "down"))
+		cfg := cacheCfg
+		cfg.Rand = func() float64 { return 0.5 }
+		e := newEngine(t, cfg)
+		defer closeEngine(t, e)
+
+		for i := range 20 {
+			if _, _, err := serveResult(t, e, getReq(fmt.Sprintf("/f%d", i)), o); err != nil && !errors.Is(err, weir.ErrCircuitOpen) {
+				t.Fatalf("failure %d: %v", i, err)
+			}
+		}
+		time.Sleep(6 * time.Second) // past OpenFor: half-open, one probe slot
+		o.Default(testorigin.Behavior{Func: func(*weir.Request) (*weir.Response, error) {
+			runtime.Goexit()
+			return nil, nil
+		}})
+		if _, _, err := serveResult(t, e, getReq("/probe"), o); err == nil {
+			t.Fatal("a Goexit origin produced a response")
+		}
+		o.Default(ccBehavior(http.StatusOK, "no-store", "ok"))
+		if _, _, err := serveResult(t, e, getReq("/after"), o); err != nil {
+			t.Fatalf("request after the lost probe: %v; want the probe slot free again", err)
 		}
 	})
 }

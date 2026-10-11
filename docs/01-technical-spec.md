@@ -73,7 +73,7 @@ These were settled with the project owner on 2026-09-27 and are not reopened by 
 | D21 | `Key.AcceptEncoding` default stays `["gzip"]`; docs steer operators to list what their origin produces. |
 | D22 | Negative caching on by default, 2 s. |
 | D23 | Prometheus is the first exporter module. |
-| D24 | Repository private on GitHub from Phase 0, public with `v0.x` tags once the key-boundary security review (M7-05) merges, `v1.0.0` at the end of Phase 1. Amended 2026-10-02 from "from M1": the M7 key-boundary work kept finding poisoning paths (#44), and a public `v0.1.0` invites adoption before the review closes them. |
+| D24 | Repository private on GitHub from Phase 0, public with `v0.x` tags once the key-boundary security review (M7-05) merges, `v1.0.0` at the end of Phase 1 (amended 2026-10-11: after Phase 3, with `observe/prom`, `store/valkey` and `caddy` tagged at the same version, sub-module tag prefix equal to its directory; see [release.md](release.md)). Amended 2026-10-02 from "from M1": the M7 key-boundary work kept finding poisoning paths (#44), and a public `v0.1.0` invites adoption before the review closes them. |
 | D25 | Requests that carry a body use a separate upload limiter pool; adapters must bound request bodies and read time (§14.1). |
 | D26 | Origin timeout covers headers and buffered bodies; streamed bodies are bounded by an idle timeout, not a total (§14.2). |
 | D27 | Upgrade and `CONNECT` requests are rejected by `Serve`; adapters route them around Weir (§14.3). |
@@ -92,6 +92,7 @@ These were settled with the project owner on 2026-09-27 and are not reopened by 
 | D40 | Vulnerabilities reported through GitHub private vulnerability reporting; `SECURITY.md` in the repository before it goes public (D24). |
 | D41 | License Apache-2.0. |
 | D42 | Support the two latest Go releases; the minimum rises only when it leaves that window. |
+| D43 | Informational (1xx) responses from the origin, including `103 Early Hints`, are not relayed to clients; only the final response is served and cached (2026-10-11, from the cache-tests `interim-*` rows). |
 
 ## 3. Terminology
 
@@ -221,7 +222,7 @@ Package `store` (import path `github.com/AshwinSathian/weir/store`) defines `Sto
 - FR-KEY-1. The primary key MUST be SHA-256 over a canonical encoding in which every field is tagged and length-prefixed. No two distinct tuples of keyed inputs may encode to the same bytes. String concatenation with delimiters is forbidden.
 - FR-KEY-2. The primary key inputs are exactly: method class (`GET` and `HEAD` share class `GET`), lowercase scheme, normalized host, path, rewritten query, and the configured `Key.Headers` and `Key.Cookies` values after normalization. Nothing else enters the primary key.
 - FR-KEY-3. Host normalization: ASCII lowercase, default port removed (`:80` for http, `:443` for https), trailing dot removed. No IDNA processing.
-- FR-KEY-4. The path is used byte-for-byte as received unless `Key.NormalizePath` is true, in which case percent-encoded unreserved characters are decoded and remaining percent escapes are uppercased (RFC 3986 §6.2.2.1–6.2.2.2). Dot-segments are never resolved. Whatever form the key uses, the forwarded request MUST carry the identical path bytes.
+- FR-KEY-4. The path is used byte-for-byte as received unless `Key.NormalizePath` is true, in which case percent-encoded unreserved characters other than `.` are decoded and remaining percent escapes are uppercased (RFC 3986 §6.2.2.1–6.2.2.2). `%2E` stays escaped, so normalization never builds a `.` or `..` segment that a filter in front of Weir did not see (T-1). Dot-segments are never resolved. Whatever form the key uses, the forwarded request MUST carry the identical path bytes.
 - FR-KEY-5. Query handling operates on raw `&`-separated segments without decoding. A segment's name is the bytes before the first `=`. `Key.QueryDrop` removes matching segments; `Key.QueryKeep`, when non-empty, removes all non-matching segments; `Key.QuerySort` sorts remaining segments by raw bytes (stable). Name patterns match exactly or by trailing `*` prefix (`utm_*`). The resulting query is used in the key and MUST be the query forwarded to the origin. Empty segments are dropped. A query that becomes empty is forwarded without `?`.
 - FR-KEY-6. Cookies listed in `Key.Cookies` are extracted from all `Cookie` header lines (RFC 6265 `name=value` pairs separated by `;`). If a named cookie appears more than once with different values, it is treated as absent. The forwarded `Cookie` header MUST contain only the keyed cookies, in `Key.Cookies` order.
 - FR-KEY-7. Vary handling uses a two-level lookup: a vary spec stored under the primary key and variants stored under variant keys. Secondary values are read from the forwarded request (after rewriting), never from the raw client request.
@@ -435,6 +436,9 @@ All fields are optional. The zero value of `Config` is valid and yields the defa
 | `Limiter.MaxUpload` | 25% of `MaxConcurrent` | D25, separate pool for requests with a body |
 | `Timeouts.StreamIdle` | 60 s | D26 |
 | `Bypass.ReportStrippedCookies` | 5 min | D31; a negative value disables |
+| `Experiments.Cookie`, `Experiments.Header` | `weir_v`, `Weir-Variant` | docs/10 §3. The header name has no underscore and is not a reserved name (T-35) |
+| `Experiments.MaxActive` | 4 | at most 8 |
+| `Experiments.SigningKeys` | none | required when experiments are configured: 1 to 4 keys of 32 to 256 bytes, the first signs and all verify |
 | `Limits.*` | see FR-VAL-1, FR-VAL-3, FR-STO-10 | |
 | `CacheStatus` | `"Weir"` | member name |
 | `NoCacheStatus` | false | true omits the header |
@@ -560,7 +564,7 @@ Resolved on 2026-09-27:
 - OQ-3 adaptive limits: D13. Static in Phase 1; revisit with load-test data. The limiter reads its cap through one method so an adaptive policy can replace it.
 - OQ-4 experiment bucketing: decisions E1 to E9 in [10-experiments-spec.md](10-experiments-spec.md).
 
-Open: none that block any milestone before Phase 3.
+Open: none.
 
 ## 13. Phase 1.x requirements (M11 to M15)
 

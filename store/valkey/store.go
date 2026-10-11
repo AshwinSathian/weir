@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -23,6 +24,16 @@ var errClosed = fmt.Errorf("store: valkey: %w: closed", store.ErrUnavailable)
 // reconnectEvery is the minimum gap between connection attempts. Calls in
 // between fail fast with the last error (FR-STF-2, 05 §7).
 const reconnectEvery = time.Second
+
+// String, GoString and LogValue print the redacted Config. Without them fmt
+// and slog would walk the unexported cfg field and print the password.
+func (s *Store) String() string { return "valkey.Store{" + s.cfg.String() + "}" }
+
+// GoString implements fmt.GoStringer; see String.
+func (s *Store) GoString() string { return s.String() }
+
+// LogValue implements slog.LogValuer; see String.
+func (s *Store) LogValue() slog.Value { return slog.StringValue(s.String()) }
 
 // Store is a store.Store backed by a Valkey server or cluster. It is safe
 // for concurrent use.

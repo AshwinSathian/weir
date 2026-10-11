@@ -17,10 +17,29 @@ import (
 )
 
 // Config configures an Engine (01 §6, 04 §1.1). The zero value is valid and
-// yields the defaults; every boolean is written so that false is the default.
-// New copies it, so later changes to the caller's slices have no effect.
+// yields the defaults. New copies it, so later changes to the caller's slices
+// have no effect. Construct it and the structs inside it with field names, as
+// minor releases may add fields.
+//
+// Every boolean is false by default. A field named Disable turns off a whole
+// subsystem (Breaker.Disable, Negative.Disable, MissRate.Disable), and a No*
+// field turns off one feature inside a subsystem (NoJitter, NoEarlyRefresh,
+// NoTraceHeaders, NoCacheStatus). Strip* and Ignore change how input is
+// handled (Storable.StripSetCookie, CacheGroups.Ignore). The remaining
+// booleans switch a behavior on: Key.QuerySort, Key.NormalizePath,
+// Breaker.CountStatus500, MissRate.Throttle, Client.HonorRevalidation and
+// Experiments.DownstreamKeysOnVariant. The one switch that is not a boolean
+// is Bypass.ReportStrippedCookies, which a negative value turns off.
+//
+// Numeric fields documented as "0: default" cannot be set to zero; zero
+// selects the default, and a negative value is rejected with ErrInvalidConfig.
 type Config struct {
-	Store         store.Store // nil: memory store sized per FR-MEM-1
+	// Store holds cached entries. Nil makes New create an in-process memory
+	// store capped at 40% of GOMEMLIMIT (clamped to 16 MiB to 8 GiB), or
+	// 256 MiB, with a logged warning, when GOMEMLIMIT is unset (FR-MEM-1).
+	// Close closes only a store the engine created. A store you pass in is
+	// yours to close, after Engine.Close returns.
+	Store         store.Store
 	Key           KeyConfig
 	Forward       ForwardConfig
 	Bypass        BypassConfig
@@ -72,7 +91,7 @@ const (
 type ForwardConfig struct {
 	Mode           ForwardMode
 	Allow          []string // canonicalized; added to the trace headers
-	NoTraceHeaders bool     // D29: do not forward traceparent, tracestate, X-Request-Id
+	NoTraceHeaders bool     // do not forward traceparent, tracestate, X-Request-Id (they are forwarded by default)
 }
 
 // ForwardMode selects the forwarding policy.
@@ -101,12 +120,15 @@ type StorableConfig struct {
 
 // FreshnessConfig tunes lifetimes, jitter and early refresh (FR-FRS).
 type FreshnessConfig struct {
-	Jitter                      float64 // 0: 0.10 unless NoJitter; [0, 0.5]
-	NoJitter                    bool
-	JitterMinLifetime           time.Duration // 0: 10s
-	EarlyRefreshBeta            float64       // 0: 1.0
-	NoEarlyRefresh              bool
-	HeuristicFraction           float64       // 0: 0.1
+	Jitter            float64 // 0: 0.10 unless NoJitter; [0, 0.5]
+	NoJitter          bool
+	JitterMinLifetime time.Duration // 0: 10s
+	EarlyRefreshBeta  float64       // 0: 1.0
+	NoEarlyRefresh    bool
+	// HeuristicFraction is the share of the time since Last-Modified used as
+	// heuristic freshness. Zero means the default 0.1; there is no way to
+	// set zero today (use Freshness.HeuristicMax to bound the result).
+	HeuristicFraction           float64
 	HeuristicMax                time.Duration // 0: 1h
 	DefaultTTL                  time.Duration // 0: none
 	DefaultStaleWhileRevalidate time.Duration // 0: none
@@ -118,18 +140,27 @@ type FreshnessConfig struct {
 type CoalesceConfig struct {
 	LeaderMaxAge    time.Duration // 0: min(10s, Timeouts.Origin); at most Timeouts.Origin
 	FollowerMaxWait time.Duration // 0: min(10s, Timeouts.Origin); at most Timeouts.Origin
-	HitForMissTTL   time.Duration // 0: 30s
+	// HitForMissTTL is how long an unstorable URI is remembered so requests
+	// skip coalescing. Zero means the default 30s; there is no way to set a
+	// zero TTL today.
+	HitForMissTTL time.Duration
 }
 
 // LimiterConfig bounds origin concurrency (FR-LIM).
 type LimiterConfig struct {
-	MaxConcurrent     int           // 0: 64
-	MaxQueue          int           // 0: 1024
-	MaxQueueWait      time.Duration // 0: 2s
-	MaxPerPartition   int           // 0: 16; clamped to MaxConcurrent
-	ReserveForeground int           // 0: MaxConcurrent/4, at least 1 when MaxConcurrent >= 2
-	MaxPerHost        int           // 0: off (FR-FAIR-1); caps in-flight fetches per normalized host, in each pool
-	MaxUpload         int           // D25; 0: MaxConcurrent/4, at least 1
+	MaxConcurrent int // 0: 64
+	// MaxQueue is the number of fetches that may wait for a slot. Zero means
+	// the default 1024; there is no way to set a zero-length queue today.
+	MaxQueue        int
+	MaxQueueWait    time.Duration // 0: 2s
+	MaxPerPartition int           // 0: 16; clamped to MaxConcurrent
+	// ReserveForeground is the number of slots background refresh and Warm
+	// may not use. Zero means MaxConcurrent/4, at least 1 when MaxConcurrent
+	// is 2 or more; there is no way to reserve none then. It must stay below
+	// MaxConcurrent.
+	ReserveForeground int
+	MaxPerHost        int // 0: off (FR-FAIR-1); caps in-flight fetches per normalized host, in each pool
+	MaxUpload         int // 0: MaxConcurrent/4, at least 1; requests with a body use this separate pool (D25)
 }
 
 // BreakerConfig tunes the origin circuit breaker (FR-BRK).
@@ -187,7 +218,7 @@ type TimeoutsConfig struct {
 	Origin     time.Duration // 0: 30s
 	Background time.Duration // 0: 30s; background refresh and Warm (FR-TMO-1)
 	Store      time.Duration // 0: 50ms (remote stores only)
-	StreamIdle time.Duration // 0: 60s (D26)
+	StreamIdle time.Duration // 0: 60s; bounds a streamed body by idle time, not total time (D26)
 }
 
 // LimitsConfig bounds request input (FR-VAL-1, FR-VAL-3, FR-STO-10).

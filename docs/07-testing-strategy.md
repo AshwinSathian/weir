@@ -129,7 +129,7 @@ Each seed taxonomy entry maps to the tests below. "Engine" tests run under synct
 - `TestFlightTableBoundedUnderFlood` (engine): 5 000 cold keys with a gated origin and clients that leave; the flight table holds exactly `MaxConcurrent + MaxQueue` flights, and none once the origin answers.
 - `TestLimiterPartitionQueueCap` (component): a partition holds at most max(`PerPartition`, `MaxQueue/4`) queued waiters; the next gets `ErrQueueFull` while other partitions still queue; a waiter leaving by timeout or grant frees its place.
 - `TestBackgroundRefreshDroppedWithoutSlot` (engine): with `MaxConcurrent − ReserveForeground` slots busy, an early refresh is dropped with `EvRefreshDropped` `no-slot` and the hit is still served.
-- `TestBackgroundDroppedFollowerFetches` (engine): a request that joined a background flight which found no slot gets a foreground fetch, not `ErrShed`.
+- `TestForegroundJoinsDroppedBackgroundFlight` (engine): a request that joined a background flight which found no slot gets a foreground fetch, not `ErrShed`.
 - `TestLimiterSkipsFullPartition` (component): queue head blocked by its partition cap does not block a later waiter of another partition.
 - `TestLimiterQueueTimeout`, `TestLimiterCancel`, `TestLimiterGrantRace` (component): the grant-versus-timeout race returns the slot exactly once (run 1 000 times with shuffled timings inside the bubble).
 
@@ -332,7 +332,7 @@ On every push and pull request:
 
 1. `gofmt -l` is empty; `go vet ./...`.
 2. `golangci-lint run` (v2 config, see [CLAUDE.md](../CLAUDE.md)).
-3. `go test -race -shuffle=on -count=1 ./...` for every module, once with the workspace and once per module with `GOWORK=off`, on each supported Go release that is at or above the `go.mod` minimum (D42; only 1.27 until Go 1.28 ships).
+3. `go test -race -shuffle=on -count=1 ./...` for the root module from the workspace root (`./...` lists only the root module's packages) and for each sub-module with `GOWORK=off` (`make modules`), on each supported Go release that is at or above the `go.mod` minimum (D42; only 1.27 until Go 1.28 ships).
 4. `go list -deps ./...` check for the root module: no import outside the standard library and the module itself (NFR-6).
 5. `govulncheck ./...`.
 6. `scripts/trace.sh` requirement coverage report (`make check` runs it in strict mode; IDs of M11 and later cards are allowlisted until their cards land).

@@ -76,16 +76,25 @@ func (e *Engine) fetch(ctx context.Context, c *keys.Classified, origin Origin, c
 		}
 		return e.circuitOpen(c, class)
 	}
+	// NFR-2, FR-CB-4: whatever ends this call (a panic in an Observer, a
+	// Goexit in the origin) must free a half-open probe slot; a leaked one
+	// shuts the breaker for MaxOpenFor against a healthy origin.
+	settled := false
+	cancelProbe := func() {
+		if !settled {
+			settled = true
+			e.cb.Cancel(probe)
+		}
+	}
+	defer cancelProbe()
 	permit := held
 	if permit == nil {
 		if permit, err = e.limFor(c).Acquire(ctx, class, c.PartitionH, c.HostH); err != nil {
-			e.cb.Cancel(probe)
 			return e.shed(c, class, err)
 		}
 	}
 	defer permit.Release()
 	if err := ctx.Err(); err != nil { // granted as the caller left (04 §8.2): send nothing
-		e.cb.Cancel(probe)
 		return fetchResult{err: err}
 	}
 	req := (*Request)(&c.Forwarded)
@@ -129,8 +138,9 @@ func (e *Engine) fetch(ctx context.Context, c *keys.Classified, origin Origin, c
 	// fetch whose caller left says nothing about the origin.
 	record := func(o breaker.Outcome) {
 		if o == breaker.Failure && ctx.Err() != nil {
-			e.cb.Cancel(probe)
+			cancelProbe()
 		} else {
+			settled = true
 			e.cb.Record(probe, o)
 		}
 	}
@@ -174,7 +184,7 @@ func (e *Engine) fetch(ctx context.Context, c *keys.Classified, origin Origin, c
 		return res
 	}
 	limit := e.cfg.Storable.MaxObjectBytes
-	body, rerr := io.ReadAll(io.LimitReader(resp.Body, limit+1))
+	body, rerr := readBounded(resp.Body, limit+1)
 	res.respTime = time.Now()
 	stampDate(resp.Header, res.respTime)
 	if rerr != nil { // a truncated body is never stored or served
@@ -323,6 +333,20 @@ func safeFetch(ctx context.Context, origin Origin, req *Request) (resp *Response
 	}
 	normalizeResponse(resp)
 	return resp, nil
+}
+
+// readBounded reads up to n bytes. A body whose Read panics (an Origin bug)
+// becomes an error here, so the caller closes it and the connection is not
+// leaked; runFlight's recover alone could not reach the body (NFR-2). It
+// covers the buffered read only; a body streamed to the client reads on the
+// caller's goroutine.
+func readBounded(r io.Reader, n int64) (b []byte, err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			b, err = nil, fmt.Errorf("weir: origin body panic: %v", p)
+		}
+	}()
+	return io.ReadAll(io.LimitReader(r, n))
 }
 
 func closeBody(r *Response) {

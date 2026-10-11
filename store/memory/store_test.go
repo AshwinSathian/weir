@@ -3,6 +3,7 @@ package memory
 import (
 	"encoding/binary"
 	"errors"
+	"math"
 	"math/rand/v2"
 	"sync"
 	"testing"
@@ -41,7 +42,7 @@ func TestConformance(t *testing.T) {
 
 // FR-LCY-1, 05 §5.1: New rejects invalid sizes and applies defaults.
 func TestNewConfig(t *testing.T) {
-	for _, cfg := range []Config{{MaxBytes: -1}, {Shards: -1}, {Shards: 3}, {Shards: 1 << 40}} {
+	for _, cfg := range []Config{{MaxBytes: -1}, {Shards: -1}, {Shards: 3}, {Shards: math.MaxInt}} {
 		if _, err := New(cfg); err == nil {
 			t.Errorf("New(%+v) = nil error", cfg)
 		}

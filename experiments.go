@@ -18,10 +18,14 @@ import (
 // request, so the origin sees exactly what was keyed (INV-1). A client's own
 // Header is always discarded (T-35).
 type ExperimentsConfig struct {
-	Cookie      string   // assignment cookie name; "": "weir_v"
-	SigningKeys [][]byte // each at least 32 bytes; the first signs, all verify (rotation)
-	Header      string   // forwarded variant header; "": "Weir-Variant"; no underscore
-	MaxActive   int      // experiments that may apply to one request; 0: 4; at most 8
+	Cookie string // assignment cookie name; "": "weir_v"
+	// SigningKeys sign and verify the assignment cookie: 1 to 4 keys of 32
+	// to 256 bytes each. The first signs and all verify, which allows
+	// rotation. New returns an error wrapping ErrInvalidConfig for any other
+	// count or length, and when Experiments is set without a key.
+	SigningKeys [][]byte
+	Header      string // forwarded variant header; "": "Weir-Variant"; no underscore
+	MaxActive   int    // experiments that may apply to one request; 0: 4; at most 8
 	Consent     ExperimentConsent
 	Experiments []ExperimentConfig
 

@@ -6,8 +6,11 @@ import (
 )
 
 // Observer receives engine events (04 §9). Observe is called synchronously on
-// the request path, so implementations must be fast and safe for concurrent
-// use.
+// the request path, so implementations must be fast, must not block, must not
+// panic and must be safe for concurrent use. The engine does not recover an
+// Observer panic: it ends the request or flight it ran in, and the origin
+// response that call held is closed only when the garbage collector finalizes
+// its connection.
 type Observer interface{ Observe(Event) }
 
 // Event is one engine event. Reason uses a fixed vocabulary per Kind and
@@ -22,8 +25,10 @@ type Event struct {
 	Info      CacheInfo // for EvRequest
 	// Set only on EvExposure. Experiment and Variant are operator
 	// configuration. Visitor is a 16-character hex prefix of SHA-256 of the
-	// visitor id. None is a safe metric label: Visitor is unbounded.
-	Experiment, Variant, Visitor string
+	// visitor id.
+	Experiment string // experiment name, from configuration
+	Variant    string // variant name, from configuration
+	Visitor    string // 16 hex characters; unbounded, never a metric label
 }
 
 // EventKind identifies an event. Its String form is safe as a metric label.

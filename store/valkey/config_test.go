@@ -184,3 +184,30 @@ func TestConfigRedacts(t *testing.T) {
 		})
 	}
 }
+
+// Formatting the Store, not just its Config, must not print the password:
+// fmt does not call a Stringer on an unexported nested field.
+func TestStoreRedacts(t *testing.T) {
+	c := validConfig()
+	c.Username, c.Password = "svc", "hunter2-secret"
+	s, err := New(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close() //nolint:errcheck // never connected
+	var buf bytes.Buffer
+	slog.New(slog.NewTextHandler(&buf, nil)).Info("store", "store", s)
+	for name, out := range map[string]string{
+		"%v":   fmt.Sprintf("%v", s),
+		"%+v":  fmt.Sprintf("%+v", s),
+		"%#v":  fmt.Sprintf("%#v", s),
+		"slog": buf.String(),
+	} {
+		if strings.Contains(out, "hunter2-secret") {
+			t.Errorf("%s leaked the password: %s", name, out)
+		}
+		if !strings.Contains(out, "127.0.0.1:6379") {
+			t.Errorf("%s lost the address: %s", name, out)
+		}
+	}
+}

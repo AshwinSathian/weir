@@ -84,9 +84,26 @@ func forwardHeader(h http.Header, c *Config, cookies []Cookie, dims []Dim) (out 
 	for _, name := range [...]string{"Cache-Control", "Pragma"} {
 		unkeyed = unkeyed || len(out[name]) > 0 && !slices.Contains(c.Headers, name)
 	}
+	dropControlBytes(out)
 	// Set last so no Connection option or Allow entry can remove or replace it.
 	out["Accept-Encoding"] = []string{aeBucket(h["Accept-Encoding"], c)}
 	return out, unkeyed
+}
+
+// dropControlBytes removes every forwarded field with a CR, LF or NUL in a
+// value. Keyed fields were checked when they were normalized; the unkeyed ones
+// (Authorization, the cache directives, trace and Allow fields) travel as the
+// client sent them, and an Origin that is not net/http would put the bytes
+// on the wire, where a CR LF pair splits the request (T-5).
+func dropControlBytes(h http.Header) {
+	for name, vals := range h {
+		for _, v := range vals {
+			if strings.ContainsAny(v, "\r\n\x00") {
+				delete(h, name)
+				break
+			}
+		}
+	}
 }
 
 // defaultForward are the unkeyed fields strict mode always sends. Only

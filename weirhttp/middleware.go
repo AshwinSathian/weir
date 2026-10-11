@@ -1,6 +1,7 @@
 package weirhttp
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/AshwinSathian/weir"
@@ -22,6 +23,10 @@ func Middleware(e *weir.Engine, origin weir.Origin) func(http.Handler) http.Hand
 				WriteError(w, err)
 				return
 			}
+			// A client that leaves must not hold the origin stream open until
+			// the idle timeout: closing the body ends the blocked read.
+			stop := context.AfterFunc(r.Context(), func() { _ = resp.Body.Close() })
+			defer stop()
 			_ = WriteResponse(w, resp) // the client is gone; nothing left to tell it
 		})
 	}

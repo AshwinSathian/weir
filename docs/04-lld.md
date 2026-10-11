@@ -133,7 +133,7 @@ type WarmConfig struct{ Concurrency int } // 0: min(4, MaxConcurrent-ReserveFore
 // Experiments (docs/10). On when Experiments or SigningKeys is non-empty.
 type ExperimentsConfig struct {
 	Cookie      string   // "": "weir_v"
-	SigningKeys [][]byte // each at least 32 bytes; first signs, all verify
+	SigningKeys [][]byte // 1 to 4 keys of 32 to 256 bytes; first signs, all verify
 	Header      string   // "": "Weir-Variant"; no '_'
 	MaxActive   int      // 0: 4; at most 8
 	Consent     ExperimentConsent

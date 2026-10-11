@@ -85,7 +85,7 @@ The log line `weir: miss-rate anomaly` and `weir_miss_rate_anomalies_total` mean
 
 `weir_store_bytes` should sit near the configured size once the cache is warm. If the process nears `GOMEMLIMIT`, look at `Storable.MaxObjectBytes` (1 MiB, headers included) and at large streamed bodies before you blame the cache: buffering for storage is bounded by `MaxConcurrent × MaxObjectBytes` (NFR-4, 64 MiB at defaults). A stream that exceeds `MaxObjectBytes` is not stored, but it holds up to `MaxObjectBytes + 1` bytes of read-ahead after its fetch slot is released, until the client reads it. Many slow clients on large responses therefore cost about one `MaxObjectBytes` each (1 MiB at defaults), beyond the bound above. The hit path's GC cost at 1M entries is in [benchmarks.md](benchmarks.md).
 
-### 4.6 A remote store fails (Phase 2.5)
+### 4.6 A remote store fails
 
 After 5 consecutive `ErrUnavailable` results the store breaker opens for 1 s, doubling to 30 s. While it is open, lookups are treated as misses and nothing is stored, so origin load rises to the uncached rate. The limiter and breaker still protect the origin. Epoch (purge) state may be lost with a store restart; run a hard purge of everything (`All: true`) after one if stale content matters (06 R-4).
 
@@ -109,6 +109,10 @@ After 5 consecutive `ErrUnavailable` results the store breaker opens for 1 s, do
 ## 7. Deploying on Caddy (single node)
 
 The `caddy` module ([08](08-caddy-adapter-spec.md)) puts the `weir` directive in front of `reverse_proxy`. This section is the checklist for one node. Setting names are in 08 §2.
+
+### 7.0 Install
+
+Build Caddy with the module: `xcaddy build --with github.com/AshwinSathian/weir@v1.0.0 --with github.com/AshwinSathian/weir/caddy@v1.0.0`. Name the root module too: the `caddy` module is tested only with the root version it was released with. Check it with `./caddy list-modules | grep weir`, which should show `http.handlers.weir`. Upgrade by rebuilding with the new version; all weir modules share one version number, so never mix versions.
 
 ### 7.1 One node per cache
 
@@ -256,7 +260,7 @@ The `experiments` block signs its assignment cookie with the first of `signing_k
 
 Load rules, all fail closed:
 
-- Every key is at least 32 bytes. A shorter one, or an unset variable (it expands to an empty key), fails `caddy validate` and the reload with the variable named; the running config stays as it was (`TestExperimentsBadKeyReloadKeepsOldHandler`). `caddy validate` reads your shell's environment, not the service's, so export the same variables there first or it fails on the empty key.
+- Every key is 32 to 256 bytes and at most 4 keys are configured (rotation needs two, at most three). A shorter one, or an unset variable (it expands to an empty key), fails `caddy validate` and the reload with the variable named; the running config stays as it was (`TestExperimentsBadKeyReloadKeepsOldHandler`). `caddy validate` reads your shell's environment, not the service's, so export the same variables there first or it fails on the empty key.
 - At least one key is required once the block has experiments.
 
 To rotate:

@@ -3,6 +3,7 @@ package weirhttp
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -10,9 +11,12 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/AshwinSathian/weir"
 )
+
+var errNoTarget = errors.New("weirhttp: TransportOrigin has no Target")
 
 // TransportOrigin sends forwarded requests to Target with Transport.
 type TransportOrigin struct {
@@ -30,15 +34,37 @@ type TransportOrigin struct {
 }
 
 var defaultTransport = sync.OnceValue(func() http.RoundTripper {
-	t := http.DefaultTransport.(*http.Transport).Clone()
+	return newTransport(http.DefaultTransport)
+})
+
+// newTransport clones base when it is an *http.Transport. An application that
+// replaced http.DefaultTransport with a wrapper (tracing, a test double)
+// would otherwise panic on every miss (NFR-2), so any other type starts from
+// a fresh Transport with the stdlib defaults that matter for an origin.
+func newTransport(base http.RoundTripper) *http.Transport {
+	var t *http.Transport
+	if bt, ok := base.(*http.Transport); ok && bt != nil {
+		t = bt.Clone()
+	} else {
+		t = &http.Transport{
+			ForceAttemptHTTP2:     true,
+			MaxIdleConns:          100,
+			IdleConnTimeout:       90 * time.Second,
+			TLSHandshakeTimeout:   10 * time.Second,
+			ExpectContinueTimeout: time.Second,
+		}
+	}
 	t.DisableCompression = true
 	t.Proxy = nil
 	return t
-})
+}
 
 // Fetch sends req to Target exactly as given: the path goes out through
 // URL.Opaque so net/url does not re-encode it (FR-FWD-1, INV-1).
 func (o *TransportOrigin) Fetch(ctx context.Context, req *weir.Request) (*weir.Response, error) {
+	if o.Target == nil {
+		return nil, errNoTarget
+	}
 	u := &url.URL{Scheme: o.Target.Scheme, Host: o.Target.Host, Opaque: req.Path, RawQuery: req.RawQuery}
 	if strings.HasPrefix(req.Path, "//") {
 		// URL.RequestURI would send "scheme://rest", naming a different

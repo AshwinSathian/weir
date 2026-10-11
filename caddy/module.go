@@ -1,5 +1,3 @@
-// Package weircaddy is the Caddy adapter for Weir: the HTTP handler module
-// http.handlers.weir (docs/08 §1).
 package weircaddy
 
 import (
@@ -272,6 +270,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 	if err != nil {
 		return serveError(w, err)
 	}
+	// A client that leaves must not hold the origin stream open until the idle
+	// timeout: closing the body ends the blocked read.
+	stop := context.AfterFunc(r.Context(), func() { _ = resp.Body.Close() })
+	defer stop()
 	_ = weirhttp.WriteResponse(w, resp) // the client is gone; nothing left to tell it
 	return nil
 }

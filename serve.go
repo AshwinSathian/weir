@@ -330,6 +330,15 @@ func (e *Engine) cacheable(ctx context.Context, c *keys.Classified, origin Origi
 func (e *Engine) fetchStored(ctx context.Context, sp *fetchSpec, origin Origin) *flightResult {
 	c, prior := sp.c, sp.prior
 	fr := &flightResult{fetchResult: e.fetch(ctx, c, origin, sp.class, true, prior, sp.permit)}
+	if fr.notMod && e.hardPurgedSince(ctx, prior) {
+		// FR-PRG-3, FR-PRG-7: a hard purge after prior was stored makes it
+		// unreachable, and it landed while this request waited for a slot,
+		// so the validation went out after the epoch and the 304 would store
+		// the purged body as fresh. Fetch again without conditionals.
+		closeBody(fr.resp)
+		prior = nil
+		fr = &flightResult{fetchResult: e.fetch(ctx, c, origin, sp.class, true, nil, nil)}
+	}
 	res := &fr.fetchResult
 	e.setNegative(ctx, sp, res) // once per flight, before any waiter reads the store
 	if res.err != nil {

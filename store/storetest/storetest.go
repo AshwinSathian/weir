@@ -1,5 +1,3 @@
-// Package storetest is the store conformance suite (05 §8). Every
-// store.Store implementation calls Run from its tests.
 package storetest
 
 import (
@@ -87,6 +85,7 @@ func Run(t *testing.T, newStore func(t *testing.T) store.Store, opts ...Option) 
 		{"SetGetRoundTrip", false, testSetGetRoundTrip},
 		{"SetReplacesAnyKind", false, testSetReplacesAnyKind},
 		{"ExpiredIsNotFound", false, testExpiredIsNotFound},
+		{"SetReplacesExpiry", false, testSetReplacesExpiry},
 		{"SetPastExpiresIsNoop", false, testSetPastExpiresIsNoop},
 		{"DeleteMissingOK", false, testDeleteMissingOK},
 		{"ContextCanceled", false, testContextCanceled},
@@ -289,6 +288,34 @@ func testExpiredIsNotFound(t *testing.T, newStore func(*testing.T) store.Store, 
 	}
 	if !integration {
 		// Remote expiry runs on the server clock, which synctest cannot fake.
+		t.Skip("real-clock case: run with -tags integration")
+	}
+	run(t)
+}
+
+// 05 §2.3, S-4: Set replaces the record whole, Expires included, in both
+// directions. A store that kept the old expiry would drop a refreshed entry
+// early or serve a shortened one late.
+func testSetReplacesExpiry(t *testing.T, newStore func(*testing.T) store.Store, o options) {
+	run := func(t *testing.T) {
+		s := newStore(t)
+		now := time.Now()
+		rec := func(exp time.Duration) *store.Entry {
+			return &store.Entry{Kind: store.KindHitForMiss, StoredAt: now, Expires: now.Add(exp)}
+		}
+		mustSet(t, s, key(1), rec(time.Hour))
+		mustSet(t, s, key(1), rec(time.Second)) // shortened
+		mustSet(t, s, key(2), rec(time.Second))
+		mustSet(t, s, key(2), rec(time.Hour)) // extended
+		time.Sleep(3 * time.Second)
+		wantNotFound(t, s, key(1))
+		mustGet(t, s, key(2))
+	}
+	if o.synctest {
+		synctest.Test(t, run)
+		return
+	}
+	if !integration {
 		t.Skip("real-clock case: run with -tags integration")
 	}
 	run(t)

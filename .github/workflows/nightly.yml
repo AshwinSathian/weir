@@ -54,7 +54,9 @@ jobs:
       - name: fuzz ${{ matrix.target }}
         env:
           FUZZTIME: ${{ inputs.fuzztime || '5m' }}
-        run: go test -run='^$' -fuzz="^${{ matrix.target }}\$" -fuzztime="$FUZZTIME" "${{ matrix.pkg }}"
+          TARGET: ${{ matrix.target }}
+          PKG: ${{ matrix.pkg }}
+        run: go test -run='^$' -fuzz="^${TARGET}\$" -fuzztime="$FUZZTIME" "$PKG"
       # A crasher is written under testdata/fuzz/<Target>/ in the package
       # directory. Check it in as a seed together with its fix (docs/07 §5).
       - name: upload crashers

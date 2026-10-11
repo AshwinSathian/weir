@@ -7,6 +7,8 @@ import (
 	"hash/crc32"
 	"io"
 	"os"
+	"path/filepath"
+	"syscall"
 	"time"
 
 	"github.com/AshwinSathian/weir/store"
@@ -38,7 +40,10 @@ type snapLoadStats struct {
 // the store empty. A file that does not start with the snapshot magic is
 // not ours and is left alone.
 func (s *Store) loadSnapshot() {
-	f, err := os.Open(s.snapPath)
+	removeStaleTemps(s.snapPath)
+	// O_NONBLOCK: opening a named pipe planted at the path would otherwise
+	// block New forever; snapFileSize then refuses anything not regular.
+	f, err := os.OpenFile(s.snapPath, os.O_RDONLY|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		return
 	}
@@ -79,6 +84,25 @@ func (s *Store) loadSnapshot() {
 		// writer puts epochs last. Fail closed: nothing loaded may be served
 		// stale.
 		_ = s.ep.set(s.ep.globalTag, store.Epoch{At: now, Mode: store.EpochHard})
+	}
+}
+
+// staleTempAge is how old a ".weir-snap-*" temp file must be before New
+// removes it: a crash or kill during a write leaves a 0600 file holding cache
+// contents, and nothing else would ever delete it. A live writer's file is
+// younger than this.
+const staleTempAge = time.Hour
+
+// removeStaleTemps deletes abandoned snapshot temp files beside snapPath.
+func removeStaleTemps(snapPath string) {
+	matches, err := filepath.Glob(filepath.Join(filepath.Dir(snapPath), ".weir-snap-*"))
+	if err != nil {
+		return
+	}
+	for _, m := range matches {
+		if fi, err := os.Lstat(m); err == nil && fi.Mode().IsRegular() && time.Since(fi.ModTime()) > staleTempAge {
+			_ = os.Remove(m)
+		}
 	}
 }
 
