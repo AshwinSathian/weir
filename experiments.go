@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/AshwinSathian/weir/internal/experiments"
 	"github.com/AshwinSathian/weir/internal/keys"
@@ -159,6 +160,19 @@ func (e *Engine) experimentsKeys() {
 	}
 }
 
+// emitExposures sends one EvExposure per entry, with no request data (10 §4
+// step 7). It runs only for a response that is returned, the one that
+// carries the marked cookie, so an error does not spend the exposure.
+func (e *Engine) emitExposures(xs []experiments.Exposure) {
+	if e.cfg.Observer == nil || len(xs) == 0 {
+		return
+	}
+	now := time.Now()
+	for _, x := range xs {
+		emit(e.cfg.Observer, Event{Kind: EvExposure, Time: now, Experiment: x.Experiment, Variant: x.Variant, Visitor: x.Visitor})
+	}
+}
+
 const expCookieMaxAge = "7776000" // 90 days, not sliding (10 §3)
 
 // experimentResponse finishes a response to a request that matched an
@@ -180,6 +194,7 @@ func (e *Engine) experimentResponse(c *keys.Classified, resp *Response) *Respons
 	resp.Header = h
 	cookied := false
 	if res.Changed {
+		e.emitExposures(res.Exposures)
 		// ponytail: an Encode failure (a key or id the load checks rule out, or
 		// a value past the cap with nothing left to drop) sends no cookie and
 		// the visitor is re-picked next request; add a log line if it is seen.

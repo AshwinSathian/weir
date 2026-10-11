@@ -276,7 +276,7 @@ func TestUnknownKindsAreIgnored(t *testing.T) {
 // or status must not panic either.
 func TestInvalidReasonDoesNotPanic(t *testing.T) {
 	o := prom.NewObserver()
-	for k := weir.EvRequest; k <= weir.EvMode; k++ {
+	for k := weir.EvRequest; k <= weir.EvExposure; k++ {
 		o.Observe(weir.Event{Kind: k, Reason: "\xff\xfe", Status: -5, Duration: -time.Second})
 	}
 	want := `# HELP weir_requests_total Requests served, by outcome.

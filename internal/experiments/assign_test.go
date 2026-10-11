@@ -85,7 +85,7 @@ func TestAssignNewAndReturning(t *testing.T) {
 // E3: a kept assignment survives a changed weight, but not a removed variant.
 func TestAssignKeepsExistingUnlessVariantGone(t *testing.T) {
 	c := assignConfig()
-	ck := Cookie{VisitorID: "v1", Assignments: []Assignment{{"checkout-copy", "b", false}}}
+	ck := Cookie{VisitorID: "v1", Assignments: []Assignment{{"checkout-copy", "b", true}}}
 	line := []string{"weir_v=" + enc(t, ck, keyA)}
 	if r := c.Assign("h", "/checkout", line, rndOf(0)); r.Picks[0].Variant != "b" || r.Changed {
 		t.Fatalf("kept: %+v", r)
@@ -141,5 +141,35 @@ func TestAssignNoMatch(t *testing.T) {
 	c := assignConfig()
 	if r := c.Assign("h", "/other", nil, rndOf(0)); len(r.Picks) != 0 || r.Changed {
 		t.Fatalf("no match: %+v", r)
+	}
+}
+
+// 10 §4 step 7: an exposure is reported once, when the assignment is
+// created or its mark is missing, and never without consent, for a winner or
+// for a marked cookie. The visitor field is the hash, not the id.
+func TestAssignExposures(t *testing.T) {
+	c := assignConfig()
+	r := c.Assign("h", "/checkout", nil, rndOf(0.25))
+	if len(r.Exposures) != 1 || r.Exposures[0].Visitor != VisitorHash(r.Cookie.VisitorID) || r.Exposures[0].Visitor == r.Cookie.VisitorID {
+		t.Fatalf("new visitor: %+v", r)
+	}
+	if a, _ := r.Cookie.Get("checkout-copy"); !a.Exposed {
+		t.Fatalf("cookie lacks the mark: %+v", r.Cookie)
+	}
+	again := c.Assign("h", "/checkout", []string{"weir_v=" + enc(t, r.Cookie, keyA)}, rndOf(0.9))
+	if len(again.Exposures) != 0 || again.Changed {
+		t.Fatalf("marked cookie: %+v", again)
+	}
+	unmarked := Cookie{VisitorID: "v1", Assignments: []Assignment{{"checkout-copy", "b", false}}}
+	r = c.Assign("h", "/checkout", []string{"weir_v=" + enc(t, unmarked, keyA)}, rndOf(0.9))
+	if len(r.Exposures) != 1 || r.Exposures[0].Variant != "b" || !r.Changed {
+		t.Fatalf("unmarked cookie: %+v", r)
+	}
+	if r = c.Assign("h", "/checkout", nil, nil); len(r.Exposures) != 0 {
+		t.Fatalf("no rand (Warm): %+v", r)
+	}
+	c.Consent = Consent{Cookie: "cmp", Value: "analytics=yes"}
+	if r = c.Assign("h", "/checkout", []string{"weir_v=" + enc(t, unmarked, keyA)}, rndOf(0.9)); len(r.Exposures) != 0 {
+		t.Fatalf("no consent: %+v", r)
 	}
 }
