@@ -473,3 +473,84 @@ func TestTransportOriginWithoutTargetFails(t *testing.T) {
 		t.Fatal("Fetch with no Target succeeded")
 	}
 }
+
+type chunkBody struct {
+	chunks []string
+}
+
+func (b *chunkBody) Read(p []byte) (int, error) {
+	if len(b.chunks) == 0 {
+		return 0, io.EOF
+	}
+	n := copy(p, b.chunks[0])
+	b.chunks = b.chunks[1:]
+	return n, nil
+}
+func (b *chunkBody) Close() error { return nil }
+
+// A body of unknown length, or an event stream, is flushed as it arrives; a
+// body with a Content-Length is copied without per-chunk flushes.
+func TestWriteResponseFlushesStreams(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		header http.Header
+		want   bool
+	}{
+		{"event stream", http.Header{"Content-Type": {"text/event-stream; charset=utf-8"}, "Content-Length": {"6"}}, true},
+		{"no content length", http.Header{"Content-Type": {"text/plain"}}, true},
+		{"known length", http.Header{"Content-Type": {"text/plain"}, "Content-Length": {"6"}}, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			err := weirhttp.WriteResponse(rec, &weir.Response{StatusCode: 200, Header: tt.header, Body: &chunkBody{[]string{"ab", "cd", "ef"}}})
+			if err != nil || rec.Body.String() != "abcdef" {
+				t.Fatalf("body %q err %v", rec.Body.String(), err)
+			}
+			if rec.Flushed != tt.want {
+				t.Fatalf("flushed = %v, want %v", rec.Flushed, tt.want)
+			}
+		})
+	}
+}
+
+// NFR-3: a client that goes away while the origin stream is idle ends the
+// handler at once; without it the body read waits for the 60 s idle timeout.
+func TestMiddlewareClientLeavesIdleStream(t *testing.T) {
+	pr, pw := io.Pipe()
+	defer pw.Close()
+	origin := weir.OriginFunc(func(context.Context, *weir.Request) (*weir.Response, error) {
+		return &weir.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: pr}, nil
+	})
+	e, err := weir.New(weir.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Close(context.Background())
+	ctx, cancel := context.WithCancel(context.Background())
+	req := httptest.NewRequestWithContext(ctx, http.MethodGet, "http://example.com/events", nil)
+	done := make(chan struct{})
+	rw := &signalWriter{ResponseRecorder: httptest.NewRecorder(), wrote: make(chan struct{})}
+	go func() {
+		weirhttp.Handler(e, origin).ServeHTTP(rw, req)
+		close(done)
+	}()
+	<-rw.wrote // the response is being streamed and the origin is idle
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second): // guard only; the handler returns at once
+		t.Fatal("handler still waiting on an idle stream after the client left")
+	}
+}
+
+// signalWriter closes wrote when the header is written.
+type signalWriter struct {
+	*httptest.ResponseRecorder
+	once  sync.Once
+	wrote chan struct{}
+}
+
+func (w *signalWriter) WriteHeader(code int) {
+	w.ResponseRecorder.WriteHeader(code)
+	w.once.Do(func() { close(w.wrote) })
+}

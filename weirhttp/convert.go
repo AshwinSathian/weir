@@ -58,8 +58,40 @@ func WriteResponse(w http.ResponseWriter, resp *weir.Response) error {
 	keys.DropHopByHop(h, resp.Header["Connection"])
 	maps.Copy(w.Header(), h)
 	w.WriteHeader(resp.StatusCode)
-	_, err := io.Copy(w, resp.Body)
-	return err
+	if !streamsToClient(h) {
+		_, err := io.Copy(w, resp.Body)
+		return err
+	}
+	// An event stream, or a body of unknown length, must reach the client as
+	// it arrives: net/http holds back writes until its buffer fills, so one
+	// event sent and then silence would not be seen. Same rule as
+	// httputil.ReverseProxy.
+	rc := http.NewResponseController(w)
+	buf := make([]byte, 32<<10)
+	for {
+		n, rerr := resp.Body.Read(buf)
+		if n > 0 {
+			if _, err := w.Write(buf[:n]); err != nil {
+				return err
+			}
+			_ = rc.Flush() // ErrNotSupported: nothing to flush
+		}
+		if rerr != nil {
+			if rerr == io.EOF {
+				return nil
+			}
+			return rerr
+		}
+	}
+}
+
+// streamsToClient reports whether a response body should be flushed after each
+// read: an event stream, or no Content-Length.
+func streamsToClient(h http.Header) bool {
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(h.Get("Content-Type"))), "text/event-stream") {
+		return true
+	}
+	return h.Get("Content-Length") == ""
 }
 
 // WriteError writes the status that weir.StatusCode maps err to, with
