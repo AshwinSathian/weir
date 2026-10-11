@@ -116,15 +116,17 @@ func Classify(r *Request, c *Config) (Classified, error) {
 	query := rewriteQuery(r.RawQuery, c)
 	origin := r.Scheme + "://" + host
 
+	// One map read per field: this runs on every request, hits included.
+	rng, ifRange, inm := h["Range"], h["If-Range"], h["If-None-Match"]
 	out := Classified{
 		Head:       r.Method == http.MethodHead,
 		req:        r,
-		Range:      len(h["Range"]) > 0,
-		rangeHdr:   h["Range"],
-		RangeValue: single(h["Range"]),
-		HasIfRange: len(h["If-Range"]) > 0,
-		IfRange:    single(h["If-Range"]),
-		ifRange:    h["If-Range"],
+		Range:      len(rng) > 0,
+		rangeHdr:   rng,
+		RangeValue: single(rng),
+		HasIfRange: len(ifRange) > 0,
+		IfRange:    single(ifRange),
+		ifRange:    ifRange,
 		Authorized: len(h["Authorization"]) > 0,
 		expHeader:  c.ExpHeader,
 		expCookie:  c.ExpCookie,
@@ -176,10 +178,10 @@ func Classify(r *Request, c *Config) (Classified, error) {
 	out.Variants = dims
 	out.Primary = PrimaryKey(&KeyInput{Method: http.MethodGet, Scheme: r.Scheme, Host: host, Path: path, Query: query,
 		Headers: keyedHeaders(fh, c), CookieNames: c.Cookies, Cookies: cookies, Variants: dims})
-	out.ClientCond = ClientConditionals{IfNoneMatch: parseIfNoneMatch(h["If-None-Match"], c)}
+	out.ClientCond = ClientConditionals{IfNoneMatch: parseIfNoneMatch(inm, c)}
 	// RFC 9110 §13.1.3: If-Modified-Since is ignored whenever If-None-Match
 	// is present, even when that field is malformed or over the limit.
-	if ims := h["If-Modified-Since"]; len(ims) == 1 && h["If-None-Match"] == nil {
+	if ims := h["If-Modified-Since"]; len(ims) == 1 && inm == nil {
 		if t, err := http.ParseTime(ims[0]); err == nil {
 			out.ClientCond.IfModifiedSince = t
 		}

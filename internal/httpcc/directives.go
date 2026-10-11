@@ -194,7 +194,8 @@ func parseCacheControl(lines []string) ResponseDirectives {
 // advisory (D5).
 func ParseRequest(h http.Header) RequestDirectives {
 	var d RequestDirectives
-	for dv := range directives(h["Cache-Control"]) {
+	cc := h["Cache-Control"]
+	for dv := range directives(cc) {
 		name := dv.name
 		switch {
 		case equalFold(name, "no-store"):
@@ -215,7 +216,7 @@ func ParseRequest(h http.Header) RequestDirectives {
 			}
 		}
 	}
-	if len(h["Cache-Control"]) > 0 {
+	if len(cc) > 0 {
 		return d
 	}
 	for dv := range directives(h["Pragma"]) {

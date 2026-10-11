@@ -56,15 +56,30 @@ func forwardHeader(h http.Header, c *Config, cookies []Cookie, dims []Dim) (out 
 	}
 	// An Allow entry, a keyed name or a Connection option can name any
 	// field; hop-by-hop fields still never go.
-	DropHopByHop(out, h["Connection"])
+	//
+	// Without Allow and Key.Headers, strict mode copied only defaultForward
+	// names, so out holds none of the fixed hop-by-hop, Cookie or dropped
+	// names; only a Connection option can still name a field in it. Skipping
+	// those deletes is the same result with about thirty fewer map writes
+	// per request (forwardHeaderRef in the tests is the unabridged version).
+	fixedClean := !c.ForwardAll && len(c.Allow) == 0 && len(c.Headers) == 0
+	if fixedClean {
+		dropConnectionOptions(out, h["Connection"])
+	} else {
+		DropHopByHop(out, h["Connection"])
+	}
 	if !c.ForwardAll {
-		delete(out, "Cookie") // only keyed cookies, even if Allow or Key.Headers names Cookie
+		if !fixedClean {
+			delete(out, "Cookie") // only keyed cookies, even if Allow or Key.Headers names Cookie
+		}
 		if v := cookieHeader(cookies); v != "" {
 			out["Cookie"] = []string{v}
 		}
 	}
-	for _, name := range dropped {
-		delete(out, name)
+	if !fixedClean {
+		for _, name := range dropped {
+			delete(out, name)
+		}
 	}
 	if c.ExpCookie != "" {
 		stripCookie(out, c.ExpCookie) // T-35, INV-1: ForwardAll would send the visitor id unkeyed
@@ -117,10 +132,9 @@ func copyField(dst, src http.Header, name string) {
 	}
 }
 
-// DropHopByHop deletes from h the hop-by-hop fields, Host, and the fields named
-// in the Connection lines conn (RFC 9110 §7.6.1). It serves forwarded
-// requests and stored responses (FR-FWD-2, FR-STO-11).
-func DropHopByHop(h http.Header, conn []string) {
+// dropConnectionOptions deletes from h the fields the Connection lines conn
+// name (RFC 9110 §7.6.1).
+func dropConnectionOptions(h http.Header, conn []string) {
 	for _, line := range conn {
 		for opt := range strings.SplitSeq(line, ",") {
 			if opt = trimOWS(opt); opt != "" {
@@ -128,6 +142,13 @@ func DropHopByHop(h http.Header, conn []string) {
 			}
 		}
 	}
+}
+
+// DropHopByHop deletes from h the hop-by-hop fields, Host, and the fields named
+// in the Connection lines conn (RFC 9110 §7.6.1). It serves forwarded
+// requests and stored responses (FR-FWD-2, FR-STO-11).
+func DropHopByHop(h http.Header, conn []string) {
+	dropConnectionOptions(h, conn)
 	for _, name := range hopByHop {
 		delete(h, name)
 	}

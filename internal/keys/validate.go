@@ -44,10 +44,10 @@ func IsUpgrade(method string, h http.Header) bool {
 	// RFC 9110 §7.8 lets a server ignore Upgrade. A lone h2c is ignored so
 	// "curl --http2 http://..." is served; Upgrade and HTTP2-Settings are
 	// hop-by-hop, so key and forward stay equal.
-	if up := h.Values("Upgrade"); len(up) == 0 || onlyH2C(up) {
+	if up := h["Upgrade"]; len(up) == 0 || onlyH2C(up) {
 		return false
 	}
-	for _, line := range h.Values("Connection") {
+	for _, line := range h["Connection"] {
 		for opt := range strings.SplitSeq(line, ",") {
 			if strings.EqualFold(strings.Trim(opt, " \t"), "upgrade") {
 				return true
