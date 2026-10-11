@@ -1811,7 +1811,7 @@ Entry template:
 - Context: medium
 
 ## 2026-10-11 · P3-04 · done
-- Branch / PR: claude/gifted-mayer-b8afaw / PR_URL
+- Branch / PR: claude/gifted-mayer-b8afaw / https://github.com/AshwinSathian/weir/pull/103
 - Done: `EvExposure` and `Event.Experiment/Variant/Visitor`; `Assign` returns `Exposures` and marks them in the cookie; `emitExposures` in experiments.go. Visitor is 16 hex chars of SHA-256 of the id. Winner, Warm, errors and no-consent emit none.
 - Tests: `TestExposureOncePerVisitor`, `TestExposureOnHit`, `TestExposureNoneWithoutConsent`, `TestExposureVisitorIsHashPrefix`, `TestAssignExposures`, EvExposure scenario in `TestEveryEventKindEmitted`. Race tests and pinned lint pass; trace 146/146. `make check` itself not run (old lint binary).
 - Deviations: docs/04 §9.1/§9.2 and docs/10 §4 step 7 details. Review should-fix: the "analysis deduplicates refusing clients" claim was false and is reworded; the original rationale is raised under Waiting on Ashwin.

@@ -5,7 +5,7 @@ Phase: 3
 Current card: none
 Card state: awaiting-merge
 Branch: claude/gifted-mayer-b8afaw (designated session branch)
-PR: PR_URL
+PR: https://github.com/AshwinSathian/weir/pull/103
 Next card: P3-05 (`make next`)
 
 ## Waiting on Ashwin
