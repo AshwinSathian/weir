@@ -6,8 +6,11 @@ import (
 )
 
 // Observer receives engine events (04 §9). Observe is called synchronously on
-// the request path, so implementations must be fast and safe for concurrent
-// use.
+// the request path, so implementations must be fast, must not block, must not
+// panic and must be safe for concurrent use. The engine does not recover an
+// Observer panic: it ends the request or flight it ran in, and the origin
+// response that call held is closed only when the garbage collector finalizes
+// its connection.
 type Observer interface{ Observe(Event) }
 
 // Event is one engine event. Reason uses a fixed vocabulary per Kind and

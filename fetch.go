@@ -76,16 +76,25 @@ func (e *Engine) fetch(ctx context.Context, c *keys.Classified, origin Origin, c
 		}
 		return e.circuitOpen(c, class)
 	}
+	// NFR-2, FR-CB-4: whatever ends this call (a panic in an Observer, a
+	// Goexit in the origin) must free a half-open probe slot; a leaked one
+	// shuts the breaker for MaxOpenFor against a healthy origin.
+	settled := false
+	cancelProbe := func() {
+		if !settled {
+			settled = true
+			e.cb.Cancel(probe)
+		}
+	}
+	defer cancelProbe()
 	permit := held
 	if permit == nil {
 		if permit, err = e.limFor(c).Acquire(ctx, class, c.PartitionH, c.HostH); err != nil {
-			e.cb.Cancel(probe)
 			return e.shed(c, class, err)
 		}
 	}
 	defer permit.Release()
 	if err := ctx.Err(); err != nil { // granted as the caller left (04 §8.2): send nothing
-		e.cb.Cancel(probe)
 		return fetchResult{err: err}
 	}
 	req := (*Request)(&c.Forwarded)
@@ -129,8 +138,9 @@ func (e *Engine) fetch(ctx context.Context, c *keys.Classified, origin Origin, c
 	// fetch whose caller left says nothing about the origin.
 	record := func(o breaker.Outcome) {
 		if o == breaker.Failure && ctx.Err() != nil {
-			e.cb.Cancel(probe)
+			cancelProbe()
 		} else {
+			settled = true
 			e.cb.Record(probe, o)
 		}
 	}
