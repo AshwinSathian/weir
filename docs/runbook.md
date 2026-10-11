@@ -252,11 +252,11 @@ A purge body that names nothing is a 400. A reply of 202 means the epochs are wr
 
 ### 7.9 Rotating experiment signing keys
 
-The `experiments` block signs its assignment cookie with the first of `signing_keys` and verifies with all of them ([10](10-experiments-spec.md) §3). Put each key in the environment and name it by placeholder (`signing_keys {env.WEIR_EXP_KEY} {env.WEIR_EXP_KEY_PREV}`), so the Caddyfile, `caddy adapt` output and Caddy's autosave hold the name and not the secret. Do not use `{$VAR}`: Caddy expands it into the adapted JSON.
+The `experiments` block signs its assignment cookie with the first of `signing_keys` and verifies with all of them ([10](10-experiments-spec.md) §3). Put each key in the environment and name it by placeholder (`signing_keys {env.WEIR_EXP_KEY} {env.WEIR_EXP_KEY_PREV}`), so the Caddyfile, `caddy adapt` output and Caddy's autosave hold the name and not the secret. Do not use `{$VAR}`: Caddy expands it into the adapted JSON. A key is either a literal or exactly `{env.NAME}`; any other brace (`{file.…}`, `{system.hostname}`, a brace pair inside a literal) is refused at load, so a key can never depend on the clock or the node.
 
 Load rules, all fail closed:
 
-- Every key is at least 32 bytes. A shorter one, or an unset variable (it expands to an empty key), fails `caddy validate` and the reload; the running config stays as it was (`TestExperimentsBadKeyReloadKeepsOldHandler`). `caddy validate` reads your shell's environment, not the service's, so export the same variables there first or it fails on the empty key.
+- Every key is at least 32 bytes. A shorter one, or an unset variable (it expands to an empty key), fails `caddy validate` and the reload with the variable named; the running config stays as it was (`TestExperimentsBadKeyReloadKeepsOldHandler`). `caddy validate` reads your shell's environment, not the service's, so export the same variables there first or it fails on the empty key.
 - At least one key is required once the block has experiments.
 
 To rotate:
@@ -266,7 +266,13 @@ To rotate:
 3. Make it first and move the old one second, then reload. New cookies are signed with the new key; visitors holding old cookies still verify and are re-signed on their next consented, matched request.
 4. Keep the old key configured for at least 90 days after step 3, the cookie lifetime. A visitor who returns later with an old cookie and no old key gets a new visitor id and may change variant.
 
-Editing experiments (weights, salts, winners, new experiments) never purges the cache. Entries for a variant that no longer applies to a visitor (a removed variant, a changed salt, a winner) stay stored, are not served to anyone, and age out. For the settings that do purge, see 7.6.
+Editing experiments (weights, salts, winners, new experiments) never purges the cache. The cache key carries the experiment name and the variant name, in the order the experiments are listed, and nothing else: not the salt, not the weights. Three consequences:
+
+- Changing weights or a salt moves visitors between variants but strands no entries; a visitor newly assigned `b` is served the stored `b` entry.
+- Removing a variant or an experiment, or reordering experiments, leaves entries that no request maps to; they age out.
+- Reusing an experiment or variant name for different content serves the old content to the new arm until the entries expire (stale windows extend that). When what a variant serves changes, give it a new name or purge.
+
+For the settings that do purge, see 7.6.
 
 ## 8. Deploying on Caddy (several nodes, one Valkey)
 

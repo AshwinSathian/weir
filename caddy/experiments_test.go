@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
 
@@ -120,6 +121,50 @@ func TestCaddyfileExperiments(t *testing.T) {
 		}
 	})
 
+	t.Run("a stray token is never echoed in any block", func(t *testing.T) {
+		const secret = "Sup3rSecretValue-0123456789abcdefXYZ"
+		for name, body := range map[string]string{
+			"experiments with arg":  "experiments " + secret + " {\n\tcookie a\n}",
+			"store with arg":        "store valkey " + secret + " {\n\taddrs h:1\n}",
+			"store type":            "store " + secret + " {\n\taddrs h:1\n}",
+			"store unknown key":     "store valkey {\n\taddrs h:1\n\t" + secret + "\n}",
+			"key unknown key":       "key {\n\theaders a\n\t" + secret + "\n}",
+			"limiter bad int":       "limiter {\n\tmax_concurrent " + secret + "\n}",
+			"limiter bad duration":  "limiter {\n\tmax_queue_wait " + secret + "\n}",
+			"top-level unknown key": secret,
+			"name with extra arg":   "name a " + secret,
+			"forward with arg":      "forward " + secret + " {\n\tallow a\n}",
+			"optional bool junk":    "experiments {\n\tdownstream_keys_on_variant " + secret + "\n}",
+			"consent short":         "experiments {\n\tconsent cookie " + secret + "\n}",
+		} {
+			_, err := adapt(t, site(body))
+			if err == nil {
+				t.Errorf("%s: bad block accepted", name)
+			} else if strings.Contains(err.Error(), secret) {
+				t.Errorf("%s: error echoes the token: %v", name, err)
+			}
+		}
+	})
+
+	t.Run("a mistyped directive name is still named", func(t *testing.T) {
+		_, err := adapt(t, site("experiments {\n\tmax_activ 3\n}"))
+		if err == nil || !strings.Contains(err.Error(), `"max_activ"`) {
+			t.Fatalf("want the typo named, got %v", err)
+		}
+	})
+
+	t.Run("downstream_keys_on_variant takes an optional boolean", func(t *testing.T) {
+		for in, want := range map[string]bool{"": true, " true": true, " false": false} {
+			out, err := adapt(t, site("experiments {\n\tsigning_keys {env.K}\n\tdownstream_keys_on_variant"+in+"\n}"))
+			if err != nil {
+				t.Fatalf("%q: %v", in, err)
+			}
+			if got := weirHandlers(t, out)[0].Experiments.DownstreamKeysOnVariant; got != want {
+				t.Errorf("%q: got %v, want %v", in, got, want)
+			}
+		}
+	})
+
 	for name, tc := range map[string]struct{ body, want string }{
 		"empty block":          {"experiments {\n}", "at least one key"},
 		"unknown key":          {"experiments {\n\tcolour red\n}", "unknown key"},
@@ -183,6 +228,35 @@ func TestExperimentsSigningKeyPlaceholders(t *testing.T) {
 		_, err := weir.New(expHandler(short).weirConfig())
 		if err == nil || strings.Contains(err.Error(), short) {
 			t.Fatalf("want an error without the key, got %v", err)
+		}
+	})
+	t.Run("only a whole env placeholder is expanded", func(t *testing.T) {
+		t.Setenv("WEIR_EXP_KEY_SET", expKeyA)
+		os.Unsetenv("WEIR_EXP_KEY_UNSET") //nolint:errcheck // absent is the point
+		for name, k := range map[string]string{
+			"clock":            "{time.now.unix}" + expKeyA,
+			"file":             "{file./etc/hostname}",
+			"host name":        "{system.hostname}" + expKeyA,
+			"brace pair":       "ab{cd}ef" + expKeyA,
+			"env in the midst": "a{env.WEIR_EXP_KEY_SET}b",
+			"unset env":        "{env.WEIR_EXP_KEY_UNSET}",
+			"bad env name":     "{env.1X}",
+		} {
+			err := expHandler(k).Validate()
+			if err == nil {
+				t.Errorf("%s: accepted", name)
+			} else if strings.Contains(err.Error(), expKeyA) {
+				t.Errorf("%s: error echoes key material: %v", name, err)
+			}
+		}
+		if err := expHandler("{env.WEIR_EXP_KEY_SET}").Validate(); err != nil {
+			t.Errorf("whole env placeholder refused: %v", err)
+		}
+		if err := expHandler(expKeyA).Validate(); err != nil {
+			t.Errorf("literal key refused: %v", err)
+		}
+		if err := (&Handler{Name: "x", Experiments: &ExperimentsConfig{Cookie: "c"}}).Validate(); err == nil {
+			t.Error("a block that enables nothing was accepted")
 		}
 	})
 	t.Run("no experiments block leaves the engine off", func(t *testing.T) {

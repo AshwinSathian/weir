@@ -226,6 +226,9 @@ func (h *Handler) Validate() error {
 			return err
 		}
 	}
+	if err := h.Experiments.validate(); err != nil {
+		return err
+	}
 	if h.MaxBytes != 0 && h.MaxBytes < minStoreBytes {
 		return fmt.Errorf("weir: max_bytes must be at least %d MiB (the largest cacheable object is 10%% of a shard)", minStoreBytes>>20)
 	}

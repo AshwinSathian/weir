@@ -57,7 +57,7 @@ func (h *Handler) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 	d.Next() // directive name
 	file, line := d.File(), d.Line()
 	if d.CountRemainingArgs() > 0 {
-		return d.ArgErr() // the block is the only form; a shorthand would hide keys
+		return argErr(d) // the block is the only form; a shorthand would hide keys
 	}
 	seen := map[string]bool{}
 	nameFile, nameLine := file, line
@@ -147,17 +147,17 @@ func (h *Handler) blockKey(d *caddyfile.Dispenser, key string, seen map[string]b
 			"if_error":         func() error { return durArg(d, &h.Stale.IfError) },
 		})
 	}
-	return d.Errf("unknown key %q", key)
+	return d.Errf("unknown key %s", tok(key))
 }
 
 // storeBlock parses `store valkey { ... }`. The type is an argument so a
 // second store kind can follow without breaking existing files.
 func (h *Handler) storeBlock(d *caddyfile.Dispenser) error {
 	if !d.NextArg() {
-		return d.ArgErr()
+		return argErr(d)
 	}
 	if typ := d.Val(); typ != "valkey" {
-		return d.Errf("unknown store type %q (only \"valkey\")", typ)
+		return d.Errf("unknown store type %s (only \"valkey\")", tok(typ))
 	}
 	s := &StoreConfig{Type: "valkey"}
 	err := subBlock(d, "store", map[string]func() error{
@@ -190,10 +190,10 @@ func (h *Handler) storeBlock(d *caddyfile.Dispenser) error {
 // case it is a key.
 func experimentsBlock(d *caddyfile.Dispenser, h *Handler) error {
 	x := &ExperimentsConfig{}
-	err := subBlockQuiet(d, "experiments", map[string]func() error{
+	err := subBlock(d, "experiments", map[string]func() error{
 		"cookie":     func() error { return secretArg(d, &x.Cookie) },
 		"header":     func() error { return secretArg(d, &x.Header) },
-		"max_active": func() error { return quietIntArg(d, &x.MaxActive) },
+		"max_active": func() error { return intArg(d, &x.MaxActive) },
 		"signing_keys": func() error {
 			args := d.RemainingArgs()
 			if len(args) == 0 {
@@ -202,7 +202,7 @@ func experimentsBlock(d *caddyfile.Dispenser, h *Handler) error {
 			x.SigningKeys = args
 			return nil
 		},
-		"downstream_keys_on_variant": func() error { return quietFlag(d, &x.DownstreamKeysOnVariant) },
+		"downstream_keys_on_variant": func() error { return optBool(d, &x.DownstreamKeysOnVariant) },
 		"consent": func() error {
 			args := d.RemainingArgs()
 			if len(args) != 3 || args[0] != "cookie" {
@@ -212,7 +212,7 @@ func experimentsBlock(d *caddyfile.Dispenser, h *Handler) error {
 			return nil
 		},
 		"experiment": func() error { return experimentBlock(d, x) },
-	}, true, "experiment")
+	}, "experiment")
 	if err != nil {
 		return err
 	}
@@ -227,7 +227,7 @@ func experimentBlock(d *caddyfile.Dispenser, x *ExperimentsConfig) error {
 	}
 	// oneArg consumed the name and the opening brace is next; subBlock
 	// expects no further argument.
-	err := subBlockQuiet(d, "experiment", map[string]func() error{
+	err := subBlock(d, "experiment", map[string]func() error{
 		"match": func() error {
 			args := d.RemainingArgs()
 			if len(args) == 0 || len(args)%2 != 0 {
@@ -258,7 +258,7 @@ func experimentBlock(d *caddyfile.Dispenser, x *ExperimentsConfig) error {
 		"variants": func() error {
 			args := d.RemainingArgs()
 			if len(args) == 0 {
-				return d.ArgErr()
+				return argErr(d)
 			}
 			for _, a := range args {
 				name, w, ok := strings.Cut(a, "=")
@@ -273,7 +273,7 @@ func experimentBlock(d *caddyfile.Dispenser, x *ExperimentsConfig) error {
 			}
 			return nil
 		},
-	}, true)
+	})
 	if err != nil {
 		return err
 	}
@@ -283,16 +283,9 @@ func experimentBlock(d *caddyfile.Dispenser, x *ExperimentsConfig) error {
 
 // subBlock parses the nested block of one key. A block key is set once, and
 // so is each key inside it.
-func subBlock(d *caddyfile.Dispenser, name string, keys map[string]func() error) error {
-	return subBlockQuiet(d, name, keys, false)
-}
-
-// subBlockQuiet is subBlock; with quiet set, the unknown-key error does not
-// quote the token, because in a block that holds secrets it may be one (an
-// operator wrapping a signing_keys list onto its own line).
-func subBlockQuiet(d *caddyfile.Dispenser, name string, keys map[string]func() error, quiet bool, repeat ...string) error {
+func subBlock(d *caddyfile.Dispenser, name string, keys map[string]func() error, repeat ...string) error {
 	if d.NextArg() {
-		return d.ArgErr()
+		return argErr(d)
 	}
 	seen := map[string]bool{}
 	nest := d.Nesting()
@@ -302,10 +295,7 @@ func subBlockQuiet(d *caddyfile.Dispenser, name string, keys map[string]func() e
 		k := d.Val()
 		fn, ok := keys[k]
 		if !ok {
-			if quiet {
-				return d.Errf("unknown key in %s block (a value on its own line? join it to its key with a backslash)", name)
-			}
-			return d.Errf("unknown key %q in %s block", k, name)
+			return d.Errf("unknown key %s in %s block", tok(k), name)
 		}
 		if seen[k] && !slices.Contains(repeat, k) {
 			return d.Errf("%q is set twice in %s block", k, name)
@@ -325,13 +315,38 @@ func subBlockQuiet(d *caddyfile.Dispenser, name string, keys map[string]func() e
 
 func oneArg(d *caddyfile.Dispenser, dst *string) error {
 	if !d.NextArg() {
-		return d.ArgErr()
+		return argErr(d)
 	}
 	*dst = d.Val()
 	if d.NextArg() {
-		return d.ArgErr()
+		return argErr(d)
 	}
 	return nil
+}
+
+// argErr replaces Caddy's ArgErr, which always quotes the last token it saw
+// (and so can print a password or signing key that sits on a mis-nested or
+// wrapped line).
+func argErr(d *caddyfile.Dispenser) error {
+	return d.Errf("wrong argument count or unexpected line ending")
+}
+
+// tok renders a token for an error. Only a token shaped like a directive name
+// (lower case, at most 24 bytes) is quoted, so a typo such as "max_activ" is
+// still named; anything else may be a secret and becomes <value>. A signing
+// key is at least 32 bytes, so a real one never takes the quoted form.
+func tok(s string) string {
+	if s == "" || len(s) > 24 || s[0] < 'a' || s[0] > 'z' {
+		return "<value>"
+	}
+	for i := range len(s) {
+		c := s[i]
+		ok := c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '_'
+		if !ok {
+			return "<value>"
+		}
+	}
+	return strconv.Quote(s)
 }
 
 // secretArg reads one value that may be a credential. Caddy's ArgErr quotes the
@@ -360,25 +375,32 @@ func quietFlag(d *caddyfile.Dispenser, dst *bool) error {
 	return nil
 }
 
-// quietIntArg is intArg without quoting the token.
-func quietIntArg(d *caddyfile.Dispenser, dst *int) error {
+// optBool is a flag that also accepts true or false (docs/10 §3 writes
+// `downstream_keys_on_variant false`).
+func optBool(d *caddyfile.Dispenser, dst *bool) error {
 	key := d.Val()
-	var s string
-	if err := secretArg(d, &s); err != nil {
-		return err
+	if !d.NextArg() {
+		*dst = true
+		return nil
 	}
-	n, err := strconv.Atoi(s)
-	if err != nil || n < 0 {
-		return d.Errf("%s is not a non-negative integer", key)
+	switch d.Val() {
+	case "true":
+		*dst = true
+	case "false":
+		*dst = false
+	default:
+		return d.Errf("%s takes true or false", key)
 	}
-	*dst = n
+	if d.NextArg() {
+		return d.Errf("%s takes at most one argument", key)
+	}
 	return nil
 }
 
 func listArg(d *caddyfile.Dispenser, dst *[]string) error {
 	args := d.RemainingArgs()
 	if len(args) == 0 {
-		return d.ArgErr()
+		return argErr(d)
 	}
 	*dst = args
 	return nil
@@ -387,7 +409,7 @@ func listArg(d *caddyfile.Dispenser, dst *[]string) error {
 // flag is a key with no value: its presence turns the setting on.
 func flag(d *caddyfile.Dispenser, dst *bool) error {
 	if d.NextArg() {
-		return d.ArgErr()
+		return argErr(d)
 	}
 	*dst = true
 	return nil
@@ -402,7 +424,7 @@ func intArg(d *caddyfile.Dispenser, dst *int) error {
 	}
 	n, err := strconv.Atoi(s)
 	if err != nil || n < 0 {
-		return d.Errf("%s: %q is not a non-negative integer", key, s)
+		return d.Errf("%s: %s is not a non-negative integer", key, tok(s))
 	}
 	*dst = n
 	return nil
@@ -416,7 +438,7 @@ func durArg(d *caddyfile.Dispenser, dst *caddy.Duration) error {
 	}
 	v, err := caddy.ParseDuration(s)
 	if err != nil {
-		return d.Errf("%s: invalid duration %q", key, s)
+		return d.Errf("%s: invalid duration %s", key, tok(s))
 	}
 	if v < 0 {
 		return d.Errf("%s: duration must not be negative", key)

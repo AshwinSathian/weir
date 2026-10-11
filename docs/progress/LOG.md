@@ -1826,7 +1826,7 @@ Entry template:
 - Follow-ups: none.
 - Context: low
 
-## 2026-10-12 · P3-05 · in-progress
+## 2026-10-11 · P3-05 · in-progress
 - Branch / PR: claude/busy-tesla-iw6ola / none yet
 - Done: `experiments { ... }` block in the Caddyfile and JSON (`caddy/{config,caddyfile,module}.go`); signing keys resolved from `{env.VAR}` at config build; experiments stay out of the key-generation hash; docs/08 §2 row; runbook 7.9 on key rotation.
 - Tests: `TestCaddyfileExperiments`, `TestExperimentsSigningKeyPlaceholders`, `TestExperimentsExcludedFromKeyGenHash`, `TestE2EExperimentSplit`; caddy module lint, vet and race tests pass. `/handoff` (review, card mark, PR) not run yet.
@@ -1834,10 +1834,18 @@ Entry template:
 - Follow-ups: run `/handoff`; the runbook's rollback claim for a bad key reload is untested.
 - Context: low
 
-## 2026-10-12 · P3-05 · done
+## 2026-10-11 · P3-05 · done
 - Branch / PR: claude/busy-tesla-iw6ola / https://github.com/AshwinSathian/weir/pull/104
 - Done: review fixes on top of the in-progress entry. Parse errors in the `experiments` block no longer quote a token (secrets on a wrapped line); the e2e test now proves the reload applied (a `winner` flips a control cookie to b) while `/warm` stays a hit; new `TestExperimentsBadKeyReloadKeepsOldHandler` pins the runbook's rollback claim; docs/08 §3 names experiments in the excluded list; runbook 7.9 corrected (stranded entries wording, validate env).
 - Tests: as in the in-progress entry plus the above; `make check` run with the Go 1.27 linter: fmt, vet, lint, race tests (root, store, internal, weirhttp, caddy, observe/prom, store/valkey) and trace (146/146) pass.
 - Deviations: none from the normative documents beyond the docs/08 and runbook edits the card lists.
 - Follow-ups: none. Review (card-reviewer): no must-fix; four should-fix fixed, nits fixed except the `{...}` in literal keys (noted in STATUS).
 - Context: low; size M was right.
+
+## 2026-10-11 · P3-05 · review-fixes
+- Branch / PR: claude/busy-tesla-iw6ola / https://github.com/AshwinSathian/weir/pull/104
+- Done: adversarial review (no must-fix). Decisions (delegated by Ashwin): quote a Caddyfile token only when it looks like a directive name and never use `ArgErr`, across the whole `weir` block; expand only a whole `{env.NAME}` in signing keys and refuse any other brace, naming an unset variable; refuse an experiments block that enables nothing; `downstream_keys_on_variant` takes an optional `true|false` (docs/10 v1.6, its example now parses); docs/10 reload wording corrected; runbook 7.9 corrected (the key carries experiment and variant names only, not salt or weights; reusing a name serves old content; reordering strands entries); dates fixed to 2026-10-11.
+- Tests: `TestCaddyfileExperiments` (stray tokens in every block, typo still named, optional boolean), `TestExperimentsSigningKeyPlaceholders` (clock, file, host name, brace, unset and bad names refused).
+- Deviations: docs/10 §3/§4 wording and Caddyfile syntax (optional boolean), within the delegated decisions.
+- Follow-ups: cap on the number of signing keys (engine, NFR-3), noted in STATUS. Left as is: weights `+5` and `05` parse; Caddyfile errors have no `weir:` prefix (match the sibling errors).
+- Context: low
