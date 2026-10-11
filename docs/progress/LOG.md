@@ -1747,8 +1747,16 @@ Entry template:
 
 ## 2026-10-11 · P3-00 · done
 - Branch / PR: claude/great-bardeen-t56hcm (the session's designated branch) / https://github.com/AshwinSathian/weir/pull/98
-- Done: docs/10 is v1.1. Ashwin decided E8 (matchers path and host only) and E9 (prune on rewrite, 512-byte cap). Two reviews (card-reviewer, then an adversarial pass; the second delegated by Ashwin with the open decisions) added E10 to E19: cookie grammar and MAC, key policy and rotation re-issue, header alias, key tags, cardinality, downstream flag, pick, exposure, winner, request classes. Cards P3-01 to P3-06; threat rows T-46 to T-51; docs/07 §13.
-- Tests: none (docs only); `make check` stops at the golangci-lint Go-version mismatch (known), trace below.
-- Deviations: none. Delegated decisions: `Config.Experiments *ExperimentsConfig`, `Event` fields Experiment/Variant/Visitor, visitor ids from crypto/rand, `downstream_keys_on_cookie`, 90-day cookie, caps 8 variants and product 16, winner applies without consent, consent withdrawal expires the cookie. A first sed on this file rewrote 8 old entries; reverted from main.
-- Follow-ups: CLAUDE.md rule 7 is not edited; E10 states it covers jitter, not identifiers (Ashwin may want a one-line note). P3-03 is at the M limit; split if it grows.
+- Done: docs/10 is v1.0. Ashwin decided E8 (matchers stay path and host only) and E9 (prune unconfigured assignments on every cookie rewrite, 512-byte cap, oldest dropped first). Cards P3-01 to P3-05 written in docs/cards/20-later.md; E1 to E9 references updated in docs/01, docs/README and PLAN.
+- Tests: none (docs only); trace 146/146; `make check` stops at the golangci-lint Go-version mismatch (known).
+- Deviations: none. The card-reviewer found a must-fix: the experiment cookie would reach the origin unkeyed under ForwardAll. Fixed in 10 §4 step 4 and P3-02 (ask-first note kept: an addition to the forwarding rules).
+- Follow-ups: P3-01 may need a public Config field, so ask first. `/handoff` was not run (reserved for the user); PR still to open.
+- Context: low
+
+## 2026-10-11 · P3-00 · review-fixes
+- Branch / PR: claude/great-bardeen-t56hcm (restarted from main after PR 98 merged) / see STATUS
+- Done: PR 98 merged before the adversarial review landed, so its fixes ship here. docs/10 is v1.1 (E10 to E19: cookie grammar and MAC, key policy and rotation re-issue, header alias, key tags, cardinality, downstream flag, pick, exposure, winner, request classes). Cards re-split into P3-01 to P3-06; threat rows T-46 to T-51; docs/07 section 13. The review was delegated by Ashwin with the open decisions: `Config.Experiments *ExperimentsConfig`, `Event` fields Experiment/Variant/Visitor, crypto/rand ids, `downstream_keys_on_cookie`, 90-day cookie, caps 8 variants and product 16, winner applies without consent, consent withdrawal expires the cookie. Default cookie name stays `weir_v` (a `__Host-` default fails on plain http).
+- Tests: none (docs only); trace 146/146; `make check` stops at the golangci-lint Go-version mismatch (known).
+- Deviations: correction: the earlier "record PR" step ran a sed that rewrote "none yet" to the PR 98 link in 8 older entries; restored here (corrections are new entries, this is one).
+- Follow-ups: CLAUDE.md rule 7 not edited (E10 says identifiers use crypto/rand); P3-03 is at the M limit.
 - Context: medium

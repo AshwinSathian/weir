@@ -5,7 +5,7 @@ Phase: 1
 Current card: none
 Card state: awaiting-merge
 Branch: claude/great-bardeen-t56hcm (designated session branch)
-PR: https://github.com/AshwinSathian/weir/pull/98
+PR: https://github.com/AshwinSathian/weir/pull/99
 Next card: P3-01 (`make next`)
 
 ## Waiting on Ashwin
