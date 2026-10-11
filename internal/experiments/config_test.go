@@ -69,7 +69,7 @@ func TestConfigValidate(t *testing.T) {
 		{"path with upper case escape", func(c *Config) { c.Experiments[0].Path = "/a%2F*" }, ""},
 		{"path with query", func(c *Config) { c.Experiments[0].Path = "/a?b" }, "path"},
 		{"path with non-ASCII", func(c *Config) { c.Experiments[0].Path = "/caf\u00e9" }, "path"},
-		{"huge Key.MaxVariants does not overflow the limit", func(c *Config) {}, ""},
+		{"huge Key.MaxVariants does not overflow the limit", func(*Config) {}, ""},
 		{"host with port", func(c *Config) { c.Experiments[1].Host = "shop.example:8080" }, ""},
 		{"ipv6 host", func(c *Config) { c.Experiments[1].Host = "[::1]:8080" }, ""},
 		{"host wildcard", func(c *Config) { c.Experiments[1].Host = "*.example" }, "host"},

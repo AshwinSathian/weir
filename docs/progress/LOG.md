@@ -1769,3 +1769,11 @@ Entry template:
 - Deviations: docs/10 v1.1 (clarifications and the hash separator; no requirement or default changed).
 - Follow-ups: P3-02 sets defaults and the public shape (ask first), deletes `_`/`-` header variants, watches allocations on the hit path.
 - Context: low
+
+## 2026-10-11 · P3-01 · review-fixes
+- Branch / PR: claude/gracious-shannon-w5n6k7 / https://github.com/AshwinSathian/weir/pull/100
+- Done: fixed the 10 golangci-lint findings CI reported in `internal/experiments` (gosec G115 conversions, prealloc, revive `max` shadowing and unused parameter, staticcheck De Morgan and SA4000). The earlier handoffs never ran lint because the local binary refuses the module.
+- Tests: golangci-lint v2.14.0 built with Go 1.27.0 reports 0 issues repo-wide; race tests, gofmt and trace pass; 20 s fuzz clean.
+- Deviations: none
+- Follow-ups: STATUS now records how to run lint locally; run it before every push.
+- Context: low

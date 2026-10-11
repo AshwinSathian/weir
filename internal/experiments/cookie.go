@@ -4,6 +4,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/binary"
 	"slices"
 	"strings"
 )
@@ -225,10 +226,7 @@ func NewVisitorID(rnd func() float64) string {
 		if !(f >= 0 && f < 1) {
 			f = 0
 		}
-		u := uint64(f * (1 << 53))
-		for j := 0; j < 8; j++ {
-			raw[i*8+j] = byte(u >> (8 * j))
-		}
+		binary.LittleEndian.PutUint64(raw[i*8:], uint64(f*(1<<53)))
 	}
 	return base64.RawURLEncoding.EncodeToString(raw[:])
 }

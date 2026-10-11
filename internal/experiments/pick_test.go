@@ -25,7 +25,8 @@ func TestPickDistribution(t *testing.T) {
 
 func TestPickIsDeterministicAndSaltDependent(t *testing.T) {
 	variants := []Variant{{"a", 1}, {"b", 1}}
-	if Pick("s", "v", variants) != Pick("s", "v", variants) {
+	first := Pick("s", "v", variants)
+	if again := Pick("s", "v", variants); first != again {
 		t.Fatal("same input, different variant")
 	}
 	differ := false

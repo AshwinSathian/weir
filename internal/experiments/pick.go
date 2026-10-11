@@ -32,10 +32,11 @@ func Pick(salt, visitorID string, variants []Variant) string {
 	// 2^-50, without a modulo.
 	slot, _ := bits.Mul64(binary.BigEndian.Uint64(sum[:8]), uint64(total))
 	for _, v := range variants {
-		if slot < uint64(v.Weight) {
+		w := uint64(v.Weight) //nolint:gosec // every weight is >= 1, checked above
+		if slot < w {
 			return v.Name
 		}
-		slot -= uint64(v.Weight)
+		slot -= w
 	}
 	return variants[len(variants)-1].Name
 }

@@ -251,7 +251,7 @@ func normalizedHost(h string) bool {
 		}
 		for i := 0; i < len(name); i++ {
 			b := name[i]
-			if !(b >= 'a' && b <= 'z' || b >= '0' && b <= '9' || b == '-' || b == '.') {
+			if ok := b >= 'a' && b <= 'z' || b >= '0' && b <= '9' || b == '-' || b == '.'; !ok {
 				return false
 			}
 		}
@@ -285,11 +285,12 @@ func normalizedPath(p string) bool {
 		if i+2 >= len(p) {
 			return false
 		}
-		hi, lo := hexVal(p[i+1]), hexVal(p[i+2])
-		if hi < 0 || lo < 0 {
+		hi, okHi := hexVal(p[i+1])
+		lo, okLo := hexVal(p[i+2])
+		if !okHi || !okLo {
 			return false
 		}
-		if c := byte(hi<<4 | lo); unreservedByte(c) {
+		if c := hi<<4 | lo; unreservedByte(c) {
 			return false // the key decodes it
 		}
 		i += 2
@@ -297,16 +298,16 @@ func normalizedPath(p string) bool {
 	return true
 }
 
-// hexVal returns the value of an upper-case hex digit, or -1 (lower case is
-// not normalized form).
-func hexVal(b byte) int {
+// hexVal returns the value of an upper-case hex digit (lower case is not
+// normalized form).
+func hexVal(b byte) (byte, bool) {
 	switch {
 	case b >= '0' && b <= '9':
-		return int(b - '0')
+		return b - '0', true
 	case b >= 'A' && b <= 'F':
-		return int(b-'A') + 10
+		return b - 'A' + 10, true
 	}
-	return -1
+	return 0, false
 }
 
 func unreservedByte(c byte) bool {
@@ -321,7 +322,8 @@ func unreservedByte(c byte) bool {
 // non-empty host; trying every host and stem is therefore exact, not a
 // sample. The experiment count is small and static, so the cube is cheap.
 func (c *Config) validateOverlap(maxProduct int) error {
-	var hosts, stems []string
+	hosts := make([]string, 0, len(c.Experiments))
+	stems := make([]string, 0, len(c.Experiments))
 	for i := range c.Experiments {
 		e := &c.Experiments[i]
 		if e.Host != "" {
@@ -366,15 +368,15 @@ func cfgErr(format string, args ...any) error {
 	return fmt.Errorf("%w: %s", ErrConfig, fmt.Sprintf(format, args...))
 }
 
-// isToken reports whether s is 1 to max bytes of [A-Za-z0-9_-]. These bytes
+// isToken reports whether s is 1 to limit bytes of [A-Za-z0-9_-]. These bytes
 // are cookie-safe and cannot collide with the cookie's separators.
-func isToken(s string, max int) bool {
-	if s == "" || len(s) > max {
+func isToken(s string, limit int) bool {
+	if s == "" || len(s) > limit {
 		return false
 	}
 	for i := 0; i < len(s); i++ {
 		b := s[i]
-		if !(b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z' || b >= '0' && b <= '9' || b == '-' || b == '_') {
+		if ok := b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z' || b >= '0' && b <= '9' || b == '-' || b == '_'; !ok {
 			return false
 		}
 	}
