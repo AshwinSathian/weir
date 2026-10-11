@@ -1,6 +1,6 @@
 # Weir experiment dimensions specification
 
-Status: v1.3. Phase 3. E1 to E7 were decided with the project owner on 2026-09-27; E8 and E9 on 2026-10-11 (P3-00). All are locked. v1.3 (P3-02 review) adds the Warm and Purge rules to §4, the consent-value limits and the matcher and header-name rules to §3. v1.2 (P3-02) records the public config shape, the defaults and the consent rule in §3. v1.1 (P3-01) adds the clarifications in §3 and §4 (control variant, load-time limits, cookie grammar, hash separator) that the first implementation needed.
+Status: v1.4. Phase 3. E1 to E7 were decided with the project owner on 2026-09-27; E8 and E9 on 2026-10-11 (P3-00). All are locked. v1.4 (P3-03, approved by the project owner) adds `DownstreamKeysOnVariant` (E7) and the cookie lifetime and rewrite rules to §3 and §4. v1.3 (P3-02 review) adds the Warm and Purge rules to §4, the consent-value limits and the matcher and header-name rules to §3. v1.2 (P3-02) records the public config shape, the defaults and the consent rule in §3. v1.1 (P3-01) adds the clarifications in §3 and §4 (control variant, load-time limits, cookie grammar, hash separator) that the first implementation needed.
 Date: 2026-10-11
 Depends on: [01-technical-spec.md](01-technical-spec.md), [02-architecture.md §7](02-architecture.md), [06-threat-model.md](06-threat-model.md)
 Seed: [00-design-doc.md §10](00-design-doc.md) (titled "Phase 2" there; it is Phase 3, see [09 §6](09-research-notes.md))
@@ -32,6 +32,7 @@ experiments {
 	consent        cookie cmp_consent analytics=yes   # optional (E6)
 	header         Weir-Variant      # forwarded header name
 	max_active     4                 # experiments that may apply to one request
+	downstream_keys_on_variant false # true: caches in front key on the variant, so E7 does not rewrite
 
 	experiment checkout-copy {
 		match    path /checkout*
@@ -52,6 +53,7 @@ Rules checked at load (P3-01, `internal/experiments`):
 - Public shape (P3-02, decided with the project owner): `Config.Experiments` of type `ExperimentsConfig` (docs/04 §1). It is off when it has no experiments and no signing keys. Defaults when on: cookie `weir_v`, header `Weir-Variant`, `max_active` 4. Signing keys have no default.
 - The forwarded header name must also not be a field the forward step drops or filters (`Range`, the `If-*` preconditions, `Expect`, `Trailer`, `Pragma`, the trace fields, `Origin`, `Referer`, `Content-Encoding` and similar), or the key would hold a dimension the origin never sees (INV-1).
 - Consent (E6): `consent cookie NAME VALUE` is `ExperimentConsent{Cookie, Value}`. The request has consent when the cookie `NAME` is present, has one value across its occurrences, and one element of its value, split on `&`, `|` and `,` without URL decoding, equals `VALUE`. Without consent the visitor gets the control variant even if the cookie holds an assignment (consent withdrawn), and nothing is recorded. A winner applies before the consent check, since it buckets nobody. `New` logs one warning when no gate is configured. The value is compared as sent: a quoted value (`cmp="analytics=yes"`) or a URL-encoded group list (`%2C` separators) never grants consent, which fails closed to the control variant.
+- Response rules (P3-03): `ExperimentsConfig.DownstreamKeysOnVariant` (default false) is the operator's declaration in E7. The assignment cookie is `NAME=VALUE; Path=/; Max-Age=7776000; HttpOnly; SameSite=Lax`, plus `Secure` when the request scheme is https; 90 days from the response that sets it, not extended by later visits. The E7 rewrite removes `public` and `s-maxage` (any case, any Cache-Control line), keeps every other directive, and appends an unqualified `private` unless one is present (a field-qualified `private="x"` does not count); with no Cache-Control it sends `private`. `CDN-Cache-Control` is removed. Both apply to every response to a matched request: hit, miss, follower, 304, 206 and 416.
 - The key encoding appends the dimensions last, only when an experiment matches, so keys of unmatched requests are unchanged and `weir/key/v1` stays.
 - A winner experiment still contributes its dimension to the key and the header (one value), so entries stay partitioned and the origin sees what was keyed.
 

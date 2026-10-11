@@ -1,0 +1,29 @@
+package weir
+
+import "testing"
+
+// E7, NFR-2: the rewrite keeps unknown and quoted directives intact and never
+// panics on a malformed line.
+func TestPrivateCacheControl(t *testing.T) {
+	tests := []struct {
+		name string
+		in   []string
+		want string
+	}{
+		{"no header", nil, "private"},
+		{"public and s-maxage dropped", []string{"public, max-age=5, s-maxage=9"}, "max-age=5, private"},
+		{"case-insensitive across lines", []string{"PUBLIC", "S-MaxAge=1, no-transform"}, "no-transform, private"},
+		{"existing private kept once", []string{"private, max-age=5"}, "private, max-age=5"},
+		{"field-qualified private gets a broad one", []string{`private="set-cookie, x", max-age=5`}, `private="set-cookie, x", max-age=5, private`},
+		{"quoted comma is not a separator", []string{`ext="a, public", public`}, `ext="a, public", private`},
+		{"unterminated quote", []string{`ext="a, public`, `\`}, `ext="a, public, \, private`},
+		{"empty members", []string{",, ,"}, "private"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := privateCacheControl(tt.in); got != tt.want {
+				t.Fatalf("got %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

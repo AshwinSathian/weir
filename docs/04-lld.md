@@ -138,6 +138,8 @@ type ExperimentsConfig struct {
 	MaxActive   int      // 0: 4; at most 8
 	Consent     ExperimentConsent
 	Experiments []ExperimentConfig
+
+	DownstreamKeysOnVariant bool // caches in front key on the variant: matched responses keep public, s-maxage and CDN-Cache-Control (docs/10 E7)
 }
 type ExperimentConsent struct{ Cookie, Value string } // Value is one '&', '|' or ',' separated element of the cookie value; zero value: no gate (logs a warning at New)
 type ExperimentConfig struct {

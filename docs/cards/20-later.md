@@ -267,7 +267,7 @@ Each phase began with one planning card that verified the spec against current u
 - Tests: `TestCaddyfileExperiments`, `TestExperimentsExcludedFromKeyGenHash` (a reload changing experiments does not purge), `TestE2EExperimentSplit` (caddytest)
 - AC: the `experiments { ... }` block parses to JSON and back; signing keys from placeholders; reload changes experiments without a global purge; runbook entry for rotating signing keys
 - Out of scope: new matcher kinds (E8)
-- Notes: the runbook entry states the load rules from 10 §3: every signing key is at least 32 bytes, and an unset `{env.WEIR_EXP_KEY_PREV}` expands to an empty key and fails the load (fail closed); rotate by adding the new key first, then promoting it.
+- Notes: the runbook entry states the load rules from 10 §3: every signing key is at least 32 bytes, and an unset `{env.WEIR_EXP_KEY_PREV}` expands to an empty key and fails the load (fail closed); rotate by adding the new key first, then promoting it. The block also takes `downstream_keys_on_variant` (P3-03, `ExperimentsConfig.DownstreamKeysOnVariant`).
 
 ## Deferred
 

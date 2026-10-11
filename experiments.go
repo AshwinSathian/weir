@@ -2,6 +2,7 @@ package weir
 
 import (
 	"bytes"
+	"maps"
 	"net/http"
 	"slices"
 	"strings"
@@ -22,6 +23,12 @@ type ExperimentsConfig struct {
 	MaxActive   int      // experiments that may apply to one request; 0: 4; at most 8
 	Consent     ExperimentConsent
 	Experiments []ExperimentConfig
+
+	// DownstreamKeysOnVariant declares that every cache in front of Weir keys
+	// on the variant (Weir-Variant, or the experiment cookie). Only then do
+	// matched responses keep public, s-maxage and CDN-Cache-Control; by
+	// default they are rewritten to private (E7, T-36).
+	DownstreamKeysOnVariant bool
 }
 
 // ExperimentConsent gates bucketing (E6). With Cookie set and the cookie
@@ -149,4 +156,85 @@ func (e *Engine) experimentsKeys() {
 	if len(x.Experiments) > 0 && !ic.Consent.Configured() {
 		e.cfg.Logger.Warn("weir: Experiments has no Consent gate; visitors are bucketed and cookied without a consent signal")
 	}
+}
+
+const expCookieMaxAge = "7776000" // 90 days, not sliding (10 §3)
+
+// experimentResponse finishes a response to a request that matched an
+// experiment (10 §4 steps 5 and 6): it adds the assignment cookie when one
+// was created or changed, and rewrites the headers downstream caches read
+// (E7, T-36). It runs after the entry is built and stored, on a header map
+// of its own, so the stored entry is never touched (P4). Responses to
+// unmatched requests, and errors, pass through.
+func (e *Engine) experimentResponse(c *keys.Classified, resp *Response) *Response {
+	res, ok := c.Decision.(experiments.Result)
+	if !ok || resp == nil || len(res.Picks) == 0 {
+		return resp
+	}
+	x := &e.cfg.Experiments
+	h := maps.Clone(resp.Header)
+	if h == nil {
+		h = http.Header{}
+	}
+	resp.Header = h
+	if res.Changed {
+		if v, ok := res.Cookie.Encode(x.SigningKeys[0]); ok {
+			sc := x.Cookie + "=" + v + "; Path=/; Max-Age=" + expCookieMaxAge + "; HttpOnly; SameSite=Lax"
+			if c.Forwarded.Scheme == "https" {
+				sc += "; Secure"
+			}
+			old := h["Set-Cookie"]
+			h["Set-Cookie"] = append(old[:len(old):len(old)], sc)
+		}
+	}
+	if !x.DownstreamKeysOnVariant {
+		h["Cache-Control"] = []string{privateCacheControl(h["Cache-Control"])}
+		delete(h, "Cdn-Cache-Control")
+	}
+	return resp
+}
+
+// privateCacheControl drops public and s-maxage from Cache-Control lines and
+// makes sure an unqualified private is present. Directives are split on
+// commas outside quotes; anything else is kept as sent.
+func privateCacheControl(lines []string) string {
+	var kept []string
+	private := false
+	for _, l := range lines {
+		start, quoted := 0, false
+		emit := func(end int) {
+			d := strings.TrimSpace(l[start:end])
+			if d == "" {
+				return
+			}
+			name, _, _ := strings.Cut(d, "=")
+			switch strings.ToLower(strings.TrimSpace(name)) {
+			case "public", "s-maxage":
+				return
+			case "private":
+				private = private || d == name // a field-qualified private is not the broad one
+			}
+			kept = append(kept, d)
+		}
+		for i := 0; i < len(l); i++ {
+			switch l[i] {
+			case '"':
+				quoted = !quoted
+			case '\\':
+				if quoted {
+					i++
+				}
+			case ',':
+				if !quoted {
+					emit(i)
+					start = i + 1
+				}
+			}
+		}
+		emit(len(l))
+	}
+	if !private {
+		kept = append(kept, "private")
+	}
+	return strings.Join(kept, ", ")
 }
