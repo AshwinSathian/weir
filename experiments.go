@@ -19,7 +19,7 @@ import (
 // Header is always discarded (T-35).
 type ExperimentsConfig struct {
 	Cookie      string   // assignment cookie name; "": "weir_v"
-	SigningKeys [][]byte // each at least 32 bytes; the first signs, all verify (rotation)
+	SigningKeys [][]byte // 1 to 4 keys of 32 to 256 bytes; the first signs, all verify (rotation)
 	Header      string   // forwarded variant header; "": "Weir-Variant"; no underscore
 	MaxActive   int      // experiments that may apply to one request; 0: 4; at most 8
 	Consent     ExperimentConsent

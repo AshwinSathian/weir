@@ -17,7 +17,9 @@ const (
 	maxNameLen        = 32
 	maxWeight         = 1000
 	maxTotalWeight    = 10000
-	minSigningKeyLn   = 32 // HMAC-SHA-256 block-size practice; an unset env key must fail the load
+	minSigningKeyLn   = 32  // HMAC-SHA-256 block-size practice; an unset env key must fail the load
+	maxSigningKeys    = 4   // verification does one HMAC per key per request (NFR-3)
+	maxSigningKeyLn   = 256 // a long key is hashed on every HMAC.New
 	maxSaltLen        = 64
 	maxActiveLimit    = 8  // bounds the forwarded header and the key dimensions (NFR-3)
 	maxExperiments    = 64 // bounds validateOverlap and the config size
@@ -141,9 +143,15 @@ func (c *Config) Validate(keyMaxVariants int) error {
 	if len(c.SigningKeys) == 0 {
 		return cfgErr("no signing key")
 	}
+	if len(c.SigningKeys) > maxSigningKeys {
+		return cfgErr("more than %d signing keys", maxSigningKeys)
+	}
 	for i, k := range c.SigningKeys {
 		if len(k) < minSigningKeyLn {
 			return cfgErr("signing key %d is shorter than %d bytes", i, minSigningKeyLn)
+		}
+		if len(k) > maxSigningKeyLn {
+			return cfgErr("signing key %d is longer than %d bytes", i, maxSigningKeyLn)
 		}
 	}
 	if c.MaxActive < 1 || c.MaxActive > maxActiveLimit {

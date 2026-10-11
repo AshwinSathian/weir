@@ -230,6 +230,12 @@ func TestExperimentsSigningKeyPlaceholders(t *testing.T) {
 			t.Fatalf("want an error without the key, got %v", err)
 		}
 	})
+	t.Run("more than four keys are refused", func(t *testing.T) {
+		// NFR-3: verification does one HMAC per key per request.
+		if _, err := weir.New(expHandler(expKeyA, expKeyB, expKeyA, expKeyB, expKeyA).weirConfig()); err == nil {
+			t.Fatal("five signing keys accepted")
+		}
+	})
 	t.Run("only a whole env placeholder is expanded", func(t *testing.T) {
 		t.Setenv("WEIR_EXP_KEY_SET", expKeyA)
 		os.Unsetenv("WEIR_EXP_KEY_UNSET") //nolint:errcheck // absent is the point

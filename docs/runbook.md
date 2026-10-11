@@ -256,7 +256,7 @@ The `experiments` block signs its assignment cookie with the first of `signing_k
 
 Load rules, all fail closed:
 
-- Every key is at least 32 bytes. A shorter one, or an unset variable (it expands to an empty key), fails `caddy validate` and the reload with the variable named; the running config stays as it was (`TestExperimentsBadKeyReloadKeepsOldHandler`). `caddy validate` reads your shell's environment, not the service's, so export the same variables there first or it fails on the empty key.
+- Every key is 32 to 256 bytes and at most 4 keys are configured (rotation needs two, at most three). A shorter one, or an unset variable (it expands to an empty key), fails `caddy validate` and the reload with the variable named; the running config stays as it was (`TestExperimentsBadKeyReloadKeepsOldHandler`). `caddy validate` reads your shell's environment, not the service's, so export the same variables there first or it fails on the empty key.
 - At least one key is required once the block has experiments.
 
 To rotate:

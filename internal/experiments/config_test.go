@@ -29,6 +29,11 @@ func TestConfigValidate(t *testing.T) {
 		{"valid", func(*Config) {}, ""},
 		{"short signing key", func(c *Config) { c.SigningKeys = [][]byte{[]byte("short")} }, "signing key 0"},
 		{"no signing key", func(c *Config) { c.SigningKeys = nil }, "no signing key"},
+		// NFR-3, T-35: verification does one HMAC per key per request.
+		{"four signing keys", func(c *Config) { c.SigningKeys = [][]byte{keyA, keyA, keyA, keyA} }, ""},
+		{"five signing keys", func(c *Config) { c.SigningKeys = [][]byte{keyA, keyA, keyA, keyA, keyA} }, "more than 4 signing keys"},
+		{"signing key at the length limit", func(c *Config) { c.SigningKeys = [][]byte{make([]byte, 256)} }, ""},
+		{"signing key over the length limit", func(c *Config) { c.SigningKeys = [][]byte{make([]byte, 257)} }, "longer than 256"},
 		{"cookie name with separator", func(c *Config) { c.CookieName = "a;b" }, "cookie name"},
 		{"header name empty", func(c *Config) { c.Header = "" }, "header name"},
 		{"zero max_active", func(c *Config) { c.MaxActive = 0 }, "max_active"},
