@@ -1,7 +1,9 @@
 package weircaddy
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -9,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/AshwinSathian/weir"
+	"github.com/AshwinSathian/weir/store"
 )
 
 const expKeyA = "0123456789abcdef0123456789abcdef-A"
@@ -36,7 +39,7 @@ const expBlock = `experiments {
 	}
 }`
 
-// docs/10 §3, docs/08 §2: the experiments block adapts to the same module
+// docs/10 §3 (E1), T-35: the experiments block adapts to the same module
 // JSON as the hand-written equivalent, round-trips through JSON, keeps signing
 // keys as placeholders, and a bad block fails with its Caddyfile line.
 func TestCaddyfileExperiments(t *testing.T) {
@@ -93,6 +96,27 @@ func TestCaddyfileExperiments(t *testing.T) {
 	t.Run("a repeated experiment name is left to the engine, a repeated key is not", func(t *testing.T) {
 		if _, err := adapt(t, site("experiments {\n\tcookie a\n\tcookie b\n}")); err == nil || !strings.Contains(err.Error(), "set twice") {
 			t.Fatalf("repeated key accepted: %v", err)
+		}
+	})
+
+	t.Run("a signing key on its own line is never echoed", func(t *testing.T) {
+		const secret = "SECRETSECRETSECRETSECRETSECRETSECRET"
+		for name, body := range map[string]string{
+			"own line":        "experiments {\n\tsigning_keys {env.A}\n\t" + secret + "\n}",
+			"extra arg":       "experiments {\n\tcookie a " + secret + "\n}",
+			"in experiment":   "experiments {\n\texperiment e {\n\t\tsalt a " + secret + "\n\t}\n}",
+			"as match field":  "experiments {\n\texperiment e {\n\t\tmatch " + secret + " x\n\t}\n}",
+			"as variant":      "experiments {\n\texperiment e {\n\t\tvariants " + secret + "\n\t}\n}",
+			"as max_active":   "experiments {\n\tmax_active " + secret + "\n}",
+			"as experiment":   "experiments {\n\texperiment " + secret + " x {\n\t\tsalt a\n\t}\n}",
+			"as flag operand": "experiments {\n\tdownstream_keys_on_variant " + secret + "\n}",
+		} {
+			_, err := adapt(t, site(body))
+			if err == nil {
+				t.Errorf("%s: bad block accepted", name)
+			} else if strings.Contains(err.Error(), secret) {
+				t.Errorf("%s: error echoes the token: %v", name, err)
+			}
 		}
 	})
 
@@ -169,7 +193,7 @@ func TestExperimentsSigningKeyPlaceholders(t *testing.T) {
 	})
 }
 
-// 08 §3, docs/10 §3: experiments change which key a request maps to, so they
+// R-3, T-35 (08 §3, docs/10 §3): experiments change which key a request maps to, so they
 // stay out of the key-generation hash and a reload that edits them does not
 // write a hard epoch.
 func TestExperimentsExcludedFromKeyGenHash(t *testing.T) {
@@ -191,9 +215,37 @@ func TestExperimentsExcludedFromKeyGenHash(t *testing.T) {
 	}
 }
 
-// docs/10 §3, FR-KEY-10: one request in a split gets a variant, the cookie
-// makes it sticky, variants are cached apart, other paths are untouched, and a
-// reload that edits the experiment keeps every other warm key (no purge).
+// T-35, 08 §3: a reload whose signing key is unset or short fails Provision
+// and gives back the store reference it took, so the running handler keeps its
+// store and the rollback claim in runbook 7.9 holds.
+func TestExperimentsBadKeyReloadKeepsOldHandler(t *testing.T) {
+	t.Setenv("WEIR_EXP_KEY", expKeyA)
+	t.Setenv("WEIR_EXP_KEY_PREV", "")
+	const exp = `"experiments": {"signing_keys": [%s], "experiments": [{"name": "e", "salt": "s",
+		"variants": [{"name": "control", "weight": 1}, {"name": "b", "weight": 1}]}]}`
+	cfg := func(keys string) string {
+		return `{"name": "rollback", "max_bytes": "200MiB", ` + fmt.Sprintf(exp, keys) + `}`
+	}
+	old := mustLoad(t, newCtx(t), cfg(`"{env.WEIR_EXP_KEY}"`))
+	for name, keys := range map[string]string{
+		"unset previous key": `"{env.WEIR_EXP_KEY}", "{env.WEIR_EXP_KEY_PREV}"`,
+		"short literal key":  `"tooshortsecretvalue"`,
+	} {
+		if _, err := loadIn(t, newCtx(t), cfg(keys)); err == nil {
+			t.Fatalf("%s: reload accepted", name)
+		}
+		if n := refs(t, old); n != 1 {
+			t.Fatalf("%s: store references = %d after the failed reload, want 1", name, n)
+		}
+		if _, err := old.pool.store.Get(context.Background(), store.Key{}); !errors.Is(err, store.ErrNotFound) {
+			t.Fatalf("%s: old handler's store is not live: %v", name, err)
+		}
+	}
+}
+
+// docs/10 §2 (E1, E2), T-35, T-36: a new visitor in a split gets a variant,
+// the cookie makes it sticky, other paths are untouched, and a reload that
+// edits the experiment takes effect without purging other warm keys (R-3).
 func TestE2EExperimentSplit(t *testing.T) {
 	t.Setenv("WEIR_EXP_KEY", expKeyA)
 	o := newE2EOrigin(t, func(w http.ResponseWriter, r *http.Request) {
@@ -201,7 +253,7 @@ func TestE2EExperimentSplit(t *testing.T) {
 		_, _ = io.WriteString(w, "variant="+r.Header.Get("Weir-Variant")+" path="+r.URL.Path)
 	})
 	tester := newTester(t)
-	site := func(variants string) string {
+	site := func(variants, winner string) string {
 		return fmt.Sprintf(`	weir {
 		name e2e-exp
 		experiments {
@@ -210,12 +262,13 @@ func TestE2EExperimentSplit(t *testing.T) {
 				match  path /exp*
 				salt   e2e
 				variants %s
+				winner   %q
 			}
 		}
 	}
-`, variants)
+`, variants, winner)
 	}
-	tester.InitServer(o.caddyfile(site("control=50 b=50")), "caddyfile")
+	tester.InitServer(o.caddyfile(site("control=50 b=50", "")), "caddyfile")
 	nojar := &http.Client{Transport: tester.Client.Transport, CheckRedirect: tester.Client.CheckRedirect}
 
 	seen := map[string]string{} // variant -> a cookie that carries it
@@ -257,12 +310,16 @@ func TestE2EExperimentSplit(t *testing.T) {
 		t.Fatalf("unmatched path was touched: %v %q", r.header, r.body)
 	}
 
-	// Reload with new weights: warm keys outside the experiment stay hits.
+	// Reload with a winner: the edit must take effect (a control cookie now
+	// gets b) while a warm key outside the experiment stays a hit (R-3).
 	get(t, nojar, "/warm")
-	before := o.calls.Load()
-	tester.InitServer(o.caddyfile(site("control=10 b=90")), "caddyfile")
+	tester.InitServer(o.caddyfile(site("control=50 b=50", "b")), "caddyfile")
+	if r := get(t, nojar, "/exp", "Cookie", seen["control"]); !strings.HasPrefix(r.body, "variant=split=b ") {
+		t.Fatalf("the reloaded winner did not apply: %q", r.body)
+	}
+	callsAfterExp := o.calls.Load()
 	get(t, nojar, "/warm")
-	if n := o.calls.Load() - before; n != 0 {
-		t.Fatalf("an experiment edit purged the cache: %d origin calls", n)
+	if n := o.calls.Load() - callsAfterExp; n != 0 {
+		t.Fatalf("an experiment edit purged the cache: /warm made %d origin calls", n)
 	}
 }

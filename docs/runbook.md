@@ -256,7 +256,7 @@ The `experiments` block signs its assignment cookie with the first of `signing_k
 
 Load rules, all fail closed:
 
-- Every key is at least 32 bytes. A shorter one, or an unset variable (it expands to an empty key), fails `caddy validate` and the reload; the running config stays as it was.
+- Every key is at least 32 bytes. A shorter one, or an unset variable (it expands to an empty key), fails `caddy validate` and the reload; the running config stays as it was (`TestExperimentsBadKeyReloadKeepsOldHandler`). `caddy validate` reads your shell's environment, not the service's, so export the same variables there first or it fails on the empty key.
 - At least one key is required once the block has experiments.
 
 To rotate:
@@ -266,7 +266,7 @@ To rotate:
 3. Make it first and move the old one second, then reload. New cookies are signed with the new key; visitors holding old cookies still verify and are re-signed on their next consented, matched request.
 4. Keep the old key configured for at least 90 days after step 3, the cookie lifetime. A visitor who returns later with an old cookie and no old key gets a new visitor id and may change variant.
 
-Editing experiments (weights, salts, winners, new experiments) never purges the cache: old variant entries become unreachable and age out. For the other settings that do purge, see 7.6.
+Editing experiments (weights, salts, winners, new experiments) never purges the cache. Entries for a variant that no longer applies to a visitor (a removed variant, a changed salt, a winner) stay stored, are not served to anyone, and age out. For the settings that do purge, see 7.6.
 
 ## 8. Deploying on Caddy (several nodes, one Valkey)
 

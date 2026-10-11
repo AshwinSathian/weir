@@ -186,13 +186,14 @@ func (h *Handler) storeBlock(d *caddyfile.Dispenser) error {
 
 // experimentsBlock parses `experiments { ... }` (docs/10 §3). Signing keys
 // are kept as written, so {env.VAR} placeholders reach the JSON and are
-// resolved at Provision; errors never quote a key token.
+// resolved at Provision; parse errors in this block never quote a token, in
+// case it is a key.
 func experimentsBlock(d *caddyfile.Dispenser, h *Handler) error {
 	x := &ExperimentsConfig{}
-	err := subBlock(d, "experiments", map[string]func() error{
-		"cookie":     func() error { return oneArg(d, &x.Cookie) },
-		"header":     func() error { return oneArg(d, &x.Header) },
-		"max_active": func() error { return intArg(d, &x.MaxActive) },
+	err := subBlockQuiet(d, "experiments", map[string]func() error{
+		"cookie":     func() error { return secretArg(d, &x.Cookie) },
+		"header":     func() error { return secretArg(d, &x.Header) },
+		"max_active": func() error { return quietIntArg(d, &x.MaxActive) },
 		"signing_keys": func() error {
 			args := d.RemainingArgs()
 			if len(args) == 0 {
@@ -201,7 +202,7 @@ func experimentsBlock(d *caddyfile.Dispenser, h *Handler) error {
 			x.SigningKeys = args
 			return nil
 		},
-		"downstream_keys_on_variant": func() error { return flag(d, &x.DownstreamKeysOnVariant) },
+		"downstream_keys_on_variant": func() error { return quietFlag(d, &x.DownstreamKeysOnVariant) },
 		"consent": func() error {
 			args := d.RemainingArgs()
 			if len(args) != 3 || args[0] != "cookie" {
@@ -211,7 +212,7 @@ func experimentsBlock(d *caddyfile.Dispenser, h *Handler) error {
 			return nil
 		},
 		"experiment": func() error { return experimentBlock(d, x) },
-	}, "experiment")
+	}, true, "experiment")
 	if err != nil {
 		return err
 	}
@@ -221,12 +222,12 @@ func experimentsBlock(d *caddyfile.Dispenser, h *Handler) error {
 
 func experimentBlock(d *caddyfile.Dispenser, x *ExperimentsConfig) error {
 	var e ExperimentConfig
-	if err := oneArg(d, &e.Name); err != nil {
+	if err := secretArg(d, &e.Name); err != nil {
 		return err
 	}
 	// oneArg consumed the name and the opening brace is next; subBlock
 	// expects no further argument.
-	err := subBlock(d, "experiment "+e.Name, map[string]func() error{
+	err := subBlockQuiet(d, "experiment", map[string]func() error{
 		"match": func() error {
 			args := d.RemainingArgs()
 			if len(args) == 0 || len(args)%2 != 0 {
@@ -246,14 +247,14 @@ func experimentBlock(d *caddyfile.Dispenser, x *ExperimentsConfig) error {
 					}
 					m.Path = args[i+1]
 				default:
-					return d.Errf("match takes host and path, not %q", args[i])
+					return d.Errf("match takes host and path only")
 				}
 			}
 			e.Match = m
 			return nil
 		},
-		"salt":   func() error { return oneArg(d, &e.Salt) },
-		"winner": func() error { return oneArg(d, &e.Winner) },
+		"salt":   func() error { return secretArg(d, &e.Salt) },
+		"winner": func() error { return secretArg(d, &e.Winner) },
 		"variants": func() error {
 			args := d.RemainingArgs()
 			if len(args) == 0 {
@@ -263,16 +264,16 @@ func experimentBlock(d *caddyfile.Dispenser, x *ExperimentsConfig) error {
 				name, w, ok := strings.Cut(a, "=")
 				n, err := strconv.Atoi(w)
 				if !ok || name == "" {
-					return d.Errf("variants take name=weight, got %q", a)
+					return d.Errf("variants take name=weight")
 				}
 				if err != nil {
-					return d.Errf("variant %q: weight %q is not an integer", name, w)
+					return d.Errf("variant weight is not an integer")
 				}
 				e.Variants = append(e.Variants, VariantConfig{Name: name, Weight: n})
 			}
 			return nil
 		},
-	})
+	}, true)
 	if err != nil {
 		return err
 	}
@@ -282,7 +283,14 @@ func experimentBlock(d *caddyfile.Dispenser, x *ExperimentsConfig) error {
 
 // subBlock parses the nested block of one key. A block key is set once, and
 // so is each key inside it.
-func subBlock(d *caddyfile.Dispenser, name string, keys map[string]func() error, repeat ...string) error {
+func subBlock(d *caddyfile.Dispenser, name string, keys map[string]func() error) error {
+	return subBlockQuiet(d, name, keys, false)
+}
+
+// subBlockQuiet is subBlock; with quiet set, the unknown-key error does not
+// quote the token, because in a block that holds secrets it may be one (an
+// operator wrapping a signing_keys list onto its own line).
+func subBlockQuiet(d *caddyfile.Dispenser, name string, keys map[string]func() error, quiet bool, repeat ...string) error {
 	if d.NextArg() {
 		return d.ArgErr()
 	}
@@ -294,6 +302,9 @@ func subBlock(d *caddyfile.Dispenser, name string, keys map[string]func() error,
 		k := d.Val()
 		fn, ok := keys[k]
 		if !ok {
+			if quiet {
+				return d.Errf("unknown key in %s block (a value on its own line? join it to its key with a backslash)", name)
+			}
 			return d.Errf("unknown key %q in %s block", k, name)
 		}
 		if seen[k] && !slices.Contains(repeat, k) {
@@ -346,6 +357,21 @@ func quietFlag(d *caddyfile.Dispenser, dst *bool) error {
 		return d.Errf("%s takes no arguments", key)
 	}
 	*dst = true
+	return nil
+}
+
+// quietIntArg is intArg without quoting the token.
+func quietIntArg(d *caddyfile.Dispenser, dst *int) error {
+	key := d.Val()
+	var s string
+	if err := secretArg(d, &s); err != nil {
+		return err
+	}
+	n, err := strconv.Atoi(s)
+	if err != nil || n < 0 {
+		return d.Errf("%s is not a non-negative integer", key)
+	}
+	*dst = n
 	return nil
 }
 

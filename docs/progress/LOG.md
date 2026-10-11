@@ -1833,3 +1833,11 @@ Entry template:
 - Deviations: none
 - Follow-ups: run `/handoff`; the runbook's rollback claim for a bad key reload is untested.
 - Context: low
+
+## 2026-10-12 · P3-05 · done
+- Branch / PR: claude/busy-tesla-iw6ola / (see STATUS)
+- Done: review fixes on top of the in-progress entry. Parse errors in the `experiments` block no longer quote a token (secrets on a wrapped line); the e2e test now proves the reload applied (a `winner` flips a control cookie to b) while `/warm` stays a hit; new `TestExperimentsBadKeyReloadKeepsOldHandler` pins the runbook's rollback claim; docs/08 §3 names experiments in the excluded list; runbook 7.9 corrected (stranded entries wording, validate env).
+- Tests: as in the in-progress entry plus the above; `make check` run with the Go 1.27 linter: fmt, vet, lint, race tests (root, store, internal, weirhttp, caddy, observe/prom, store/valkey) and trace (146/146) pass.
+- Deviations: none from the normative documents beyond the docs/08 and runbook edits the card lists.
+- Follow-ups: none. Review (card-reviewer): no must-fix; four should-fix fixed, nits fixed except the `{...}` in literal keys (noted in STATUS).
+- Context: low; size M was right.
