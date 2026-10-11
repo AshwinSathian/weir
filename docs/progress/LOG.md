@@ -1849,3 +1849,11 @@ Entry template:
 - Deviations: docs/10 §3/§4 wording and Caddyfile syntax (optional boolean), within the delegated decisions.
 - Follow-ups: cap on the number of signing keys (engine, NFR-3), noted in STATUS. Left as is: weights `+5` and `05` parse; Caddyfile errors have no `weir:` prefix (match the sibling errors).
 - Context: low
+
+## 2026-10-11 · release-prep (R-02 to R-06) · done
+- Branch / PR: claude/magical-carson-rwdd4q / none yet (direct commits, as Ashwin asked: plan, implement, review, keep pushing)
+- Done: three read-only audits (API freeze, docs vs code, hard rules) and an adversarial review of the branch. Fixed: signing keys capped at 4 and 256 bytes (docs/10 v1.7); a stored status below 200 is a miss (storeguard); a panicking origin body is closed; `TransportOrigin` survives a wrapped `http.DefaultTransport` and a nil `Target`; weir:/store: prefixes; `originrule_test.go` guards CLAUDE.md rule 2. Added release procedure (docs/release.md), `scripts/release-pin.sh`, `make release-check`, `release-gate` workflow, CHANGELOG, README Install/Stability/status, SECURITY for v1, Example functions, godoc for the freeze, cache-tests baseline (284/81) with a decision on every row (new D43), PLAN sync.
+- Tests: TestStoreGuardTreatsUnservableStatusAsMiss, TestPanicInBodyReadClosesBody, TestOriginReachedOnlyThroughFetch, TestNewTransportFromWrappedDefault, TestTransportOriginWithoutTargetFails, signing key rows (root and caddy). `make check` passes (lint via the go1.27 workaround). 20x shuffled race run of the engine packages: see the next entry.
+- Deviations: D24 amended (v1.0.0 after Phase 3, lockstep sub-module tags) and D43 added in docs/01; CLAUDE.md rule 2 names safeFetch; decided without a question under Ashwin's delegation.
+- Follow-ups: tag procedure and reference-machine run are Ashwin's (docs/release.md); candidates for v1.1: export what `caddy` needs from `internal/keys`, `Event.Count`, a way to set zero for MaxQueue/ReserveForeground/HitForMissTTL/HeuristicFraction, `observe/prom` options, `apidiff` job; `caddy validate` still spends the key-generation purge (no Caddy signal to detect validate).
+- Context: high

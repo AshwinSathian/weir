@@ -1,24 +1,24 @@
 # Status
 
 Updated: 2026-10-11
-Phase: 3
+Phase: release
 Current card: none
-Card state: awaiting-merge
-Branch: claude/busy-tesla-iw6ola (designated session branch)
-PR: https://github.com/AshwinSathian/weir/pull/104
-Next card: none (`make next` says all cards are done)
+Card state: ready
+Branch: claude/magical-carson-rwdd4q (release-prep commits, no PR yet)
+PR: none
+Next card: none (all cards done; M16-02 deferred)
 
 ## Waiting on Ashwin
 
-Nothing.
+- Run `make load` on the reference machine and record it in docs/benchmarks.md (docs/07 §12). Judge `BenchmarkServeHitSmall` ns/op there against 1.5 times the median (01 NFR-5).
+- Run the `release-gate` workflow (Actions, manual) on the candidate commit: engine tests 100x under race, one hour of fuzzing per target.
+- Decide whether to open a PR for the release-prep branch, then follow docs/release.md (release branch, rc rehearsal, tags in order: root, observe/prom and store/valkey, caddy).
+- Confirm the decisions taken for you: D24 amended, D43 added, README Stability promises, signing key caps, `servableStatus` miss.
 
 ## Notes for the next session
 
-- P3-05 is done: the `experiments { ... }` block (Caddyfile and JSON) is in `caddy/{config,caddyfile,module}.go`; signing keys keep `{env.VAR}` and resolve at config build; experiments are outside the key-generation hash. docs/08 §2 and §3, runbook 7.9 updated. This was the last Phase 3 card; no card is open.
-- Caddyfile parse errors in the whole `weir` block quote a token only when it looks like a directive name (`tok`), and never use Caddy's `ArgErr` (`argErr`), because a wrapped line can leave a password or signing key in a key position.
-- `caddy validate` reads the operator's shell environment, so it fails on an unset `WEIR_EXP_KEY*` there (runbook 7.9).
-- A signing key is a literal or exactly `{env.NAME}`; any other brace is refused at load (the earlier general replacer could read files or the clock into a key). A block with neither `signing_keys` nor an experiment is refused.
-- Open follow-up (engine, not this card): `SigningKeys` has no maximum count and verification does one HMAC per key per request (NFR-3). Suggest a cap such as 4 in `internal/experiments/config.go`.
-- Hit-path cost note from P3-04 still stands: a new matched visitor costs 48 allocs; a later card may cut it.
-- Lint can run here: `GOTOOLCHAIN=go1.27.0 GOBIN=/tmp/lintbin go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0`, then `make check GOLANGCI=/tmp/lintbin/golangci-lint` with `GOTOOLCHAIN=go1.27.0` (the installed binary is built with Go 1.25).
-- `TestE2EPurgeHerd` (real-clock caddytest) is a known flake. Open follow-up from P25-07d: a way for `caddy validate` to skip the purge.
+- The sub-modules require weir v0.0.0 with `replace`; outsiders cannot `go get` them until the tag procedure in docs/release.md is done. `make release-check` fails on `main` by design.
+- Deferred to v1.1: see the last LOG entry (export for `caddy`, `Event.Count`, zero-able knobs, prom options, apidiff job).
+- `caddy validate` against a Valkey store can spend the key-generation purge; Caddy gives modules no way to detect validate (runbook 7.8).
+- Lint can run here: `GOTOOLCHAIN=go1.27.0 GOBIN=/tmp/lintbin go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0`, then `GOTOOLCHAIN=go1.27.0 make check GOLANGCI=/tmp/lintbin/golangci-lint`.
+- `TestE2EPurgeHerd` (real-clock caddytest) did not flake in 15 local runs.
