@@ -5,7 +5,7 @@ Phase: 1
 Current card: none
 Card state: awaiting-merge
 Branch: claude/sweet-clarke-gwnywy (the session's designated branch, not a `card/` branch)
-PR: pending (filled after the PR is opened)
+PR: https://github.com/AshwinSathian/weir/pull/97
 Next card: P3-00 (`make next`)
 
 ## Waiting on Ashwin
