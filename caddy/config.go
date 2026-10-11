@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -142,6 +143,127 @@ type StaleConfig struct {
 	IfError         caddy.Duration `json:"if_error,omitempty"`
 }
 
+// ExperimentsConfig mirrors weir.ExperimentsConfig (docs/10 §3). Signing
+// keys are strings; a whole {env.NAME} is resolved when the engine config is
+// built, so the stored config never holds the secret, and no other placeholder
+// or brace is accepted. An unset variable fails the load (T-35).
+type ExperimentsConfig struct {
+	Cookie                  string             `json:"cookie,omitempty"`
+	SigningKeys             []string           `json:"signing_keys,omitempty"`
+	Consent                 *ConsentConfig     `json:"consent,omitempty"`
+	Header                  string             `json:"header,omitempty"`
+	MaxActive               int                `json:"max_active,omitempty"`
+	DownstreamKeysOnVariant bool               `json:"downstream_keys_on_variant,omitempty"`
+	Experiments             []ExperimentConfig `json:"experiments,omitempty"`
+}
+
+// ConsentConfig mirrors weir.ExperimentConsent (E6).
+type ConsentConfig struct {
+	Cookie string `json:"cookie"`
+	Value  string `json:"value"`
+}
+
+// ExperimentConfig mirrors weir.ExperimentConfig. The first variant is the
+// control arm.
+type ExperimentConfig struct {
+	Name     string           `json:"name"`
+	Match    *ExperimentMatch `json:"match,omitempty"`
+	Salt     string           `json:"salt,omitempty"`
+	Variants []VariantConfig  `json:"variants,omitempty"`
+	Winner   string           `json:"winner,omitempty"`
+}
+
+// ExperimentMatch is the host and path matcher of one experiment (docs/10 E8).
+type ExperimentMatch struct {
+	Host string `json:"host,omitempty"`
+	Path string `json:"path,omitempty"`
+}
+
+// VariantConfig is one arm of an experiment.
+type VariantConfig struct {
+	Name   string `json:"name"`
+	Weight int    `json:"weight"`
+}
+
+// envPlaceholder reports the variable name when k is exactly {env.NAME}. Only
+// that form is expanded: a general replacer would also read files, the clock
+// or the host name into a key, which changes across reloads or nodes and
+// silently re-buckets visitors, and it would shorten a literal key that holds
+// a brace pair.
+func envPlaceholder(k string) (name string, ok bool) {
+	name, ok = strings.CutPrefix(k, "{env.")
+	if !ok {
+		return "", false
+	}
+	name, ok = strings.CutSuffix(name, "}")
+	if !ok || name == "" {
+		return "", false
+	}
+	for i := range len(name) {
+		c := name[i]
+		ok := c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z' || c == '_' || i > 0 && c >= '0' && c <= '9'
+		if !ok {
+			return "", false
+		}
+	}
+	return name, true
+}
+
+// validate checks what the engine cannot see through the placeholders: it
+// refuses a block that enables nothing, any brace in a signing key other than
+// a whole {env.NAME}, and an unset or empty variable (named, which is not a
+// secret). Messages never carry a key value.
+func (x *ExperimentsConfig) validate() error {
+	if x == nil {
+		return nil
+	}
+	if len(x.SigningKeys) == 0 && len(x.Experiments) == 0 {
+		return errors.New("weir: experiments block needs signing_keys and at least one experiment")
+	}
+	for i, k := range x.SigningKeys {
+		if name, ok := envPlaceholder(k); ok {
+			if os.Getenv(name) == "" {
+				return fmt.Errorf("weir: experiments signing key %d: environment variable %s is not set", i, name)
+			}
+		} else if strings.ContainsAny(k, "{}") {
+			return fmt.Errorf("weir: experiments signing key %d: only a whole {env.NAME} placeholder is expanded", i)
+		}
+	}
+	return nil
+}
+
+// weirExperiments maps the adapter block onto weir.ExperimentsConfig. It
+// resolves {env.VAR} in the signing keys; no error or log line carries a key.
+func (x *ExperimentsConfig) weirExperiments() weir.ExperimentsConfig {
+	if x == nil {
+		return weir.ExperimentsConfig{}
+	}
+	out := weir.ExperimentsConfig{
+		Cookie: x.Cookie, Header: x.Header, MaxActive: x.MaxActive,
+		DownstreamKeysOnVariant: x.DownstreamKeysOnVariant,
+	}
+	for _, k := range x.SigningKeys {
+		if name, ok := envPlaceholder(k); ok {
+			k = os.Getenv(name) // unset gives an empty key, which the engine refuses (T-35)
+		}
+		out.SigningKeys = append(out.SigningKeys, []byte(k))
+	}
+	if x.Consent != nil {
+		out.Consent = weir.ExperimentConsent{Cookie: x.Consent.Cookie, Value: x.Consent.Value}
+	}
+	for _, e := range x.Experiments {
+		ec := weir.ExperimentConfig{Name: e.Name, Salt: e.Salt, Winner: e.Winner}
+		if e.Match != nil {
+			ec.Host, ec.Path = e.Match.Host, e.Match.Path
+		}
+		for _, v := range e.Variants {
+			ec.Variants = append(ec.Variants, weir.VariantConfig{Name: v.Name, Weight: v.Weight})
+		}
+		out.Experiments = append(out.Experiments, ec)
+	}
+	return out
+}
+
 // decodeStrict decodes like Caddy does for module config: unknown keys are
 // an error, so a misspelled setting never silently keeps its default.
 func decodeStrict(raw []byte, v any) error {
@@ -196,6 +318,7 @@ func (h *Handler) weirConfig() weir.Config {
 			DefaultStaleIfError:         time.Duration(h.Stale.IfError),
 		},
 	}
+	cfg.Experiments = h.Experiments.weirExperiments()
 	if h.MultiHost {
 		// FR-FAIR-3: 25% of MaxConcurrent, at least 1.
 		cfg.Limiter.MaxPerHost = max(1, cmp.Or(h.Limiter.MaxConcurrent, defaultMaxConcurrent)/4)

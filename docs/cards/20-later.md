@@ -260,7 +260,7 @@ Each phase began with one planning card that verified the spec against current u
 - AC: the catalog entry is added to 04 §9.2; one `EvExposure{experiment, variant, visitor}` per visitor per experiment (on creation or when the signed exposed mark is missing, which is then added); visitor is a SHA-256 prefix; events carry no other request data
 - Out of scope: any analytics sink
 
-### [ ] P3-05 Caddy adapter: experiments block
+### [x] P3-05 Caddy adapter: experiments block
 - Plan: Phase 3 · Size: M · Depends on: P3-04
 - Read: 10 §3; 08 §2 (configuration surface), §3 (key-generation hash)
 - Touch: caddy/{caddyfile,config,module}.go, one test file, docs/08, docs/runbook.md (7 files at the limit; split the caddytest e2e into P3-05b if it grows)

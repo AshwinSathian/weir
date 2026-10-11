@@ -1,6 +1,6 @@
 # Weir experiment dimensions specification
 
-Status: v1.5. Phase 3. E1 to E7 were decided with the project owner on 2026-09-27; E8 and E9 on 2026-10-11 (P3-00). All are locked. v1.5 (PR 102 review) adds the re-sign rule, key retention, the quote rule and the vendor-field note to §4. v1.4 (P3-03, approved by the project owner) adds `DownstreamKeysOnVariant` (E7) and the cookie lifetime and rewrite rules to §3 and §4. v1.3 (P3-02 review) adds the Warm and Purge rules to §4, the consent-value limits and the matcher and header-name rules to §3. v1.2 (P3-02) records the public config shape, the defaults and the consent rule in §3. v1.1 (P3-01) adds the clarifications in §3 and §4 (control variant, load-time limits, cookie grammar, hash separator) that the first implementation needed.
+Status: v1.6. Phase 3. v1.6 (P3-05 review) makes the Caddy `downstream_keys_on_variant` key take an optional `true` or `false`, so the example below parses, and corrects the reload wording in §4. E1 to E7 were decided with the project owner on 2026-09-27; E8 and E9 on 2026-10-11 (P3-00). All are locked. v1.5 (PR 102 review) adds the re-sign rule, key retention, the quote rule and the vendor-field note to §4. v1.4 (P3-03, approved by the project owner) adds `DownstreamKeysOnVariant` (E7) and the cookie lifetime and rewrite rules to §3 and §4. v1.3 (P3-02 review) adds the Warm and Purge rules to §4, the consent-value limits and the matcher and header-name rules to §3. v1.2 (P3-02) records the public config shape, the defaults and the consent rule in §3. v1.1 (P3-01) adds the clarifications in §3 and §4 (control variant, load-time limits, cookie grammar, hash separator) that the first implementation needed.
 Date: 2026-10-11
 Depends on: [01-technical-spec.md](01-technical-spec.md), [02-architecture.md §7](02-architecture.md), [06-threat-model.md](06-threat-model.md)
 Seed: [00-design-doc.md §10](00-design-doc.md) (titled "Phase 2" there; it is Phase 3, see [09 §6](09-research-notes.md))
@@ -76,7 +76,7 @@ Warm and Purge (P3-02 review, decided with the project owner): `Engine.Warm` has
 - Cache fragmentation: key cardinality per URL is the product of variant counts of the active experiments. `max_active` bounds it; config load rejects combinations whose product exceeds `Key.MaxVariants × 4`.
 - Downstream mixing and cookie caching by a CDN in front: E7 (T-36).
 - Stale across variants: impossible by construction, since stale entries live under variant keys (the seed's concern in §10).
-- Config reload: experiments change keys only on matched paths, so they are excluded from the Caddy adapter's key-generation hash and do not trigger a global soft purge ([08 §3](08-caddy-adapter-spec.md)).
+- Config reload: experiments change keys only on matched paths, so they are excluded from the Caddy adapter's key-generation hash and a reload that edits them writes no epoch of any kind ([08 §3](08-caddy-adapter-spec.md)).
 - Crawlers without cookies get a fresh assignment per request and a `Set-Cookie` they ignore; responses they receive are still cache hits for their variant.
 - Ending an experiment: set `winner`; existing sticky assignments are overridden. Remove the experiment in a later reload once traffic has moved.
 
