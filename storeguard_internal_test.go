@@ -17,6 +17,7 @@ import (
 type guardStore struct {
 	store.Store
 	err   error
+	ent   *store.Entry
 	block bool
 }
 
@@ -27,7 +28,7 @@ func (s *guardStore) Get(ctx context.Context, _ store.Key) (*store.Entry, error)
 		<-ctx.Done()
 		return nil, fmt.Errorf("guard: %w: %w", store.ErrUnavailable, ctx.Err())
 	}
-	return nil, s.err
+	return s.ent, s.err
 }
 
 // openDurations records the Duration of every EvStoreBreaker open event.
@@ -138,5 +139,37 @@ func TestStoreGuardScrubFailureNotCounted(t *testing.T) {
 	}
 	if len(obs.d) != 0 {
 		t.Fatalf("breaker opened %d times on scrub failures", len(obs.d))
+	}
+}
+
+// NFR-2, 05 S-6: the store does not read HTTP semantics, so the guard is where
+// a record that no HTTP server can write (status 0 from a hostile or corrupt
+// remote writer; net/http panics on WriteHeader below 100) becomes a miss.
+func TestStoreGuardTreatsUnservableStatusAsMiss(t *testing.T) {
+	tests := []struct {
+		name string
+		ent  *store.Entry
+		want bool // served as stored
+	}{
+		{"response 200", &store.Entry{Kind: store.KindResponse, Status: 200}, true},
+		{"response 999", &store.Entry{Kind: store.KindResponse, Status: 999}, true},
+		{"response without a status", &store.Entry{Kind: store.KindResponse}, false},
+		{"response 99", &store.Entry{Kind: store.KindResponse, Status: 99}, false},
+		{"negative without a status", &store.Entry{Kind: store.KindNegative}, false},
+		{"negative 503", &store.Entry{Kind: store.KindNegative, Status: 503}, true},
+		{"vary spec has no status", &store.Entry{Kind: store.KindVarySpec}, true},
+		{"hit for miss has no status", &store.Entry{Kind: store.KindHitForMiss}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := newStoreGuard(&guardStore{ent: tt.ent}, time.Second, nil)
+			ent, err := g.get(t.Context(), store.Key{})
+			if tt.want && (err != nil || ent != tt.ent) {
+				t.Fatalf("get = %v, %v; want the entry", ent, err)
+			}
+			if !tt.want && (!errors.Is(err, store.ErrNotFound) || ent != nil) {
+				t.Fatalf("get = %v, %v; want ErrNotFound", ent, err)
+			}
+		})
 	}
 }

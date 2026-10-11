@@ -55,7 +55,22 @@ func (g *storeGuard) get(ctx context.Context, k store.Key) (*store.Entry, error)
 	}
 	defer cancel()
 	ent, err := g.s.Get(ctx, k)
+	if err == nil && !servableStatus(ent) {
+		// NFR-2: a record whose status net/http cannot write (it panics
+		// below 100) is a miss, not a crash. Only a remote writer or a
+		// hand-made snapshot can produce one.
+		ent, err = nil, store.ErrNotFound
+	}
 	return ent, g.exit(ctx, "get", err)
+}
+
+// servableStatus reports whether a response or negative entry carries a
+// status an HTTP server can write. Other kinds have none.
+func servableStatus(ent *store.Entry) bool {
+	if ent == nil || (ent.Kind != store.KindResponse && ent.Kind != store.KindNegative) {
+		return true
+	}
+	return ent.Status >= 100 && ent.Status <= 999
 }
 
 func (g *storeGuard) set(ctx context.Context, k store.Key, ent *store.Entry) error {
