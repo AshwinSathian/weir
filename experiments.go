@@ -123,7 +123,7 @@ func (e *Engine) experimentsKeys() {
 	ic := x.internal()
 	e.kcfg.ExpHeader, e.kcfg.ExpCookie = x.Header, x.Cookie
 	rnd := e.cfg.Rand
-	e.kcfg.Assign = func(host, path string, cookieLines []string) ([]keys.Dim, any) {
+	assign := func(host, path string, cookieLines []string, rnd func() float64) ([]keys.Dim, any) {
 		r := ic.Assign(host, path, cookieLines, rnd)
 		if len(r.Picks) == 0 {
 			return nil, nil
@@ -134,6 +134,18 @@ func (e *Engine) experimentsKeys() {
 		}
 		return dims, r
 	}
+	e.kcfg.Assign = func(host, path string, cookieLines []string) ([]keys.Dim, any) {
+		return assign(host, path, cookieLines, rnd)
+	}
+	// Warm has no visitor: no cookie and no Rand, so every experiment without
+	// a winner gets its control variant and nothing is minted or burned.
+	e.kcfgWarm = e.kcfg
+	e.kcfgWarm.Assign = func(host, path string, _ []string) ([]keys.Dim, any) {
+		dims, _ := assign(host, path, nil, nil)
+		return dims, nil
+	}
+	e.kcfgPurge = e.kcfg
+	e.kcfgPurge.Assign = nil
 	if len(x.Experiments) > 0 && !ic.Consent.Configured() {
 		e.cfg.Logger.Warn("weir: Experiments has no Consent gate; visitors are bucketed and cookied without a consent signal")
 	}

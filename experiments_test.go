@@ -223,3 +223,58 @@ func TestUnmatchedPathHasNoVariant(t *testing.T) {
 		}
 	})
 }
+
+// E6, E4, P2: Warm stores the control variant, or the winner, whatever Cookie
+// the warm request carries and with or without a consent gate; other variants
+// fill on demand.
+func TestWarmFetchesControlVariant(t *testing.T) {
+	for _, gated := range []bool{false, true} {
+		synctest.Test(t, func(t *testing.T) {
+			o := echoOrigin(t)
+			cfg := expConfig()
+			if gated {
+				cfg.Experiments.Consent = weir.ExperimentConsent{Cookie: "cmp_consent", Value: "analytics=yes"}
+			}
+			e := newEngine(t, cfg)
+			defer closeEngine(t, e)
+
+			warm := expReq("/checkout", http.Header{"Cookie": {visitor(t, "v", "b") + "; cmp_consent=analytics=yes"}})
+			st, err := e.Warm(t.Context(), func(yield func(*weir.Request) bool) { yield(warm) }, o)
+			if err != nil || st.Fetched != 1 {
+				t.Fatalf("Warm = %+v, %v", st, err)
+			}
+			ctl := http.Header{"Cookie": {visitor(t, "v", "control") + "; cmp_consent=analytics=yes"}}
+			resp, body := serve(t, e, expReq("/checkout", ctl), o)
+			if !resp.Cache.Hit || body != "variant=checkout-copy=control" {
+				t.Fatalf("gated=%v: control after warm: hit=%v %q", gated, resp.Cache.Hit, body)
+			}
+			if n := o.Calls("/checkout"); n != 1 {
+				t.Fatalf("gated=%v: origin calls = %d", gated, n)
+			}
+			b := http.Header{"Cookie": {visitor(t, "v", "b") + "; cmp_consent=analytics=yes"}}
+			if resp, _ := serve(t, e, expReq("/checkout", b), o); resp.Cache.Hit {
+				t.Fatalf("gated=%v: variant b was warmed", gated)
+			}
+		})
+	}
+}
+
+// E4: a winner is warmed and served to everyone.
+func TestWinnerWarmed(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		o := echoOrigin(t)
+		cfg := expConfig()
+		cfg.Experiments.Experiments[0].Winner = "b"
+		e := newEngine(t, cfg)
+		defer closeEngine(t, e)
+
+		warm := expReq("/checkout", nil)
+		if st, err := e.Warm(t.Context(), func(yield func(*weir.Request) bool) { yield(warm) }, o); err != nil || st.Fetched != 1 {
+			t.Fatalf("Warm = %+v, %v", st, err)
+		}
+		resp, body := serve(t, e, expReq("/checkout", nil), o)
+		if !resp.Cache.Hit || body != "variant=checkout-copy=b" {
+			t.Fatalf("hit=%v %q", resp.Cache.Hit, body)
+		}
+	})
+}

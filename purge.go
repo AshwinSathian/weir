@@ -83,7 +83,7 @@ func (e *Engine) sameOriginTag(c *keys.Classified, base *url.URL, ref string) (s
 	}
 	u := base.ResolveReference(r)
 	kc, err := keys.Classify(&keys.Request{Method: http.MethodGet, Scheme: u.Scheme, Host: u.Host,
-		Path: u.EscapedPath(), RawQuery: u.RawQuery}, &e.kcfg)
+		Path: u.EscapedPath(), RawQuery: u.RawQuery}, &e.kcfgPurge)
 	if err != nil || kc.Origin != c.Origin {
 		return store.Tag{}, false
 	}
@@ -235,7 +235,7 @@ func (e *Engine) classifyURL(raw string, originOnly bool) (keys.Classified, erro
 	}
 	// Schemes are case-insensitive (RFC 9110 §4.2.3); Validate takes the lowercase form.
 	kc, err := keys.Classify(&keys.Request{Method: http.MethodGet, Scheme: strings.ToLower(scheme), Host: host,
-		Path: path, RawQuery: query}, &e.kcfg)
+		Path: path, RawQuery: query}, &e.kcfgPurge)
 	if err != nil {
 		reason := "purge-url"
 		if re, ok := errors.AsType[*keys.RequestError](err); ok {

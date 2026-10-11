@@ -1785,3 +1785,11 @@ Entry template:
 - Deviations: docs/10 v1.2 (public shape, defaults, consent rule), docs/04 (Config types, key encoding, forwarding). Public API, defaults and consent shape approved by Ashwin.
 - Follow-ups: review found the cookie strip missed `weir_v =1` (whitespace before `=`); fixed with an independent fuzz oracle. `Warm` calls Classify with no cookie and would warm a random variant when no consent gate is set (decide in P3-03/04). Purge also runs Assign needlessly. Branch is the designated session branch, not `card/P3-02-*`.
 - Context: medium
+
+## 2026-10-11 · P3-02 · review-fixes
+- Branch / PR: claude/awesome-ritchie-8ltcfc / https://github.com/AshwinSathian/weir/pull/101
+- Done: adversarial review found no must-fix. Fixed the should-fix items: the variant header may not be a field the forward step drops or filters (`Range`, `If-*`, `Pragma`, trace fields and more), the stripped-cookie report no longer lists the visitor cookie, matcher hosts with port 80 or 443 are load errors, `Variants` slices are cloned. Decisions (delegated by Ashwin): Warm stores the control variant or winner and ignores request cookies; Purge skips assignment (`kcfgWarm`, `kcfgPurge`); consent value stays "no URL decoding", limits documented.
+- Tests: `TestConfigRejectsDroppedOrFilteredHeader`, `TestConfigRejectsDefaultPortHost`, `TestWarmFetchesControlVariant`, `TestWinnerWarmed`, `TestStrippedCookieReportSkipsExperimentCookie`. Lint 0 issues, race tests, vet, gofmt and trace pass.
+- Deviations: docs/10 v1.3, docs/06 T-35 row, `Warm` doc comment.
+- Follow-ups: allocation trimming (P3-05); warming non-control variants would be a new option (ask first).
+- Context: medium

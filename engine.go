@@ -37,18 +37,20 @@ func (f OriginFunc) Fetch(ctx context.Context, req *Request) (*Response, error) 
 // Engine makes shared-cache decisions per request (04 §6.1). It is safe for
 // concurrent use (FR-LCY-3).
 type Engine struct {
-	cfg      Config      // defaults applied, immutable after New
-	kcfg     keys.Config // compiled from cfg
-	sg       *storeGuard
-	ownStore bool
-	flights  coalesce.Table
-	lim      *limiter.Limiter
-	upl      *limiter.Limiter          // requests with a body (FR-LIM-7)
-	cb       *breaker.Breaker          // nil when Breaker.Disable
-	mode     atomic.Pointer[modeState] // nil: ModeNormal (FR-MODE-1)
-	cr       *cookieReport             // nil when disabled (FR-OBS-5)
-	mr       *missrate.Tracker         // nil when MissRate.Disable
-	badGroup sync.Once                 // one warning for invalid Cache-Group-Invalidation (FR-OBS-3)
+	cfg       Config      // defaults applied, immutable after New
+	kcfg      keys.Config // compiled from cfg
+	kcfgWarm  keys.Config // kcfg, but Warm always stores the control variant (E6)
+	kcfgPurge keys.Config // kcfg without assignment: purges use URI tags, which no variant changes
+	sg        *storeGuard
+	ownStore  bool
+	flights   coalesce.Table
+	lim       *limiter.Limiter
+	upl       *limiter.Limiter          // requests with a body (FR-LIM-7)
+	cb        *breaker.Breaker          // nil when Breaker.Disable
+	mode      atomic.Pointer[modeState] // nil: ModeNormal (FR-MODE-1)
+	cr        *cookieReport             // nil when disabled (FR-OBS-5)
+	mr        *missrate.Tracker         // nil when MissRate.Disable
+	badGroup  sync.Once                 // one warning for invalid Cache-Group-Invalidation (FR-OBS-3)
 
 	mu        sync.Mutex  // orders setting closed against wg.Add in goBackground
 	closed    atomic.Bool // written under mu; read without it on the Serve path
@@ -97,6 +99,7 @@ func New(cfg Config) (*Engine, error) {
 	}
 	warnForwarding(c)
 	e := &Engine{cfg: c, kcfg: keysConfig(&c), sg: newStoreGuard(c.Store, c.Timeouts.Store, c.Observer), ownStore: own, cr: newCookieReport(&c), closeDone: make(chan struct{})}
+	e.kcfgWarm, e.kcfgPurge = e.kcfg, e.kcfg
 	e.experimentsKeys()
 	l := &c.Limiter
 	e.lim = limiter.New(limiter.Config{

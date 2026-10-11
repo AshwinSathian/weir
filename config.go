@@ -228,6 +228,9 @@ func (c *Config) copySlices() {
 		c.Experiments.SigningKeys[i] = bytes.Clone(k) // the caller may zero or rotate its keys
 	}
 	c.Experiments.Experiments = slices.Clone(c.Experiments.Experiments)
+	for i := range c.Experiments.Experiments {
+		c.Experiments.Experiments[i].Variants = slices.Clone(c.Experiments.Experiments[i].Variants)
+	}
 }
 
 func (c *Config) applyDefaults() {

@@ -232,3 +232,30 @@ func TestStrippedCookieReport(t *testing.T) {
 		})
 	}
 }
+
+// FR-OBS-5, T-35: the experiment cookie is on every visitor's request and
+// cannot be keyed, so the report never suggests it.
+func TestStrippedCookieReportSkipsExperimentCookie(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var log bytes.Buffer
+		cfg := cacheCfg
+		cfg.Logger = slog.New(slog.NewTextHandler(&log, nil))
+		cfg.Bypass.ReportStrippedCookies = time.Minute
+		cfg.Experiments = expConfig().Experiments
+		cfg.Experiments.Consent = weir.ExperimentConsent{Cookie: "cmp", Value: "a=yes"}
+		e := newEngine(t, cfg)
+		defer closeEngine(t, e)
+		o := testorigin.NewChecked(t, 64, 16)
+		o.Default(cacheable("x"))
+
+		r := getReq("/other")
+		r.Header["Cookie"] = []string{"weir_v=v1.x.y.z; seen=1"}
+		serve(t, e, r, o)
+		time.Sleep(2 * time.Minute)
+		serve(t, e, r, o)
+		lines := reportLines(log.String())
+		if len(lines) != 1 || strings.Contains(lines[0], "weir_v") || !strings.Contains(lines[0], "seen") {
+			t.Fatalf("report: %q", lines)
+		}
+	})
+}
