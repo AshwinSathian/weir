@@ -444,3 +444,32 @@ func FuzzRequestFrom(f *testing.F) {
 		}
 	})
 }
+
+type wrapRT struct{ http.RoundTripper }
+
+// NFR-2: a program that wrapped http.DefaultTransport (tracing, a test
+// double) must not turn every miss into a panic and a 502.
+func TestNewTransportFromWrappedDefault(t *testing.T) {
+	for name, base := range map[string]http.RoundTripper{
+		"wrapped":      wrapRT{http.DefaultTransport},
+		"nil":          nil,
+		"typed nil":    (*http.Transport)(nil),
+		"plain":        http.DefaultTransport,
+		"custom proxy": &http.Transport{Proxy: http.ProxyFromEnvironment},
+	} {
+		t.Run(name, func(t *testing.T) {
+			tr := weirhttp.NewTransportForTest(base)
+			if !tr.DisableCompression || tr.Proxy != nil {
+				t.Fatalf("DisableCompression=%v Proxy set=%v; want true and unset", tr.DisableCompression, tr.Proxy != nil)
+			}
+		})
+	}
+}
+
+// NFR-2: a zero TransportOrigin is an error, not a nil dereference.
+func TestTransportOriginWithoutTargetFails(t *testing.T) {
+	_, err := (&weirhttp.TransportOrigin{}).Fetch(t.Context(), &weir.Request{Method: "GET", Path: "/"})
+	if err == nil {
+		t.Fatal("Fetch with no Target succeeded")
+	}
+}
