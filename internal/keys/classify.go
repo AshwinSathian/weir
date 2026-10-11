@@ -4,6 +4,7 @@ import (
 	"hash/maphash"
 	"net/http"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/AshwinSathian/weir/internal/httpcc"
@@ -58,10 +59,14 @@ type Classified struct {
 	PartitionH uint64 // maphash of Partition, per-process seed
 	HostH      uint64 // maphash of the normalized host, per-process seed (FR-FAIR-1)
 	ReqCC      httpcc.RequestDirectives
+	Variants   []Dim // experiment dimensions the key and the forwarded header carry (T-35)
+	Decision   any   // what Config.Assign returned alongside Variants; opaque to this package
 	ClientCond ClientConditionals
 	RangeValue string   // the Range value a hit may slice (FR-RNG-1); "" when absent or repeated
 	HasIfRange bool     // request carried If-Range
 	IfRange    string   // its value; "" when repeated, which never applies
+	expHeader  string   // Config.ExpHeader, for pass
+	expCookie  string   // Config.ExpCookie, for pass
 	rangeHdr   []string // the client's Range lines, for AsRangePass
 	ifRange    []string // the client's If-Range lines, for AsRangePass
 	req        *Request // the client request, for AsBypass; never modified
@@ -104,6 +109,8 @@ func Classify(r *Request, c *Config) (Classified, error) {
 		IfRange:    single(h["If-Range"]),
 		ifRange:    h["If-Range"],
 		Authorized: len(h["Authorization"]) > 0,
+		expHeader:  c.ExpHeader,
+		expCookie:  c.ExpCookie,
 		URITag:     TagURI(origin, path, query),
 		OriginTag:  TagOrigin(origin),
 		Origin:     origin,
@@ -134,10 +141,14 @@ func Classify(r *Request, c *Config) (Classified, error) {
 		return out, nil
 	}
 
-	cookies := keyedCookies(h["Cookie"], c)
+	cookies := dropCookie(keyedCookies(h["Cookie"], c), c.ExpCookie)
+	var dims []Dim
+	if c.Assign != nil {
+		dims, out.Decision = c.Assign(host, path, h["Cookie"])
+	}
 	// FR-FWD-4: a HEAD miss is fetched as GET so the response can be stored.
 	// T-5: the body of a fat GET never reaches the origin.
-	fh, unkeyed := forwardHeader(h, c, cookies)
+	fh, unkeyed := forwardHeader(h, c, cookies, dims)
 	if len(fh["Cookie"]) == 0 {
 		// INV-1: under ForwardAll a Connection option can name Cookie, and
 		// a cookie the origin never sees must not split the key.
@@ -145,8 +156,9 @@ func Classify(r *Request, c *Config) (Classified, error) {
 	}
 	out.Forwarded = Request{Method: http.MethodGet, Scheme: r.Scheme, Host: host, Path: path, RawQuery: query, Header: fh}
 	out.Unkeyed = unkeyed
+	out.Variants = dims
 	out.Primary = PrimaryKey(&KeyInput{Method: http.MethodGet, Scheme: r.Scheme, Host: host, Path: path, Query: query,
-		Headers: keyedHeaders(fh, c), CookieNames: c.Cookies, Cookies: cookies})
+		Headers: keyedHeaders(fh, c), CookieNames: c.Cookies, Cookies: cookies, Variants: dims})
 	out.ClientCond = ClientConditionals{IfNoneMatch: parseIfNoneMatch(h["If-None-Match"], c)}
 	// RFC 9110 §13.1.3: If-Modified-Since is ignored whenever If-None-Match
 	// is present, even when that field is malformed or over the limit.
@@ -195,6 +207,10 @@ func pass(out Classified, r *Request, host string) Classified {
 		h = http.Header{}
 	}
 	DropHopByHop(h, r.Header["Connection"])
+	deleteVariantHeader(h, out.expHeader) // T-35: a client cannot pick a variant on any path
+	if out.expCookie != "" {
+		stripCookie(h, out.expCookie) // the visitor id is for Weir, not the origin
+	}
 	out.Forwarded = Request{Method: r.Method, Scheme: r.Scheme, Host: host, Path: r.Path, RawQuery: r.RawQuery,
 		Header: h, Body: r.Body}
 	// net/http gives every bodyless request http.NoBody (FR-LIM-7: main pool).
@@ -274,4 +290,17 @@ func single(lines []string) string {
 		return ""
 	}
 	return lines[0]
+}
+
+// dropCookie removes the experiment cookie from the keyed cookies. New
+// rejects a Key.Cookies entry that names it; this covers a Config built
+// without New (T-35, INV-1).
+func dropCookie(cs []Cookie, name string) []Cookie {
+	if name == "" {
+		return cs
+	}
+	if !slices.ContainsFunc(cs, func(c Cookie) bool { return strings.EqualFold(c.Name, name) }) {
+		return cs
+	}
+	return slices.DeleteFunc(slices.Clone(cs), func(c Cookie) bool { return strings.EqualFold(c.Name, name) })
 }

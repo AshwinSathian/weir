@@ -22,6 +22,10 @@ import (
 // first ctx cancellation and returns ctx's error. Once Close starts, it
 // takes no new request, lets running fetches finish within Close's grace,
 // and returns ErrClosed.
+//
+// With experiments configured, Warm stores the control variant (or the
+// winner) of each matching experiment whatever Cookie the request carries
+// (docs/10 §4); other variants fill on demand.
 func (e *Engine) Warm(ctx context.Context, reqs iter.Seq[*Request], origin Origin) (WarmStats, error) {
 	if e.closed.Load() {
 		return WarmStats{}, ErrClosed
@@ -113,7 +117,7 @@ func (e *Engine) warmOne(ctx context.Context, req *Request, origin Origin, st *W
 		st.Failed++
 		return
 	}
-	c, err := keys.Classify((*keys.Request)(req), &e.kcfg)
+	c, err := keys.Classify((*keys.Request)(req), &e.kcfgWarm)
 	if err != nil {
 		_ = e.rejected(err) // emits EvKeyRejected
 		st.Failed++

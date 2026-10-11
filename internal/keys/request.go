@@ -40,6 +40,22 @@ type Config struct {
 	BypassHeaders     []string // Bypass.Headers, canonical names
 	BypassCookies     []string // Bypass.Cookies
 	HonorRevalidation bool     // Client.HonorRevalidation
+
+	// Experiments (10 §4 steps 3 and 4). ExpHeader is deleted from every
+	// forwarded request, spelled with '_' or '-' and in any case, and set
+	// from the assignment on a cacheable one. ExpCookie never reaches the
+	// origin. Assign receives the normalized host, the validated path and
+	// the client's Cookie lines, and returns the key dimensions in config
+	// order; its second result is handed back in Classified.Decision.
+	ExpHeader string
+	ExpCookie string
+	Assign    func(host, path string, cookieLines []string) (dims []Dim, decision any)
+}
+
+// Dim is one experiment dimension of the primary key: the variant a
+// request is keyed and forwarded under (10 §4 step 4).
+type Dim struct {
+	Experiment, Variant string
 }
 
 // ErrUpgrade reports a CONNECT or protocol upgrade request (FR-UPG-1). The

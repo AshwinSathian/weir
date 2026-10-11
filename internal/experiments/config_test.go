@@ -146,3 +146,35 @@ func TestMatchAndActive(t *testing.T) {
 		t.Error("Lookup failed")
 	}
 }
+
+// T-35, T-7, INV-1: the variant header may not take a name the forward step
+// drops or filters, since the key would hold a dimension the origin never sees.
+func TestConfigRejectsDroppedOrFilteredHeader(t *testing.T) {
+	for _, h := range []string{"Range", "If-None-Match", "If-Range", "If-Modified-Since", "Expect", "Trailer", "Pragma",
+		"Traceparent", "Tracestate", "X-Request-Id", "Origin", "Referer", "Content-Encoding", "content-length"} {
+		t.Run(h, func(t *testing.T) {
+			c := validConfig()
+			c.Header = h
+			if err := c.Validate(8); err == nil {
+				t.Fatalf("header %q accepted", h)
+			}
+		})
+	}
+}
+
+// E8: a matcher host with the default port of either scheme can never match,
+// because the request host drops :443 on https and :80 on http.
+func TestConfigRejectsDefaultPortHost(t *testing.T) {
+	for _, h := range []string{"shop.example:443", "shop.example:80", "[::1]:443"} {
+		c := validConfig()
+		c.Experiments[1].Host = h
+		if err := c.Validate(8); err == nil {
+			t.Fatalf("host %q accepted", h)
+		}
+	}
+	c := validConfig()
+	c.Experiments[1].Host = "shop.example:8443"
+	if err := c.Validate(8); err != nil {
+		t.Fatalf("non-default port rejected: %v", err)
+	}
+}

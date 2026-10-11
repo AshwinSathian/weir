@@ -23,6 +23,8 @@ const (
 	tagHeaderValue = 0x11
 	tagCookieName  = 0x20
 	tagCookieValue = 0x21
+	tagExperiment  = 0x30
+	tagVariant     = 0x31
 )
 
 // Header is one Key.Headers entry after normalization. Value is ignored
@@ -43,6 +45,7 @@ type KeyInput struct {
 	Headers     []Header // one per Key.Headers name, config order
 	CookieNames []string // Key.Cookies, config order
 	Cookies     []Cookie // present cookies as keyedCookies returns them
+	Variants    []Dim    // experiment dimensions, config order (T-35)
 }
 
 // bufPool holds encoding buffers, retained at their largest size. That
@@ -101,6 +104,12 @@ func appendKey(b []byte, in *KeyInput) []byte {
 		b = appendField(b, tagCookieName, ck.Name)
 		b = append(b, 1)
 		b = appendField(b, tagCookieValue, ck.Value)
+	}
+	// Appended last and only when present, so a key with no experiment
+	// encodes as before and keyVersion stays.
+	for _, d := range in.Variants {
+		b = appendField(b, tagExperiment, d.Experiment)
+		b = appendField(b, tagVariant, d.Variant)
 	}
 	return b
 }

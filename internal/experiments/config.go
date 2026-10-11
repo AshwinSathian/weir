@@ -30,7 +30,10 @@ const (
 var reservedHeaders = map[string]bool{
 	"cookie": true, "set-cookie": true, "host": true, "content-length": true, "content-type": true,
 	"transfer-encoding": true, "connection": true, "te": true, "upgrade": true, "keep-alive": true,
-	"trailer": true, "vary": true, "authorization": true, "accept": true, "accept-encoding": true,
+	"trailer": true, "vary": true, "range": true, "if-none-match": true, "if-modified-since": true,
+	"if-match": true, "if-unmodified-since": true, "if-range": true, "expect": true, "pragma": true,
+	"traceparent": true, "tracestate": true, "x-request-id": true, "origin": true, "referer": true,
+	"content-encoding": true, "authorization": true, "accept": true, "accept-encoding": true,
 	"user-agent": true, "forwarded": true, "via": true, "cache-control": true,
 }
 
@@ -62,6 +65,7 @@ type Config struct {
 	SigningKeys [][]byte // the first signs, all verify (rotation)
 	Header      string
 	MaxActive   int
+	Consent     Consent // optional gate (E6)
 	Experiments []Experiment
 }
 
@@ -144,6 +148,9 @@ func (c *Config) Validate(keyMaxVariants int) error {
 	}
 	if c.MaxActive < 1 || c.MaxActive > maxActiveLimit {
 		return cfgErr("max_active must be 1 to %d", maxActiveLimit)
+	}
+	if err := c.Consent.validate(c.CookieName); err != nil {
+		return err
 	}
 	if len(c.Experiments) > maxExperiments {
 		return cfgErr("more than %d experiments", maxExperiments)
@@ -258,6 +265,11 @@ func normalizedHost(h string) bool {
 	}
 	if port == "" {
 		return true
+	}
+	// The request host drops :443 on https and :80 on http, so a matcher
+	// that spells either could never match its own scheme.
+	if port == ":80" || port == ":443" {
+		return false
 	}
 	digits := port[1:]
 	if digits == "" || len(digits) > 5 || digits[0] == '0' {

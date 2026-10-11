@@ -49,7 +49,13 @@ func newCookieReport(c *Config) *cookieReport {
 	if c.Bypass.ReportStrippedCookies < 0 || c.Forward.Mode == ForwardAll {
 		return nil
 	}
-	return &cookieReport{keyed: c.Key.Cookies, log: c.Logger, deadline: time.Now().Add(c.Bypass.ReportStrippedCookies)}
+	keyed := c.Key.Cookies
+	if c.Experiments.enabled() {
+		// The visitor cookie is on every request and can never be keyed (T-35),
+		// so suggesting it would send the operator to a load error.
+		keyed = append(slices.Clone(keyed), c.Experiments.Cookie)
+	}
+	return &cookieReport{keyed: keyed, log: c.Logger, deadline: time.Now().Add(c.Bypass.ReportStrippedCookies)}
 }
 
 // observe counts the unkeyed cookie names in the Cookie lines of one

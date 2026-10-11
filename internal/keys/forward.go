@@ -27,7 +27,7 @@ var dropped = []string{
 // always under ForwardAll, else when an Allow field, Cache-Control or Pragma
 // is sent unkeyed. Authorization has its own flag, and trace fields have a
 // validated shape (FR-FWD-6).
-func forwardHeader(h http.Header, c *Config, cookies []Cookie) (out http.Header, unkeyed bool) {
+func forwardHeader(h http.Header, c *Config, cookies []Cookie, dims []Dim) (out http.Header, unkeyed bool) {
 	if c.ForwardAll {
 		unkeyed = true
 		out = h.Clone()
@@ -66,6 +66,10 @@ func forwardHeader(h http.Header, c *Config, cookies []Cookie) (out http.Header,
 	for _, name := range dropped {
 		delete(out, name)
 	}
+	if c.ExpCookie != "" {
+		stripCookie(out, c.ExpCookie) // T-35, INV-1: ForwardAll would send the visitor id unkeyed
+	}
+	setVariantHeader(out, c.ExpHeader, dims)
 	filterTrace(out, c.NoTraceHeaders)
 	for _, name := range c.Allow {
 		// T-31: an Allow field reaches the origin unkeyed. Cookie goes
@@ -221,4 +225,104 @@ func canonicalKeys(h http.Header) bool {
 		}
 	}
 	return true
+}
+
+// sameHeaderName reports whether a map key names the variant header once
+// '_' reads as '-' and case is folded: CGI-style origins give Weir_Variant
+// and Weir-Variant one variable (T-35). name is canonical.
+func sameHeaderName(k, name string) bool {
+	if len(k) != len(name) {
+		return false
+	}
+	for i := 0; i < len(k); i++ {
+		a := k[i]
+		if a == '_' {
+			a = '-'
+		}
+		if lowerASCII(a) != lowerASCII(name[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+func lowerASCII(c byte) byte {
+	if 'A' <= c && c <= 'Z' {
+		return c + 'a' - 'A'
+	}
+	return c
+}
+
+// deleteVariantHeader removes every client-supplied spelling of the variant
+// header (T-35).
+func deleteVariantHeader(h http.Header, name string) {
+	if name == "" {
+		return
+	}
+	for k := range h {
+		if sameHeaderName(k, name) {
+			delete(h, k)
+		}
+	}
+}
+
+// setVariantHeader replaces the variant header with the assignment, in
+// every forwarding mode (10 §4 step 4). No dimension, no header.
+func setVariantHeader(h http.Header, name string, dims []Dim) {
+	deleteVariantHeader(h, name)
+	if name == "" || len(dims) == 0 {
+		return
+	}
+	var b strings.Builder
+	for i, d := range dims {
+		if i > 0 {
+			b.WriteByte(';')
+		}
+		b.WriteString(d.Experiment)
+		b.WriteByte('=')
+		b.WriteString(d.Variant)
+	}
+	h[name] = []string{b.String()}
+}
+
+// stripCookie removes every pair named name from the Cookie lines, keeping
+// the other pairs in order. A line left empty is dropped; h is untouched
+// when nothing matches.
+func stripCookie(h http.Header, name string) {
+	lines := h["Cookie"]
+	hit := false
+	for _, line := range lines {
+		for pair := range strings.SplitSeq(line, ";") {
+			hit = hit || cookiePairNamed(pair, name)
+		}
+	}
+	if !hit {
+		return
+	}
+	var out []string
+	for _, line := range lines {
+		var kept []string
+		for pair := range strings.SplitSeq(line, ";") {
+			if p := strings.Trim(pair, " \t"); p != "" && !cookiePairNamed(pair, name) {
+				kept = append(kept, p)
+			}
+		}
+		if len(kept) > 0 {
+			out = append(out, strings.Join(kept, "; "))
+		}
+	}
+	if len(out) == 0 {
+		delete(h, "Cookie")
+		return
+	}
+	h["Cookie"] = out
+}
+
+// cookiePairNamed reports whether a Cookie pair carries the cookie name, with
+// or without "=" and in any case: origins differ on both, and the visitor
+// id must reach none of them.
+func cookiePairNamed(pair, name string) bool {
+	n, _, _ := strings.Cut(pair, "=")
+	// net/http and most origins trim the name, so "weir_v =1" is the cookie.
+	return strings.EqualFold(strings.Trim(n, " \t\r\n"), name)
 }
