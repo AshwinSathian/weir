@@ -92,6 +92,7 @@ These were settled with the project owner on 2026-09-27 and are not reopened by 
 | D40 | Vulnerabilities reported through GitHub private vulnerability reporting; `SECURITY.md` in the repository before it goes public (D24). |
 | D41 | License Apache-2.0. |
 | D42 | Support the two latest Go releases; the minimum rises only when it leaves that window. |
+| D43 | Informational (1xx) responses from the origin, including `103 Early Hints`, are not relayed to clients; only the final response is served and cached (2026-10-11, from the cache-tests `interim-*` rows). |
 
 ## 3. Terminology
 
