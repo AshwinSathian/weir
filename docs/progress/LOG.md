@@ -1736,3 +1736,11 @@ Entry template:
 - Deviations: none beyond 08 §3 and runbook wording; no config field added.
 - Follow-ups: Provision/Cleanup wiring has no test (needs the store seam, should-fix left open); warning repeats per attempt; `validate` signal.
 - Context: low; size S was right.
+
+## 2026-10-11 · P25-07d · review-fixes
+- Branch / PR: claude/sweet-clarke-gwnywy / https://github.com/AshwinSathian/weir/pull/97
+- Done: adversarial review (agent), decisions delegated by Ashwin. `reconcileServerKeyGen` now returns `retry` (check failed or record write failed) and takes `quiet`; the retry loop logs attempts at Debug, a purge error once per distinct message, nothing after `stop`. Wiring test added with a real handler (no seam). 08 §3 and runbook 8.7 corrected: the retry also repeats a failed record write, and a known in-process change still purges at Provision. The reviewer's claim that a skipped check skips that purge was wrong (an existing test covers it).
+- Tests: `TestKeyGenRetryRecordWriteLoggingAndStop` (4 subtests), `TestProvisionStartsAndCleanupStopsKeyGenRetry`; gofmt, vet, trace 146/146, root and `caddy` race tests pass; lint not run here.
+- Deviations: 08 §3 and runbook only.
+- Follow-ups: `validate` signal; the "differ" Warn repeats while a purge keeps failing.
+- Context: low

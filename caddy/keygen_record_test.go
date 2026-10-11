@@ -67,7 +67,7 @@ func runKeyGen(t *testing.T, f *fakeRecorder, h [32]byte, keyChanged bool, purge
 		r.recAtPurge = bytes.Clone(f.rec)
 		f.mu.Unlock()
 		return purgeErr
-	}, warnLog(&r.log), "n")
+	}, warnLog(&r.log), "n", false)
 	f.mu.Lock()
 	r.recAfterRun = bytes.Clone(f.rec)
 	f.mu.Unlock()
@@ -153,7 +153,7 @@ func TestReconcileServerKeyGenOutageAndMemory(t *testing.T) {
 	var sb strings.Builder
 	purges := 0
 	for _, kc := range []bool{false, true} {
-		if _, err := reconcileServerKeyGen(t.Context(), mem, tight, kc, func(context.Context) error { purges++; return nil }, warnLog(&sb), "n"); err != nil {
+		if _, err := reconcileServerKeyGen(t.Context(), mem, tight, kc, func(context.Context) error { purges++; return nil }, warnLog(&sb), "n", false); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -257,20 +257,20 @@ func TestKeyGenCheckRetriedAfterOutage(t *testing.T) {
 	})
 }
 
-// reconcileServerKeyGen reports a skipped check so Provision can start the retry.
+// reconcileServerKeyGen asks for a retry when the check or the record write failed so Provision can start the retry.
 func TestReconcileServerKeyGenReportsSkippedCheck(t *testing.T) {
 	loose, tight := [32]byte{1}, [32]byte{2}
 	var sb strings.Builder
 	noop := func(context.Context) error { return nil }
 	down := &fakeRecorder{rec: loose[:], checkErr: errors.New("down")}
-	if skipped, err := reconcileServerKeyGen(t.Context(), down, tight, false, noop, warnLog(&sb), "n"); !skipped || err != nil {
-		t.Fatalf("skipped = %v, err = %v; want skipped", skipped, err)
+	if retry, err := reconcileServerKeyGen(t.Context(), down, tight, false, noop, warnLog(&sb), "n", false); !retry || err != nil {
+		t.Fatalf("retry = %v, err = %v; want retry", retry, err)
 	}
 	if !strings.Contains(sb.String(), "background retry is running") {
 		t.Fatalf("warning does not mention the retry: %q", sb.String())
 	}
 	up := &fakeRecorder{rec: loose[:]}
-	if skipped, _ := reconcileServerKeyGen(t.Context(), up, tight, false, noop, warnLog(&sb), "n"); skipped {
+	if retry, _ := reconcileServerKeyGen(t.Context(), up, tight, false, noop, warnLog(&sb), "n", false); retry {
 		t.Fatal("a successful check reported skipped")
 	}
 	mem, err := memory.New(memory.Config{})
@@ -278,7 +278,106 @@ func TestReconcileServerKeyGenReportsSkippedCheck(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer mem.Close()
-	if skipped, _ := reconcileServerKeyGen(t.Context(), mem, tight, false, noop, warnLog(&sb), "n"); skipped {
+	if retry, _ := reconcileServerKeyGen(t.Context(), mem, tight, false, noop, warnLog(&sb), "n", false); retry {
 		t.Fatal("a store with no record reported skipped")
+	}
+}
+
+// blockingRecorder never answers until its context ends, like a blackholed server.
+type blockingRecorder struct{ store.Store }
+
+func (blockingRecorder) CheckKeyGen(ctx context.Context, _ []byte) (bool, error) {
+	<-ctx.Done()
+	return false, ctx.Err()
+}
+func (blockingRecorder) RecordKeyGen(ctx context.Context, _ []byte) error {
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+// FR-STF-2, R-3: the retry also covers a record write that failed after the
+// purge, logs a long outage quietly, and stops promptly while a call is in
+// flight without reporting the cancelled attempt.
+func TestKeyGenRetryRecordWriteLoggingAndStop(t *testing.T) {
+	loose, tight := [32]byte{1}, [32]byte{2}
+	t.Run("a failed record write is retried until it lands", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			f := &fakeRecorder{rec: loose[:], writeErr: errors.New("timeout")}
+			var sb strings.Builder
+			r := startKeyGenRetry(f, tight, func(context.Context) error { return nil }, warnLog(&sb), "n")
+			time.Sleep(time.Minute)
+			f.mu.Lock()
+			stale := bytes.Equal(f.rec, loose[:])
+			f.writeErr = nil
+			f.mu.Unlock()
+			if !stale {
+				t.Fatal("the record changed while writes failed")
+			}
+			time.Sleep(time.Minute)
+			r.stop()
+			if !bytes.Equal(f.rec, tight[:]) {
+				t.Fatalf("record = %x after the write recovered, want the new hash", f.rec)
+			}
+		})
+	})
+	t.Run("an hour of outage logs nothing above debug", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			f := &fakeRecorder{rec: loose[:], checkErr: errors.New("down")}
+			var sb strings.Builder
+			r := startKeyGenRetry(f, tight, func(context.Context) error { return nil }, warnLog(&sb), "n")
+			time.Sleep(time.Hour)
+			r.stop()
+			if sb.Len() != 0 {
+				t.Fatalf("retry attempts logged: %q", sb.String())
+			}
+		})
+	})
+	t.Run("a persistent purge failure is logged once", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			f := &fakeRecorder{rec: loose[:]}
+			var sb strings.Builder
+			r := startKeyGenRetry(f, tight, func(context.Context) error { return errors.New("boom") }, warnLog(&sb), "n")
+			time.Sleep(time.Hour)
+			r.stop()
+			// The 'forwarding rules differ' Warn is not quiet and repeats with each
+			// failed purge (rare: reads work, the purge does not); the purge error
+			// itself is logged once.
+			if n := strings.Count(sb.String(), "purge failed"); n != 1 {
+				t.Fatalf("purge failure logged %d times, want 1:\n%s", n, sb.String())
+			}
+		})
+	})
+	t.Run("stop during a blocked call returns and logs nothing", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			var sb strings.Builder
+			r := startKeyGenRetry(blockingRecorder{}, tight, func(context.Context) error { return nil }, warnLog(&sb), "n")
+			time.Sleep(1500 * time.Millisecond) // the first attempt is in flight
+			r.stop()
+			if sb.Len() != 0 {
+				t.Fatalf("a cancelled attempt was reported: %q", sb.String())
+			}
+		})
+	})
+}
+
+// FR-STF-2, R-3: Provision starts the retry only for a Valkey site whose check
+// failed, and Cleanup stops it (no goroutine is left behind).
+func TestProvisionStartsAndCleanupStopsKeyGenRetry(t *testing.T) {
+	h := mustLoad(t, newCtx(t), `{"name":"kgr-valkey","store":{"type":"valkey","addrs":["127.0.0.1:1"]}}`)
+	if h.keyGenRetry == nil {
+		t.Fatal("no retry after a failed check")
+	}
+	if err := h.Cleanup(); err != nil {
+		t.Logf("cleanup: %v", err) // the dead server may make the close report an error
+	}
+	select {
+	case <-h.keyGenRetry.done:
+	default:
+		t.Fatal("Cleanup left the retry running")
+	}
+	m := mustLoad(t, newCtx(t), `{"name":"kgr-mem"}`)
+	defer m.Cleanup()
+	if m.keyGenRetry != nil {
+		t.Fatal("a memory site started a retry")
 	}
 }

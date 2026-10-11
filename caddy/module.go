@@ -62,7 +62,7 @@ type Handler struct {
 	pool    *pooledStore
 	release func() error
 	// keyGenRetry is the background key-generation retry after a Provision
-	// whose check was skipped (08 §3); nil otherwise. Cleanup stops it first.
+	// whose check was skipped or whose record write failed (08 §3); nil otherwise. Cleanup stops it first.
 	keyGenRetry *keyGenRetry
 	closed      *atomic.Bool // set by Provision; a pointer so Handler stays copyable
 	// admin is the registry entry for the admin API (08 §7); set last by a
@@ -182,7 +182,7 @@ func (h *Handler) Provision(ctx caddy.Context) (err error) {
 		}
 		return nil
 	}
-	skipped, err := reconcileServerKeyGen(ctx, p.store, fwdHash, keyChanged, purge, cfg.Logger, h.Name)
+	retry, err := reconcileServerKeyGen(ctx, p.store, fwdHash, keyChanged, purge, cfg.Logger, h.Name, false)
 	if err != nil {
 		return err
 	}
@@ -198,7 +198,7 @@ func (h *Handler) Provision(ctx caddy.Context) (err error) {
 	ms.addEngine(e)
 	p.sink.attach(ms)
 	engines.add(h.Name, h.admin)
-	if skipped {
+	if retry {
 		// Started last: nothing after this can fail, so Cleanup always
 		// reaches stop. The retry's purge leaves the engine open (a failed
 		// retry is tried again), unlike the one Provision passes above.
