@@ -98,7 +98,7 @@ func (e *Engine) serve(ctx context.Context, req *Request, origin Origin, c *keys
 		}
 		return e.pass(ctx, c.AsBypass(), origin, FwdBypass)
 	}
-	e.cr.observe(req.Header)
+	e.cr.observe(c.CanonicalHeader())
 	resp, err := e.cacheable(ctx, c, origin, nil)
 	se, follower := errors.AsType[sharedError](err)
 	if follower {

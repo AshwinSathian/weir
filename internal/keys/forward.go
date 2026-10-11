@@ -237,9 +237,33 @@ func CanonicalHeader(h http.Header) http.Header {
 
 func canonicalKeys(h http.Header) bool {
 	for k := range h {
-		if http.CanonicalHeaderKey(k) != k {
+		if !isCanonicalKey(k) {
 			return false
 		}
+	}
+	return true
+}
+
+// isCanonicalKey reports http.CanonicalHeaderKey(k) == k. The common case, a
+// key of token bytes in canonical case, is decided in one pass with no call;
+// anything else (a lower-case letter after a hyphen, a byte that is not a
+// token byte, which makes the standard library return the key unchanged)
+// goes to the standard library, so the answer is the same on every input.
+func isCanonicalKey(k string) bool {
+	upper := true
+	for i := 0; i < len(k); i++ {
+		c := k[i]
+		isLetter := 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z'
+		switch {
+		case isLetter:
+			if upper != ('A' <= c && c <= 'Z') {
+				return http.CanonicalHeaderKey(k) == k
+			}
+		case '0' <= c && c <= '9', c == '-':
+		default:
+			return http.CanonicalHeaderKey(k) == k
+		}
+		upper = c == '-'
 	}
 	return true
 }

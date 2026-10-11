@@ -9,8 +9,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"github.com/AshwinSathian/weir/internal/keys"
 )
 
 const (
@@ -68,9 +66,9 @@ func (r *cookieReport) observe(h http.Header) {
 	if r == nil || r.done.Load() {
 		return
 	}
-	// Classify strips whatever case the caller's key has, so read it the
-	// same way. net/http headers are already canonical and cost a scan.
-	lines := keys.CanonicalHeader(h)["Cookie"]
+	// h is Classified.CanonicalHeader: Classify already read whatever case
+	// the caller's key has, so this does not scan the keys again.
+	lines := h["Cookie"]
 	if len(lines) == 0 || !r.mu.TryLock() {
 		return
 	}

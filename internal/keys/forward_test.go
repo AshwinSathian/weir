@@ -182,3 +182,16 @@ func FuzzMalformedHeaderAbsent(f *testing.F) {
 		}
 	})
 }
+
+// INV-1, T-15: isCanonicalKey is a shortcut for http.CanonicalHeaderKey(k) == k
+// and must agree on every key.
+func FuzzIsCanonicalKey(f *testing.F) {
+	for _, s := range []string{"", "Accept-Encoding", "accept-encoding", "X-Custom", "X-custom", "Content-length", "A", "a", "-", "A-", "Weir_Variant", "Ke y", "ÄB", "X\x00y", "Foo-bar baz", "Te", "TE", "x-A"} {
+		f.Add(s)
+	}
+	f.Fuzz(func(t *testing.T, k string) {
+		if got, want := isCanonicalKey(k), http.CanonicalHeaderKey(k) == k; got != want {
+			t.Fatalf("isCanonicalKey(%q) = %v, want %v", k, got, want)
+		}
+	})
+}

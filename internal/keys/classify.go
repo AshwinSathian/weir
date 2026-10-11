@@ -72,6 +72,15 @@ type Classified struct {
 	req        *Request // the client request, for AsBypass; never modified
 }
 
+// CanonicalHeader is the client's header with canonical keys, the one every
+// decision in Classify read. Nil when the request was refused.
+func (c *Classified) CanonicalHeader() http.Header {
+	if c.req == nil {
+		return nil
+	}
+	return c.req.Header
+}
+
 // URITag is the tag of the request's URI (04 §3.1). It is computed on use,
 // not in Classify: a hit reads the tags the entry carries, so only stores,
 // purges and invalidations pay for the SHA-256.
