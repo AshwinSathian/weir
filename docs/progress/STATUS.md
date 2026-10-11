@@ -5,7 +5,7 @@ Phase: 3
 Current card: none
 Card state: awaiting-merge
 Branch: claude/awesome-ritchie-8ltcfc (designated session branch)
-PR: PENDING
+PR: https://github.com/AshwinSathian/weir/pull/101
 Next card: P3-03 (`make next`)
 
 ## Waiting on Ashwin

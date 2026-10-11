@@ -1779,7 +1779,7 @@ Entry template:
 - Context: low
 
 ## 2026-10-11 · P3-02 · done
-- Branch / PR: claude/awesome-ritchie-8ltcfc / PR number in STATUS
+- Branch / PR: claude/awesome-ritchie-8ltcfc / https://github.com/AshwinSathian/weir/pull/101
 - Done: `Config.Experiments` (`experiments.go`), assignment and consent in `internal/experiments/assign.go`, key dimension (tags 0x30, 0x31), variant header replace and experiment-cookie strip in `internal/keys`, one-time no-consent warning.
 - Tests: `TestVariantIsKeyDimension`, `TestWeirVariantAlwaysReplaced`, `TestExperimentCookieNeverForwarded`, `TestForwardedEqualsKeyed`, `TestConsentAbsentGetsControl`, `TestWinnerOverridesAssignment`, config and assign tests, `FuzzExperimentForward` (seeds in testdata/fuzz, oracle uses net/http cookie parsing). Race tests, vet, gofmt, trace 146/146 and lint (0 issues) pass; `make check` itself stops at the known lint binary mismatch. `BenchmarkServeHitExperiments`: 14 allocs/op unmatched, 23 matched without cookie, 28 with a valid cookie.
 - Deviations: docs/10 v1.2 (public shape, defaults, consent rule), docs/04 (Config types, key encoding, forwarding). Public API, defaults and consent shape approved by Ashwin.
