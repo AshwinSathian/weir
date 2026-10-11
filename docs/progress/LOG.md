@@ -1809,3 +1809,19 @@ Entry template:
 - Deviations: docs/10 v1.5.
 - Follow-ups: P3-05 runbook states the 90-day old-key retention.
 - Context: medium
+
+## 2026-10-11 · P3-04 · done
+- Branch / PR: claude/gifted-mayer-b8afaw / https://github.com/AshwinSathian/weir/pull/103
+- Done: `EvExposure` and `Event.Experiment/Variant/Visitor`; `Assign` returns `Exposures` and marks them in the cookie; `emitExposures` in experiments.go. Visitor is 16 hex chars of SHA-256 of the id. Winner, Warm, errors and no-consent emit none.
+- Tests: `TestExposureOncePerVisitor`, `TestExposureOnHit`, `TestExposureNoneWithoutConsent`, `TestExposureVisitorIsHashPrefix`, `TestAssignExposures`, EvExposure scenario in `TestEveryEventKindEmitted`. Race tests and pinned lint pass; trace 146/146. `make check` itself not run (old lint binary).
+- Deviations: docs/04 §9.1/§9.2 and docs/10 §4 step 7 details. Review should-fix: the "analysis deduplicates refusing clients" claim was false and is reworded; the original rationale is raised under Waiting on Ashwin.
+- Follow-ups: none new; P3-05 next.
+- Context: medium; size S was right. The PR is on the designated session branch, not a card branch.
+
+## 2026-10-11 · P3-04 · review-fixes
+- Branch / PR: claude/gifted-mayer-b8afaw / https://github.com/AshwinSathian/weir/pull/103
+- Done: adversarial review (must-fix: docs/10 step 7 contradicted itself). Decisions (delegated by Ashwin): accept inflated counts from cookie-refusing clients and fix the rationale; accept the E9 re-exposure and document it (not changing E9's drop order); emit only when the marked cookie was built (Encode failure emits nothing). Benchmark cookie now carries the mark.
+- Tests: `TestAssignExposureLifecycle`, `TestExposureRepeatsAfterE9Drop`, `TestExposureAnyReturnedResponse` (bypass mode, Range).
+- Deviations: docs/10 step 7 and docs/04 §9.2 reworded; "Waiting on Ashwin" cleared.
+- Follow-ups: none.
+- Context: low

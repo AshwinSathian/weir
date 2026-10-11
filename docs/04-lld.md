@@ -1163,6 +1163,10 @@ type Event struct {
 	Status    int
 	Reason    string        // fixed vocabulary per kind, safe as a metric label
 	Info      CacheInfo     // for EvRequest
+	// Set only on EvExposure (docs/10 §4 step 7). Experiment and Variant are
+	// operator configuration; Visitor is 16 hex characters of SHA-256 of the
+	// visitor id. None is a safe metric label.
+	Experiment, Variant, Visitor string
 }
 ```
 
@@ -1188,6 +1192,7 @@ type Event struct {
 | `EvMissRateAnomaly` | window closed with an anomalous partition | `flag`, `throttle` |
 | `EvEvict` | the memory store `New` built evicted (batched per shard per call); `Status` is how many records. A store passed in `Config.Store` reports through its own `memory.Config.OnEvict` | `small`, `main`, `expired` |
 | `EvMode` | `SetMode` changed the incident mode or it expired (FR-MODE-1) | `normal`, `stale-on-error`, `bypass` (new mode) |
+| `EvExposure` | a returned response to a request that matched an experiment recorded a first exposure: the visitor's assignment was created, or its signed cookie lacked the exposed mark (which that response adds). Any returned response counts (hits, origin error statuses, bypass mode, Range pass-through); errors without a response, winners, `Warm` and requests without consent do not. Repeats are possible and share one `Visitor` hash: concurrent first requests with one unmarked cookie, and an assignment dropped by the cookie cap (docs/10 E9); clients that refuse cookies get a new `Visitor` each request (docs/10 §4 step 7). Sets `Experiment`, `Variant` and `Visitor` and no other request data (`Partition` is empty) | none |
 
 Reasons never contain request data. `Partition` is the only field derived from request input; exporters must not use it as a metric label.
 

@@ -26,12 +26,19 @@ func expConfig() weir.Config {
 	return c
 }
 
-// visitor returns a Cookie header value holding a signed assignment.
-func visitor(t *testing.T, id, variant string) string {
+// visitor returns a Cookie header value holding a signed assignment whose
+// exposure is already recorded, so serving it rewrites nothing.
+func visitor(t *testing.T, id, variant string) string { return visitorMark(t, id, variant, true) }
+
+// visitorMark is visitor with the exposed mark optional.
+func visitorMark(t *testing.T, id, variant string, exposed bool) string {
 	t.Helper()
 	c := experiments.Cookie{VisitorID: id}
 	if variant != "" {
 		c.Set("checkout-copy", variant)
+		if exposed {
+			c.MarkExposed("checkout-copy")
+		}
 	}
 	v, ok := c.Encode(expKey)
 	if !ok {

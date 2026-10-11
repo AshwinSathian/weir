@@ -1,6 +1,10 @@
 package experiments
 
-import "strings"
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"strings"
+)
 
 // Consent names the cookie that gates bucketing (E6). A request has consent
 // when the cookie Cookie is present and one element of its value equals
@@ -91,6 +95,26 @@ type Result struct {
 	Picks   []Choice // one per active experiment, config order
 	Cookie  Cookie   // the verified cookie, or a fresh one; updated when Changed
 	Changed bool     // an assignment was created or replaced, so the cookie needs a rewrite (P3-03)
+	// Exposures lists the experiments whose exposure is recorded by this
+	// request (10 §4 step 7), at most one per active experiment. Each has
+	// been marked in Cookie, so Changed is set.
+	Exposures []Exposure
+}
+
+// Exposure is one first sighting of a visitor in a variant. Visitor is
+// VisitorHash of the visitor id, never the id.
+type Exposure struct {
+	Experiment, Variant, Visitor string
+}
+
+// VisitorHash is the 16 hex characters (64 bits) of SHA-256(id) that events
+// carry instead of the visitor id (10 §4 step 7). The id is the cookie's
+// bucketing input, so analytics get a stable handle; it cannot be fed back
+// into a cookie only because the cookie needs the MAC. The hash is not a
+// secret and the id is not either, so do not rely on its secrecy.
+func VisitorHash(id string) string {
+	sum := sha256.Sum256([]byte(id))
+	return hex.EncodeToString(sum[:8])
 }
 
 // Assign runs 10 §4 steps 1 to 3 for a request on the normalized host and
@@ -135,7 +159,8 @@ func (c *Config) choose(e *Experiment, res *Result, consent bool, rnd func() flo
 		return e.Control() // E6
 	}
 	if a, ok := res.Cookie.Get(e.Name); ok && e.hasVariant(a.Variant) {
-		return a.Variant // E3
+		expose(res, e.Name, a.Variant) // E3
+		return a.Variant
 	}
 	if res.Cookie.VisitorID == "" {
 		res.Cookie.VisitorID = NewVisitorID(rnd)
@@ -146,7 +171,19 @@ func (c *Config) choose(e *Experiment, res *Result, consent bool, rnd func() flo
 	}
 	res.Cookie.Set(e.Name, v)
 	res.Changed = true
+	expose(res, e.Name, v)
 	return v
+}
+
+// expose records the exposure once: only an assignment whose cookie lacks the
+// mark counts, and the mark goes into the cookie that answers this request.
+// choose reaches it only with consent and a visitor, so a winner, a control
+// served for lack of consent, and Warm record nothing (E4, E6).
+func expose(res *Result, experiment, variant string) {
+	if res.Cookie.MarkExposed(experiment) {
+		res.Changed = true
+		res.Exposures = append(res.Exposures, Exposure{experiment, variant, VisitorHash(res.Cookie.VisitorID)})
+	}
 }
 
 func (e *Experiment) hasVariant(name string) bool {

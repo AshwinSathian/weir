@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/AshwinSathian/weir/internal/experiments"
 	"github.com/AshwinSathian/weir/internal/keys"
@@ -159,6 +160,20 @@ func (e *Engine) experimentsKeys() {
 	}
 }
 
+// emitExposures sends one EvExposure per entry, with no request data (10 §4
+// step 7, FR-OBS-1). It runs only for a returned response whose cookie
+// carrying the mark was built, so neither an error nor an Encode failure
+// claims an exposure that would be repeated.
+func (e *Engine) emitExposures(xs []experiments.Exposure) {
+	if e.cfg.Observer == nil || len(xs) == 0 {
+		return
+	}
+	now := time.Now()
+	for _, x := range xs {
+		emit(e.cfg.Observer, Event{Kind: EvExposure, Time: now, Experiment: x.Experiment, Variant: x.Variant, Visitor: x.Visitor})
+	}
+}
+
 const expCookieMaxAge = "7776000" // 90 days, not sliding (10 §3)
 
 // experimentResponse finishes a response to a request that matched an
@@ -182,8 +197,10 @@ func (e *Engine) experimentResponse(c *keys.Classified, resp *Response) *Respons
 	if res.Changed {
 		// ponytail: an Encode failure (a key or id the load checks rule out, or
 		// a value past the cap with nothing left to drop) sends no cookie and
-		// the visitor is re-picked next request; add a log line if it is seen.
+		// no exposure, and the visitor is re-picked next request; add a log
+		// line if it is seen.
 		if v, ok := res.Cookie.Encode(x.SigningKeys[0]); ok {
+			e.emitExposures(res.Exposures)
 			sc := x.Cookie + "=" + v + "; Path=/; Max-Age=" + expCookieMaxAge + "; HttpOnly; SameSite=Lax"
 			if c.Forwarded.Scheme == "https" {
 				sc += "; Secure"

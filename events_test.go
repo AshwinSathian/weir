@@ -77,6 +77,7 @@ var vocabulary = map[weir.EventKind][]string{
 	weir.EvMissRateAnomaly: {"flag", "throttle"},
 	weir.EvEvict:           {"small", "main", "expired"},
 	weir.EvMode:            {"normal", "stale-on-error", "bypass"},
+	weir.EvExposure:        {""},
 }
 
 // checkVocabulary fails for a recorded reason outside the catalog, so an
@@ -446,6 +447,18 @@ func TestEveryEventKindEmitted(t *testing.T) {
 			serve(t, e, varyReq("/o", "X-Custom", v), o)
 		}
 		seen.want(t, l, weir.EvVaryOverflow)
+	})
+
+	scenario("experiment exposure", expConfig(), func(t *testing.T, cfg weir.Config, l *eventLog) {
+		o := testorigin.NewChecked(t, 64, 16)
+		o.Default(cacheable("x"))
+		e := newEngine(t, cfg)
+		defer closeEngine(t, e)
+
+		serve(t, e, expReq("/checkout", nil), o)
+		if ev := seen.want(t, l, weir.EvExposure); ev.Experiment != "checkout-copy" || len(ev.Visitor) != 16 {
+			t.Errorf("exposure event = %+v", ev)
+		}
 	})
 
 	// The engine's own memory store reports evictions through the observer.

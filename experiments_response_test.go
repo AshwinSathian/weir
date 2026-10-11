@@ -287,7 +287,7 @@ func TestSetCookieResignsOldKeyCookie(t *testing.T) {
 			defer closeEngine(t, e)
 			resp, _ := serve(t, e, expReq("/checkout", http.Header{"Cookie": {old()}}), o)
 			cs := expCookieOf(resp)
-			if len(cs) != 1 || !strings.Contains(cs[0], ".keep-me.checkout-copy:b.") {
+			if len(cs) != 1 || !strings.Contains(cs[0], ".keep-me.checkout-copy:b!.") {
 				t.Fatalf("Set-Cookie = %q, want the same visitor and variant", cs)
 			}
 			if cookiePair(cs[0]) == old() {
@@ -400,6 +400,7 @@ func experimentsCookieFor(t *testing.T, id, variant string, key []byte) string {
 	t.Helper()
 	c := experiments.Cookie{VisitorID: id}
 	c.Set("checkout-copy", variant)
+	c.MarkExposed("checkout-copy")
 	v, ok := c.Encode(key)
 	if !ok {
 		t.Fatal("encode refused")

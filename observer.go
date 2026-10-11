@@ -20,6 +20,10 @@ type Event struct {
 	Status    int
 	Reason    string    // fixed vocabulary per kind, safe as a metric label
 	Info      CacheInfo // for EvRequest
+	// Set only on EvExposure. Experiment and Variant are operator
+	// configuration. Visitor is a 16-character hex prefix of SHA-256 of the
+	// visitor id. None is a safe metric label: Visitor is unbounded.
+	Experiment, Variant, Visitor string
 }
 
 // EventKind identifies an event. Its String form is safe as a metric label.
@@ -46,6 +50,7 @@ const (
 	EvMissRateAnomaly                      // a window closed with an anomalous partition
 	EvEvict                                // the memory store evicted
 	EvMode                                 // the incident mode changed (FR-MODE-1)
+	EvExposure                             // a visitor was first seen in an experiment variant (docs/10 E1)
 	evCount
 )
 
@@ -69,6 +74,7 @@ var eventKindNames = [evCount]string{
 	EvMissRateAnomaly: "miss-rate-anomaly",
 	EvEvict:           "evict",
 	EvMode:            "mode",
+	EvExposure:        "exposure",
 }
 
 // String returns the kind's label name, or "unknown".

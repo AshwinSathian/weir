@@ -4,22 +4,20 @@ Updated: 2026-10-11
 Phase: 3
 Current card: none
 Card state: awaiting-merge
-Branch: claude/vigilant-tesla-7nuval (designated session branch)
-PR: https://github.com/AshwinSathian/weir/pull/102
-Next card: P3-04 (`make next`)
+Branch: claude/gifted-mayer-b8afaw (designated session branch)
+PR: https://github.com/AshwinSathian/weir/pull/103
+Next card: P3-05 (`make next`)
 
 ## Waiting on Ashwin
 
-Nothing. The cookie lifetime and `DownstreamKeysOnVariant` were decided in the PR 102 review (90 days, field kept) and are in docs/10 v1.5. The control-variant and hash-separator questions were decided in the PR 100 review (first listed variant; `salt || 0x00 || id`) and are in docs/10 v1.1.
+Nothing. The P3-04 review question (cookie-refusing clients cannot be deduplicated by the hashed visitor) was decided with Ashwin's delegation: accept the inflated count, correct the docs/10 step 7 rationale, keep emitting on first visits.
 
 ## Notes for the next session
 
-- P3-03 is done: `experimentResponse` (experiments.go) runs in `Serve` after the entry is stored, adds the assignment `Set-Cookie` (90-day Max-Age; decided in the PR 102 review: keep it, non-sliding, with re-sign on a rotated-out key; docs/10 v1.5) and rewrites Cache-Control to private plus drops CDN-Cache-Control. New public field `ExperimentsConfig.DownstreamKeysOnVariant` (approved); a response that sets the cookie is private even with it.
-- P3-04 can read `Result.Cookie`, `Changed` and `MarkExposed` from `keys.Classified.Decision` in `experimentResponse`; an exposure mark also rewrites the cookie, so reuse the Set-Cookie code there.
-- P3-05 must expose `downstream_keys_on_variant` in the Caddy block (noted on the card).
-- Not done by design (E7 lists two fields only): `Surrogate-Control` and vendor CDN fields are left alone; documented in docs/10.
-- Warm stores the control variant (or the winner) and Purge runs no assignment (docs/10 v1.3).
-- Hit-path cost with experiments (`BenchmarkServeHitExperiments`): 14, 23 and 28 allocs/op before P3-03; after it 14, 45 and 35 (matched requests clone the header map and build the Cache-Control string). P3-05 benchmarks may want to cut that.
-- Lint can run here: `GOTOOLCHAIN=go1.27.0 GOBIN=/tmp/lintbin go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0` from a scratch directory, then `GOTOOLCHAIN=go1.27.0 /tmp/lintbin/golangci-lint run`. Run it before pushing.
+- P3-04 is done: `Assign` returns `Result.Exposures` (marked in the cookie, `Changed` set); `experimentResponse` emits `EvExposure{Experiment, Variant, Visitor}` through `emitExposures` for a returned response. `Event` has three new string fields (docs/04 §9.1, §9.2). `observe/prom` ignores the kind.
+- P3-05 must expose `downstream_keys_on_variant` in the Caddy block (noted on the card). Cookies in tests now carry the exposed mark by default (`visitor`, `experimentsCookieFor`); `visitorMark(..., false)` builds an unmarked one.
+- Hit-path cost with P3-04 (adversarial review, main vs branch): unchanged for hits (14 allocs); matched-no-cookie 45 to 48 allocs (the hash, hex and `Exposures` slice for a new visitor); matched-valid-cookie 35 allocs once the benchmark cookie carries the mark. P3-05 benchmarks may want to cut the new-visitor cost.
+- Exposure repeats with one hash are documented (docs/10 step 7): concurrent first requests with an unmarked cookie, and an E9-dropped assignment. `TestExposureRepeatsAfterE9Drop` pins the second.
+- Lint can run here: `GOTOOLCHAIN=go1.27.0 GOBIN=/tmp/lintbin go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0` from a scratch directory, then `GOTOOLCHAIN=go1.27.0 /tmp/lintbin/golangci-lint run`. `make check` fails here because the installed binary is built with Go 1.25.
 - `TestE2EPurgeHerd` (real-clock caddytest) is a known flake.
 - Open follow-up from P25-07d: a way for `caddy validate` to skip the purge (needs a signal from Caddy).

@@ -252,7 +252,7 @@ Each phase began with one planning card that verified the spec against current u
 - AC: a created or changed assignment adds `Set-Cookie` (HttpOnly, SameSite=Lax, Path=/, Secure on https) to that client's response only; matched responses drop `public` and `s-maxage` and gain `private`, lose `CDN-Cache-Control`, unless the operator declared variant-aware downstream; the stored entry is unchanged (P4: build a new header map)
 - Out of scope: exposure events (P3-04)
 
-### [ ] P3-04 EvExposure
+### [x] P3-04 EvExposure
 - Plan: Phase 3 · Size: S · Depends on: P3-03
 - Read: 10 §4 step 7; 04 §9.2 (events)
 - Touch: events, assignment step, tests, docs/04 §9.2
