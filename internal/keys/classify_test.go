@@ -567,3 +567,28 @@ func TestClassifyHostHash(t *testing.T) {
 		}
 	})
 }
+
+// T-31, INV-1: unkeyed fields travel as the client sent them, so a value with
+// CR, LF or NUL is dropped before an Origin that is not net/http can put it
+// on the wire and split the request.
+func TestControlBytesInUnkeyedFieldsDropped(t *testing.T) {
+	for _, bad := range []string{"a\r\nX-Injected: 1", "a\nb", "a\rb", "a\x00b"} {
+		for _, name := range []string{"Authorization", "Cache-Control", "Pragma", "X-Request-Id"} {
+			cfg := classifyCfg()
+			c, err := Classify(classifyReq("GET", http.Header{name: {"ok", bad}}), cfg)
+			if err != nil {
+				continue // rejected outright is fine too
+			}
+			if v, ok := c.Forwarded.Header[name]; ok {
+				t.Errorf("%s with %q reached the forward as %q", name, bad, v)
+			}
+			if _, ok := c.Forwarded.Header["X-Injected"]; ok {
+				t.Errorf("injected field appeared for %s", name)
+			}
+		}
+	}
+	c, err := Classify(classifyReq("GET", http.Header{"Authorization": {"Bearer ok"}}), classifyCfg())
+	if err != nil || c.Forwarded.Header.Get("Authorization") != "Bearer ok" {
+		t.Fatalf("a clean Authorization was lost: %v %v", c.Forwarded.Header, err)
+	}
+}
