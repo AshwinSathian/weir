@@ -5,7 +5,7 @@ Phase: 3
 Current card: none
 Card state: awaiting-merge
 Branch: claude/busy-tesla-iw6ola (designated session branch)
-PR: (filled after push)
+PR: https://github.com/AshwinSathian/weir/pull/104
 Next card: none (`make next` says all cards are done)
 
 ## Waiting on Ashwin
