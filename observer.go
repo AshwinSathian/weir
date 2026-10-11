@@ -22,8 +22,10 @@ type Event struct {
 	Info      CacheInfo // for EvRequest
 	// Set only on EvExposure. Experiment and Variant are operator
 	// configuration. Visitor is a 16-character hex prefix of SHA-256 of the
-	// visitor id. None is a safe metric label: Visitor is unbounded.
-	Experiment, Variant, Visitor string
+	// visitor id.
+	Experiment string // experiment name, from configuration
+	Variant    string // variant name, from configuration
+	Visitor    string // 16 hex characters; unbounded, never a metric label
 }
 
 // EventKind identifies an event. Its String form is safe as a metric label.

@@ -26,7 +26,7 @@ func ExampleHandler() {
 	}()
 
 	calls := 0
-	origin := weir.OriginFunc(func(ctx context.Context, req *weir.Request) (*weir.Response, error) {
+	origin := weir.OriginFunc(func(_ context.Context, _ *weir.Request) (*weir.Response, error) {
 		calls++
 		return &weir.Response{
 			StatusCode: http.StatusOK,
@@ -38,7 +38,7 @@ func ExampleHandler() {
 
 	for range 2 {
 		rec := httptest.NewRecorder()
-		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "http://example.com/page", nil))
+		h.ServeHTTP(rec, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "http://example.com/page", nil))
 		fmt.Println(rec.Code, rec.Body.String())
 	}
 	fmt.Println("origin calls:", calls)

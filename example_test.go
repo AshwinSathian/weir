@@ -15,7 +15,7 @@ import (
 
 // newExampleOrigin counts calls and returns a response cacheable for a minute.
 func newExampleOrigin(calls *int) weir.Origin {
-	return weir.OriginFunc(func(ctx context.Context, req *weir.Request) (*weir.Response, error) {
+	return weir.OriginFunc(func(_ context.Context, req *weir.Request) (*weir.Response, error) {
 		*calls++
 		return &weir.Response{
 			StatusCode: http.StatusOK,
@@ -109,7 +109,7 @@ func ExampleEngine_Purge() {
 			fmt.Println("serve:", err)
 			return
 		}
-		io.Copy(io.Discard, resp.Body)
+		_, _ = io.Copy(io.Discard, resp.Body)
 		resp.Body.Close()
 	}
 	fetch()
@@ -172,7 +172,7 @@ func ExampleTrackingParams() {
 			fmt.Println("serve:", err)
 			return
 		}
-		io.Copy(io.Discard, resp.Body)
+		_, _ = io.Copy(io.Discard, resp.Body)
 		resp.Body.Close()
 	}
 	fmt.Println("origin calls:", calls)

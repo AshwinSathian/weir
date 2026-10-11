@@ -14,11 +14,17 @@ import (
 
 // Config sizes a Store (05 §5.1).
 type Config struct {
-	MaxBytes      int64         // 0: 256 MiB
-	Shards        int           // 0: 16; a power of two, at most MaxShards
-	MaxRetention  time.Duration // 0: 24h; caps every record's lifetime (E-11)
-	MaxHardEpochs int           // 0: 10000 (E-6)
-	EpochSlots    int           // 0: 1 << 19; a power of two, at most MaxEpochSlots (E-7)
+	MaxBytes     int64         // 0: 256 MiB
+	Shards       int           // 0: 16; a power of two, at most MaxShards
+	MaxRetention time.Duration // 0: 24h; caps every record's lifetime (E-11)
+	// MaxHardEpochs caps how many distinct tags may hold a hard epoch (0:
+	// 10000, E-6). It is a tuning knob: its meaning and scale may change in
+	// a minor release.
+	MaxHardEpochs int
+	// EpochSlots is the size of the table that holds soft and invalidation
+	// epochs (0: 1 << 19; a power of two, at most MaxEpochSlots, E-7). It is
+	// a tuning knob: its meaning and scale may change in a minor release.
+	EpochSlots int
 	// MaxBytesPerOwner caps the bytes one Entry.Owner may hold in each shard
 	// (FR-FAIR-2), so an owner may hold Shards times this in all. A cap below
 	// one object's size declines every Set for that owner. 0 disables it. An over-quota Set first evicts that owner's
@@ -30,8 +36,11 @@ type Config struct {
 	// SnapshotTimeout bounds the snapshot written by Close; CloseContext uses
 	// its own context instead. 0: 5s.
 	SnapshotTimeout time.Duration
-	// OnEvict, when set, receives per-Set eviction counts by queue: "small",
-	// "main" or "expired". It runs after the shard lock is released.
+	// OnEvict, when set, receives per-Set eviction counts by queue. The queue
+	// names are a stable vocabulary: "small" (entries evicted from the
+	// small admission queue), "main" (entries evicted from the main queue)
+	// and "expired" (entries dropped because they had expired). It runs
+	// after the shard lock is released.
 	OnEvict func(queue string, n int)
 }
 

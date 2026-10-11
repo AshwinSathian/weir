@@ -1,5 +1,3 @@
-// Package storetest is the store conformance suite (05 §8). Every
-// store.Store implementation calls Run from its tests.
 package storetest
 
 import (

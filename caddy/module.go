@@ -1,5 +1,3 @@
-// Package weircaddy is the Caddy adapter for Weir: the HTTP handler module
-// http.handlers.weir (docs/08 §1).
 package weircaddy
 
 import (

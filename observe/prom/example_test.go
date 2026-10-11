@@ -31,7 +31,7 @@ func ExampleNewObserver() {
 	}()
 	reg.MustRegister(obs, prom.NewCollector(e))
 
-	origin := weir.OriginFunc(func(ctx context.Context, req *weir.Request) (*weir.Response, error) {
+	origin := weir.OriginFunc(func(_ context.Context, _ *weir.Request) (*weir.Response, error) {
 		return &weir.Response{
 			StatusCode: http.StatusOK,
 			Header:     http.Header{"Cache-Control": {"max-age=60"}},
@@ -44,7 +44,7 @@ func ExampleNewObserver() {
 		fmt.Println("serve:", err)
 		return
 	}
-	io.Copy(io.Discard, resp.Body)
+	_, _ = io.Copy(io.Discard, resp.Body)
 	resp.Body.Close()
 
 	n, err := testutil.GatherAndCount(reg, "weir_requests_total")

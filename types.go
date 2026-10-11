@@ -8,7 +8,7 @@ type Purge struct {
 	URLs   []string // absolute http(s) URLs; parsed and rewritten exactly like requests
 	Origin string   // "scheme://host[:port]"; required when Groups is non-empty
 	Groups []string
-	Eager  bool // M15: with PurgeHard, also delete matching records now (store.Scrubber)
+	Eager  bool // with PurgeHard, also delete matching records now, if the store implements store.Scrubber
 }
 
 // PurgeMode selects how purged entries are treated.
@@ -36,9 +36,9 @@ type BreakerState uint8
 
 // BreakerState values.
 const (
-	BreakerClosed BreakerState = iota
-	BreakerHalfOpen
-	BreakerOpen
+	BreakerClosed   BreakerState = iota // requests reach the origin normally
+	BreakerHalfOpen                     // a few probe requests test whether the origin recovered
+	BreakerOpen                         // origin fetches fail fast until the open period ends
 )
 
 // Mode is an incident mode set with Engine.SetMode (FR-MODE-1, D33).

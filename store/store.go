@@ -35,13 +35,13 @@ type Flags uint16
 
 // Flags values.
 const (
-	FlagMustRevalidate  Flags = 1 << iota
-	FlagProxyRevalidate       // proxy-revalidate
-	FlagNoCache               // unqualified or qualified, treated the same
-	FlagSMaxAge               // freshness came from s-maxage
-	FlagHeuristic             // freshness is heuristic
-	FlagPublic                // public
-	FlagFromAuthorized        // stored from a request that carried Authorization
+	FlagMustRevalidate  Flags = 1 << iota // must-revalidate
+	FlagProxyRevalidate                   // proxy-revalidate
+	FlagNoCache                           // unqualified or qualified, treated the same
+	FlagSMaxAge                           // freshness came from s-maxage
+	FlagHeuristic                         // freshness is heuristic
+	FlagPublic                            // public
+	FlagFromAuthorized                    // stored from a request that carried Authorization
 )
 
 // Entry is one stored record. It is immutable after Set (P4): the store and
@@ -67,7 +67,7 @@ type Entry struct {
 	FetchDuration       time.Duration
 	VaryNames           []string // canonical names this variant was keyed on; nil when no Vary
 	Tags                []Tag    // [global, URI, groups...] in this order; the engine splits on it (05 E-12)
-	Owner               Tag      // origin tag; opaque to stores, used for per-owner quotas (M14)
+	Owner               Tag      // origin tag; opaque to stores, used for per-owner byte quotas (memory store MaxBytesPerOwner)
 
 	// KindVarySpec: VaryNames (shared field) plus Variants.
 	Variants []VariantRef // bounded by MaxVariants, copy-on-write
@@ -192,6 +192,12 @@ type Sizer interface {
 
 // Store errors.
 var (
-	ErrNotFound    = errors.New("store: not found")
+	// ErrNotFound is returned by Get when no live record has the key. It is a
+	// normal miss, not a failure.
+	ErrNotFound = errors.New("store: not found")
+	// ErrUnavailable means the store could not answer: a timeout, a lost
+	// connection, overload, an undecodable remote record or a closed store.
+	// The engine treats any other store error the same way, counts it toward
+	// the store breaker and serves from the origin instead.
 	ErrUnavailable = errors.New("store: unavailable")
 )

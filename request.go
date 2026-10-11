@@ -23,7 +23,9 @@ type Response struct {
 	StatusCode int
 	Header     http.Header
 	Body       io.ReadCloser // never nil on responses returned by Serve
-	Cache      CacheInfo     // set by Serve; ignored on responses returned by an Origin
+	// Cache describes how Serve produced the response. Serve sets it; an
+	// Origin's value is ignored.
+	Cache CacheInfo
 }
 
 // CacheInfo describes how Serve produced a response. It feeds the
@@ -36,7 +38,15 @@ type CacheInfo struct {
 	Stored    bool          // the forwarded response was stored
 	Collapsed bool          // this request waited on another request's flight
 	TTL       time.Duration // remaining freshness at send time; negative when stale
-	Detail    string        // implementation detail for Cache-Status, e.g. "negative"
+	// Detail is a short label for the Cache-Status detail parameter. Serve
+	// sets it to one of two values: "negative" (a cached origin error
+	// answered) or "hit-for-miss" (the URI is known to be unstorable, so the
+	// request skipped coalescing). It is empty otherwise. When it is empty
+	// and Stale is not StaleNone, the Cache-Status header carries the stale
+	// reason instead: "stale-while-revalidate", "stale-if-error", "shed",
+	// "circuit-open" or "coalesce-timeout". New values may be added in a
+	// minor release, so treat an unknown value as informational.
+	Detail string
 }
 
 // FwdReason is why a request went to the origin. Values mirror the fwd
