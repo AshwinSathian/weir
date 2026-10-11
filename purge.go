@@ -27,7 +27,7 @@ import (
 // and the memory store fails only once closed.
 func (e *Engine) invalidate(ctx context.Context, c *keys.Classified, resp *Response) {
 	ctx = context.WithoutCancel(ctx) // the response is already on its way to the client
-	tags := []store.Tag{c.URITag}
+	tags := []store.Tag{c.URITag()}
 	base, err := url.ParseRequestURI(c.Forwarded.Path) // Path is escaped; relative references resolve against it
 	if err != nil {
 		base = &url.URL{Path: "/"}
@@ -87,7 +87,7 @@ func (e *Engine) sameOriginTag(c *keys.Classified, base *url.URL, ref string) (s
 	if err != nil || kc.Origin != c.Origin {
 		return store.Tag{}, false
 	}
-	return kc.URITag, true
+	return kc.URITag(), true
 }
 
 // Purge makes the entries p names stale (PurgeSoft) or unreachable
@@ -140,7 +140,7 @@ func (e *Engine) Purge(ctx context.Context, p Purge) error {
 		if err != nil {
 			return fmt.Errorf("%w: purge url %d", err, i) // the index, never the URL's text
 		}
-		tags = append(tags, kc.URITag)
+		tags = append(tags, kc.URITag())
 	}
 	if len(p.Groups) > 0 || p.Origin != "" { // an Origin nothing uses is still checked
 		kc, err := e.classifyURL(p.Origin, true)

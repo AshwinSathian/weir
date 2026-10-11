@@ -120,7 +120,7 @@ func TestClassifyCacheableForward(t *testing.T) {
 	if c.Origin != "https://example.com" || c.Partition != "https://example.com/p" {
 		t.Fatalf("origin %q partition %q", c.Origin, c.Partition)
 	}
-	if c.URITag != TagURI(c.Origin, "/p", "a=1") || c.OriginTag != TagOrigin(c.Origin) {
+	if c.URITag() != TagURI(c.Origin, "/p", "a=1") || c.OriginTag() != TagOrigin(c.Origin) {
 		t.Fatal("tags do not match the forwarded target")
 	}
 	if len(r.Header) != len(h) || r.Header.Get("X-Forwarded-Host") == "" {
@@ -325,7 +325,7 @@ func TestPassURITagUsesRewrittenQuery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.URITag != g.URITag {
+	if c.URITag() != g.URITag() {
 		t.Fatal("pass URI tag differs from the cacheable URI tag")
 	}
 	if c.Forwarded.Path != "/%7ep" || c.Forwarded.RawQuery != "b=2&utm_source=x&a=1" {
