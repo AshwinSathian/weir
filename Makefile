@@ -10,7 +10,7 @@ endif
 # leans on an unpublished sibling by accident (docs/02 §3.2).
 SUBMODULES := $(patsubst ./%/go.mod,%,$(shell find . -mindepth 2 -name go.mod -not -path './testdata/*' -not -path './.claude/*' -not -path './.git/*' | sort))
 
-.PHONY: check fmt-check vet lint test modules test-short trace trace-strict fuzz-short bench load cache-tests vuln card next test-valkey
+.PHONY: release-check check fmt-check vet lint test modules test-short trace trace-strict fuzz-short bench load cache-tests vuln card next test-valkey
 
 ## check: everything a card must pass before handoff (CI runs the same)
 check: fmt-check vet lint test modules trace-strict
@@ -33,6 +33,15 @@ modules:
 	  echo "== $$m"; \
 	  (cd $$m && GOWORK=off go vet ./... && GOWORK=off $(GOLANGCI) run && GOWORK=off go test -race -shuffle=on -count=1 ./...) || exit 1; \
 	done
+
+## release-check: no sub-module may keep a replace or a v0.0.0 pin on the release commit (replace is ignored by importers)
+release-check:
+	@fail=0; for m in $(SUBMODULES); do \
+	  if grep -nE '^replace |github.com/AshwinSathian/weir[^ ]* v0\.0\.0' $$m/go.mod; then echo "$$m/go.mod: unpublished pin"; fail=1; fi; \
+	done; \
+	for m in $(SUBMODULES); do \
+	  (cd $$m && GOWORK=off go list -m all >/dev/null) || { echo "$$m does not resolve alone"; fail=1; }; \
+	done; exit $$fail
 
 ## test-valkey: integration tests (store/valkey, and the two-node Caddy test in caddy/) against a real server (WEIR_VALKEY_ADDR, default 127.0.0.1:6379; start Valkey with --maxmemory-policy volatile-lfu; WEIR_VALKEY_STORM_ADDR, a throwaway server with --maxmemory 16mb, enables the eviction storm)
 test-valkey:

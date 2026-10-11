@@ -1,0 +1,100 @@
+name: release-gate
+
+# docs/07 §12 and docs/release.md: the checks that need hours rather than
+# minutes. Run by hand (workflow_dispatch) on the release candidate commit.
+# The load scenarios (§9) run on the reference machine, not here.
+
+on:
+  workflow_dispatch:
+    inputs:
+      fuzztime:
+        description: Time per fuzz target (docs/07 §12 asks for 1 hour cumulatively)
+        default: 60m
+      count:
+        description: Consecutive runs of the engine-level tests (docs/07 §12 asks for 100)
+        default: "100"
+
+permissions:
+  contents: read
+
+jobs:
+  repeat:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      # -count=N reruns each test N times in one process, shuffled, under the
+      # race detector. A single failure fails the job, as §12 requires.
+      - name: engine-level tests, repeated
+        env:
+          COUNT: ${{ inputs.count }}
+        run: go test -race -shuffle=on -count="$COUNT" -timeout 170m . ./internal/... ./store/... ./weirhttp/...
+
+  fuzz-targets:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.list.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - id: list
+        name: list fuzz targets
+        run: |
+          go test -run '^$' ./... > /dev/null
+          for pkg in $(go list ./...); do
+            out="$(go test -list '^Fuzz' "$pkg")"
+            for f in $(echo "$out" | grep '^Fuzz' || true); do
+              echo "{\"pkg\":\"$pkg\",\"target\":\"$f\"}"
+            done
+          done | jq -sc '{include: .}' > matrix.json
+          test "$(jq '.include | length' matrix.json)" -gt 0
+          echo "matrix=$(cat matrix.json)" >> "$GITHUB_OUTPUT"
+
+  fuzz:
+    needs: fuzz-targets
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.fuzz-targets.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: fuzz ${{ matrix.target }}
+        env:
+          FUZZTIME: ${{ inputs.fuzztime }}
+        run: go test -run='^$' -fuzz="^${{ matrix.target }}\$" -fuzztime="$FUZZTIME" "${{ matrix.pkg }}"
+      - name: upload crashers
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: crasher-${{ matrix.target }}
+          path: "**/testdata/fuzz/${{ matrix.target }}/*"
+          if-no-files-found: warn
+
+  budgets:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      # NFR-5: the allocation bound holds on any machine; ns/op is judged on
+      # the reference machine, so it is printed here and not gated.
+      - name: ServeHitSmall allocations
+        run: |
+          out="$(go test -run '^$' -bench '^BenchmarkServeHitSmall$' -benchmem -count 3 .)"
+          echo "$out"
+          echo "$out" | awk '/BenchmarkServeHitSmall/ { if ($(NF-1)+0 > 16) { print "allocs/op over 16: " $(NF-1); bad=1 } } END { exit bad }'

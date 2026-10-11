@@ -73,7 +73,7 @@ These were settled with the project owner on 2026-09-27 and are not reopened by 
 | D21 | `Key.AcceptEncoding` default stays `["gzip"]`; docs steer operators to list what their origin produces. |
 | D22 | Negative caching on by default, 2 s. |
 | D23 | Prometheus is the first exporter module. |
-| D24 | Repository private on GitHub from Phase 0, public with `v0.x` tags once the key-boundary security review (M7-05) merges, `v1.0.0` at the end of Phase 1. Amended 2026-10-02 from "from M1": the M7 key-boundary work kept finding poisoning paths (#44), and a public `v0.1.0` invites adoption before the review closes them. |
+| D24 | Repository private on GitHub from Phase 0, public with `v0.x` tags once the key-boundary security review (M7-05) merges, `v1.0.0` at the end of Phase 1 (amended 2026-10-11: after Phase 3, with `observe/prom`, `store/valkey` and `caddy` tagged at the same version, sub-module tag prefix equal to its directory; see [release.md](release.md)). Amended 2026-10-02 from "from M1": the M7 key-boundary work kept finding poisoning paths (#44), and a public `v0.1.0` invites adoption before the review closes them. |
 | D25 | Requests that carry a body use a separate upload limiter pool; adapters must bound request bodies and read time (§14.1). |
 | D26 | Origin timeout covers headers and buffered bodies; streamed bodies are bounded by an idle timeout, not a total (§14.2). |
 | D27 | Upgrade and `CONNECT` requests are rejected by `Serve`; adapters route them around Weir (§14.3). |
@@ -435,6 +435,9 @@ All fields are optional. The zero value of `Config` is valid and yields the defa
 | `Limiter.MaxUpload` | 25% of `MaxConcurrent` | D25, separate pool for requests with a body |
 | `Timeouts.StreamIdle` | 60 s | D26 |
 | `Bypass.ReportStrippedCookies` | 5 min | D31; a negative value disables |
+| `Experiments.Cookie`, `Experiments.Header` | `weir_v`, `Weir-Variant` | docs/10 §3. The header name has no underscore and is not a reserved name (T-35) |
+| `Experiments.MaxActive` | 4 | at most 8 |
+| `Experiments.SigningKeys` | none | required when experiments are configured: 1 to 4 keys of 32 to 256 bytes, the first signs and all verify |
 | `Limits.*` | see FR-VAL-1, FR-VAL-3, FR-STO-10 | |
 | `CacheStatus` | `"Weir"` | member name |
 | `NoCacheStatus` | false | true omits the header |
@@ -560,7 +563,7 @@ Resolved on 2026-09-27:
 - OQ-3 adaptive limits: D13. Static in Phase 1; revisit with load-test data. The limiter reads its cap through one method so an adaptive policy can replace it.
 - OQ-4 experiment bucketing: decisions E1 to E9 in [10-experiments-spec.md](10-experiments-spec.md).
 
-Open: none that block any milestone before Phase 3.
+Open: none.
 
 ## 13. Phase 1.x requirements (M11 to M15)
 

@@ -110,6 +110,10 @@ After 5 consecutive `ErrUnavailable` results the store breaker opens for 1 s, do
 
 The `caddy` module ([08](08-caddy-adapter-spec.md)) puts the `weir` directive in front of `reverse_proxy`. This section is the checklist for one node. Setting names are in 08 §2.
 
+### 7.0 Install
+
+Build Caddy with the module: `xcaddy build --with github.com/AshwinSathian/weir/caddy@v1.0.0`. Check it with `./caddy list-modules | grep weir`, which should show `http.handlers.weir`. Upgrade by rebuilding with the new version; all weir modules share one version number, so never mix versions.
+
 ### 7.1 One node per cache
 
 With the default memory store, run exactly one Caddy node per cache (D17, T-38). Each node has its own memory store, so behind a load balancer a purge reaches only the node it was sent to and the others keep serving the old content. To run several nodes, put the cache on Valkey and follow section 8. Otherwise pin one node per site, or accept a different cache on every node and do not rely on purges.

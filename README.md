@@ -6,16 +6,30 @@ A weir is a low dam that regulates flow without stopping it. That is the job: le
 
 ## Status
 
-Phase 1 (the engine, milestones M1 to M10) is implemented and tested; the optional M10-10 card and the release gate are the last open items. The public API can still change before the first tag. The Caddy module, the Valkey store and the experiment dimensions come in later phases.
+All planned phases are implemented and tested: the engine (Phase 1), the Phase 1.x features (single-range responses, targeted cache-control, snapshots, per-host fairness, eager purge), the Caddy module, the Valkey store and experiment-aware keys. One item is deferred on purpose: a pointer-light memory layout (M16-02, decision D36), to be reopened only if a deployment exceeds the GC budget at 1M entries.
 
-| Phase | Scope | State |
+| Piece | Where | Spec |
 |---|---|---|
-| 0 | skeleton, CI, test harness | done |
-| 1 | the engine, milestone by milestone (M1 to M10) | implemented, in hardening |
-| 1.x | single-range responses, targeted cache-control, snapshots, per-host fairness, eager purge (M11 to M16) | specified |
-| 2 | Caddy module (one node on the memory store; several on Valkey) | draft spec |
-| 2.5 | Valkey store, multi-node | planned |
-| 3 | experiment-aware key dimensions | draft spec |
+| Engine, `weirhttp` adapter, memory store | this module | [docs/01](docs/01-technical-spec.md), [docs/04](docs/04-lld.md) |
+| Caddy module | [caddy/](caddy/) | [docs/08](docs/08-caddy-adapter-spec.md), [runbook 7](docs/runbook.md) |
+| Valkey store (several Caddy nodes) | [store/valkey/](store/valkey/) | [docs/05 §7](docs/05-storage-interface-spec.md), [runbook 8](docs/runbook.md) |
+| Prometheus metrics | [observe/prom/](observe/prom/) | [docs/04 §9](docs/04-lld.md) |
+| Experiment dimensions | `Config.Experiments` | [docs/10](docs/10-experiments-spec.md) |
+
+## Install
+
+```sh
+go get github.com/AshwinSathian/weir@v1.0.0                    # the engine, weirhttp, the memory store
+go get github.com/AshwinSathian/weir/observe/prom@v1.0.0       # Prometheus metrics
+go get github.com/AshwinSathian/weir/store/valkey@v1.0.0       # shared store for several nodes
+xcaddy build --with github.com/AshwinSathian/weir/caddy@v1.0.0 # Caddy with the weir handler
+```
+
+The four modules are tagged together and share a version number: use the same one for all of them. Building Caddy needs a Go 1.27 toolchain (`GOTOOLCHAIN=auto` fetches it).
+
+## Stability
+
+From `v1.0.0` the exported Go API of the root module, `store`, `store/memory`, `store/storetest`, `weirhttp` and `observe/prom` follows semantic versioning, as do the `weir_*` metric names and labels, the `Cache-Status` parameters, the Caddyfile directives and the Caddy JSON field names. Event kinds and `Event` fields may be added in a minor release. Construct structs with field names: fields can be added in a minor release. Defaults that protect (strict forwarding, `Vary` handling, stale serving) change only in a major release.
 
 ## Why another cache
 
@@ -57,7 +71,7 @@ func main() {
 ```
 
 - `weirhttp.Handler(e, origin)` serves every request through the engine. `weirhttp.Middleware(e, origin)` returns a `func(http.Handler) http.Handler` that does the same but hands CONNECT and protocol upgrades to the next handler.
-- An origin is anything with `Fetch(ctx, *weir.Request) (*weir.Response, error)`. `weirhttp.TransportOrigin` forwards to an upstream over an `http.RoundTripper`; `weirhttp.HandlerOrigin{Handler: h}` runs an in-process `http.Handler` as the origin.
+- An origin is anything with `Fetch(ctx, *weir.Request) (*weir.Response, error)`. `weirhttp.TransportOrigin` forwards to an upstream over an `http.RoundTripper`; `&weirhttp.HandlerOrigin{Handler: h}` runs an in-process `http.Handler` as the origin.
 - `examples/weirproxy` is a complete reverse proxy built this way: `weirproxy -listen :8080 -origin http://localhost:9000`.
 - Responses carry an RFC 9211 `Cache-Status` header (member name `Weir`, change it with `Config.CacheStatus`, drop it with `NoCacheStatus`).
 - Set `GOMEMLIMIT`. The default memory store takes 40% of it (256 MiB with a warning when it is unset).
@@ -97,7 +111,7 @@ A change to a default that weakens security or stale serving needs a reason you 
 
 ## Design documents
 
-Start with [docs/README.md](docs/README.md). The build plan is [PLAN-weir.md](PLAN-weir.md). Agent instructions are in [CLAUDE.md](CLAUDE.md).
+Start with [docs/README.md](docs/README.md). The build plan is [PLAN-weir.md](PLAN-weir.md), release notes are in [CHANGELOG.md](CHANGELOG.md) and the release procedure is [docs/release.md](docs/release.md). Agent instructions are in [CLAUDE.md](CLAUDE.md).
 
 ## Requirements
 

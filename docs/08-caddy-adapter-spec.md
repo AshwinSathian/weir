@@ -9,7 +9,7 @@ Verified against: Caddy v2.11.7 (released 2026-10-03, `go 1.26.0` in its `go.mod
 ## 1. Shape
 
 - Module: `github.com/AshwinSathian/weir/caddy`, its own `go.mod`, requiring `github.com/caddyserver/caddy/v2` and the root `weir` module.
-- Built into Caddy with `xcaddy build --with github.com/AshwinSathian/weir/caddy`.
+- Built into Caddy with `xcaddy build --with github.com/AshwinSathian/weir/caddy@v1.0.0` (use the version you want; the `observe/prom` and `store/valkey` modules it requires are fetched at the same version, and the build needs a Go 1.27 toolchain, so set `GOTOOLCHAIN=auto`).
 - Module ID: `http.handlers.weir`. Caddyfile directive: `weir`.
 - Implements `caddy.Module`, `caddy.Provisioner`, `caddy.Validator`, `caddy.CleanerUpper`, `caddyhttp.MiddlewareHandler`, `caddyfile.Unmarshaler`, with interface guards.
 - Registered with `httpcaddyfile.RegisterHandlerDirective("weir", parse)` and `httpcaddyfile.RegisterDirectiveOrder("weir", httpcaddyfile.Before, "reverse_proxy")` so the directive works without a global `order` option. `RegisterDirectiveOrder` is marked EXPERIMENTAL in Caddy's source; if it changes, the fallback is documenting `order weir before reverse_proxy` in the global options block. In Caddy's default order `encode` comes before `reverse_proxy` (§11), so `weir` lands between them: `encode` is outer by default, the first case in §5.
