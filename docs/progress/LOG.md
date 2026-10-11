@@ -1748,7 +1748,7 @@ Entry template:
 ## 2026-10-11 · P3-00 · done
 - Branch / PR: claude/great-bardeen-t56hcm (the session's designated branch) / none yet
 - Done: docs/10 is v1.0. Ashwin decided E8 (matchers stay path and host only) and E9 (prune unconfigured assignments on every cookie rewrite, 512-byte cap, oldest dropped first). Cards P3-01 to P3-05 written in docs/cards/20-later.md; E1 to E9 references updated in docs/01, docs/README and PLAN.
-- Tests: none (docs only); trace run below.
-- Deviations: none
+- Tests: none (docs only); trace 146/146; `make check` stops at the golangci-lint Go-version mismatch (known).
+- Deviations: none. The card-reviewer found a must-fix: the experiment cookie would reach the origin unkeyed under ForwardAll. Fixed in 10 §4 step 4 and P3-02 (ask-first note kept: an addition to the forwarding rules).
 - Follow-ups: P3-01 may need a public Config field, so ask first. `/handoff` was not run (reserved for the user); PR still to open.
 - Context: low

@@ -1,6 +1,6 @@
 # Phase 2, 2.5 and 3 entry cards
 
-These phases start from draft specs. Each begins with one planning card that verifies the spec against current upstream code, asks the user any new questions, and writes that phase's implementation cards into this file (replacing the placeholder list). Phase 2 cards were written by P2-00 against Caddy v2.11.7; the Phase 2.5 and 3 cards are written by their planning cards.
+Each phase began with one planning card that verified the spec against current upstream code, asked the user any new questions, and wrote that phase's implementation cards into this file. Phase 2 cards were written by P2-00 against Caddy v2.11.7; the Phase 2.5 cards by P25-00; the Phase 3 cards by P3-00 (spec 10 v1.0).
 
 ## Phase 2: Caddy adapter
 
@@ -228,19 +228,19 @@ These phases start from draft specs. Each begins with one planning card that ver
 
 ### [ ] P3-01 Experiment config and signed assignment cookie
 - Plan: Phase 3 · Size: M · Depends on: P3-00
-- Read: 10 §2 E1 to E3, E8, E9, §3, §4 steps 1 to 3; 04 §2 (Config); 06 T-35
-- Touch: internal/experiments/{config,cookie,pick}.go (new, stdlib only), tests, docs/04 (Config fields)
-- Tests: `TestCookieRoundTrip`, `TestCookieRejectsBadMAC`, `TestCookieKeyRotation`, `TestPickDistribution` (weights within 3 sigma over 100k ids), `TestPruneUnconfigured`, `TestCookieCap512`, `FuzzParseCookie` with seeds
-- AC: `v1.<visitor-id>.<assignments>.<mac>` parses and verifies against every key; a bad or missing MAC yields "no assignment"; pick is deterministic for (salt, visitor-id); pruning per E9; config load rejects overlapping matchers above `max_active` and variant products above `Key.MaxVariants x 4`; no panics on any input (NFR-2)
+- Read: 10 §2 E1 to E3, E8, E9, §3, §4 steps 1 to 3; 04 §1.1 (Config); 06 T-35
+- Touch: internal/experiments/{config,cookie,pick}.go (new, stdlib only) and one test file each (6 files; the docs/04 Config fields come with P3-02, where Config is wired)
+- Tests: `TestCookieRoundTrip`, `TestCookieRejectsBadMAC`, `TestCookieKeyRotation`, `TestPickDistribution` (weights within 3 sigma over 100k ids from a counter, so the test is deterministic), `TestPruneUnconfigured`, `TestCookieCap512`, `FuzzParseCookie` with seeds
+- AC: `v1.<visitor-id>.<assignments>.<mac>` parses and verifies against every key; a bad or missing MAC yields "no assignment"; pick is deterministic for (salt, visitor-id); pruning per E9; config load rejects overlapping matchers above `max_active` and variant products above `Key.MaxVariants × 4`; no panics on any input (NFR-2)
 - Out of scope: the engine, keys and headers (P3-02); Set-Cookie (P3-03)
-- Notes: constant-time MAC compare (`hmac.Equal`). Randomness for new visitor ids from `Config.Rand`. A public `Config` field is an API change: ask first.
+- Notes: constant-time MAC compare (`hmac.Equal`). Randomness for new visitor ids from `Config.Rand`. The config shape in 10 §3 is decided; whether it appears as a public `Config` field or an option is not, and is an API change: ask first (P3-02 wires it). Cookie grammar: assignments in creation order, `!` suffix marks recorded exposure, 512-byte cap on the whole value (E9).
 
 ### [ ] P3-02 Variant key dimension and forwarded header
 - Plan: Phase 3 · Size: M · Depends on: P3-01
-- Read: 10 §4 steps 1, 3, 4; 02 P2, §7; 04 `internal/keys` encoding; 06 T-35
-- Touch: internal/keys/encode.go, forward.go, request.go, root package match/assign step, tests
-- Tests: `TestVariantIsKeyDimension` (two variants, two entries, never mixed), `TestWeirVariantAlwaysReplaced` (every forwarding mode including `ForwardAll`), `TestForwardedEqualsKeyed` with experiments, `TestConsentAbsentGetsControl`, `TestWinnerOverridesAssignment`
-- AC: dimensions `(experiment, variant)` appended in config order with a new tag byte; a client `Weir-Variant` never reaches the origin or the key; first `max_active` matches apply; consent gate per E6 including the one-time start warning; fuzz seeds for the new key input shape
+- Read: 10 §4 steps 1 to 4; 02 P2, §7; 04 §3.2, §3.5; 06 T-35
+- Touch: internal/keys/encode.go, forward.go, request.go, experiments.go in the root package (new: match and assign step), docs/04 (Config fields), tests
+- Tests: `TestVariantIsKeyDimension` (two variants, two entries, never mixed), `TestWeirVariantAlwaysReplaced` (every forwarding mode including `ForwardAll`), `TestExperimentCookieNeverForwarded` (all modes, other cookies kept; load rejects `Key.Cookies` naming it), `TestForwardedEqualsKeyed` with experiments, `TestConsentAbsentGetsControl`, `TestWinnerOverridesAssignment`
+- AC: dimensions `(experiment, variant)` appended in config order with a new tag byte; a client `Weir-Variant` never reaches the origin or the key; the experiment cookie is removed from the forwarded `Cookie` header in every mode; first `max_active` matches apply; consent gate per E6 including the one-time start warning; fuzz seeds for the new key input shape
 - Out of scope: Set-Cookie and E7 (P3-03); exposure events (P3-04)
 - Notes: security-sensitive (`internal/keys`): answer the 06 section 6 checklist in the commit body.
 
@@ -257,13 +257,13 @@ These phases start from draft specs. Each begins with one planning card that ver
 - Read: 10 §4 step 7; 04 §9.2 (events)
 - Touch: events, assignment step, tests, docs/04 §9.2
 - Tests: `TestExposureOncePerVisitor`, `TestExposureOnHit`, `TestExposureNoneWithoutConsent`, `TestExposureVisitorIsHashPrefix`
-- AC: one `EvExposure{experiment, variant, visitor}` per visitor per experiment (on creation or when the signed exposed mark is missing, which is then added); visitor is a SHA-256 prefix; events carry no other request data
+- AC: the catalog entry is added to 04 §9.2; one `EvExposure{experiment, variant, visitor}` per visitor per experiment (on creation or when the signed exposed mark is missing, which is then added); visitor is a SHA-256 prefix; events carry no other request data
 - Out of scope: any analytics sink
 
 ### [ ] P3-05 Caddy adapter: experiments block
 - Plan: Phase 3 · Size: M · Depends on: P3-04
-- Read: 10 §3; 08 §3 (key-generation hash), Caddyfile section
-- Touch: caddy/{caddyfile,config,module}.go, tests, docs/08, docs/runbook.md
+- Read: 10 §3; 08 §2 (configuration surface), §3 (key-generation hash)
+- Touch: caddy/{caddyfile,config,module}.go, one test file, docs/08, docs/runbook.md (7 files at the limit; split the caddytest e2e into P3-05b if it grows)
 - Tests: `TestCaddyfileExperiments`, `TestExperimentsExcludedFromKeyGenHash` (a reload changing experiments does not purge), `TestE2EExperimentSplit` (caddytest)
 - AC: the `experiments { ... }` block parses to JSON and back; signing keys from placeholders; reload changes experiments without a global purge; runbook entry for rotating signing keys
 - Out of scope: new matcher kinds (E8)
