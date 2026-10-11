@@ -1720,3 +1720,11 @@ Entry template:
 - Deviations: 05 §7, 08 §3 (new bullet), runbook 8.6/8.7, card AC wording.
 - Follow-ups: P25-07d; CI on Valkey 8.1, then tick PLAN 2.5.5.
 - Context: medium
+
+## 2026-10-11 · P25-07c · review-fixes
+- Branch / PR: card/P25-07c-keygen-record / https://github.com/AshwinSathian/weir/pull/96
+- Done: second adversarial review (agent), decisions delegated by Ashwin. Correction to the entry above: PLAN 2.5.5 was ticked again in 92a3f40 after CI went green on Valkey 8.1. Now: the check and the record write get a 2 s deadline (`keyGenCallTimeout`), `reconcileServerKeyGen` takes the Provision context, the skipped-check warning names P25-07d, integration subtest for an existing prefix with no record, runbook 7.8/8.6/8.7 and 08 §2/§3 document the `caddy validate` side effect, the one-time purge on upgrade, the load delay on a dropped network and the hash-version note.
+- Tests: `TestValkeyKeyGenRecord` (5 subtests) passes with `-race` on redis 7.0.15; unit tests, vet and gofmt pass; lint not run here.
+- Deviations: 08 §2, §3, runbook only.
+- Follow-ups: P25-07d; a way for `validate` to skip the purge (needs a signal from Caddy); Provision-level test seam.
+- Context: medium

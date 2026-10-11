@@ -179,7 +179,7 @@ func (h *Handler) Provision(ctx caddy.Context) (err error) {
 		}
 		return nil
 	}
-	if err = reconcileServerKeyGen(p.store, fwdHash, keyChanged, purge, cfg.Logger, h.Name); err != nil {
+	if err = reconcileServerKeyGen(ctx, p.store, fwdHash, keyChanged, purge, cfg.Logger, h.Name); err != nil {
 		return err
 	}
 	// Record the hash only now: a Provision that failed above must not

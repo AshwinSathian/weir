@@ -59,7 +59,7 @@ type keyGenRun struct {
 func runKeyGen(t *testing.T, f *fakeRecorder, h [32]byte, keyChanged bool, purgeErr error) *keyGenRun {
 	t.Helper()
 	r := &keyGenRun{purgeErr: purgeErr}
-	r.err = reconcileServerKeyGen(f, h, keyChanged, func(context.Context) error {
+	r.err = reconcileServerKeyGen(t.Context(), f, h, keyChanged, func(context.Context) error {
 		r.purges++
 		f.mu.Lock()
 		r.recAtPurge = bytes.Clone(f.rec)
@@ -151,7 +151,7 @@ func TestReconcileServerKeyGenOutageAndMemory(t *testing.T) {
 	var sb strings.Builder
 	purges := 0
 	for _, kc := range []bool{false, true} {
-		if err := reconcileServerKeyGen(mem, tight, kc, func(context.Context) error { purges++; return nil }, warnLog(&sb), "n"); err != nil {
+		if err := reconcileServerKeyGen(t.Context(), mem, tight, kc, func(context.Context) error { purges++; return nil }, warnLog(&sb), "n"); err != nil {
 			t.Fatal(err)
 		}
 	}

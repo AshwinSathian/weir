@@ -19,9 +19,13 @@ Next card: see `make next`
 - The ordering (check, purge, record) moved into `reconcileServerKeyGen` with unit tests for the order, a failed purge and a failed check. PLAN 2.5.5 was unticked until CI went green on Valkey 8.1 (it did, on 4d9500f; ticked).
 - Accepted: a rolled-back reload leaves the new record in place (08 §3); nodes sharing a prefix with different `forward` purge each other on each start or reload.
 
+## Decided 2026-10-11 (P25-07c, second adversarial review of PR 96)
+
+No must-fix. Decisions, all implemented: the check and record write use a 2 s deadline and take the Provision context; docs now state that `caddy validate` can purge and re-record on a Valkey site (validate against a scratch server), that the first start of this version purges every existing Valkey prefix once, and the up-to-4 s load delay on a dropped network; one more integration subtest covers an existing prefix with no record. Deferred to follow-ups: a `validate` signal, a Provision-level test seam (P25-07d area). Accepted: rolled-back reload, mutual purge on differing `forward`, outage skip.
+
 ## Notes for the next session (P25-07c)
 
-- CI is green on 4d9500f (lint, tests, Valkey 8.1 integration); PLAN 2.5.5 ticked.
+- CI was green on 4d9500f and 92a3f40 (lint, tests, Valkey 8.1 integration); re-check the head after the second review round. PLAN 2.5.5 ticked.
 - `TestValkeyKeyGenRecord` and the store integration tests run under `make test-valkey`.
 
 ## Decided 2026-10-11 (P25-07, adversarial review of PR 94)

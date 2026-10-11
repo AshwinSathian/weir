@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"slices"
+	"time"
 
 	"github.com/AshwinSathian/weir"
 	"github.com/AshwinSathian/weir/store"
@@ -17,7 +18,10 @@ import (
 // P2-00). A reload that changes it writes a hard epoch, because an entry
 // stored under the looser setting may hold personalized content (R-3).
 // Settings that only change which key a request maps to, and host lists,
-// are left out on purpose, so adding a domain never purges the cache.
+// are left out on purpose, so adding a domain never purges the cache. The
+// version tag below is part of the hash, and the hash is also the record kept
+// on a shared Valkey server: changing what this function covers purges every
+// shared cache once on upgrade.
 func keyGenHash(cfg weir.Config) [sha256.Size]byte {
 	return keyGenHashFor(cfg, [sha256.Size]byte{})
 }
@@ -57,6 +61,11 @@ func keyGenHashFor(cfg weir.Config, storeDigest [sha256.Size]byte) [sha256.Size]
 	return out
 }
 
+// keyGenCallTimeout bounds the record's read and write at Provision. It is
+// shorter than closeTimeout because a load that waits on a dead server delays
+// every site after it (08 §3).
+const keyGenCallTimeout = 2 * time.Second
+
 // keyGenRecorder is a store that keeps the forwarding hash on its server
 // (the Valkey store, 05 §7). The memory store keeps its record beside the
 // snapshot instead.
@@ -80,17 +89,19 @@ type keyGenRecorder interface {
 // outage at start opens the store breaker instead of failing the load, so the
 // check is skipped with a warning and repeated at the next start or reload.
 // A failed purge is returned. A store with no record (memory) only purges
-// when keyChanged. Each server call gets its own closeTimeout deadline.
-func reconcileServerKeyGen(st store.Store, fwd [sha256.Size]byte, keyChanged bool, purge func(context.Context) error, log *slog.Logger, name string) error {
+// when keyChanged. The check and the record call each get keyGenCallTimeout, so a
+// blackholed server delays a load by at most twice that per site; the purge gets
+// closeTimeout.
+func reconcileServerKeyGen(ctx context.Context, st store.Store, fwd [sha256.Size]byte, keyChanged bool, purge func(context.Context) error, log *slog.Logger, name string) error {
 	rec, hasRec := st.(keyGenRecorder)
 	checked := false
 	if hasRec {
-		ctx, cancel := context.WithTimeout(context.Background(), closeTimeout)
-		changed, err := rec.CheckKeyGen(ctx, fwd[:])
+		cctx, cancel := context.WithTimeout(ctx, keyGenCallTimeout)
+		changed, err := rec.CheckKeyGen(cctx, fwd[:])
 		cancel()
 		switch {
 		case err != nil:
-			log.Warn("weir: key-generation record not checked; entries stored under older forwarding rules stay servable until the next start or reload with the server reachable",
+			log.Warn("weir: key-generation record not checked; entries stored under older forwarding rules stay servable until the next start or reload with the server reachable (a background retry is card P25-07d)",
 				"name", name, "error", err)
 		case changed:
 			checked, keyChanged = true, true
@@ -101,17 +112,17 @@ func reconcileServerKeyGen(st store.Store, fwd [sha256.Size]byte, keyChanged boo
 		}
 	}
 	if keyChanged {
-		ctx, cancel := context.WithTimeout(context.Background(), closeTimeout)
-		err := purge(ctx)
+		pctx, cancel := context.WithTimeout(ctx, closeTimeout)
+		err := purge(pctx)
 		cancel()
 		if err != nil {
 			return err
 		}
 	}
 	if checked {
-		ctx, cancel := context.WithTimeout(context.Background(), closeTimeout)
+		rctx, cancel := context.WithTimeout(ctx, keyGenCallTimeout)
 		defer cancel()
-		if err := rec.RecordKeyGen(ctx, fwd[:]); err != nil {
+		if err := rec.RecordKeyGen(rctx, fwd[:]); err != nil {
 			log.Warn("weir: key-generation record not written; the next start checks again", "name", name, "error", err)
 		}
 	}

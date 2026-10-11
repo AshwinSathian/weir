@@ -76,4 +76,35 @@ func TestValkeyKeyGenRecord(t *testing.T) {
 			t.Fatalf("epoch moved from %v to %v", before, got)
 		}
 	})
+	t.Run("a prefix used before the record existed writes the hard epoch once", func(t *testing.T) {
+		// A lookup creates the epoch keys (meta) the way an older Weir did, with
+		// no key-generation record on the server.
+		old := fmt.Sprintf("kgold-%d", time.Now().UnixNano())
+		p2, err := valkey.New(valkey.Config{Addrs: []string{addr}, Prefix: old})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = p2.Close() })
+		at := func() time.Time {
+			t.Helper()
+			ep, ok, err := p2.NewestEpoch(t.Context(), []store.Tag{store.TagGlobal()}, time.Now().Add(-time.Hour))
+			if err != nil || !ok {
+				t.Fatalf("NewestEpoch = %v, %v, %v", ep, ok, err)
+			}
+			return ep.At
+		}
+		before := at()
+		pause()
+		raw := fmt.Sprintf(`{"name":"node-old","store":{"type":"valkey","addrs":[%q],"prefix":%q},"forward":{"allow":["X-A"]}}`, addr, old)
+		mustLoad(t, newCtx(t), raw)
+		after := at()
+		if !after.After(before) {
+			t.Fatalf("epoch stayed at %v: an existing prefix with no record was not purged", before)
+		}
+		pause()
+		mustLoad(t, newCtx(t), raw)
+		if got := at(); !got.Equal(after) {
+			t.Fatalf("second load moved the epoch from %v to %v", after, got)
+		}
+	})
 }
