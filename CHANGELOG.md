@@ -15,11 +15,12 @@ First stable release. It supersedes the `v0.1.0` tag, which predates most of the
 - Memory store (S3-FIFO) with snapshots across restarts; the `store.Store` interface and its optional capability interfaces.
 - Experiment-aware key dimensions (`Config.Experiments`): signed assignment cookie, consent gate, up to 4 signing keys of 32 to 256 bytes, `EvExposure`.
 - `weirhttp` adapters for `net/http`.
+- Hit path: one cached hit costs 852 ns and 12 allocations in process on an Apple M4 Pro with Go 1.27.2 (`BenchmarkServeHitSmall`), inside the budget of 1.25 µs and 16 allocations (NFR-5). Numbers and method are in docs/benchmarks.md.
 
 ### Modules
 
 - `observe/prom`: Prometheus observer and collector.
-- `store/valkey`: shared store for several nodes (Valkey 7 or later, `volatile-lfu` or `noeviction`).
+- `store/valkey`: shared store for several nodes (tested against Valkey 8.1; `volatile-lfu` or `noeviction`).
 - `caddy`: the `weir` handler, Caddyfile and JSON configuration, admin purge API, `experiments` block. Built against Caddy v2.11.7.
 
 ### Changed since the last pre-release work
@@ -44,8 +45,8 @@ First stable release. It supersedes the `v0.1.0` tag, which predates most of the
 
 ### Known limits
 
-- Pointer-light memory layout deferred (M16-02, D36): GC cost at 1M entries is 1.76 µs per request on the measured machine, inside the 2 µs gate.
+- Pointer-light memory layout deferred (M16-02, D36): GC cost at 1M entries is 1.08 µs per request on the reference machine (Apple M4 Pro) and 1.76 µs on a 4-vCPU Linux container, inside the 2 µs gate.
 - The `caddy` module imports the root module's `internal/keys`, so the four modules must be used at the same version (with xcaddy, pin the root module and `caddy` to it explicitly).
 - `Engine.Close` waits for origin goroutines; an `Origin` that ignores its context can delay it.
 
-Install: see the README.
+Install: see the README. Documentation: https://weir.ashwinsathian.com

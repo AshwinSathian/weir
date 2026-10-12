@@ -18,4 +18,4 @@ The root module, `weirhttp`, `observe/prom`, `store/valkey` and `caddy` are all 
 
 ## Scope
 
-The threat model is in [docs/06-threat-model.md](docs/06-threat-model.md). Its residual risks (§5) describe behavior that is out of scope, for example an origin that varies its response on an input without naming it in `Vary`.
+The threat model is in [docs/06-threat-model.md](docs/06-threat-model.md), with a plain-language summary of the residual risks at [weir.ashwinsathian.com/security](https://weir.ashwinsathian.com/security/). Its residual risks (§5) describe behavior that is out of scope, for example an origin that varies its response on an input without naming it in `Vary`.

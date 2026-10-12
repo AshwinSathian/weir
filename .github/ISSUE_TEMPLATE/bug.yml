@@ -1,0 +1,47 @@
+name: Bug report
+description: Weir did something the documentation says it should not
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        If this could let one user receive another user's response, or let a client poison a cache entry, stop: report it privately under the Security tab instead. See SECURITY.md.
+  - type: input
+    id: version
+    attributes:
+      label: Weir version or commit
+      placeholder: v1.0.0
+    validations:
+      required: true
+  - type: dropdown
+    id: adapter
+    attributes:
+      label: How you run it
+      options: [weirhttp (net/http), Caddy module, Engine.Serve directly, examples/weirproxy]
+    validations:
+      required: true
+  - type: textarea
+    id: config
+    attributes:
+      label: Configuration
+      description: The weir.Config fields you set, or the weir block of your Caddyfile. Remove secrets.
+      render: text
+  - type: textarea
+    id: repro
+    attributes:
+      label: What happened
+      description: The request, the origin's response headers, and the Cache-Status header you got. A failing Go test is best.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+      description: Cite the requirement ID (for example FR-COA-4) or the documentation page if you can.
+    validations:
+      required: true
+  - type: input
+    id: env
+    attributes:
+      label: Go version and store
+      placeholder: go1.27.2, memory store

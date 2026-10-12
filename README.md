@@ -1,43 +1,14 @@
 # Weir
 
-Weir is a Go library for shared HTTP caching in front of an origin that has to stay up. It implements RFC 9111 caching and adds the defenses most caches leave out: TTL jitter, request coalescing with timeouts, an origin concurrency budget with per-path fairness, stale-while-revalidate and stale-if-error, a circuit breaker, short negative caching, lazy soft purges, and a cache key built as a security boundary.
+Weir is a Go library for shared HTTP caching in front of an origin that has to stay up. The request it forwards is the request it keyed, so a header the cache ignores cannot poison an entry, and a stampede cannot reach the origin faster than a budget you set.
 
-A weir is a low dam that regulates flow without stopping it. That is the job: let traffic through to the origin at a rate it can survive, whatever the cache is doing.
+A weir is a low dam that regulates flow without stopping it. Adapters for `net/http` and Caddy handle the wire; Weir makes the decision for each request.
 
-## Status
+[![ci](https://github.com/AshwinSathian/weir/actions/workflows/ci.yml/badge.svg)](https://github.com/AshwinSathian/weir/actions/workflows/ci.yml) [![Go reference](https://pkg.go.dev/badge/github.com/AshwinSathian/weir.svg)](https://pkg.go.dev/github.com/AshwinSathian/weir) [![release](https://img.shields.io/github/v/release/AshwinSathian/weir)](https://github.com/AshwinSathian/weir/releases) [![license](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
-All planned phases are implemented and tested: the engine (Phase 1), the Phase 1.x features (single-range responses, targeted cache-control, snapshots, per-host fairness, eager purge), the Caddy module, the Valkey store and experiment-aware keys. One item is deferred on purpose: a pointer-light memory layout (M16-02, decision D36), to be reopened only if a deployment exceeds the GC budget at 1M entries.
+Documentation: [weir.ashwinsathian.com](https://weir.ashwinsathian.com)
 
-| Piece | Where | Spec |
-|---|---|---|
-| Engine, `weirhttp` adapter, memory store | this module | [docs/01](docs/01-technical-spec.md), [docs/04](docs/04-lld.md) |
-| Caddy module | [caddy/](caddy/) | [docs/08](docs/08-caddy-adapter-spec.md), [runbook 7](docs/runbook.md) |
-| Valkey store (several Caddy nodes) | [store/valkey/](store/valkey/) | [docs/05 §7](docs/05-storage-interface-spec.md), [runbook 8](docs/runbook.md) |
-| Prometheus metrics | [observe/prom/](observe/prom/) | [docs/04 §9](docs/04-lld.md) |
-| Experiment dimensions | `Config.Experiments` | [docs/10](docs/10-experiments-spec.md) |
-
-## Install
-
-```sh
-go get github.com/AshwinSathian/weir@v1.0.0                    # the engine, weirhttp, the memory store
-go get github.com/AshwinSathian/weir/observe/prom@v1.0.0       # Prometheus metrics
-go get github.com/AshwinSathian/weir/store/valkey@v1.0.0       # shared store for several nodes
-xcaddy build --with github.com/AshwinSathian/weir@v1.0.0 --with github.com/AshwinSathian/weir/caddy@v1.0.0   # Caddy with the weir handler
-```
-
-The four modules are tagged together and share a version number: use the same one for all of them. `caddy` is tested only against the root module at its own version, so xcaddy gets both pinned. Building Caddy needs a Go 1.27 toolchain (`GOTOOLCHAIN=auto` fetches it).
-
-## Stability
-
-From `v1.0.0` the exported Go API of the root module, `store`, `store/memory`, `store/storetest`, `weirhttp` and `observe/prom` follows semantic versioning, as do the metric families and labels documented in docs/04 §9.3, the `Cache-Status` parameter names, the Caddyfile directives and the Caddy JSON field names. Free-text values (the `detail` and `fwd` strings, `Event.Reason`) and event kinds may gain new values in a minor release, so match on them with a default case. Construct structs with field names: fields can be added in a minor release. Defaults that protect (strict forwarding, `Vary` handling, stale serving) change only in a major release.
-
-## Why another cache
-
-Existing caches solve RFC correctness and same-key coalescing well. Weir exists for the cases that still take origins down: many keys expiring together, purges and cold starts that turn into cross-key stampedes, storage outages that fail open, and attackers who generate guaranteed misses or poison entries through inputs the cache does not key. The full argument, with prior art, is in [docs/00-design-doc.md](docs/00-design-doc.md).
-
-## Quick start
-
-Put Weir in front of an `http.Handler` or an upstream URL with the `weirhttp` adapter. The zero `weir.Config` is valid.
+## See it work
 
 ```go
 package main
@@ -54,68 +25,103 @@ import (
 
 func main() {
 	target, _ := url.Parse("http://localhost:9000") // scheme and host; a path is ignored
-	e, err := weir.New(weir.Config{})
+	e, err := weir.New(weir.Config{})               // the zero Config is valid
 	if err != nil {
 		log.Fatal(err)
 	}
-	origin := &weirhttp.TransportOrigin{Target: target}
-
 	srv := &http.Server{
 		Addr:              ":8080",
-		Handler:           weirhttp.Handler(e, origin),
+		Handler:           weirhttp.Handler(e, &weirhttp.TransportOrigin{Target: target}),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
-	log.Fatal(srv.ListenAndServe())
-	// On shutdown: srv.Shutdown(ctx), then e.Close(ctx).
+	log.Fatal(srv.ListenAndServe()) // on shutdown: srv.Shutdown(ctx), then e.Close(ctx)
 }
 ```
 
-- `weirhttp.Handler(e, origin)` serves every request through the engine. `weirhttp.Middleware(e, origin)` returns a `func(http.Handler) http.Handler` that does the same but hands CONNECT and protocol upgrades to the next handler.
-- An origin is anything with `Fetch(ctx, *weir.Request) (*weir.Response, error)`. `weirhttp.TransportOrigin` forwards to an upstream over an `http.RoundTripper`; `&weirhttp.HandlerOrigin{Handler: h}` runs an in-process `http.Handler` as the origin.
-- `examples/weirproxy` is a complete reverse proxy built this way: `weirproxy -listen :8080 -origin http://localhost:9000`.
-- Responses carry an RFC 9211 `Cache-Status` header (member name `Weir`, change it with `Config.CacheStatus`, drop it with `NoCacheStatus`).
-- Set `GOMEMLIMIT`. The default memory store takes 40% of it (256 MiB with a warning when it is unset).
-- Read [docs/runbook.md](docs/runbook.md) before putting it in front of production traffic.
+`examples/weirproxy` is this program with flags. Run it in front of an origin that answers `Cache-Control: max-age=60` and ask twice:
 
-Configuration is the `weir.Config` struct; every field, default and range is in [docs/01-technical-spec.md §6](docs/01-technical-spec.md). For a first run, `Key.QueryDrop: weir.TrackingParams()` is the one setting most sites want: it keeps `utm_*`, `gclid`, `fbclid` and similar from minting a key each. Dropped parameters never reach the origin, so remove any name the origin reads from the list first.
+```console
+$ go run github.com/AshwinSathian/weir/examples/weirproxy@v1.0.0 -listen :8080 -origin http://localhost:9000
+$ curl -si localhost:8080/ | grep -i -e '^age' -e cache-status
+Cache-Status: Weir; fwd=uri-miss; fwd-status=200; stored
+$ curl -si localhost:8080/ | grep -i -e '^age' -e cache-status
+Age: 13
+Cache-Status: Weir; hit; ttl=43
+```
 
-## Strict forwarding
+The first request went to the origin and was stored. The second, 13 seconds later, never left the process. Its `ttl` is 43 and not 47 because jitter took four seconds off this entry's lifetime, so entries stored together do not expire together. On Caddy the same thing is a `weir { name site-a }` block in front of `reverse_proxy`; see the [quickstart](https://weir.ashwinsathian.com/docs/quickstart/).
 
-For a cacheable request, the origin receives only the headers that are part of the cache key, are explicitly allowed, or HTTP requires (`Authorization`, `Cache-Control`, `Pragma`, a normalized `Accept-Encoding`), plus the trace headers `traceparent`, `tracestate` and `X-Request-Id`. The request Weir forwards is the request it keyed. That equality is what makes unkeyed-input cache poisoning structurally impossible: an attacker cannot change the response for other users with a header the key ignores, because the origin never sees such a header.
+## What you get
 
-The consequence for you: if your origin reads `Accept-Language`, `X-Device`, a cookie or any other request header to build a page, say so. Put it in `Key.Headers` or `Key.Cookies` (one cache entry per distinct value) or, when the response must not vary on it, in `Forward.Allow` (the origin sees it, the key does not, so only do this for a header that cannot change the response). A cookie the origin needs but you do not list is dropped. For the first `Bypass.ReportStrippedCookies` (5 minutes by default) after `New`, Weir counts the dropped cookie names (never values) and logs the most common ones once, so you can find the ones you forgot.
+- Coalescing. Concurrent requests for one key share one origin fetch, with a bound on how long followers wait and on how long a slow leader keeps the flight (FR-COA-1). [Coalescing](https://weir.ashwinsathian.com/docs/concepts/coalescing/)
+- Jitter and early refresh. Each lifetime is shortened by up to 10%, and a hot entry is refreshed in the background shortly before it expires (FR-FRS-5, FR-FRS-6). [Freshness and staleness](https://weir.ashwinsathian.com/docs/concepts/freshness-and-staleness/)
+- An origin budget. Every fetch holds a slot from a limiter (64 by default) with a per-path share, so 10,000 keys expiring at once reach the origin 64 at a time (FR-LIM-1). [Origin protection](https://weir.ashwinsathian.com/docs/concepts/origin-protection/)
+- Stale serving and a breaker. Stale-while-revalidate, stale-if-error and a circuit breaker turn an origin outage into stale content or a fast 503 (FR-STL-1, FR-CB-1). Same page.
+- Purges that do not stampede. A soft purge marks entries stale and lets them revalidate through the limiter; a hard purge removes them. By URL, by RFC 9875 group, or everything (FR-PRG-1). [Purging](https://weir.ashwinsathian.com/docs/concepts/purging/)
+- A cache key that is a security boundary. On a cacheable request the origin receives only keyed, allowed and protocol headers (FR-FWD-1, INV-1). [The cache key](https://weir.ashwinsathian.com/docs/concepts/cache-key/)
 
-Weir also serves stale content only when the origin allows it with `stale-while-revalidate` or `stale-if-error`, unless you set `Freshness.DefaultStaleWhileRevalidate` or `DefaultStaleIfError`.
+## What Weir is not
 
-## Settings that take a protection back
+A CDN, a WAF, a per-client rate limiter, a private (browser) cache, or a cache for application data. It does not store 206 responses (it answers single ranges from complete objects), has no prefix purge, and the memory store does not share a cache between nodes: several nodes need the Valkey store. It bounds origin load, so put a rate limiter in front of it for floods of distinct paths.
 
-Each of these is safe to use when you know why. Each one returns a risk the defaults remove, or trades a function for one ([docs/06 §5](docs/06-threat-model.md), R-3 and R-8).
+## Install
 
-| Setting | What you take back | Use it when |
+```sh
+go get github.com/AshwinSathian/weir@v1.0.0                    # the engine, weirhttp, the memory store
+go get github.com/AshwinSathian/weir/observe/prom@v1.0.0       # Prometheus metrics
+go get github.com/AshwinSathian/weir/store/valkey@v1.0.0       # shared store for several nodes
+xcaddy build --with github.com/AshwinSathian/weir@v1.0.0 --with github.com/AshwinSathian/weir/caddy@v1.0.0   # Caddy with the weir handler
+```
+
+The four modules are tagged together and share a version number, so use the same one for all of them. The Caddy module has the import path `github.com/AshwinSathian/weir/caddy` and the Go package name `weircaddy`; it is tested only against the root module at its own version, which is why xcaddy gets both pinned.
+
+The minimum is Go 1.27.0, and CI tests the two latest Go releases. Deploy with 1.27.2 or later: earlier 1.27 releases carry standard library vulnerabilities (HTTP/2, `net/textproto`, `crypto/tls`) that `govulncheck` reports against the paths `weirhttp` uses. The root module builds for every target Go supports, `js/wasm` and `wasip1/wasm` included.
+
+## Two things to know before production
+
+Strict forwarding. If your origin reads `Accept-Language`, a device header or a cookie to build a page, it will not see it until you say so. Key it (`Key.Headers`, `Key.Cookies`: one entry per value), allow it (`Forward.Allow`: the origin sees it, the key does not, so only for a header that cannot change the response), or lose it. For the first five minutes Weir counts the cookie names it dropped and logs the common ones once.
+
+Settings that take a protection back. `Forward.Mode: weir.ForwardAll` returns every header to the origin unkeyed. `Storable.StripSetCookie` stores responses that set cookies. `Freshness.DefaultStaleIfError` serves stale content the origin never allowed. Each is right for some site, and each returns a risk the defaults remove. The [tuning page](https://weir.ashwinsathian.com/docs/tuning/) lists all of them with what you give up and the threat ID.
+
+Set `GOMEMLIMIT` (the memory store takes 40% of it) and read the [production guide](https://weir.ashwinsathian.com/docs/guides/production/) first.
+
+## Status and stability
+
+Everything planned for v1 is implemented: the engine, single-range responses, targeted cache-control (RFC 9213), snapshots across restarts, the Caddy module, the Valkey store and experiment-aware keys. A pointer-light memory layout (M16-02) is deferred until a deployment exceeds the GC budget at 1M entries.
+
+From `v1.0.0` the exported Go API of the root module, `store`, `store/memory`, `store/storetest`, `weirhttp` and `observe/prom` follows semantic versioning. So do the metric families and labels, the `Cache-Status` parameter names, the Caddyfile directives and the Caddy JSON field names. Free-text values (`detail` and `fwd` strings, `Event.Reason`) and event kinds may gain values in a minor release, so match on them with a default case. Construct structs with field names: fields can be added in a minor release. Defaults that protect (strict forwarding, `Vary` handling, stale serving) change only in a major release.
+
+## Security
+
+Weir decides what a shared cache stores and serves, so a bug can hand one user's response to another. The [threat model](docs/06-threat-model.md) lists 45 threats with the requirement and test that answer each, seven invariants and eight residual risks; the [security page](https://weir.ashwinsathian.com/security/) puts the residual risks in plain language. Report a vulnerability privately through the repository's Security tab ([SECURITY.md](SECURITY.md)).
+
+## Performance
+
+Measured on an Apple M4 Pro (12 cores), in-process, with no network or TLS. Other hardware gives other numbers.
+
+| What | Result | Command |
 |---|---|---|
-| `Forward.Mode: weir.ForwardAll` | strict forwarding: every request header reaches the origin, unkeyed, on cacheable requests too. `New` logs a warning. Cookie bypass rules then match names as sent, so an origin that rewrites cookie names (PHP turns `.` and a space into `_`) needs each spelling in `Bypass.Cookies` | the origin cannot be audited for header use and you accept the poisoning risk; a long `Forward.Allow` is usually better. A flight led by a request with unkeyed input shares a 500, 502, 503 or 504 answer with the followers that joined it, although nothing is stored (R-7) |
-| `Forward.Allow` with many names | the same, one header at a time. `New` logs a warning for `Authorization` and `Proxy-Authorization`; `Cookie` is rejected, so list cookie names in `Key.Cookies` | a header cannot change the response but the origin requires it |
-| `Storable.StripSetCookie: true` | the rule that a response with `Set-Cookie` is not stored: Weir removes the field, stores the rest and still sends the cookie to the client whose request triggered the fetch (FR-STO-6) | the origin sets a cookie on every response (analytics) and the body does not depend on it |
-| `Key.VaryAllow: ["Cookie"]` (or `Authorization`) | the rule that a response varying on `Cookie`, `Authorization` or `Proxy-Authorization` is not stored (FR-KEY-9) | a cookie really selects a small set of public variants |
-| `Freshness.DefaultTTL`, `DefaultStaleWhileRevalidate`, `DefaultStaleIfError` | origin authority over freshness and staleness (D6): a response with no explicit lifetime or `Last-Modified` becomes cacheable, and stale content is served that the origin never allowed | the origin sends no freshness headers and cannot be changed |
-| `Client.HonorRevalidation: true` | the default of ignoring client `Cache-Control: no-cache`, `max-age`, `min-fresh`, `max-stale` and `Pragma: no-cache` (D5): `no-cache`, `max-age=0` and `Pragma: no-cache` (when there is no `Cache-Control`) then force validation of a stored entry; `min-fresh`, `max-stale` and other `max-age` values stay ignored. Validation is still coalesced and limited, and is a cheap 304 when the entry has a validator. Anyone who sends those headers can trigger it | you want browser reloads to bypass the cache |
-| `Breaker.Disable`, `Negative.Disable`, `MissRate.Disable`, `Freshness.NoJitter`, `Freshness.NoEarlyRefresh` | the matching defense: circuit breaker, short negative caching, miss-rate detection, TTL jitter, early refresh | a test, or a measured reason |
-| `TransportOrigin.Rewrite` adding headers | the same, from the adapter side: a header it adds to a cacheable request is unkeyed input (T-4). Proxies in front of Weir that add `X-Forwarded-For` have the same effect (R-1) | the origin needs `Via` or origin auth and never varies on it |
-| `HandlerOrigin` behind your own middleware | an in-process origin that varies its response on context values set by middleware in front of Weir (R-6): the key does not see them. Put that middleware behind Weir or route the path around it | never, unless the context values cannot change the response |
-| Raising limits: `Limiter.*`, `Limits.*`, `Storable.MaxObjectBytes`, `Timeouts.*` | the bounds behind T-12, T-20, T-21 and NFR-4: a higher `MaxPerPartition` weakens the flood cap, a higher `MaxObjectBytes` raises buffering in proportion | the origin and the process have measured headroom |
-| `Storable.Statuses` | the default status set; 206, 304, 500, 502, 503 and 504 are never storable whatever you list | you cache an unusual status on purpose |
-| `MissRate.Throttle: true` | the busy path's own misses: a client that floods it with distinct queries can keep it capped at one origin fetch for as long as it sends (R-8). Off by default | after a run without it where you read the warnings, see the runbook |
-| `CacheGroups.Ignore: true` | RFC 9875 group invalidation (`Cache-Group-Invalidation` is no longer acted on) | the origin's group headers should not purge other entries |
+| One cached hit (`BenchmarkServeHitSmall`, Go 1.27.2) | 852 ns, 12 allocations | `make bench` |
+| 10,000 keys expiring together, limit 32 (Go 1.27.1) | origin peak in flight 32, 0 client errors | `make load` |
+| Origin brownout (Go 1.27.1) | every request 2xx, 52,975 served stale | `make load` |
 
-A change to a default that weakens security or stale serving needs a reason you can write down; the project treats this as a hard rule for itself (CLAUDE.md, rule 12).
+Method, raw output and what these do not show: [benchmarks](https://weir.ashwinsathian.com/benchmarks/).
 
-## Design documents
+## Compared with
 
-Start with [docs/README.md](docs/README.md). The build plan is [PLAN-weir.md](PLAN-weir.md), release notes are in [CHANGELOG.md](CHANGELOG.md) and the release procedure is [docs/release.md](docs/release.md). Agent instructions are in [CLAUDE.md](CLAUDE.md).
+| | Choose it when | Choose Weir when |
+|---|---|---|
+| Varnish | you want a standalone cache with VCL and years of production use | the cache lives inside a Go server or Caddy and you want a concurrency budget across keys |
+| nginx `proxy_cache` | nginx is already your proxy and `proxy_cache_lock` covers your herds | you need jitter, a breaker and strict forwarding |
+| Souin, Caddy cache-handler | you need its storage backends or surrogate keys today | key hardening and origin protection matter more than backend choice |
+| `x/sync/singleflight`, sturdyc | you are deduplicating function calls, not HTTP responses | you need HTTP semantics: `Vary`, validation, `Cache-Control` |
+| CDN request collapsing | you want a managed edge | you need the behavior at your own origin tier, in code you control |
 
-## Requirements
+Details and sources: [compare](https://weir.ashwinsathian.com/compare/).
 
-Go 1.27 or later, and 1.27.2 or later for anything you deploy: 1.27.1 and earlier carry standard library vulnerabilities (HTTP/2, `net/textproto`, `crypto/tls`) that `govulncheck` reports against the code paths `weirhttp` uses. Weir supports the two latest Go releases. The core module has no dependencies outside the standard library. It builds for every operating system and architecture Go supports, `js/wasm` and `wasip1/wasm` included; CI tests Linux and vets 32-bit and the two wasm targets.
+## Documentation
+
+The site has the [quickstart](https://weir.ashwinsathian.com/docs/quickstart/), concept pages, guides for `net/http` and Caddy, and the [configuration reference](https://weir.ashwinsathian.com/docs/reference/config/). In this repository: the [runbook](docs/runbook.md) for operators, the [design documents](docs/README.md), the [changelog](CHANGELOG.md), and [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 

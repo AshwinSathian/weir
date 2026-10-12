@@ -1,6 +1,6 @@
 # Weir technical specification
 
-Status: v1.0, approved for Phase 0 and Phase 1 implementation
+Status: v1.0, implemented through Phase 3 (first approved for Phase 0 and Phase 1; later phases added in §13, §14 and docs 08 and 10)
 Date: 2026-10-12
 Owner: Ashwin Sathian
 Module: `github.com/AshwinSathian/weir`
@@ -40,7 +40,7 @@ Phase 1.x (milestones M11 to M15, §13) adds single-range responses, targeted ca
 - Not a private (browser) cache. Weir is always a shared cache in the RFC 9111 sense.
 - No partial-object storage. 206 responses from the origin are never stored. Weir answers single byte ranges from complete stored objects (M11, §13.1); multi-range requests get the full 200.
 - No trailer storage. Trailers from the origin are discarded on stored responses (RFC 9111 §3.1 permits this).
-- Targeted cache-control fields (RFC 9213) arrive in M12 (§13.2), not in M1 to M10.
+- Targeted cache-control fields (RFC 9213) were not part of M1 to M10. They arrived in M12 (§13.2) and are implemented.
 - No persistence across crashes. Graceful shutdowns snapshot the memory store (M13, §13.3); `Warm` covers everything else.
 - No multi-node cache coherence before Phase 2.5. Memory-store deployments run one Caddy node (D17); several nodes share a cache only through the Valkey store (runbook §8).
 

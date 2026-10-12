@@ -211,7 +211,7 @@ Spec: [docs/10-experiments-spec.md](docs/10-experiments-spec.md) (decisions E1 t
 
 ## Testing strategy
 
-[docs/07-testing-strategy.md](docs/07-testing-strategy.md). Rollout is by library version: `v0.x` tags per milestone from M1; `v1.0.0` at the end of Phase 1. Rollback is a version pin.
+[docs/07-testing-strategy.md](docs/07-testing-strategy.md). Rollout is by library version: `v0.x` tags per milestone from M1; `v1.0.0` after Phase 3, with `observe/prom`, `store/valkey` and `caddy` tagged at the same version (D24 as amended 2026-10-11). Rollback is a version pin.
 
 ## Operations
 

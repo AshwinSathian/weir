@@ -2,15 +2,27 @@
 
 Updated: 2026-10-12
 
-Benchmark results per milestone, so each milestone review can compare against the previous one with `benchstat` ([07 §10](07-testing-strategy.md)). NFR-5 budgets apply from M10; until then these numbers are a baseline, not a gate.
+Benchmark and load-test results. The first section is the current state. Everything from "Earlier runs" on is the record of how the numbers got there, kept so each run can be compared with the one before it using `benchstat` ([07 §10](07-testing-strategy.md)). Every absolute number names its machine. The rendered version, with what the numbers do not show, is at [weir.ashwinsathian.com/benchmarks](https://weir.ashwinsathian.com/benchmarks/).
 
-Reproduce a row with:
+## Current results
+
+Reference machine: Apple M4 Pro, 12 cores, 24 GiB, macOS. The budgets are NFR-5 (hit path) and D36 (GC) in [01](01-technical-spec.md).
+
+| What | Result | Budget | Run |
+|---|---|---|---|
+| `BenchmarkServeHitSmall`, Go 1.27.2 | 852.2 ns/op, 12 allocs/op | 1.25 µs, 16 allocs | "Hardening after v1.0.0-rc.1" below |
+| `BenchmarkServeHitSmall`, Go 1.27.1, idle machine | 833.5 and 821.4 ns/op, 12 allocs/op | same | "Hit path optimization" below |
+| Five load scenarios, idle machine | all pass | [07 §9](07-testing-strategy.md) | "Reference machine run" below |
+| GC per request at 1M entries | 1.08 µs (1.76 µs on the 4-vCPU Linux container) | 2 µs | "Reference machine run" below |
+
+Reproduce with:
 
 ```sh
 go test -run '^$' -bench . -count 6 ./ ./internal/keys/ ./store/memory/ ./internal/limiter/ ./internal/missrate/
+make load
 ```
 
-Store the raw output next to the table when a milestone adds a row, so `benchstat old.txt new.txt` works without rerunning the old commit.
+Store the raw output next to the table when a run adds a row, so `benchstat old.txt new.txt` works without rerunning the old commit.
 
 ## What each benchmark measures
 
@@ -24,6 +36,10 @@ Store the raw output next to the table when a milestone adds a row, so `benchsta
 | `BenchmarkServeHitParallel` | `weir` | `ServeHitSmall` from GOMAXPROCS goroutines over 1024 keys, miss-rate tracker on and off |
 | `BenchmarkLimiterAcquireRelease` | `internal/limiter` | uncontended Acquire/Release, and with a full queue |
 | `BenchmarkMemoryStoreGetParallel` | `store/memory` | `Get` from 12 goroutines over 1024 resident 1 KiB entries (16 shards) |
+
+## Earlier runs
+
+The sections from here to "Reference machine run" are superseded by it. Numbers from the 4-vCPU Linux container cannot be compared with the reference machine, and the 4 µs budget mentioned under M10 was provisional: NFR-5 now says 1.25 µs.
 
 ## M1 (2026-10-01)
 
@@ -52,7 +68,7 @@ Machine: 4 vCPU Linux container (not the reference machine), Go 1.27.0 linux/amd
 | origin brownout (×20) | 17 breaker open events, ended closed, 53 972 stale responses, every request 2xx during the brownout, peak 39 goroutines | breaker per config, stale served, no goroutine growth | pass |
 | store flap (50%) | 3.59 M requests, 0 client errors, slowest request 54 ms (bound 207 ms), store breaker 15 open / 10 closed | bounded latency, breaker cycles | pass |
 
-Every scenario also met the goroutine check (baseline ±10 within 5 s after load), before and after `Close`. Steady-hit p99 sits one histogram bucket (12.5%) under the 200 µs bound on this box, and moves with the achieved rate (an earlier lighter run measured 74 µs); compare runs only at a similar rate. The 4-core run is a floor: re-run `make load` on the reference machine and replace this table.
+Every scenario also met the goroutine check (baseline ±10 within 5 s after load), before and after `Close`. Steady-hit p99 sits one histogram bucket (12.5%) under the 200 µs bound on this box, and moves with the achieved rate (an earlier lighter run measured 74 µs); compare runs only at a similar rate. The 4-core run is a floor; the reference machine run of 2026-10-11 below supersedes this table.
 
 ## M10 benchmarks and benchstat against M1 (2026-10-08)
 

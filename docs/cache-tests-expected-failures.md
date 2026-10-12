@@ -1,6 +1,7 @@
 # cache-tests expected failures
 
-Updated: 2026-10-11
+Updated: 2026-10-12
+Last verified: 2026-10-12, `make cache-tests` on the Mac with Go 1.27.2 against `main`, no regression from the baseline (docs/progress/LOG.md, rc-rehearsal entry).
 
 Tests from [http-tests/cache-tests](https://github.com/http-tests/cache-tests) that `examples/weirproxy` fails, from the run recorded in `testdata/cache-tests-baseline.json` (suite commit `d644cf4`, 365 tests, 284 pass, 81 fail). The nightly job (docs/07 §8) fails only when a test that passed in the baseline fails now, so this list is documentation, not configuration. Update both files together with `UPDATE=1 scripts/cache-tests.sh`.
 
