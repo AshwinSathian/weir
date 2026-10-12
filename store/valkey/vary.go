@@ -57,12 +57,12 @@ func (s *Store) SetVarySpec(ctx context.Context, k store.Key, prev, next *store.
 // so it never passes a nil prev for one; this serves direct callers.
 // The three round trips share one callCtx deadline (05 §7).
 func (s *Store) swapOverStale(ctx context.Context, cl client, key string, val []byte, pxat int64) (bool, error) {
-	raw, err := cl.get(ctx, key)
+	raw, err := cl.getEntry(ctx, key, s.cfg.MaxObjectBytes)
 	switch {
 	case err == nil:
 		// An undecodable record counts as stale too: Get reports it as a miss,
 		// and a plain Set would overwrite it, so the swap must as well.
-		if e, derr := store.Decode(raw, maxValueBytes); derr == nil && (e.Expires.IsZero() || time.Now().Before(e.Expires)) {
+		if e, derr := store.Decode(raw, s.cfg.MaxObjectBytes); derr == nil && (e.Expires.IsZero() || time.Now().Before(e.Expires)) {
 			return false, nil
 		}
 	case valkey.IsValkeyNil(err):

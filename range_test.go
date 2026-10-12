@@ -1,6 +1,7 @@
 package weir_test
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"strconv"
@@ -529,4 +530,54 @@ func TestHeadWithRangeMissNoFill(t *testing.T) {
 			t.Fatalf("origin calls = %d, want 1", n)
 		}
 	})
+}
+
+// FR-RNG-6: Range with If-Match or If-Unmodified-Since is answered with the
+// full 200, from the cache and on a miss, where the request is fetched and
+// stored like any other and the origin sees neither field.
+func TestRangeIgnoredWithUnevaluatedPrecondition(t *testing.T) {
+	for _, tc := range []struct{ name, field, value string }{
+		{"If-Match", "If-Match", `"v1"`},
+		{"If-Match star", "If-Match", "*"},
+		{"If-Unmodified-Since", "If-Unmodified-Since", "Mon, 01 Jan 2024 00:00:00 GMT"},
+	} {
+		for _, warm := range []bool{true, false} {
+			name := tc.name + "/miss"
+			if warm {
+				name = tc.name + "/hit"
+			}
+			t.Run(name, func(t *testing.T) {
+				synctest.Test(t, func(t *testing.T) {
+					var sawRange, sawCond atomic.Bool
+					origin := weir.OriginFunc(func(_ context.Context, r *weir.Request) (*weir.Response, error) {
+						sawRange.Store(sawRange.Load() || len(r.Header["Range"]) > 0)
+						sawCond.Store(sawCond.Load() || len(r.Header[tc.field]) > 0)
+						return &weir.Response{StatusCode: 200, Header: http.Header{"Cache-Control": {"max-age=60"}, "Etag": {`"v2"`}},
+							Body: io.NopCloser(strings.NewReader("0123456789"))}, nil
+					})
+					e := newEngine(t, cacheCfg)
+					defer closeEngine(t, e)
+					if warm {
+						serve(t, e, getReq("/a"), origin)
+					}
+					req := withHeader(withHeader(getReq("/a"), "Range", "bytes=2-5"), tc.field, tc.value)
+					resp, body := serve(t, e, req, origin)
+					if resp.StatusCode != http.StatusOK || body != "0123456789" || resp.Header.Get("Content-Range") != "" {
+						t.Fatalf("got %d %q Content-Range %q, want the full 200", resp.StatusCode, body, resp.Header.Get("Content-Range"))
+					}
+					if resp.Cache.Hit != warm || !warm && !resp.Cache.Stored {
+						t.Fatalf("cache info %+v, warm=%v", resp.Cache, warm)
+					}
+					if sawRange.Load() || sawCond.Load() {
+						t.Fatalf("origin saw Range=%v %s=%v, want neither (T-7)", sawRange.Load(), tc.field, sawCond.Load())
+					}
+					// An unsatisfiable range is ignored the same way: no 416.
+					resp, _ = serve(t, e, withHeader(withHeader(getReq("/a"), "Range", "bytes=50-60"), tc.field, tc.value), origin)
+					if resp.StatusCode != http.StatusOK {
+						t.Fatalf("unsatisfiable range: got %d, want 200", resp.StatusCode)
+					}
+				})
+			})
+		}
+	}
 }

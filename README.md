@@ -115,7 +115,7 @@ Start with [docs/README.md](docs/README.md). The build plan is [PLAN-weir.md](PL
 
 ## Requirements
 
-Go 1.27 or later, and 1.27.2 or later for anything you deploy: 1.27.1 and earlier carry standard library vulnerabilities (HTTP/2, `net/textproto`, `crypto/tls`) that `govulncheck` reports against the code paths `weirhttp` uses. Weir supports the two latest Go releases. The core module has no dependencies outside the standard library. It builds for Linux, macOS, Windows, the BSDs, Solaris, AIX and Plan 9, 32-bit targets included; it does not build for `js/wasm` or `wasip1/wasm`.
+Go 1.27 or later, and 1.27.2 or later for anything you deploy: 1.27.1 and earlier carry standard library vulnerabilities (HTTP/2, `net/textproto`, `crypto/tls`) that `govulncheck` reports against the code paths `weirhttp` uses. Weir supports the two latest Go releases. The core module has no dependencies outside the standard library. It builds for every operating system and architecture Go supports, `js/wasm` and `wasip1/wasm` included; CI tests Linux and vets 32-bit and the two wasm targets.
 
 ## License
 

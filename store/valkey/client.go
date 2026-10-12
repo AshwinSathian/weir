@@ -20,6 +20,10 @@ type client interface {
 	// get returns the value at key, or an error for which valkey.IsValkeyNil
 	// is true when the key is absent.
 	get(ctx context.Context, key string) ([]byte, error)
+	// getEntry is get for a record of at most limit bytes: the server sends
+	// no more than limit+1, so the caller can tell an oversized value from
+	// one that fits without receiving it (T-21). An empty value is absent.
+	getEntry(ctx context.Context, key string, limit int64) ([]byte, error)
 	// set stores val at key until the Unix millisecond pxat.
 	set(ctx context.Context, key string, val []byte, pxat int64) error
 	del(ctx context.Context, key string) error
@@ -39,9 +43,9 @@ type client interface {
 	// scanNode runs one SCAN step on the node at addr and returns the keys
 	// and the next cursor (0 when done).
 	scanNode(ctx context.Context, addr string, cursor uint64, match string, count int64) ([]string, uint64, error)
-	// getMulti returns the value at each key, nil where a key is absent. Keys
-	// may span cluster slots.
-	getMulti(ctx context.Context, keys []string) ([][]byte, error)
+	// getMulti returns the value at each key, cut to limit+1 bytes as
+	// getEntry does, nil where a key is absent. Keys may span cluster slots.
+	getMulti(ctx context.Context, keys []string, limit int64) ([][]byte, error)
 	// delMulti deletes keys (any slots) and returns how many existed.
 	delMulti(ctx context.Context, keys []string) (int64, error)
 	// evalVarySet stores val at key until pxat if the value there is prev
@@ -109,6 +113,15 @@ func (v valkeyClient) get(ctx context.Context, key string) ([]byte, error) {
 	return v.c.Do(ctx, v.c.B().Get().Key(key).Build()).AsBytes()
 }
 
+func (v valkeyClient) getEntry(ctx context.Context, key string, limit int64) ([]byte, error) {
+	// GETRANGE's end is inclusive, and it answers "" for an absent key.
+	b, err := v.c.Do(ctx, v.c.B().Getrange().Key(key).Start(0).End(limit).Build()).AsBytes()
+	if err == nil && len(b) == 0 {
+		return nil, valkey.Nil
+	}
+	return b, err
+}
+
 func (v valkeyClient) set(ctx context.Context, key string, val []byte, pxat int64) error {
 	return v.c.Do(ctx, v.c.B().Set().Key(key).Value(string(val)).PxatMillisecondsTimestamp(pxat).Build()).Error()
 }
@@ -157,15 +170,17 @@ func (v valkeyClient) scanNode(ctx context.Context, addr string, cursor uint64, 
 	return e.Elements, e.Cursor, err
 }
 
-func (v valkeyClient) getMulti(ctx context.Context, keys []string) ([][]byte, error) {
+func (v valkeyClient) getMulti(ctx context.Context, keys []string, limit int64) ([][]byte, error) {
 	cmds := make(valkey.Commands, len(keys))
 	for i, k := range keys {
-		cmds[i] = v.c.B().Get().Key(k).Build()
+		cmds[i] = v.c.B().Getrange().Key(k).Start(0).End(limit).Build()
 	}
 	out := make([][]byte, len(keys))
 	for i, r := range v.c.DoMulti(ctx, cmds...) {
 		b, err := r.AsBytes()
 		switch {
+		case err == nil && len(b) == 0:
+			// GETRANGE answers "" for a key deleted or expired since the scan
 		case err == nil:
 			out[i] = b
 		case valkey.IsValkeyNil(err):

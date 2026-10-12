@@ -26,16 +26,24 @@ func rewriteQuery(raw string, c *Config) string {
 		}
 		out = append(out, s)
 	}
-	if c.QuerySort && !slices.IsSorted(out) {
-		// Equal segments are identical bytes, so an unstable sort gives
-		// the same result as the stable one FR-KEY-5 asks for.
-		slices.Sort(out)
+	if c.QuerySort && !slices.IsSortedFunc(out, cmpSegmentName) {
+		// By name only, and stable: "sort=price&sort=name" and
+		// "ids=3&ids=1" mean something in that order to an origin, so the
+		// values of a repeated name stay as the client sent them (FR-KEY-5).
+		slices.SortStableFunc(out, cmpSegmentName)
 		changed = true
 	}
 	if !changed {
 		return raw
 	}
 	return strings.Join(out, "&")
+}
+
+// cmpSegmentName orders two query segments by the raw bytes of their names.
+func cmpSegmentName(a, b string) int {
+	an, _, _ := strings.Cut(a, "=")
+	bn, _, _ := strings.Cut(b, "=")
+	return strings.Compare(an, bn)
 }
 
 // match reports whether name equals a pattern or starts with the prefix of

@@ -300,6 +300,7 @@ example.com {
 ### 8.1 One Valkey and one prefix per cache
 
 - All nodes of a cache use the same `addrs` and the same `prefix`. Set `prefix` explicitly. It defaults to the site `name`, which keeps two sites on one server apart, but then `name` must be identical on every node or the nodes share nothing. Two caches that must not see each other's purges need two prefixes (or two servers).
+- A Valkey record is limited to 64 MiB (`valkey.Config.MaxObjectBytes`; the Caddyfile has no key for it, and the engine's object limit under Caddy is 1 MiB). A larger value at an entry key is treated as a miss and overwritten.
 - Every node that shares a `prefix` must also agree on `max_retention` and `max_clock_skew` (05 §7): the prune margin comes from the node that writes, so a node with a shorter retention prunes hard epochs that another node's entries still depend on.
 - Give the cache its own server. Epoch keys have no TTL, and `maxmemory` is server-wide, so another application that writes TTL-less keys to the same server fills it with keys the eviction policy cannot remove.
 

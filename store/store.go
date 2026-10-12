@@ -81,25 +81,36 @@ type Entry struct {
 
 // Size constants (04 §2). entryOverhead is the fixed per-record charge,
 // covering the struct and store bookkeeping; variantRefSize is one VariantRef
-// (a 32-byte Key and a 24-byte time.Time).
+// (a 32-byte Key and a 24-byte time.Time). The other two are what a header
+// costs in memory beyond its bytes on a 64-bit platform: stringOverhead is a
+// string header, charged per header value and per vary name, and
+// headerNameOverhead is a map slot (a string header for the name, a slice
+// header for its values, and the map's own bookkeeping). T-21: without them
+// a response made of thousands of one-byte values took about 16 times the
+// memory it was charged for.
 const (
-	entryOverhead  = 256
-	variantRefSize = 56
+	entryOverhead      = 256
+	variantRefSize     = 56
+	stringOverhead     = 16
+	headerNameOverhead = 48
 )
 
 // Size returns the bytes a byte-weighted store accounts for e: len(Body) +
-// header bytes + vary name bytes + 32 per tag + 56 per variant ref + 256
-// (04 §2). Vary specs carry no body, so their name and ref bytes must count
-// or the store's byte bound undercounts them (NFR-3).
+// header bytes + 48 per header name + 16 per header value + vary name bytes
+// + 16 per vary name + 32 per tag + 56 per variant ref + 256 (04 §2). Header
+// bytes are the name and the value for every value. Vary specs carry no
+// body, so their name and ref bytes must count or the store's byte bound
+// undercounts them (NFR-3).
 func (e *Entry) Size() int64 {
 	n := int64(len(e.Body)) + int64(len(e.Tags))*int64(len(Tag{})) +
 		int64(len(e.Variants))*variantRefSize + entryOverhead
 	for _, name := range e.VaryNames {
-		n += int64(len(name))
+		n += int64(len(name)) + stringOverhead
 	}
 	for name, vals := range e.Header {
+		n += headerNameOverhead
 		for _, v := range vals {
-			n += int64(len(name) + len(v))
+			n += int64(len(name)+len(v)) + stringOverhead
 		}
 	}
 	return n

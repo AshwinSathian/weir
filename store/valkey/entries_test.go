@@ -22,6 +22,24 @@ type fakeKV struct {
 	pxat map[string]int64
 	sets int
 	err  error // returned by every command when set
+	// maxRead is the longest value getEntry handed back.
+	maxRead int
+}
+
+// getEntry answers as GETRANGE 0 limit does: at most limit+1 bytes, and an
+// empty value is an absent key.
+func (f *fakeClient) getEntry(ctx context.Context, key string, limit int64) ([]byte, error) {
+	v, err := f.get(ctx, key)
+	if err == nil && len(v) == 0 {
+		return nil, valkey.Nil
+	}
+	if int64(len(v)) > limit+1 {
+		v = v[:limit+1]
+	}
+	f.kv.mu.Lock()
+	f.kv.maxRead = max(f.kv.maxRead, len(v))
+	f.kv.mu.Unlock()
+	return v, err
 }
 
 func (f *fakeClient) get(_ context.Context, key string) ([]byte, error) {
@@ -215,7 +233,6 @@ func TestSetClampsToMaxRetention(t *testing.T) {
 func TestGetDecodeFailureIsUnavailable(t *testing.T) {
 	var k store.Key
 	for name, v := range map[string][]byte{
-		"empty":         {},
 		"not a record":  []byte("hello world, not a record"),
 		"truncated":     {'W', 'E', 'I', 'R', 1},
 		"wrong version": {'W', 'E', 'I', 'R', 99, 1, 0, 0},
@@ -285,5 +302,68 @@ func TestGetPastExpiresIsNotFound(t *testing.T) {
 	_ = cl.set(t.Context(), s.entryKey(k), v, 1)
 	if _, err := s.Get(t.Context(), k); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("Get = %v, want ErrNotFound", err)
+	}
+}
+
+// T-21, 05 §7: a value over MaxObjectBytes is a miss, not an error, and the
+// store never receives more than one byte past the limit. An empty value is
+// what GETRANGE answers for an absent key.
+func TestGetOversizedValueIsMiss(t *testing.T) {
+	const limit = minMaxObjectBytes
+	var k store.Key
+	for name, v := range map[string][]byte{
+		"one byte over":   make([]byte, limit+1),
+		"far over":        make([]byte, 8*limit),
+		"empty is absent": {},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s, cl := connected(t, func(c *Config) { c.MaxObjectBytes = limit })
+			_ = cl.set(t.Context(), s.entryKey(k), v, 1)
+			e, err := s.Get(t.Context(), k)
+			if e != nil || !errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrUnavailable) {
+				t.Fatalf("Get = %v, %v; want nil, ErrNotFound", e, err)
+			}
+			if cl.kv.maxRead > limit+1 {
+				t.Fatalf("read %d bytes, want at most %d", cl.kv.maxRead, limit+1)
+			}
+		})
+	}
+}
+
+// T-21, S-4: Set declines a record that encodes to more than MaxObjectBytes
+// and removes the record it would have replaced; one that fits round-trips.
+func TestSetDeclinesOversizedRecord(t *testing.T) {
+	const limit = minMaxObjectBytes
+	s, cl := connected(t, func(c *Config) { c.MaxObjectBytes = limit })
+	var k store.Key
+	now := time.Now()
+	fits := testEntry(now)
+	fits.Body = make([]byte, limit-1024)
+	if err := s.Set(t.Context(), k, fits); err != nil {
+		t.Fatal(err)
+	}
+	if e, err := s.Get(t.Context(), k); err != nil || len(e.Body) != len(fits.Body) {
+		t.Fatalf("record under the limit: %v, %v", e, err)
+	}
+	big := testEntry(now)
+	big.Body = make([]byte, limit)
+	if err := s.Set(t.Context(), k, big); err != nil {
+		t.Fatalf("Set of an oversized record = %v, want nil (declined)", err)
+	}
+	if _, err := s.Get(t.Context(), k); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("after a declined Set: %v, want ErrNotFound (the older record is removed)", err)
+	}
+	if cl.kv.sets != 1 {
+		t.Fatalf("sets = %d, want 1", cl.kv.sets)
+	}
+}
+
+// FR-LCY-1: the store reports its record limit, so weir.New can reject a
+// Storable.MaxObjectBytes it could never hold.
+func TestStoreIsSizer(t *testing.T) {
+	s, _ := connected(t, nil)
+	var sz store.Sizer = s
+	if sz.MaxObjectBytes() != defaultMaxObjectBytes || sz.Bytes() != -1 {
+		t.Fatalf("MaxObjectBytes = %d, Bytes = %d", sz.MaxObjectBytes(), sz.Bytes())
 	}
 }

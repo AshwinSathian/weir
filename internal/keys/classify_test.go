@@ -114,8 +114,13 @@ func TestClassifyCacheableForward(t *testing.T) {
 	if f.Host != "example.com" || f.Path != "/p" || f.RawQuery != "a=1" {
 		t.Fatalf("forwarded target = %q %q %q", f.Host, f.Path, f.RawQuery)
 	}
-	if !c.Authorized || !c.Range {
+	// FR-RNG-6: If-Match is not evaluated, so the Range beside it is ignored.
+	if !c.Authorized || c.Range {
 		t.Fatalf("Authorized=%v Range=%v", c.Authorized, c.Range)
+	}
+	delete(h, "If-Match")
+	if c, err = Classify(classifyReq("GET", h), cfg); err != nil || !c.Range {
+		t.Fatalf("without If-Match: Range=%v err=%v", c.Range, err)
 	}
 	if c.Origin != "https://example.com" || c.Partition != "https://example.com/p" {
 		t.Fatalf("origin %q partition %q", c.Origin, c.Partition)

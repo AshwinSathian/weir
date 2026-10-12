@@ -75,7 +75,7 @@ func (f *fakeClient) scanNode(_ context.Context, _ string, cursor uint64, match 
 	return slices.Clone(all[from:to]), next, nil
 }
 
-func (f *fakeClient) getMulti(_ context.Context, keys []string) ([][]byte, error) {
+func (f *fakeClient) getMulti(_ context.Context, keys []string, _ int64) ([][]byte, error) {
 	f.kv.mu.Lock()
 	defer f.kv.mu.Unlock()
 	if f.scan.err != nil {

@@ -111,7 +111,7 @@ func TestNegativeNotFor500(t *testing.T) {
 		{"Authorization", cacheCfg, 503, withHeader(getReq("/a"), "Authorization", "Bearer junk")},
 		{"request no-store", cacheCfg, 503, withHeader(getReq("/a"), "Cache-Control", "no-store")},
 		{"Cache-Control", cacheCfg, 503, withHeader(getReq("/a"), "Cache-Control", "max-age=0")},
-		{"oversized Pragma", cacheCfg, 503, withHeader(getReq("/a"), "Pragma", strings.Repeat("A", 9000))},
+		{"Pragma at the length bound", cacheCfg, 503, withHeader(getReq("/a"), "Pragma", strings.Repeat("A", 256))},
 		{"Range", cacheCfg, 503, withHeader(getReq("/a"), "Range", "bytes=0-1")},
 		{"Forward.Allow field", allow, 503, withHeader(getReq("/a"), "X-Tenant", "evil")},
 		{"ForwardAll", all, 503, getReq("/a")},

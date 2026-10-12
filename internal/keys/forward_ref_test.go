@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -55,6 +56,9 @@ func forwardHeaderRef(h http.Header, c *Config, cookies []Cookie, dims []Dim) (o
 	}
 	setVariantHeader(out, c.ExpHeader, dims)
 	filterTrace(out, c.NoTraceHeaders)
+	if !c.ForwardAll {
+		filterDirectives(out, c.Headers)
+	}
 	for _, name := range c.Allow {
 		// T-31: an Allow field reaches the origin unkeyed. Cookie goes
 		// keyed-only, and Accept-Encoding goes as the bucket every request
@@ -62,9 +66,10 @@ func forwardHeaderRef(h http.Header, c *Config, cookies []Cookie, dims []Dim) (o
 		keyed := name == "Cookie" || name == "Accept-Encoding" || slices.Contains(defaultForward, name)
 		unkeyed = unkeyed || !keyed && len(out[name]) > 0
 	}
-	// T-31: the cache directives go as the client sent them, any length and
-	// any bytes, so an origin or WAF that rejects one must not fail the key
-	// for everyone. Keyed, they went in normal form and split the key.
+	// T-31: the cache directives go as the client sent them once
+	// filterDirectives has bounded their bytes and length, so an origin or
+	// WAF that rejects one must not fail the key for everyone. Keyed, they
+	// went in normal form and split the key.
 	for _, name := range [...]string{"Cache-Control", "Pragma"} {
 		unkeyed = unkeyed || len(out[name]) > 0 && !slices.Contains(c.Headers, name)
 	}
@@ -94,6 +99,15 @@ func FuzzForwardHeaderMatchesReference(f *testing.F) {
 	f.Add([]byte{0, 1, 2, 7, 3}, "x", "y, Authorization", uint8(0))
 	f.Add([]byte{7, 14, 15, 19, 20, 21}, "keep-alive, Te", "z", uint8(2))
 	f.Add([]byte{6, 7, 23}, "Cookie", "a=b", uint8(3))
+	// FR-FWD-1: Cache-Control (1) and Pragma (2) values the directive filter
+	// must judge: empty, 10 KiB, non-ASCII, separators only, markup, and
+	// lines that pass one by one but not together.
+	f.Add([]byte{1, 2}, "", "", uint8(0))
+	f.Add([]byte{1, 1, 2}, "", strings.Repeat("a", 10<<10), uint8(0))
+	f.Add([]byte{1, 2}, "", "no-cach\xe9", uint8(0))
+	f.Add([]byte{1, 2, 1}, "", ",, ,=", uint8(1))
+	f.Add([]byte{1, 2}, "", `x="<script>"`, uint8(3))
+	f.Add([]byte{1, 1, 1, 2, 2, 2}, "", strings.Repeat("a", 100), uint8(2))
 	f.Fuzz(func(t *testing.T, pick []byte, conn, val string, sel uint8) {
 		h := http.Header{}
 		for i, b := range pick {

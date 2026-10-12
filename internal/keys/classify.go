@@ -120,6 +120,14 @@ func Classify(r *Request, c *Config) (Classified, error) {
 
 	// One map read per field: this runs on every request, hits included.
 	rng, ifRange, inm := h["Range"], h["If-Range"], h["If-None-Match"]
+	// FR-RNG-6: Weir does not evaluate If-Match or If-Unmodified-Since (RFC
+	// 9110 §13.1.1 and §13.1.4 let a cache ignore them) and never forwards
+	// them on a cacheable request, so a client that sends one with Range to
+	// resume a download would get a 206 nobody checked against the bytes it
+	// already holds. Range is ignored instead: the answer is the full 200.
+	if len(rng) > 0 && (len(h["If-Match"]) > 0 || len(h["If-Unmodified-Since"]) > 0) {
+		rng, ifRange = nil, nil
+	}
 	out := Classified{
 		Head:       r.Method == http.MethodHead,
 		req:        r,

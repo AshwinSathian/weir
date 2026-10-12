@@ -586,7 +586,10 @@ func TestNoMarkerAfterUnkeyedInput(t *testing.T) {
 		{"Forward.Allow naming keyed fields plants a marker", weir.Config{Freshness: weir.FreshnessConfig{NoJitter: true}, Forward: weir.ForwardConfig{Allow: []string{"Accept-Encoding", "Authorization"}}}, [2]string{"Accept-Encoding", "gzip"}, true},
 		{"Forward.Allow configured but absent plants a marker", allow, [2]string{"Traceparent", "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01"}, true},
 		{"Cache-Control present plants no marker", cacheCfg, [2]string{"Cache-Control", "max-age=0"}, false},
-		{"oversized Pragma plants no marker", cacheCfg, [2]string{"Pragma", strings.Repeat("A", 9000)}, false},
+		{"Pragma at the length bound plants no marker", cacheCfg, [2]string{"Pragma", strings.Repeat("A", 256)}, false},
+		// FR-FWD-1: an oversized field is dropped, so the origin answered a
+		// request with no unkeyed input and the marker is sound.
+		{"oversized Pragma is not forwarded and plants a marker", cacheCfg, [2]string{"Pragma", strings.Repeat("A", 9000)}, true},
 		{"ForwardAll plants no marker", all, [2]string{"Traceparent", "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01"}, false},
 		{"trace header alone plants a marker", cacheCfg, [2]string{"Traceparent", "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01"}, true},
 	} {
