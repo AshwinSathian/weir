@@ -10,7 +10,7 @@ Next card: none (all cards done; M16-02 deferred)
 
 ## Waiting on Ashwin
 
-- `release-gate` is green on `92a1e56` (run 38213460051, all 35 jobs). Remaining before the real tag: `make vuln`, `make cache-tests` and `make check` on the Mac, the `v1.0.0-rc.1` rehearsal, and the behavior decisions below.
+- Upgrade Go to 1.27.2 or later on the Mac, rerun `make vuln` and `make cache-tests` (the script no longer needs `setsid`). `release-gate` is green on `92a1e56` but ran on Go 1.27.0. Then the `v1.0.0-rc.1` rehearsal and the behavior decisions below.
 - Decide whether to open a PR for the release-prep branch, then follow docs/release.md (release branch, rc rehearsal, tags in order: root, observe/prom and store/valkey, caddy).
 - Confirm the decisions taken for you: D24 amended, D43 added, README Stability promises, signing key caps, `servableStatus` miss.
 
