@@ -366,8 +366,15 @@ func (h *Handler) storeSpec() storeSpec {
 // memoryConfig maps the handler onto the store settings. A multi-host site
 // gets MaxBytesPerOwner at 25% of a shard (FR-FAIR-3).
 func (h *Handler) memoryConfig(size int64, sink *evictSink) memory.Config {
+	// A store above 256 MiB gets more shards of about 16 MiB instead of 16
+	// larger ones: a full shard of hot records pauses its readers for one
+	// queue walk when it evicts, and that walk grows with the shard (05 §5.1).
+	// The adapter has no key for Storable.MaxObjectBytes, so the default
+	// 1 MiB object is what a shard must hold.
+	shards := memory.Shards(max(size, defaultStoreBytes), 1<<20)
 	cfg := memory.Config{
 		MaxBytes:        size,
+		Shards:          shards,
 		OnEvict:         sink.emit,
 		SnapshotTimeout: closeTimeout,
 	}
@@ -379,7 +386,7 @@ func (h *Handler) memoryConfig(size int64, sink *evictSink) memory.Config {
 		if size == 0 {
 			size = defaultStoreBytes
 		}
-		cfg.MaxBytesPerOwner = max(1, size/defaultShards/4)
+		cfg.MaxBytesPerOwner = max(1, size/int64(shards)/4)
 	}
 	return cfg
 }

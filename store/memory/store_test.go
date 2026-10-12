@@ -5,6 +5,7 @@ import (
 	"errors"
 	"math"
 	"math/rand/v2"
+	"strconv"
 	"sync"
 	"testing"
 	"testing/synctest"
@@ -327,6 +328,76 @@ func TestConcurrentEvictionInvariants(t *testing.T) {
 		}
 		if n != len(sh.m) || sum != sh.bytes || sh.small.bytes+sh.main.bytes != sh.bytes {
 			t.Fatalf("shard %d: %d linked nodes, %d mapped; %d linked bytes, %d accounted", i, n, len(sh.m), sum, sh.bytes)
+		}
+	}
+}
+
+// BenchmarkEvictionPauseLargeShard measures the longest single Set on a full
+// shard whose every record is hot (frequency 3): S3-FIFO then walks the main
+// queue up to four times, under the shard's write lock, before it finds a
+// victim (05 §5.3). The metric that matters is pause-ms, per shard size;
+// ns/op is the same number per run.
+func BenchmarkEvictionPauseLargeShard(b *testing.B) {
+	for _, mib := range []int64{16, 64, 256} {
+		b.Run(strconv.FormatInt(mib, 10)+"MiB", func(b *testing.B) {
+			var worst time.Duration
+			for b.Loop() {
+				b.StopTimer()
+				s, err := New(Config{MaxBytes: mib << 20, Shards: 1})
+				if err != nil {
+					b.Fatal(err)
+				}
+				exp := time.Now().Add(time.Hour)
+				body := make([]byte, 64)
+				n := int(mib << 20 / (&store.Entry{Kind: store.KindResponse, Body: body}).Size())
+				keys := make([]store.Key, n+n/2)
+				for i := range keys {
+					binary.BigEndian.PutUint64(keys[i][:], uint64(i))
+					_ = s.Set(b.Context(), keys[i], &store.Entry{Kind: store.KindResponse, Body: body, Expires: exp})
+				}
+				for range 3 { // every resident record becomes as hot as it can
+					for i := range keys {
+						_, _ = s.Get(b.Context(), keys[i])
+					}
+				}
+				var k store.Key
+				binary.BigEndian.PutUint64(k[:], 1<<40)
+				b.StartTimer()
+				start := time.Now()
+				_ = s.Set(b.Context(), k, &store.Entry{Kind: store.KindResponse, Body: body, Expires: exp})
+				worst = max(worst, time.Since(start))
+				b.StopTimer()
+				_ = s.Close()
+				b.StartTimer()
+			}
+			b.ReportMetric(float64(worst.Microseconds())/1000, "pause-ms")
+		})
+	}
+}
+
+// 05 §5.1: Shards keeps shards near 16 MiB so a larger store gets more of
+// them, never fewer than 16 unless one object needs a bigger shard, and never
+// a count New would refuse.
+func TestShards(t *testing.T) {
+	for _, tc := range []struct {
+		maxBytes, maxObject int64
+		want                int
+	}{
+		{256 << 20, 1 << 20, 16}, // the default store: 16 MiB shards
+		{1 << 30, 1 << 20, 64},   // 16 MiB shards
+		{8 << 30, 1 << 20, 512},  // the largest default store
+		{1 << 40, 1 << 20, 1024}, // capped
+		{8 << 30, 20 << 20, 32},  // a 20 MiB object needs a 200 MiB small queue's shard
+		{100 << 20, 1 << 20, 8},  // small store: the object still has to fit
+		{16 << 20, 1 << 20, 1},   // one shard
+		{1 << 20, 1 << 20, 1},    // too small for the object: New's size check reports it
+	} {
+		got := Shards(tc.maxBytes, tc.maxObject)
+		if got != tc.want {
+			t.Errorf("Shards(%d MiB, %d MiB) = %d, want %d", tc.maxBytes>>20, tc.maxObject>>20, got, tc.want)
+		}
+		if _, err := New(Config{MaxBytes: tc.maxBytes, Shards: got}); err != nil {
+			t.Errorf("New refuses %d shards: %v", got, err)
 		}
 	}
 }

@@ -37,6 +37,16 @@ Not the reference machine, so these compare one commit with the next on one lapt
 
 Allocations are unchanged (12 per hit). The tracker took one mutex per cacheable request and, for a partition without a counter, scanned all 64 counters under it; a hit now takes a read lock and adds to a counter only when its partition already has one. With the tracker on, parallel hits cost what they cost with it off. The limiter's release walk stops once no slot is free.
 
+Eviction pause by shard size (card HRD-13, same laptop): the longest single `Set` on a full shard of hot 64-byte records, `BenchmarkEvictionPauseLargeShard`, three runs each.
+
+| Shard | Longest `Set` |
+|---|---|
+| 16 MiB | 0.48 ms |
+| 64 MiB | 2.56 ms |
+| 256 MiB | 9.76 ms |
+
+The walk is linear in the shard, so the 512 MiB shards of an 8 GiB default store before v1.1 come to about 20 ms. `memory.Shards` now keeps shards near 16 MiB ([05 §5.1](05-storage-interface-spec.md)).
+
 ## What each benchmark measures
 
 | Benchmark | Package | Path |

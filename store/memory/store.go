@@ -18,8 +18,10 @@ type Config struct {
 	Shards       int           // 0: 16; a power of two, at most MaxShards
 	MaxRetention time.Duration // 0: 24h; caps every record's lifetime (E-11)
 	// MaxHardEpochs caps how many distinct tags may hold a hard epoch (0:
-	// 10000, E-6). It is a tuning knob: its meaning and scale may change in
-	// a minor release.
+	// 100000, E-6; 10000 before v1.1). A tag holds its place for
+	// MaxRetention, so this is the number of URLs and groups that can be
+	// hard-purged within that time; each costs about 100 bytes. It is a
+	// tuning knob: its meaning and scale may change in a minor release.
 	MaxHardEpochs int
 	// EpochSlots is the size of the table that holds soft and invalidation
 	// epochs (0: 1 << 19; a power of two, at most MaxEpochSlots, E-7). It is
@@ -46,6 +48,35 @@ type Config struct {
 	// after the shard lock is released.
 	OnEvict func(queue string, n int)
 }
+
+// shardTarget is the shard size Shards aims for. One Set on a full shard
+// whose records are all hot walks its main queue up to four times under the
+// write lock (05 §5.3): about 0.5 ms for 16 MiB of small records, 2.6 ms for
+// 64 MiB and 10 ms for 256 MiB (BenchmarkEvictionPauseLargeShard, M4 Pro).
+const shardTarget = 16 << 20
+
+// Shards returns a shard count for a store of maxBytes that will hold objects
+// of up to maxObject bytes: the power of two that makes shards of about
+// 16 MiB, at least 16 and at most 1024, then halved while a shard's small
+// queue (a tenth of the shard) could not hold one such object, down to 1. A
+// larger store thereby gets more shards instead of larger ones, which keeps
+// the longest eviction pause, and the readers it blocks, small (05 §5.1).
+// New's own default stays 16, because a shard's size is also the store's
+// MaxObjectBytes and changing it would refuse objects it used to take.
+func Shards(maxBytes, maxObject int64) int {
+	n := 16
+	for n < 1024 && maxBytes/int64(n*2) >= shardTarget {
+		n *= 2
+	}
+	for n > 1 && maxBytes/int64(n)/10 < maxObject {
+		n /= 2
+	}
+	return n
+}
+
+// defaultMaxHardEpochs is Config.MaxHardEpochs when unset: at 24 h retention,
+// one hard purge of a new URL or group a second, around the clock (E-6).
+const defaultMaxHardEpochs = 100_000
 
 // MaxShards bounds Config.Shards, so a mistyped count fails New instead of
 // exhausting memory (NFR-2).
@@ -87,7 +118,7 @@ func New(cfg Config) (*Store, error) {
 		cfg.MaxRetention = 24 * time.Hour
 	}
 	if cfg.MaxHardEpochs == 0 {
-		cfg.MaxHardEpochs = 10000
+		cfg.MaxHardEpochs = defaultMaxHardEpochs
 	}
 	if cfg.EpochSlots == 0 {
 		cfg.EpochSlots = 1 << 19

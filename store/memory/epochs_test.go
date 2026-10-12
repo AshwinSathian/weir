@@ -28,7 +28,7 @@ func TestNewEpochConfig(t *testing.T) {
 		}
 	}
 	s := newStore(t, Config{})
-	if len(s.ep.planes[0]) != 1<<19 || s.ep.maxHard != 10000 || s.ep.retention != 24*time.Hour {
+	if len(s.ep.planes[0]) != 1<<19 || s.ep.maxHard != 100_000 || s.ep.retention != 24*time.Hour {
 		t.Errorf("defaults: %d slots, %d hard, %v retention", len(s.ep.planes[0]), s.ep.maxHard, s.ep.retention)
 	}
 }
