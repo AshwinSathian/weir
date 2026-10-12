@@ -152,7 +152,12 @@ func TestSnapshotHardEpochSurvives(t *testing.T) {
 	since := at.Add(-time.Hour)
 	for name, tg := range map[string]store.Tag{"tag": tag, "global": store.TagGlobal()} {
 		ep, ok, err := s2.NewestEpoch(ctx, []store.Tag{tg}, since)
-		if err != nil || !ok || ep.Mode != store.EpochHard || ep.At.Sub(at).Abs() > time.Microsecond {
+		// The store keeps epoch times as monotonic offsets from its start, so a
+		// restored time can differ from the wall clock reading by the skew
+		// between the two clocks (microseconds on a loaded runner). That is far
+		// below anything a purge can see: stored epochs round to whole seconds
+		// elsewhere. Compare wall time with a millisecond of room.
+		if err != nil || !ok || ep.Mode != store.EpochHard || ep.At.Round(0).Sub(at.Round(0)).Abs() > time.Millisecond {
 			t.Errorf("%s epoch = %+v, %v, %v; want hard at %v", name, ep, ok, err, at)
 		}
 	}

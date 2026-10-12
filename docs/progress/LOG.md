@@ -1897,3 +1897,11 @@ Entry template:
 - Deviations: docs/01 NFR-5 value; supersedes the "accept +32%" proposal in docs/benchmarks.md.
 - Follow-ups: still waiting on Ashwin for the release-gate workflow results and the tag procedure.
 - Context: low
+
+## 2026-10-12 · release-gate · review-fixes
+- Branch / PR: claude/magical-carson-rwdd4q (restarted from main after PR 106 merged) / see STATUS
+- Done: first `release-gate` run on `ab5d7f7` (run 38202380943). 29 of 29 fuzz targets ran an hour clean; repeat x100 under `-race` passed for the root package, `internal/...` and `weirhttp`; `budgets` passed. `store/...` failed once in `TestSnapshotHardEpochSurvives` (1 µs tolerance on a restored epoch time; the store keeps epochs as monotonic offsets, so a few microseconds of wall/monotonic skew trips it). Test bug, reproduced locally 1 in 3 000 with `-race`; tolerance now 1 ms on wall time. The workflow gained `repeat`, `fuzz` and `pkgs` inputs so a rerun after a fix can skip the hour of fuzzing. Gate log added to docs/release.md.
+- Tests: `TestSnapshotHardEpochSurvives` 6 000 runs under `-race`; `./store/...` 80 shuffled race repeats (see the commit).
+- Deviations: none.
+- Follow-ups: Ashwin reruns the gate narrowed to `fuzz=false`, `pkgs=["./store/..."]`, then the rc rehearsal and the tags.
+- Context: low
