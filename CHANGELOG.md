@@ -10,7 +10,9 @@ Nothing yet.
 
 First stable release. It supersedes the `v0.1.0` tag, which predates most of the engine and cannot be used with the sub-modules.
 
-The copy of this file inside the `v1.0.0` tag reads "v1.0.0 (unreleased)": the date was added on `main` after the tag. The content is the same.
+The copy of this file inside the `v1.0.0` tag reads "v1.0.0 (unreleased)": the date was added on `main` after the tag. It lists the same changes; two headings and three lines were corrected here afterwards.
+
+Tags: `v1.0.0`, `observe/prom/v1.0.0`, `store/valkey/v1.0.0` and `caddy/v1.0.0`. The release candidates `v1.0.0-rc.1` and `v1.0.0-rc.3` stay on the module proxy for all four modules; `caddy/v1.0.0-rc.2` is the same commit as `caddy/v1.0.0-rc.1` and has no counterpart in the other modules.
 
 ### Engine (root module)
 
@@ -25,7 +27,7 @@ The copy of this file inside the `v1.0.0` tag reads "v1.0.0 (unreleased)": the d
 ### Modules
 
 - `observe/prom`: Prometheus observer and collector.
-- `store/valkey`: shared store for several nodes (Valkey 7 or later, `volatile-lfu` or `noeviction`).
+- `store/valkey`: shared store for several nodes (Valkey 7 or later; `maxmemory-policy` must be `volatile-lfu`, another `volatile-*` policy or `noeviction`).
 - `caddy`: the `weir` handler, Caddyfile and JSON configuration, admin purge API, `experiments` block. Built against Caddy v2.11.7.
 
 ### Fixed before the first release candidate
@@ -50,8 +52,9 @@ The copy of this file inside the `v1.0.0` tag reads "v1.0.0 (unreleased)": the d
 
 ### Known limits
 
-- Pointer-light memory layout deferred (M16-02, D36): GC cost at 1M entries is 1.76 µs per request on the measured machine, inside the 2 µs gate.
+- Pointer-light memory layout deferred (M16-02, D36): GC cost at 1M entries is about 1 µs per request on the reference machine (Apple M4 Pro; 1.76 µs on a 4-core Xeon), inside the 2 µs gate.
 - The `caddy` module imports the root module's `internal/keys`, so the four modules must be used at the same version (with xcaddy, pin the root module and `caddy` to it explicitly).
 - `Engine.Close` waits for origin goroutines; an `Origin` that ignores its context can delay it.
+- `store/valkey`: a new or flushed server stores nothing usable for `MaxClockSkew` + 1 s (2 s by default) after the first request; a value at an entry key that fits `MaxObjectBytes` but is not a Weir record counts as a store error. The Caddyfile has no key for `MaxObjectBytes`.
 
 Install: see the README.
