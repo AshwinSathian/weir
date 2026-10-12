@@ -25,6 +25,9 @@ type nextOrigin struct {
 	// fetch must not share it with the request still being logged.
 	vars map[string]any
 	log  *slog.Logger
+	// clientPlaceholders keeps the triggering client's replacer on the
+	// forwarded request (the behavior before v1.1; 08 §6).
+	clientPlaceholders bool
 }
 
 // errNextFailed is what the engine and handle_errors see when next fails.
@@ -32,10 +35,12 @@ type nextOrigin struct {
 // and Caddy internals that {http.error.message} would show to clients.
 var errNextFailed = errors.New("weir: next handler failed")
 
-func newNextOrigin(next caddyhttp.Handler, base *http.Request, log *slog.Logger) nextOrigin {
-	o := nextOrigin{next: next, base: base, log: log}
+func newNextOrigin(next caddyhttp.Handler, base *http.Request, log *slog.Logger, clientPlaceholders bool) nextOrigin {
+	o := nextOrigin{next: next, base: base, log: log, clientPlaceholders: clientPlaceholders}
 	if v, ok := base.Context().Value(caddyhttp.VarsCtxKey).(map[string]any); ok {
 		o.vars = maps.Clone(v)
+	} else if !clientPlaceholders {
+		o.vars = map[string]any{} // the new replacer's start_time needs a table of its own
 	}
 	return o
 }
@@ -58,6 +63,13 @@ func (o nextOrigin) serve(w http.ResponseWriter, hr *http.Request) {
 	if o.vars != nil {
 		ctx = context.WithValue(ctx, caddyhttp.VarsCtxKey, o.vars)
 	}
+	if !o.clientPlaceholders {
+		// T-45: {http.request.orig_uri} must not show the handlers behind
+		// weir a query parameter the key dropped.
+		u := *hr.URL
+		ctx = context.WithValue(ctx, caddyhttp.OriginalRequestCtxKey,
+			http.Request{Method: hr.Method, URL: &u, RequestURI: hr.RequestURI, RemoteAddr: o.base.RemoteAddr})
+	}
 	// Clone also keeps RemoteAddr (08 §6 warns about X-Forwarded-For) and
 	// unexported path-value state, which is harmless under Caddy.
 	r := o.base.Clone(ctx)
@@ -68,6 +80,18 @@ func (o nextOrigin) serve(w http.ResponseWriter, hr *http.Request) {
 	r.Form, r.PostForm, r.MultipartForm, r.Trailer, r.TransferEncoding = nil, nil, nil, nil, nil
 	// The client's body rewinder and cancel hook must not outlive the swap (INV-1).
 	r.GetBody, r.Close, r.Pattern, r.Response = nil, false, "", nil
+	if !o.clientPlaceholders {
+		// T-4, T-45, INV-1: the replacer in ctx is bound to the triggering
+		// client's request, so a placeholder behind weir would read that
+		// client's headers, cookies and URI, the unkeyed ones included, and
+		// what it wrote into a cacheable fetch would be stored for everyone.
+		// The forwarded request gets a replacer of its own, bound to itself.
+		// NewTestReplacer is the one exported way to bind one without
+		// PrepareRequest, which would also reset Caddy's route groups and let
+		// a second handle block of the same group run. Its start_time write
+		// lands in o.vars, the fetch's private table.
+		caddyhttp.NewTestReplacer(r)
+	}
 	err := o.next.ServeHTTP(w, r)
 	if err == nil {
 		return
