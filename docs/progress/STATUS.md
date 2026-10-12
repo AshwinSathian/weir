@@ -1,16 +1,17 @@
 # Status
 
-Updated: 2026-10-12
-Phase: released (v1.0.0, 2026-10-12)
+Updated: 2026-10-13
+Phase: released (v1.0.1, 2026-10-12)
 Current card: none
 Card state: ready
 Branch: main
-PR: 119 (site and README sync, v1.0.1 changelog section), after 118
+PR: the v1.0.1 wrap-up (site and CI at v1.0.1, `site/go.mod`, branch rules)
 Next card: none (all cards done; M16-02 deferred)
 
 ## Waiting on Ashwin
 
-- `v1.0.1` (documentation release, so pkg.go.dev shows the current README). Merge PR 119; `main` is then the commit to tag. The release session tags all four modules from a new `release/v1.0.1` branch in its own worktree (docs/release.md steps 2 to 7), runs `make release-smoke VERSION=v1.0.1` and publishes the GitHub release. Nothing may ask the module proxy for `v1.0.1` before the tags are pushed (docs/release.md step 4), which is why `site/data/release.ts` and `WEIR_VERSION` in ci.yml still say `v1.0.0` here. After the tags, the site session opens the PR from `claude/v1.0.1-post-release` (both bumps) and redeploys the site.
+- `v1.0.1` is tagged for all four modules and published (docs/release.md, release log). Merge the wrap-up PR, which moves the site and the `caddy-published` CI job to it and adds `site/go.mod` and the branch-rule documents. Then redeploy the site: `make site-deploy BRANCH=main` (the site session that prepared this has ended, and nothing deploys on merge).
+- `main` and `release/*` are protected by rulesets since 2026-10-13 (docs/release.md, Branch rules). PR 120 (Dependabot, TypeScript 7 in `site/`) is open; the site session advised reviewing it as a major bump.
 - The site is live at https://weir.ashwinsathian.com (Pages project `weir-site`, direct upload; nothing deploys on merge). The About page (`site/content/pages/about.md`) is drafted in your voice and still wants your edit.
 
 - `v1.0.0` is tagged for all four modules and published (docs/release.md, rehearsal log).

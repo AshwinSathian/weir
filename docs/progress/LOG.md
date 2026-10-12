@@ -1987,3 +1987,12 @@ Entry template:
 - Deviations: none. docs/06, docs/10 and the runbook's 7.9 text are PR 118's; this branch only changed the runbook's install line.
 - Follow-ups: the release session tags `v1.0.1` after the merge; then the post-release branch `claude/v1.0.1-post-release` and a site deploy (STATUS). No job or command asks the proxy for `v1.0.1` before the tags. If the tag is not cut on 2026-10-12, change the date in the CHANGELOG heading first.
 - Context: high
+
+## 2026-10-13 · release-v1.0.1 · done
+- Branch / PR: release/v1.0.1 (tags) and claude/v1.0.1-wrapup / see the PR list
+- Done: `v1.0.1` tagged on `main` at `04698f1`, `observe/prom/v1.0.1` and `store/valkey/v1.0.1` on `81cf674`, `caddy/v1.0.1` on `b72b6bb`; GitHub release published. A documentation release: the Go changes since `v1.0.0` are two tests and a doc comment. This PR carries the site session's prepared commit (site `VERSION` and CI `WEIR_VERSION` to v1.0.1; that session had ended) and adds `site/go.mod`, which takes `site/` out of the root module zip from the next release, and the documents for the two GitHub rulesets Ashwin asked for (`protect-main`, `protect-release-branches`), created on 2026-10-13.
+- Tests: none added. Narrowed release-gate, `ci` and `site` green on `04698f1`; `make release-check`, `GOWORK=off` race tests and `make release-smoke VERSION=v1.0.1` pass; module zips built locally before and after `site/go.mod` (root 1 205 753 to 1 041 761 bytes).
+- Deviations: CLAUDE.md no longer allows direct commits to `main` (the ruleset refuses them). docs/release.md has a "Branch rules" section and a wait after each tag push.
+- Incident: `release-smoke` ran seconds after the `caddy` tag push and the proxy cached a not-found for 30 minutes. No bad commit or tag.
+- Follow-ups: redeploy the site after the merge; PR 120; v1.1 list in STATUS.
+- Context: high

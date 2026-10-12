@@ -7,5 +7,9 @@ updates:
       interval: weekly
     open-pull-requests-limit: 5
     groups:
+      # Minor and patch updates arrive together. A major version gets its own
+      # pull request, so it is reviewed as the breaking change it may be
+      # (PR 120 put TypeScript 5 to 7 in the catch-all group).
       site:
         patterns: ["*"]
+        update-types: [minor, patch]

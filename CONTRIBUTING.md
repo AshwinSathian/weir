@@ -42,6 +42,8 @@ Changes under `internal/keys`, the storability rules, forwarding or `store/codec
 
 Conventional Commits with the milestone or area as scope: `fix(m4): release the slot when the flight is aged`. The body says what changed and why, in plain sentences, with the requirement IDs covered. One logical change per pull request; the template asks for the rest.
 
+`main` accepts changes only through a pull request with a green `check` job, and neither `main` nor a `release/*` branch can be force-pushed or deleted. The maintainer merges.
+
 ## Documentation and the website
 
 The site in [site/](site/) is built from this repository. Tables for configuration, threats, conformance, benchmarks and errors are read from `docs/` and the Go source at build time, so fix a fact in its source document and the site follows. Hand-written pages are Markdown under `site/content/`. `make site-check` lints style (no em dashes, plain words, one bold phrase per section) and fails when a measured number in the copy has no entry in `site/content/claims.md`.
