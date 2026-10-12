@@ -5,7 +5,7 @@ Phase: v1.1.0 in review (released: v1.0.1, 2026-10-12)
 Current card: none
 Card state: awaiting-merge
 Branch: card/HRD-01-hardening
-PR: PR_URL
+PR: https://github.com/AshwinSathian/weir/pull/122
 Next card: HRD-18 (release v1.1.0), after the pull request is merged
 
 ## Waiting on Ashwin
