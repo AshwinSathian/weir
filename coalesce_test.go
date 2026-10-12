@@ -865,3 +865,49 @@ func TestFollowerFallsBackAfterFlightDeadline(t *testing.T) {
 		<-lead
 	})
 }
+
+// missOnce hides the record of the next Get, as a lookup that ran just
+// before another request's flight stored its response sees the store.
+type missOnce struct {
+	store.Store
+	armed atomic.Bool
+}
+
+func (s *missOnce) Get(ctx context.Context, k store.Key) (*store.Entry, error) {
+	if s.armed.CompareAndSwap(true, false) {
+		return nil, store.ErrNotFound
+	}
+	return s.Store.Get(ctx, k)
+}
+
+// FR-COA-1: a request whose lookup missed just before another request's
+// flight stored the response, and that then finds no flight to join, does not
+// fetch again. Creating the flight, it looks once more and serves the entry.
+// Before v1.1 this window cost a second origin call (BenchmarkServeMissCoalesced
+// read 1.003 calls per key, and more as the path between lookup and join grew).
+func TestCreatorFindsEntryStoredMeanwhile(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		m, err := memory.New(memory.Config{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer m.Close()
+		st := &missOnce{Store: m}
+		cfg := cacheCfg
+		cfg.Store = st
+		e := newEngine(t, cfg)
+		defer closeEngine(t, e)
+		o := testorigin.NewChecked(t, 1, 1)
+		o.Default(testorigin.Behavior{Header: http.Header{"Cache-Control": {"max-age=60"}}, Body: []byte("v")})
+
+		serve(t, e, getReq("/a"), o)
+		st.armed.Store(true) // the next lookup misses although the entry is stored
+		resp, body := serve(t, e, getReq("/a"), o)
+		if n := o.TotalCalls(); n != 1 || body != "v" || !resp.Cache.Hit {
+			t.Fatalf("origin calls %d, body %q, cache %+v; want the stored entry served as a hit after one call", n, body, resp.Cache)
+		}
+		if n := weir.Flights(e); n != 0 {
+			t.Fatalf("%d flights left in the table", n)
+		}
+	})
+}

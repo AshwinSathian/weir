@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/AshwinSathian/weir/internal/coalesce"
+	"github.com/AshwinSathian/weir/internal/httpcc"
 	"github.com/AshwinSathian/weir/internal/keys"
 	"github.com/AshwinSathian/weir/internal/limiter"
 	"github.com/AshwinSathian/weir/store"
@@ -50,6 +51,29 @@ type flightResult struct {
 	entry       *store.Entry // the storable entry followers share; nil when not shareable
 	vk          store.Key    // the variant key entry answers (Primary without Vary)
 	errHeader   http.Header  // a buffered 5xx's header, which followers copy (04 §6.6)
+	// fromStore: no fetch ran. The flight's creator found entry stored by
+	// the flight before it (storedMeanwhile), and every waiter serves it as
+	// a hit.
+	fromStore bool
+}
+
+// storedMeanwhile looks the request's key up once more, for a request that
+// has just created a flight, and returns the entry when a fetch that ended
+// in between stored a fresh one under the same key. It answers no when the
+// client asked for validation, when the store is remote, and when the key the
+// record lives under has changed (a vary spec appeared): those go on to the
+// fetch as before.
+func (e *Engine) storedMeanwhile(ctx context.Context, sp *fetchSpec) (ent *store.Entry, ttl time.Duration, ok bool) {
+	if e.sg.remote || sp.lk.fwd == FwdRequest {
+		return nil, 0, false
+	}
+	now := time.Now()
+	lk := e.lookup(ctx, sp.c, now)
+	if lk.entry == nil || lk.ck != sp.lk.ck || sameRecord(lk.entry, sp.found) {
+		return nil, 0, false
+	}
+	st, staleness, _ := httpcc.Evaluate(lk.entry, lk.epoch, lk.epochOK, now)
+	return lk.entry, -staleness, st == httpcc.Fresh
 }
 
 // live reports whether resp.Body still streams from the origin, so exactly
@@ -70,6 +94,16 @@ func (e *Engine) fetchCoalesced(ctx context.Context, sp *fetchSpec, origin Origi
 		return sharedError{err}
 	}
 	if created {
+		// FR-COA-1: between this request's lookup and its Join, the flight
+		// it would have joined may have stored its response and gone. One
+		// more look at the store, now that this request owns the key's
+		// flight, turns that second fetch into a hit for it and for
+		// whoever joins meanwhile. An in-process store only: there the read
+		// costs nothing next to a fetch.
+		if ent, ttl, ok := e.storedMeanwhile(ctx, sp); ok {
+			f.Publish(&flightResult{entry: ent, vk: sp.lk.ck, fromStore: true})
+			return e.fromEntry(c, ent, time.Now(), CacheInfo{Hit: true, TTL: ttl}), nil
+		}
 		if !e.goBackground(func(bg context.Context) { e.runFlight(bg, ctx, f, sp, origin) }) {
 			f.Publish(&flightResult{fetchResult: fetchResult{err: ErrClosed}})
 		}
@@ -145,6 +179,11 @@ func (e *Engine) fetchCoalesced(ctx context.Context, sp *fetchSpec, origin Origi
 	// FR-KEY-7: a follower shares the entry only when its own forwarded
 	// request selects the same variant.
 	if fr.entry != nil && keys.VariantKey(c.Primary, fr.entry.VaryNames, c.Forwarded.Header) == fr.vk {
+		if fr.fromStore { // the flight found the entry already stored: a hit, nothing was forwarded
+			now := time.Now()
+			_, staleness, _ := httpcc.Evaluate(fr.entry, store.Epoch{}, false, now)
+			return e.fromEntry(c, fr.entry, now, CacheInfo{Hit: true, TTL: -staleness}), nil
+		}
 		return e.fromEntry(c, fr.entry, time.Now(),
 			CacheInfo{Fwd: sp.lk.fwd, FwdStatus: fr.ci.FwdStatus, Stored: fr.ci.Stored, Collapsed: true}), nil
 	}
