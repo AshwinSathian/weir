@@ -1,6 +1,6 @@
 # Weir benchmarks
 
-Updated: 2026-10-11
+Updated: 2026-10-12
 
 Benchmark results per milestone, so each milestone review can compare against the previous one with `benchstat` ([07 §10](07-testing-strategy.md)). NFR-5 budgets apply from M10; until then these numbers are a baseline, not a gate.
 
@@ -243,3 +243,29 @@ The optimized hit path is about 4% faster than M1 and 23% faster than M10 on the
 The gain is smaller on the M4 Pro than on the Xeon (-30% there against M10-to-branch -23% here, relative to the release candidate), as expected: SHA-256 is cheaper with the ARM instructions, so the two tags no longer hashed per hit saved less.
 
 **New baseline.** The 20% regression rule is measured from this run, a median of about 0.83 µs. NFR-5 sets the ns/op ceiling at 1.5 times that, 1.25 µs (docs/01), replacing the 1.9 µs derived from the first, noisier reference run. The first reference run above stays as the record of the release candidate.
+
+## Hardening after v1.0.0-rc.1 (2026-10-12)
+
+The changes that followed the `v1.0.0-rc.1` rehearsal (stable `QuerySort` by name, the `Cache-Control` and `Pragma` filter on the forward, `Range` ignored beside `If-Match`, per-field overhead in `Entry.Size`, the Valkey record limit, the wasm build) measured on the reference machine with Go 1.27.2. The machine was not idle (an editor and one agent session), so read the load figures as pass or fail and the benchstat lines as the comparison. Raw output: [benchmarks/hardening-2026-10-12.txt](benchmarks/hardening-2026-10-12.txt).
+
+### Benchmarks (`benchstat`, `main` at `3f7eefa` against the branch, 10 interleaved runs)
+
+| Benchmark | main | branch | change | B/op | allocs/op |
+|---|---:|---:|---|---:|---:|
+| `BenchmarkServeHitSmall` | 838.6 ns ± 1% | 852.2 ns ± 1% | +1.6% (p=0.001) | 1 536 | 12 |
+| `BenchmarkKeyBuild` | 775.2 ns ± 1% | 792.3 ns ± 1% | +2.2% (p<0.001) | 512 | 8 |
+
+The cost is the directive filter, two map reads on the forwarded header for every request. Allocations and bytes are unchanged. 852 ns is 3% above the 0.83 µs baseline, inside the 20% rule and the 1.25 µs ceiling of NFR-5.
+
+### Load scenarios (`make load`, scale 1, 472 s)
+
+| Scenario | Measured | Threshold | Result |
+|---|---|---|---|
+| steady hits | 34.7 M requests, 578 k/s achieved (target 584 k/s), hit ratio 1.0000, p50 1.5 µs, p99 7.7 to 11.3 µs in each of six windows, 0 origin calls after warm | ratio > 99%, median-window p99 < 200 µs | pass |
+| synchronized expiry | 10 000 keys stored in 1.7 s, all 10 000 refetched, origin peak in-flight 32, busiest second 1 455 origin calls, 0 client errors | refetch ≥ 90%, in-flight ≤ 32, ≤ 2 000 calls/s | pass |
+| busting flood plus normal | 99 976 flood requests (70 784 shed), flood in-flight peak 8, normal offered 499/s with 0 drops, normal p99 53.2 µs alone and 36.9 µs under flood | in-flight ≤ 8, p99 within 20% (50 µs floor) | pass |
+| origin brownout (×20) | 16 breaker open events, ended closed, 55 054 stale responses, every request 2xx before, during and after, peak 41 goroutines | breaker per config, stale served, no goroutine growth | pass |
+| store flap (50%) | 11.2 M requests, 0 client errors, slowest request 49.2 ms (bound 207.5 ms), store breaker 16 open / 10 closed | bounded latency, breaker cycles | pass |
+
+`TestGCAt1MEntries` passed: 0.93 µs of GC per request at 1M entries (1.08 µs in the first reference run, gate 2 µs), GC share 6.4% runtime-reported and 8.9% projected. Live heap after the fill is 2 099 MiB for 1M entries, the same as in the first reference run.
+

@@ -74,6 +74,15 @@ func newStore(cfg Config, dial dialFunc) (*Store, error) {
 	return &Store{cfg: cfg, dial: dial, ekeys: epochKeys(cfg.Prefix, cfg.HashTag), eprfx: eprfx, closing: make(chan struct{})}, nil
 }
 
+// Bytes returns -1: the server holds the records, and the store does not
+// track their total. With MaxObjectBytes it makes *Store a store.Sizer.
+func (s *Store) Bytes() int64 { return -1 }
+
+// MaxObjectBytes returns the largest record the store accepts
+// (Config.MaxObjectBytes), which weir.New checks Storable.MaxObjectBytes
+// against (FR-LCY-1).
+func (s *Store) MaxObjectBytes() int64 { return s.cfg.MaxObjectBytes }
+
 // Info reports a remote store, so the engine applies Timeouts.Store and the
 // store breaker.
 func (s *Store) Info() store.Info { return store.Info{Name: "valkey", Remote: true} }

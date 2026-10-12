@@ -1,0 +1,127 @@
+# Hardening after v1.0.0-rc.1, Apple M4 Pro, 12 cores, go1.27.2 darwin/arm64, 2026-10-12
+# benchstat: main (3f7eefa) against the hardening branch, 10 interleaved runs each
+goos: darwin
+goarch: arm64
+pkg: github.com/AshwinSathian/weir
+cpu: Apple M4 Pro
+                 │   old.txt   │              new.txt               │
+                 │   sec/op    │   sec/op     vs base               │
+ServeHitSmall-12   838.6n ± 1%   852.2n ± 1%  +1.62% (p=0.001 n=10)
+
+                 │   old.txt    │             new.txt              │
+                 │     B/op     │     B/op      vs base            │
+ServeHitSmall-12   1.500Ki ± 0%   1.500Ki ± 0%  ~ (p=1.000 n=10) ¹
+¹ all samples are equal
+
+                 │  old.txt   │            new.txt             │
+                 │ allocs/op  │ allocs/op   vs base            │
+ServeHitSmall-12   12.00 ± 0%   12.00 ± 0%  ~ (p=1.000 n=10) ¹
+¹ all samples are equal
+
+pkg: github.com/AshwinSathian/weir/internal/keys
+            │   old.txt   │              new.txt               │
+            │   sec/op    │   sec/op     vs base               │
+KeyBuild-12   775.2n ± 1%   792.3n ± 1%  +2.21% (p=0.000 n=10)
+
+            │  old.txt   │            new.txt             │
+            │    B/op    │    B/op     vs base            │
+KeyBuild-12   512.0 ± 0%   512.0 ± 0%  ~ (p=1.000 n=10) ¹
+¹ all samples are equal
+
+            │  old.txt   │            new.txt             │
+            │ allocs/op  │ allocs/op   vs base            │
+KeyBuild-12   8.000 ± 0%   8.000 ± 0%  ~ (p=1.000 n=10) ¹
+¹ all samples are equal
+
+# make load, scale 1
+go test -tags load -count=1 -timeout 15m -v ./loadtest/
+=== RUN   TestGCAt1MEntries
+    gc_test.go:213: 
+        gc at scale (scale 1, 12 CPU, go1.27.2)
+          entries (small / large)            10000 / 1000000
+          heap in use / live after fill      30 / 25 MiB / 2442 / 2099 MiB
+          hit ratio (paced)                  1.0000 / 1.0000
+          GC CPU per forced cycle            9.79 ms (5 cycles, every 5s) / 1190.61 ms (5 cycles, every 5s)
+          paced 20000/s p50                  4.608µs / 7.68µs
+          paced p99 with forced cycles       32.768µs / 36.864µs
+          paced max                          3.078708ms / 8.339958ms
+          saturated requests                 74626695 / 70150219
+          saturated alloc per request        1712.15 B / 1719.92 B
+          saturated non-GC CPU per request   9.27 µs / 9.54 µs
+          saturated natural cycles in window 4754 / 56
+          saturated GC share, runtime-reported 3.36% / 6.38%
+          saturated GC µs per request        0.63 µs / 0.93 µs
+          saturated GC share, projected      6.38% / 8.89%
+        
+--- PASS: TestGCAt1MEntries (182.65s)
+=== RUN   TestSteadyHits
+    scenarios_test.go:88: 
+        steady hits (scale 1, 12 CPU, go1.27.2)
+          requests                           34673850
+          paced target (50% of saturated)    583512
+          achieved rate                      577889
+          hit ratio                          1.0000
+          p50                                1.536µs
+          p99 per window                     [7.68µs 8.192µs 9.216µs 8.192µs 8.192µs 11.264µs]
+          p99 median window                  8.192µs
+          p99 overall                        8.192µs
+          max                                7.510041ms
+          origin calls after warm            0
+        
+--- PASS: TestSteadyHits (75.20s)
+=== RUN   TestSynchronizedExpiry
+    scenarios_test.go:139: 
+        synchronized expiry (scale 1, 12 CPU, go1.27.2)
+          keys                               10000
+          max-age                            1m0s
+          storing phase                      1.72s
+          elapsed                            1m20s
+          origin peak in-flight              32
+          origin peak calls/s                1455
+          limit calls/s (20%)                2000
+          refetched after storing            10000
+          client errors                      0
+          peak queue                         0
+        
+--- PASS: TestSynchronizedExpiry (81.94s)
+=== RUN   TestBustingFloodWithNormalTraffic
+    scenarios_test.go:210: 
+        busting flood plus normal traffic (scale 1, 12 CPU, go1.27.2)
+          normal p99 alone                   53.248µs
+          normal p99 under flood             36.864µs
+          normal p50 alone / flood           11.264µs / 6.656µs
+          normal hit ratio under flood       1.0000
+          flood requests / shed errors       99976 / 70784
+          flood client drops                 0
+          normal offered (target ~500/s)     499/s, drops 0
+          flood peak in-flight               8
+          MaxPerPartition                    8
+        
+--- PASS: TestBustingFloodWithNormalTraffic (41.56s)
+=== RUN   TestOriginBrownout
+    scenarios_test.go:275: 
+        origin brownout (x20 latency) (scale 1, 12 CPU, go1.27.2)
+          2xx / total before                 12063 / 12063
+          2xx / total during                 58551 / 58551
+          2xx / total after                  20052 / 20052
+          stale served during                55054
+          client errors during               0
+          breaker open events                16
+          breaker state at end               closed
+          peak goroutines                    41
+          origin shed events                 0
+        
+--- PASS: TestOriginBrownout (47.42s)
+=== RUN   TestStoreFlap
+    scenarios_test.go:385: 
+        store flap (50% failing) (scale 1, 12 CPU, go1.27.2)
+          requests                           11230461
+          client errors                      0
+          slowest request                    49.176333ms
+          bound                              207.485219ms
+          store breaker open / closed        16 / 10
+          store errors                       602
+        
+--- PASS: TestStoreFlap (43.21s)
+PASS
+ok  	github.com/AshwinSathian/weir/loadtest	472.408s

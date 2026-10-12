@@ -86,6 +86,9 @@ func forwardHeader(h http.Header, c *Config, cookies []Cookie, dims []Dim) (out 
 	}
 	setVariantHeader(out, c.ExpHeader, dims)
 	filterTrace(out, c.NoTraceHeaders)
+	if !c.ForwardAll {
+		filterDirectives(out, c.Headers)
+	}
 	for _, name := range c.Allow {
 		// T-31: an Allow field reaches the origin unkeyed. Cookie goes
 		// keyed-only, and Accept-Encoding goes as the bucket every request
@@ -93,9 +96,10 @@ func forwardHeader(h http.Header, c *Config, cookies []Cookie, dims []Dim) (out 
 		keyed := name == "Cookie" || name == "Accept-Encoding" || slices.Contains(defaultForward, name)
 		unkeyed = unkeyed || !keyed && len(out[name]) > 0
 	}
-	// T-31: the cache directives go as the client sent them, any length and
-	// any bytes, so an origin or WAF that rejects one must not fail the key
-	// for everyone. Keyed, they went in normal form and split the key.
+	// T-31: the cache directives go as the client sent them once
+	// filterDirectives has bounded their bytes and length, so an origin or
+	// WAF that rejects one must not fail the key for everyone. Keyed, they
+	// went in normal form and split the key.
 	for _, name := range [...]string{"Cache-Control", "Pragma"} {
 		unkeyed = unkeyed || len(out[name]) > 0 && !slices.Contains(c.Headers, name)
 	}
@@ -180,6 +184,48 @@ func filterTrace(h http.Header, none bool) {
 	if id := h["X-Request-Id"]; none || len(id) > 0 && (len(id) != 1 || len(id[0]) > 128 || !allTraceBytes(id)) {
 		delete(h, "X-Request-Id")
 	}
+}
+
+// Bounds on an unkeyed Cache-Control or Pragma field (FR-FWD-1). Every
+// request directive RFC 9111 §5.2.1 defines fits many times over.
+const (
+	maxDirectiveBytes = 256
+	maxDirectiveLines = 8
+)
+
+// filterDirectives drops an unkeyed Cache-Control or Pragma field that is
+// not a plain directive list (FR-FWD-1, T-1). Both reach the origin outside
+// the key, and the response is stored for everyone, so neither may carry a
+// payload an origin could reflect or an amount a server would reject: at
+// most 8 lines and 256 bytes together, no empty line, and only letters,
+// digits, "-", "_", "=", "," and space. A quoted argument is legal HTTP but
+// no request directive needs one; the cost is that one field for that one
+// request. The engine has already read the directives from the client's
+// own header, so a dropped no-store still keeps the response out of the cache.
+func filterDirectives(h http.Header, keyed []string) {
+	for _, name := range [...]string{"Cache-Control", "Pragma"} {
+		if v := h[name]; len(v) > 0 && !slices.Contains(keyed, name) && !plainDirectives(v) {
+			delete(h, name)
+		}
+	}
+}
+
+func plainDirectives(lines []string) bool {
+	if len(lines) > maxDirectiveLines || combinedLen(lines) > maxDirectiveBytes {
+		return false
+	}
+	for _, l := range lines {
+		if l == "" {
+			return false
+		}
+		for i := 0; i < len(l); i++ {
+			c := l[i]
+			if ('a' > c || c > 'z') && ('A' > c || c > 'Z') && ('0' > c || c > '9') && strings.IndexByte("-_=, ", c) < 0 {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // allTraceBytes reports whether every line is non-empty, holds only

@@ -30,7 +30,10 @@ func TestRewriteQuery(t *testing.T) {
 		{"everything dropped leaves empty", drop, "utm_a=1&fbclid=2", ""},
 		{"keep removes non-matching", keep, "id=1&x=2&page_size=3&pagex", "id=1&page_size=3&pagex"},
 		{"keep matches exact only without star", keep, "idx=1", ""},
-		{"sort orders raw bytes", sorted, "b=2&a=2&a=1&B=0", "B=0&a=1&a=2&b=2"},
+		{"sort orders names by raw bytes", sorted, "b=2&a=1&c&B=0", "B=0&a=1&b=2&c"},
+		{"sort keeps the value order of a repeated name", sorted, "b=2&a=2&a=1&B=0", "B=0&a=2&a=1&b=2"},
+		{"sort treats a bare name and an empty value as one name", sorted, "b&a=&a&a=0", "a=&a&a=0&b"},
+		{"sort compares names, not segments", sorted, "a-=1&a=2", "a=2&a-=1"},
 		{"sort keeps duplicates", sorted, "a=1&a=1", "a=1&a=1"},
 		{"values are not decoded", &Config{QuerySort: true}, "a=%2F&a=/", "a=%2F&a=/"},
 	}
@@ -67,6 +70,7 @@ func FuzzQueryRewrite(f *testing.F) {
 	// FR-KEY-5, NFR-2; T-2: no panic, every output segment is an input
 	// segment, no dropped name survives, and rewriting is idempotent.
 	f.Add("a=1;b=2&utm_x=3", false, false)
+	f.Add("b=2&a=2&a=1&a&a=&b=1", false, true)
 	f.Fuzz(func(t *testing.T, raw string, useKeep, sort bool) {
 		c := &Config{QueryDrop: []string{"utm_*", "fbclid"}, QuerySort: sort}
 		if useKeep {
@@ -105,8 +109,26 @@ func FuzzQueryRewrite(f *testing.F) {
 				t.Fatalf("rewriteQuery(%q) = %q: kept %q", raw, got, s)
 			}
 		}
-		if sort && !slices.IsSorted(out) {
-			t.Fatalf("rewriteQuery(%q) = %q: not sorted", raw, got)
+		if sort {
+			// Names ascend, and the segments of one name keep the order
+			// they had in the input.
+			if !slices.IsSortedFunc(out, cmpSegmentName) {
+				t.Fatalf("rewriteQuery(%q) = %q: names not sorted", raw, got)
+			}
+			for i, s := range out {
+				name, _, _ := strings.Cut(s, "=")
+				same := func(x string) bool { n, _, _ := strings.Cut(x, "="); return n == name && !dropped(n) && x != "" }
+				var want []string
+				for _, x := range in {
+					if same(x) {
+						want = append(want, x)
+					}
+				}
+				first := slices.IndexFunc(out, same)
+				if w := want[i-first]; w != s {
+					t.Fatalf("rewriteQuery(%q) = %q: %q moved ahead of %q", raw, got, s, w)
+				}
+			}
 		}
 		if again := rewriteQuery(got, c); again != got {
 			t.Fatalf("not idempotent: %q -> %q -> %q", raw, got, again)

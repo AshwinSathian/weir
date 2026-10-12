@@ -55,6 +55,14 @@ type Config struct {
 	// HardEpochWait, when non-zero, issues WAIT 1 <ms> after a hard epoch
 	// write (0, off).
 	HardEpochWait time.Duration
+	// MaxObjectBytes is the largest record the store writes or reads, in
+	// encoded bytes (64 MiB; 64 KiB to 256 MiB). Set declines a larger
+	// record and Get treats a larger value as a miss without receiving it,
+	// so a value another writer planted costs at most this much memory per
+	// lookup (T-21). weir.New rejects a Storable.MaxObjectBytes above it.
+	// Stores that share a Prefix should use the same value: a node with a
+	// smaller one never sees the larger records of the others.
+	MaxObjectBytes int64
 	// SkipPolicyCheck skips the maxmemory-policy check on connect, for
 	// managed services that disable CONFIG (false). The operator then owns
 	// the guarantee that epoch keys are never evicted.
@@ -68,6 +76,12 @@ const (
 	defaultMaxClockSkew  = time.Second
 	defaultMaxHardEpochs = 10000
 	defaultCallTimeout   = 5 * time.Second
+	// defaultMaxObjectBytes is 64 times the engine's default object limit.
+	// The ceiling stays under Valkey's own 512 MiB string limit with room
+	// for the one extra byte getEntry asks for.
+	defaultMaxObjectBytes = 64 << 20
+	minMaxObjectBytes     = 64 << 10
+	maxMaxObjectBytes     = 256 << 20
 
 	// Upper bounds: the prune margin MaxRetention + MaxClockSkew + 1s must
 	// not overflow, and every table has a stated bound (P5, NFR-3).
@@ -115,6 +129,9 @@ func (c Config) Validate() (Config, error) {
 	if c.CallTimeout == 0 {
 		c.CallTimeout = defaultCallTimeout
 	}
+	if c.MaxObjectBytes == 0 {
+		c.MaxObjectBytes = defaultMaxObjectBytes
+	}
 	if c.HardEpochWait >= c.CallTimeout && c.HardEpochWait != 0 {
 		return Config{}, cfgErr("HardEpochWait must be shorter than CallTimeout")
 	}
@@ -138,6 +155,9 @@ func (c Config) check() error {
 		if slices.Contains(c.Addrs[:i], a) {
 			return cfgErr("duplicate address %q", a)
 		}
+	}
+	if c.MaxObjectBytes != 0 && (c.MaxObjectBytes < minMaxObjectBytes || c.MaxObjectBytes > maxMaxObjectBytes) {
+		return cfgErr("MaxObjectBytes %d must be between %d and %d", c.MaxObjectBytes, minMaxObjectBytes, maxMaxObjectBytes)
 	}
 	for _, p := range []struct{ name, v string }{{"Prefix", c.Prefix}, {"HashTag", c.HashTag}} {
 		if p.v != "" && !keyPartOK(p.v) {
@@ -219,7 +239,7 @@ func (c Config) String() string {
 	}
 	fmt.Fprintf(&b, " Cluster:%t Prefix:%q HashTag:%q CoLocateEntries:%t", c.Cluster, c.Prefix, c.HashTag, c.CoLocateEntries)
 	fmt.Fprintf(&b, " MaxRetention:%v MaxClockSkew:%v NoClockSkew:%t MaxHardEpochs:%d", c.MaxRetention, c.MaxClockSkew, c.NoClockSkew, c.MaxHardEpochs)
-	fmt.Fprintf(&b, " CallTimeout:%v HardEpochWait:%v SkipPolicyCheck:%t}", c.CallTimeout, c.HardEpochWait, c.SkipPolicyCheck)
+	fmt.Fprintf(&b, " CallTimeout:%v HardEpochWait:%v MaxObjectBytes:%d SkipPolicyCheck:%t}", c.CallTimeout, c.HardEpochWait, c.MaxObjectBytes, c.SkipPolicyCheck)
 	return b.String()
 }
 

@@ -4,16 +4,16 @@ Updated: 2026-10-12
 Phase: release
 Current card: none
 Card state: awaiting-merge
-Branch: claude/rc1-rehearsal-fixes (rc.1 rehearsal findings)
+Branch: claude/v1-hardening (stacked on claude/rc1-rehearsal-fixes, PR 110)
 PR: see the PR list
 Next card: none (all cards done; M16-02 deferred)
 
 ## Waiting on Ashwin
 
-- Merge the rehearsal PR. Then choose: go straight to `v1.0.0`, or rehearse the corrected procedure once more as `v1.0.0-rc.3` for all four modules (`caddy/v1.0.0-rc.2` is taken). The rc.1 code is sound; only the procedure and docs changed, so rc.3 is optional.
-- Before the real tag: one full `release-gate` run on the final `main` commit (it now uses Go 1.27.2 or later; the last green run was `92a1e56` on 1.27.0), and `make load` on the reference machine if benchmarks.md should carry a 1.27.2 run.
-- After the `v1.0.0` tags: set `WEIR_VERSION: v1.0.0` in the `caddy-published` CI job, date the CHANGELOG section, publish the GitHub release, delete `release/v1.0.0-rc.1`.
-- Decide whether `js/wasm` and `wasip1/wasm` should build (the snapshot loader's `syscall.O_NONBLOCK` stops them). Documented as a known limit for v1.0.0.
+- Merge the hardening PR (it contains PR 110's commit; merging it alone is enough, or merge 110 first). A session cannot merge: the permission layer refused `gh pr merge`.
+- Then, on the merged `main` commit, in this order: full `release-gate` run (Go code changed in `internal/keys`, `store`, `store/memory`, `store/valkey` and the root package, so the gate of 2026-10-12 no longer covers it); `v1.0.0-rc.3` for all four modules by the corrected procedure in docs/release.md (`caddy/v1.0.0-rc.2` is taken); set `WEIR_VERSION: v1.0.0-rc.3` in the `caddy-published` CI job.
+- Review the five behavior changes in the hardening PR; each changes a requirement or a public contract (FR-KEY-5, FR-FWD-1, new FR-RNG-6, `Entry.Size`, new `valkey.Config.MaxObjectBytes`). Say so if one should be reverted before rc.3.
+- After the `v1.0.0` tags: `WEIR_VERSION: v1.0.0`, date the CHANGELOG section, publish the GitHub release, delete the rc branches.
 - Confirm the decisions taken for you: D24 amended, D43 added, README Stability promises, signing key caps, `servableStatus` miss.
 
 - Decide on the review follow-ups listed in the last LOG entry (If-Match handling, unkeyed Pragma/Cache-Control storage, QuerySort order, Entry.Size accounting, Valkey record size limit).

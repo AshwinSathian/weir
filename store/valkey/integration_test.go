@@ -3,8 +3,10 @@
 package valkey
 
 import (
+	"errors"
 	"os"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -76,5 +78,44 @@ func TestSetTTLIsClamped(t *testing.T) {
 	}
 	if ttl <= 0 || ttl > time.Hour.Milliseconds() {
 		t.Fatalf("PTTL = %d ms, want in (0, %d]", ttl, time.Hour.Milliseconds())
+	}
+}
+
+// T-21, 05 §7: against a real server, a value another writer planted above
+// MaxObjectBytes is a miss, the next Set replaces it, and an absent key is
+// ErrNotFound although GETRANGE answers "" and not nil for it.
+func TestOversizedValueOnServerIsMiss(t *testing.T) {
+	addr := serverAddr(t)
+	const limit = 64 << 10
+	s, err := New(Config{Addrs: []string{addr}, Prefix: "big" + strconv.FormatInt(time.Now().UnixNano(), 36), MaxObjectBytes: limit})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	var k store.Key
+	if _, err := s.Get(t.Context(), k); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("absent key: %v, want ErrNotFound", err)
+	}
+	cl, err := s.acquire(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := cl.(valkeyClient).c
+	planted := strings.Repeat("x", 4<<20)
+	if err := c.Do(t.Context(), c.B().Set().Key(s.entryKey(k)).Value(planted).Build()).Error(); err != nil {
+		t.Fatal(err)
+	}
+	if raw, err := cl.getEntry(t.Context(), s.entryKey(k), limit); err != nil || len(raw) != limit+1 {
+		t.Fatalf("getEntry returned %d bytes, %v; want %d", len(raw), err, limit+1)
+	}
+	if _, err := s.Get(t.Context(), k); !errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrUnavailable) {
+		t.Fatalf("planted value: %v, want ErrNotFound", err)
+	}
+	now := time.Now()
+	if err := s.Set(t.Context(), k, testEntry(now)); err != nil {
+		t.Fatal(err)
+	}
+	if e, err := s.Get(t.Context(), k); err != nil || string(e.Body) != "hello" {
+		t.Fatalf("after Set over the planted value: %v, %v", e, err)
 	}
 }

@@ -121,7 +121,7 @@ func (s *Store) scrubStep(ctx context.Context, cl client, addr string, cursor ui
 // scrubChunk reads the records at keys and deletes the response records that
 // carry a wanted tag.
 func (s *Store) scrubChunk(ctx context.Context, cl client, keys []string, want map[store.Tag]struct{}) (int, error) {
-	vals, err := cl.getMulti(ctx, keys)
+	vals, err := cl.getMulti(ctx, keys, s.cfg.MaxObjectBytes)
 	if err != nil {
 		return 0, err
 	}
@@ -132,7 +132,7 @@ func (s *Store) scrubChunk(ctx context.Context, cl client, keys []string, want m
 		}
 		// A value that does not decode is not ours to judge: Get already
 		// reports it as ErrUnavailable and the server expires it.
-		e, err := store.Decode(v, maxValueBytes)
+		e, err := store.Decode(v, s.cfg.MaxObjectBytes)
 		if err != nil || e.Kind != store.KindResponse {
 			continue
 		}

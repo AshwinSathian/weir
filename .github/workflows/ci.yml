@@ -32,6 +32,12 @@ jobs:
       # 64-bit until a vet run here caught it.
       - name: vet on 32-bit
         run: GOARCH=386 go vet ./...
+      # The snapshot loader's O_NONBLOCK kept the root module from compiling
+      # for wasm until the v1.0.0-rc.1 rehearsal cross-built it.
+      - name: vet on wasm
+        run: |
+          GOOS=js GOARCH=wasm go vet ./...
+          GOOS=wasip1 GOARCH=wasm go vet ./...
       - name: govulncheck
         run: make vuln
 

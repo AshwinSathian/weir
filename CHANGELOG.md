@@ -29,6 +29,15 @@ First stable release. It supersedes the `v0.1.0` tag, which predates most of the
 - `TransportOrigin` no longer panics when `http.DefaultTransport` has been replaced, and returns an error for a missing `Target`.
 - An origin body whose `Read` panics is closed instead of leaked.
 
+### Changed after v1.0.0-rc.1
+
+- `Key.QuerySort` sorts by parameter name only and keeps the order of a repeated name's values (`ids=3&ids=1` is no longer rewritten to `ids=1&ids=3`).
+- An unkeyed `Cache-Control` or `Pragma` request field is forwarded only as a plain directive list (at most 8 lines and 256 bytes, letters, digits, `-`, `_`, `=`, `,` and space); anything else is dropped for that request.
+- A `Range` request that also carries `If-Match` or `If-Unmodified-Since` gets the full 200 instead of a 206: Weir does not evaluate those preconditions.
+- `store.Entry.Size` charges 48 bytes per header name and 16 per header value and vary name, so a memory store holds somewhat fewer small entries per byte of `MaxBytes` and can no longer be made to hold many times its limit.
+- `store/valkey`: new `Config.MaxObjectBytes` (64 MiB). Larger values are never read whole and count as misses; `*Store` now reports its limit, so `weir.New` rejects a larger `Storable.MaxObjectBytes`.
+- The root module builds for `js/wasm` and `wasip1/wasm`.
+
 ### Requirements
 
 - Go 1.27.2 or later for anything you deploy. Earlier 1.27 releases carry standard library vulnerabilities that `govulncheck` reports against `weirhttp`.
@@ -38,6 +47,5 @@ First stable release. It supersedes the `v0.1.0` tag, which predates most of the
 - Pointer-light memory layout deferred (M16-02, D36): GC cost at 1M entries is 1.76 µs per request on the measured machine, inside the 2 µs gate.
 - The `caddy` module imports the root module's `internal/keys`, so the four modules must be used at the same version (with xcaddy, pin the root module and `caddy` to it explicitly).
 - `Engine.Close` waits for origin goroutines; an `Origin` that ignores its context can delay it.
-- The root module does not build for `js/wasm` or `wasip1/wasm` (the snapshot loader needs `O_NONBLOCK`).
 
 Install: see the README.

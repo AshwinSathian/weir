@@ -1,7 +1,7 @@
 # Weir low-level design
 
 Status: v1.0
-Date: 2026-10-11
+Date: 2026-10-12
 Depends on: [01-technical-spec.md](01-technical-spec.md), [02-architecture.md](02-architecture.md), [03-hld.md](03-hld.md)
 
 This document is written for the person (or agent) implementing a milestone. It gives exact type definitions, algorithms, locking rules and pseudo-code. Code may differ in naming of unexported identifiers; exported names, behavior, bounds and locking rules may not change without updating this document in the same commit.
@@ -324,7 +324,7 @@ var (
 )
 ```
 
-`Entry.Size()` returns `len(Body) + header bytes + vary name bytes + 32 per tag + 56 per variant ref + 256` (fixed overhead) and is what byte-weighted stores account. Vary specs have no body, so leaving out their names and refs would let up to `MaxVariants` refs per record go uncounted against the store's byte bound (NFR-3).
+`Entry.Size()` returns `len(Body) + header bytes + 48 per header name + 16 per header value + vary name bytes + 16 per vary name + 32 per tag + 56 per variant ref + 256` (fixed overhead) and is what byte-weighted stores account. Header bytes are the name plus the value, for every value. The 48 and the 16 are what a header costs in memory beyond its bytes on a 64-bit platform (a map slot with the name's string header and the value slice header; one string header per value): without them a response made of thousands of one-byte values held about 16 times the memory it was charged (T-21). A typical entry with 15 header fields is charged about 1 KiB more than its bytes, so a response within 1 or 2 KiB of the store's largest record can be storable by the engine's rule (body plus header bytes) and still declined by the store. Vary specs have no body, so leaving out their names and refs would let up to `MaxVariants` refs per record go uncounted against the store's byte bound (NFR-3).
 
 Tags are computed by `internal/keys`, except `TagGlobal`, which `store.TagGlobal()` defines so stores can recognize it (05 E-5) without importing `internal/keys`:
 

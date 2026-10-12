@@ -8,7 +8,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"syscall"
 	"time"
 
 	"github.com/AshwinSathian/weir/store"
@@ -41,9 +40,9 @@ type snapLoadStats struct {
 // not ours and is left alone.
 func (s *Store) loadSnapshot() {
 	removeStaleTemps(s.snapPath)
-	// O_NONBLOCK: opening a named pipe planted at the path would otherwise
-	// block New forever; snapFileSize then refuses anything not regular.
-	f, err := os.OpenFile(s.snapPath, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	// A named pipe planted at the path must not block New forever (T-33):
+	// openSnapshot never waits, and snapFileSize refuses anything not regular.
+	f, err := openSnapshot(s.snapPath)
 	if err != nil {
 		return
 	}
