@@ -1946,3 +1946,12 @@ Entry template:
 - Deviations: none. docs/release.md gains the rc.3 row and the smoke target.
 - Follow-ups: `v1.0.0` is Ashwin's call. A full `release-gate` run holds all hosted runners, so `ci` on `main` queued behind it for the whole run.
 - Context: high
+
+## 2026-10-12 · release-v1.0.0 · done
+- Branch / PR: release/v1.0.0 (tags) and claude/v1-post-release / see the PR list
+- Done: `v1.0.0` tagged on `main` at `46dc73c`, `observe/prom/v1.0.0` and `store/valkey/v1.0.0` on `6a7ff35`, `caddy/v1.0.0` on `60ac90a`. `make release-check` and the `GOWORK=off` race tests passed before each sub-module tag. `make release-smoke VERSION=v1.0.0`, runbook 7.8 on the built Caddy, the README program and pkg.go.dev all pass. GitHub release published from the CHANGELOG section. `caddy-published` in CI builds `v1.0.0`.
+- Tests: none added. The gate run 38259811052 covers the code (no Go file changed since).
+- Deviations: none in behavior. The CHANGELOG inside the tag says "(unreleased)" because PR 113 was merged after the root tag; `main` is dated.
+- Incidents, all caught before a push: a pre-tag proxy probe cached a not-found for about 30 minutes; a failed pin hidden by `tail` in an `&&` chain made a local commit without `go.sum`; another session switched the shared checkout to `site/launch` mid-procedure, so one pin ran on that branch and was reverted there (only the four `go.mod`/`go.sum` files). docs/release.md steps 4 and 5 now cover each.
+- Follow-ups: v1.1 list in STATUS; rc branches can be deleted.
+- Context: high
