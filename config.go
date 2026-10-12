@@ -229,7 +229,10 @@ type TimeoutsConfig struct {
 	Origin     time.Duration // 0: 30s
 	Background time.Duration // 0: 30s; background refresh and Warm (FR-TMO-1)
 	Store      time.Duration // 0: 50ms (remote stores only)
-	StreamIdle time.Duration // 0: 60s; bounds a streamed body by idle time, not total time (D26)
+	// StreamIdle bounds a streamed body by idle time, not total time (D26):
+	// the stream is cancelled when the origin sends nothing for this long, and
+	// when the consumer reads nothing for this long. 0: 60s.
+	StreamIdle time.Duration
 }
 
 // LimitsConfig bounds request input (FR-VAL-1, FR-VAL-3, FR-STO-10).

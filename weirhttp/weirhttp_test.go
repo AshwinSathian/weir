@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -557,4 +558,65 @@ type signalWriter struct {
 func (w *signalWriter) WriteHeader(code int) {
 	w.ResponseRecorder.WriteHeader(code)
 	w.once.Do(func() { close(w.wrote) })
+}
+
+// deadlineWriter records the write deadlines WriteResponse sets.
+type deadlineWriter struct {
+	*httptest.ResponseRecorder
+	deadlines []time.Time
+}
+
+func (w *deadlineWriter) SetWriteDeadline(t time.Time) error {
+	w.deadlines = append(w.deadlines, t)
+	return nil
+}
+
+// liveBody is a response body that says it still streams from the origin.
+type liveBody struct {
+	io.Reader
+	idle time.Duration
+}
+
+func (liveBody) Close() error                { return nil }
+func (b liveBody) StreamIdle() time.Duration { return b.idle }
+
+// FR-TMO-2, T-18: every write of a live origin stream gets the stream's idle
+// bound as its deadline, and the deadline is cleared afterwards because the
+// connection serves the next request.
+func TestWriteResponseDeadlineOnLiveStream(t *testing.T) {
+	w := &deadlineWriter{ResponseRecorder: httptest.NewRecorder()}
+	body := strings.Repeat("x", 100<<10)
+	resp := &weir.Response{StatusCode: 200, Header: http.Header{"Content-Length": {strconv.Itoa(len(body))}},
+		Body: liveBody{strings.NewReader(body), time.Minute}}
+	start := time.Now()
+	if err := weirhttp.WriteResponse(w, resp); err != nil {
+		t.Fatal(err)
+	}
+	if w.Body.Len() != len(body) {
+		t.Fatalf("wrote %d bytes, want %d", w.Body.Len(), len(body))
+	}
+	if len(w.deadlines) < 3 { // 100 KiB in 32 KiB reads, then the reset
+		t.Fatalf("%d deadlines set, want one per write and a reset", len(w.deadlines))
+	}
+	for i, d := range w.deadlines[:len(w.deadlines)-1] {
+		if d.Before(start.Add(time.Minute)) || d.After(time.Now().Add(time.Minute)) {
+			t.Fatalf("deadline %d = %v, want now + the idle bound", i, d)
+		}
+	}
+	if last := w.deadlines[len(w.deadlines)-1]; !last.IsZero() {
+		t.Fatalf("last deadline = %v, want it cleared", last)
+	}
+}
+
+// FR-TMO-2: a stored body pins nothing at the origin, so its write has no
+// deadline of Weir's.
+func TestWriteResponseNoDeadlineOnStoredBody(t *testing.T) {
+	w := &deadlineWriter{ResponseRecorder: httptest.NewRecorder()}
+	resp := &weir.Response{StatusCode: 200, Header: http.Header{"Content-Length": {"2"}}, Body: io.NopCloser(strings.NewReader("ok"))}
+	if err := weirhttp.WriteResponse(w, resp); err != nil {
+		t.Fatal(err)
+	}
+	if len(w.deadlines) != 0 {
+		t.Fatalf("deadlines set on a stored body: %v", w.deadlines)
+	}
 }

@@ -461,33 +461,51 @@ func (b *uploadBody) blame() error {
 	return nil
 }
 
-// idleBody is a streamed origin body (FR-TMO-2). Each Read arms a timer of
-// idle; a Read still blocked when it fires cancels the fetch context with
-// ErrOriginTimeout. Time the consumer spends between reads does not count.
-// Close cancels the context.
+// errStreamUnread is the cause set on a stream whose consumer read nothing
+// for Timeouts.StreamIdle (FR-TMO-2, T-18).
+var errStreamUnread = errors.New("weir: stream not read within Timeouts.StreamIdle")
+
+// idleBody is a streamed origin body (FR-TMO-2). One timer of idle is always
+// armed while the body is open. It is reset when a Read starts and when it
+// returns, so it fires when the origin sends nothing for idle (the fetch ends
+// with ErrOriginTimeout) and also when the consumer asks for nothing for idle
+// (errStreamUnread): a reader that stopped reading must not hold the origin
+// connection (T-18). Close cancels the context.
 type idleBody struct {
 	io.ReadCloser
-	ctx    context.Context
-	cancel context.CancelCauseFunc
-	idle   time.Duration
-	timer  *time.Timer
+	ctx     context.Context
+	cancel  context.CancelCauseFunc
+	idle    time.Duration
+	timer   *time.Timer
+	reading atomic.Bool // a Read is waiting on the origin
 }
 
 func newIdleBody(ctx context.Context, rc io.ReadCloser, cancel context.CancelCauseFunc, idle time.Duration) *idleBody {
 	b := &idleBody{ReadCloser: rc, ctx: ctx, cancel: cancel, idle: idle}
-	b.timer = time.AfterFunc(idle, func() { cancel(ErrOriginTimeout) })
-	b.timer.Stop()
+	b.timer = time.AfterFunc(idle, func() {
+		if b.reading.Load() {
+			cancel(ErrOriginTimeout)
+		} else {
+			cancel(errStreamUnread)
+		}
+	})
 	return b
 }
 
 func (b *idleBody) Read(p []byte) (int, error) {
+	b.reading.Store(true)
 	b.timer.Reset(b.idle)
 	n, err := b.ReadCloser.Read(p)
-	b.timer.Stop()
-	if err != nil && !errors.Is(err, io.EOF) && b.ctx.Err() != nil {
-		err = context.Cause(b.ctx) // the origin's own error cannot pose as the timeout (04 §1.3)
+	b.reading.Store(false)
+	if err != nil {
+		b.timer.Stop() // the stream is over; nothing is left to bound
+		if !errors.Is(err, io.EOF) && b.ctx.Err() != nil {
+			err = context.Cause(b.ctx) // the origin's own error cannot pose as the timeout (04 §1.3)
+		}
+		return n, err
 	}
-	return n, err
+	b.timer.Reset(b.idle)
+	return n, nil
 }
 
 func (b *idleBody) Close() error {
@@ -496,6 +514,10 @@ func (b *idleBody) Close() error {
 	b.cancel(nil)
 	return err
 }
+
+// StreamIdle reports the idle bound of a live origin stream. weirhttp reads
+// it through this method to give its writes the same bound (FR-TMO-2).
+func (b *idleBody) StreamIdle() time.Duration { return b.idle }
 
 // cancelOnClose runs cancel after the body closes.
 type cancelOnClose struct {
@@ -507,6 +529,14 @@ func (c *cancelOnClose) Close() error {
 	err := c.ReadCloser.Close()
 	c.cancel()
 	return err
+}
+
+// StreamIdle forwards the wrapped stream's idle bound, 0 when it has none.
+func (c *cancelOnClose) StreamIdle() time.Duration {
+	if s, ok := c.ReadCloser.(interface{ StreamIdle() time.Duration }); ok {
+		return s.StreamIdle()
+	}
+	return 0
 }
 
 // timeoutFor is the origin deadline of a fetch of class (FR-TMO-1):

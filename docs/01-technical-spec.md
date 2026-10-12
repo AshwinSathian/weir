@@ -613,7 +613,7 @@ Open: none.
 ### 14.2 Timeouts (D26)
 
 - FR-TMO-1. `Timeouts.Origin` bounds the time from sending the request to receiving response headers, and, for buffered bodies (at most `MaxObjectBytes`), the whole body read. A drip-feeding origin therefore cannot hold a limiter slot beyond it (T-41). `Timeouts.Background` (default 30 s) replaces `Timeouts.Origin` for background refresh and `Warm`, which no request waits on, so an operator can fail foreground fetches fast and still give refreshes a slow origin's full answer time.
-- FR-TMO-2. Streamed bodies (pass-through, oversized) have no total deadline. Each read that makes no progress for `Timeouts.StreamIdle` (default 60 s) fails the stream. Their limiter slot was already released at headers (FR-LIM-1).
+- FR-TMO-2. Streamed bodies (pass-through, oversized, fetched behind an over-size marker) have no total deadline. A stream on which nothing moves for `Timeouts.StreamIdle` (default 60 s) is cancelled: an origin read that makes no progress for that long fails with `ErrOriginTimeout`, and a stream whose consumer starts no read for that long is cancelled too, so a client that stopped reading does not hold the origin connection (v1.1; before it only the origin's silence counted). `weirhttp.WriteResponse` gives every write of such a body a deadline of the same length, and none to a stored body, which holds nothing at the origin. Their limiter slot was already released at headers (FR-LIM-1).
 
 ### 14.3 Upgrades and CONNECT (D27)
 

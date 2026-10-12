@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/AshwinSathian/weir"
 	"github.com/AshwinSathian/weir/internal/keys"
@@ -58,7 +59,17 @@ func WriteResponse(w http.ResponseWriter, resp *weir.Response) error {
 	keys.DropHopByHop(h, resp.Header["Connection"])
 	maps.Copy(w.Header(), h)
 	w.WriteHeader(resp.StatusCode)
-	if !streamsToClient(h) {
+	// FR-TMO-2, T-18: a body still streaming from the origin holds the origin
+	// connection, so a client that stops reading must not hold the write
+	// forever. Each write of it gets the stream's own idle bound. A stored
+	// body holds nothing, and a slow client may take as long as the server's
+	// own timeouts allow.
+	var idle time.Duration
+	if s, ok := resp.Body.(interface{ StreamIdle() time.Duration }); ok {
+		idle = s.StreamIdle()
+	}
+	flush := streamsToClient(h)
+	if !flush && idle <= 0 {
 		_, err := io.Copy(w, resp.Body)
 		return err
 	}
@@ -67,14 +78,23 @@ func WriteResponse(w http.ResponseWriter, resp *weir.Response) error {
 	// event sent and then silence would not be seen. Same rule as
 	// httputil.ReverseProxy.
 	rc := http.NewResponseController(w)
+	if idle > 0 {
+		// The connection may serve another request after this one.
+		defer func() { _ = rc.SetWriteDeadline(time.Time{}) }()
+	}
 	buf := make([]byte, 32<<10)
 	for {
 		n, rerr := resp.Body.Read(buf)
 		if n > 0 {
+			if idle > 0 {
+				_ = rc.SetWriteDeadline(time.Now().Add(idle)) // ErrNotSupported: the writer has no deadline
+			}
 			if _, err := w.Write(buf[:n]); err != nil {
 				return err
 			}
-			_ = rc.Flush() // ErrNotSupported: nothing to flush
+			if flush {
+				_ = rc.Flush() // ErrNotSupported: nothing to flush
+			}
 		}
 		if rerr != nil {
 			if rerr == io.EOF {

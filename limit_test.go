@@ -705,10 +705,10 @@ func TestStreamIdleTimeout(t *testing.T) {
 	}
 }
 
-// FR-TMO-2, T-18: only a Read in progress counts toward StreamIdle. A
-// consumer that waits 90 s between reads of a stream whose origin has the
-// bytes ready keeps it; a Close during a blocked Read ends that Read.
-func TestStreamIdleCountsOnlyReads(t *testing.T) {
+// FR-TMO-2, T-18: a consumer that pauses for less than StreamIdle between
+// reads keeps the stream, however long the stream lasts in total; a Close
+// during a blocked Read ends that Read.
+func TestStreamIdlePausesUnderTheBound(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		origin := weir.OriginFunc(func(ctx context.Context, _ *weir.Request) (*weir.Response, error) {
 			return &weir.Response{StatusCode: http.StatusOK, Header: http.Header{},
@@ -723,9 +723,9 @@ func TestStreamIdleCountsOnlyReads(t *testing.T) {
 		}
 		buf := make([]byte, 1)
 		for i := range 5 {
-			time.Sleep(90 * time.Second)
+			time.Sleep(59 * time.Second)
 			if _, err := resp.Body.Read(buf); err != nil {
-				t.Fatalf("read %d after a 90 s pause: %v", i, err)
+				t.Fatalf("read %d after a 59 s pause: %v", i, err)
 			}
 		}
 		done := make(chan error, 1)
@@ -813,6 +813,41 @@ func TestEngineOwnerQuotaIsolatesHosts(t *testing.T) {
 		}
 		if resp, _ := serve(t, e, getReq("/f0"), o); resp.Cache.Hit {
 			t.Fatal("flooding host kept its oldest page past its quota")
+		}
+	})
+}
+
+// FR-TMO-2, T-18: a stream nobody reads for StreamIdle is cancelled, so a
+// client that stopped reading does not hold the origin connection. Before
+// v1.1 only the origin's silence counted, and a reader that stopped reading
+// held the connection without a limit.
+func TestUnreadStreamIsCancelled(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var originCtx context.Context
+		origin := weir.OriginFunc(func(ctx context.Context, _ *weir.Request) (*weir.Response, error) {
+			originCtx = ctx
+			return &weir.Response{StatusCode: http.StatusOK, Header: http.Header{},
+				Body: &dripBody{ctx: ctx, burst: []byte("abcde"), n: 1, tick: math.MaxInt64}}, nil
+		})
+		e := newEngine(t, cacheCfg)
+		defer closeEngine(t, e)
+
+		resp, err := e.Serve(t.Context(), postReq("/s"), origin)
+		if err != nil {
+			t.Fatalf("Serve: %v", err)
+		}
+		defer resp.Body.Close()
+		time.Sleep(59 * time.Second)
+		if originCtx.Err() != nil {
+			t.Fatal("the fetch was cancelled before StreamIdle")
+		}
+		time.Sleep(2 * time.Second)
+		synctest.Wait()
+		if originCtx.Err() == nil {
+			t.Fatal("the fetch is still live 61 s after the last read")
+		}
+		if _, err := resp.Body.Read(make([]byte, 1)); err == nil || errors.Is(err, weir.ErrOriginTimeout) {
+			t.Fatalf("read after the cancel: %v, want an error that does not blame the origin", err)
 		}
 	})
 }
