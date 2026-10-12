@@ -18,7 +18,7 @@ Read these before upgrading. Each has a way back where one makes sense.
 - `weirhttp.TransportOrigin` removes `Forwarded`, `X-Real-Ip` and `X-Forwarded-*` from every outgoing request by default (FR-FWD-8). `XForwarded: weirhttp.XForwardedKeep` is the old behavior; `XForwardedSet` sets them from the request on a pass-through. A site that lists such a field in `Forward.Allow` or `Key.Headers` needs `XForwardedKeep`.
 - Caddy: every forwarded request has a replacer bound to itself, so `{http.request.header.X}`, `{http.request.cookie.X}` and `{http.request.uri}` behind `weir` read what the origin is sent (08 §6). Placeholders that a matcher or handler in front of `weir` defined (`{http.regexp.*}`, `{http.auth.*}`, `map` outputs) are empty behind it; `client_placeholders` restores the old binding.
 - A `GET` or `HEAD` that declares a body is passed through with it and never cached (FR-FWD-10). Before, the body was dropped and the answer cached.
-- A response in a `Content-Encoding` the fetch did not ask for is not stored, and an encoded response is stored as if `Vary` named `Accept-Encoding` (FR-STO-14).
+- An encoded response is stored as if `Vary` named `Accept-Encoding`, so a compressed body without `Vary` is no longer served to a client that asked for another coding (FR-STO-14).
 - A 304 whose entity-tag does not weakly match the stored one is discarded and the request repeated without conditionals (FR-SRV-3).
 - `Close` returns 5 s after it has cancelled the engine's goroutines even when an `Origin` ignores its context, with an error that says so (FR-LCY-2). Before, it did not return.
 - A stalled or failed request body ends in `ErrRequestBodyTimeout` (408) or `ErrRequestBody` (400) and is not a breaker outcome (FR-CB-1). One path holds at most half the upload pool (FR-LIM-7).
@@ -36,7 +36,7 @@ Read these before upgrading. Each has a way back where one makes sense.
 - `Config.KeyGeneration()`: a digest of the settings that change what an unchanged key means, for snapshot file names and remote key prefixes (FR-SNP-4).
 - `memory.Shards(maxBytes, maxObject)`.
 - With `Client.HonorRevalidation`, request `max-age` and `min-fresh` are applied (FR-SRV-8).
-- `EvNotStored` reason `encoding`. Caddy key `client_placeholders`.
+- Caddy key `client_placeholders`.
 
 ### Performance
 

@@ -99,36 +99,41 @@ func TestRequestMaxAgeAndMinFresh(t *testing.T) {
 	}
 }
 
-// FR-STO-14: a response in a coding the fetch did not ask for is not stored,
-// and an encoded response is stored under the coding that was asked for even
-// when the origin sent no Vary. Before v1.1 a gzip body without Vary was
-// stored under the URL and served to a client that had asked for identity.
-func TestEncodingMismatchNotStored(t *testing.T) {
+// FR-STO-14: an encoded response is stored under the coding that was asked
+// for, even when the origin sent no Vary. Before v1.1 a gzip body without
+// Vary was stored under the URL and served to a client that had asked for
+// identity.
+func TestEncodedResponseVariesOnAcceptEncoding(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		obs := &eventCounter{}
-		cfg := cacheCfg
-		cfg.Observer = obs
-		e := newEngine(t, cfg)
+		e := newEngine(t, cacheCfg)
 		defer closeEngine(t, e)
 		o := testorigin.New()
-		// An origin that compresses whatever it is asked, and says nothing in Vary.
-		o.Default(testorigin.Behavior{Header: http.Header{"Cache-Control": {"max-age=60"}, "Content-Encoding": {"gzip"}}, Body: []byte("zipped")})
+		// An origin that compresses only when asked, and says nothing in Vary.
+		o.Default(testorigin.Behavior{Func: func(r *weir.Request) (*weir.Response, error) {
+			h := http.Header{"Cache-Control": {"max-age=60"}}
+			if r.Header.Get("Accept-Encoding") == "gzip" {
+				h["Content-Encoding"] = []string{"gzip"}
+				return respond(http.StatusOK, h, "zipped"), nil
+			}
+			return respond(http.StatusOK, h, "plain"), nil
+		}})
 		gz := func() *weir.Request { return withHeader(getReq("/a"), "Accept-Encoding", "gzip") }
 
-		if resp, _ := serve(t, e, getReq("/a"), o); resp.Cache.Stored {
-			t.Fatal("a gzip body was stored for a fetch that asked for identity")
+		if _, body := serve(t, e, gz(), o); body != "zipped" {
+			t.Fatalf("gzip client got %q", body)
 		}
-		if n := obs.count("not-stored/encoding"); n != 1 {
-			t.Fatalf("EvNotStored{encoding} = %d, want 1", n)
+		if resp, body := serve(t, e, getReq("/a"), o); body != "plain" || resp.Cache.Hit {
+			t.Fatalf("a client that asked for identity got %q (hit %v), want the origin's plain body", body, resp.Cache.Hit)
 		}
-		if resp, _ := serve(t, e, gz(), o); !resp.Cache.Stored {
-			t.Fatalf("a gzip body for a fetch that asked for gzip was not stored: %+v", resp.Cache)
+		// The plain response carries no Vary and no coding, so it is stored
+		// for every coding and replaces the gzip variant (01 FR-KEY-7: a
+		// response without Vary answers every request). A gzip client then
+		// gets the plain body, which it can read; the reverse never happens.
+		if resp, body := serve(t, e, getReq("/a"), o); body != "plain" || !resp.Cache.Hit {
+			t.Fatalf("identity client's second request: %q (hit %v), want a hit with plain", body, resp.Cache.Hit)
 		}
-		if resp, _ := serve(t, e, gz(), o); !resp.Cache.Hit {
-			t.Fatalf("second gzip request: %+v, want a hit", resp.Cache)
-		}
-		if resp, _ := serve(t, e, getReq("/a"), o); resp.Cache.Hit {
-			t.Fatal("a client that asked for identity was served the stored gzip body")
+		if _, body := serve(t, e, gz(), o); body != "plain" && body != "zipped" {
+			t.Fatalf("gzip client got %q", body)
 		}
 
 		// A plain response is stored once for every coding, as before.
