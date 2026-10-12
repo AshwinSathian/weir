@@ -26,6 +26,10 @@ type Table struct {
 type shard struct {
 	mu sync.Mutex
 	m  map[store.Key]*Flight
+	// busy counts the fetches in progress that may store under a primary
+	// key, whether or not a flight runs them. Only keys with a count above 0
+	// are present, so its size is bounded by the fetches in progress (P5).
+	busy map[store.Key]int
 }
 
 // Flight is one shared origin fetch. Waiters block on Done and read Result
@@ -58,6 +62,36 @@ func (t *Table) Join(k store.Key, now time.Time, maxAge time.Duration) (f *Fligh
 	f = &Flight{done: make(chan struct{}), started: now, sh: sh, key: k}
 	sh.m[k] = f
 	return f, true
+}
+
+// Enter counts one fetch in progress that may store under primary key k.
+// The caller must call Leave(k) once the fetch has stored or given up.
+func (t *Table) Enter(k store.Key) {
+	sh := &t.shards[k[0]&63]
+	sh.mu.Lock()
+	if sh.busy == nil {
+		sh.busy = make(map[store.Key]int)
+	}
+	sh.busy[k]++
+	sh.mu.Unlock()
+}
+
+// Leave ends one Enter(k).
+func (t *Table) Leave(k store.Key) {
+	sh := &t.shards[k[0]&63]
+	sh.mu.Lock()
+	if sh.busy[k]--; sh.busy[k] <= 0 {
+		delete(sh.busy, k)
+	}
+	sh.mu.Unlock()
+}
+
+// Busy reports whether a fetch that may store under k is in progress.
+func (t *Table) Busy(k store.Key) bool {
+	sh := &t.shards[k[0]&63]
+	sh.mu.Lock()
+	defer sh.mu.Unlock()
+	return sh.busy[k] > 0
 }
 
 // NewFlight returns a flight outside any table, for a fetch no one may

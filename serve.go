@@ -331,6 +331,11 @@ func (e *Engine) cacheable(ctx context.Context, c *keys.Classified, origin Origi
 // (fetchDirect).
 func (e *Engine) fetchStored(ctx context.Context, sp *fetchSpec, origin Origin) *flightResult {
 	c, prior := sp.c, sp.prior
+	// FR-INV-1: counted from before the request is sent until anything it
+	// stores is in the store, so an unsafe request that arrives in between
+	// knows the URI has a response on its way (invalidate).
+	e.flights.Enter(c.Primary)
+	defer e.flights.Leave(c.Primary)
 	// FR-STO-12, T-18: a marker for an over-size object says the body will
 	// not fit, so the fetch behind it streams instead of holding
 	// MaxObjectBytes that nothing will keep. The next attempt to store comes

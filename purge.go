@@ -27,21 +27,25 @@ import (
 // and the memory store fails only once closed.
 func (e *Engine) invalidate(ctx context.Context, c *keys.Classified, resp *Response) {
 	ctx = context.WithoutCancel(ctx) // the response is already on its way to the client
-	tags := []store.Tag{c.URITag()}
+	// The epoch time is read before any target is checked for a record
+	// (needsEpoch relies on that order).
+	ep := store.Epoch{At: time.Now(), Mode: store.EpochInvalid}
+	emit(e.cfg.Observer, Event{Kind: EvPurge, Time: ep.At, Partition: c.Partition, Reason: "invalid"})
+	// The target as a GET would be keyed: the unsafe request itself has no
+	// key. It passed validation, so the error is unreachable; it fails closed.
+	if kc, err := keys.Classify(&keys.Request{Method: http.MethodGet, Scheme: c.Forwarded.Scheme, Host: c.Forwarded.Host,
+		Path: c.Forwarded.Path, RawQuery: c.Forwarded.RawQuery}, &e.kcfgPurge); err != nil || e.needsEpoch(ctx, kc.Primary) {
+		_ = e.sg.setEpoch(ctx, c.URITag(), ep)
+	}
 	base, err := url.ParseRequestURI(c.Forwarded.Path) // Path is escaped; relative references resolve against it
 	if err != nil {
 		base = &url.URL{Path: "/"}
 	}
 	base.Scheme, base.Host = c.Forwarded.Scheme, c.Forwarded.Host
 	for _, name := range [...]string{"Location", "Content-Location"} {
-		if t, ok := e.sameOriginTag(c, base, resp.Header.Get(name)); ok {
-			tags = append(tags, t)
+		if kc, ok := e.sameOrigin(c, base, resp.Header.Get(name)); ok && e.needsEpoch(ctx, kc.Primary) {
+			_ = e.sg.setEpoch(ctx, kc.URITag(), ep)
 		}
-	}
-	ep := store.Epoch{At: time.Now(), Mode: store.EpochInvalid}
-	emit(e.cfg.Observer, Event{Kind: EvPurge, Time: ep.At, Partition: c.Partition, Reason: "invalid"})
-	for _, t := range tags {
-		_ = e.sg.setEpoch(ctx, t, ep)
 	}
 	if e.cfg.CacheGroups.Ignore {
 		return
@@ -69,25 +73,47 @@ func (e *Engine) invalidate(ctx context.Context, c *keys.Classified, resp *Respo
 	emit(e.cfg.Observer, Event{Kind: EvPurge, Time: ep.At, Partition: c.Partition, Status: len(groups), Reason: "group"})
 }
 
-// sameOriginTag resolves ref against base and returns its URI tag when it
-// names the request's origin. The URI is validated and rewritten exactly
-// like a request, so it tags what a GET for it would store; invalid or
-// cross-origin values are ignored.
-func (e *Engine) sameOriginTag(c *keys.Classified, base *url.URL, ref string) (store.Tag, bool) {
+// needsEpoch reports whether an invalidation epoch for the URI whose GET is
+// keyed primary can change anything (FR-INV-1, T-29). It cannot when the URI
+// has no record and no fetch on its way, and writing it anyway only loads
+// the epoch sketch every other entry shares (05 E-8): unsafe requests to
+// URIs nobody cached sent a growing share of unrelated entries back to the
+// origin.
+//
+// The skip is exact only when one key covers the URI and this process sees
+// every fetch for it (exactInvalidation). The caller read the epoch time
+// first. A fetch sent at or before that time was counted before it was sent
+// (fetchStored), so either it is still counted here, or it has finished and
+// whatever it stored is visible to the read below. A fetch sent after the
+// epoch time is not covered by the epoch at all (FR-PRG-7). Any answer but
+// "no record" writes the epoch, a store error included.
+func (e *Engine) needsEpoch(ctx context.Context, primary store.Key) bool {
+	if !e.exactInvalidation || e.flights.Busy(primary) {
+		return true
+	}
+	_, err := e.sg.get(ctx, primary)
+	return !errors.Is(err, store.ErrNotFound)
+}
+
+// sameOrigin resolves ref against base and returns it classified as a GET
+// when it names the request's origin. The URI is validated and rewritten
+// exactly like a request, so its tag and key are those a GET for it would
+// store under; invalid or cross-origin values are ignored.
+func (e *Engine) sameOrigin(c *keys.Classified, base *url.URL, ref string) (keys.Classified, bool) {
 	if ref == "" {
-		return store.Tag{}, false
+		return keys.Classified{}, false
 	}
 	r, err := url.Parse(ref)
 	if err != nil {
-		return store.Tag{}, false
+		return keys.Classified{}, false
 	}
 	u := base.ResolveReference(r)
 	kc, err := keys.Classify(&keys.Request{Method: http.MethodGet, Scheme: u.Scheme, Host: u.Host,
 		Path: u.EscapedPath(), RawQuery: u.RawQuery}, &e.kcfgPurge)
 	if err != nil || kc.Origin != c.Origin {
-		return store.Tag{}, false
+		return keys.Classified{}, false
 	}
-	return kc.URITag(), true
+	return kc, true
 }
 
 // Purge makes the entries p names stale (PurgeSoft) or unreachable

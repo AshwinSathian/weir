@@ -51,6 +51,11 @@ type Engine struct {
 	cr        *cookieReport             // nil when disabled (FR-OBS-5)
 	mr        *missrate.Tracker         // nil when MissRate.Disable
 	badGroup  sync.Once                 // one warning for invalid Cache-Group-Invalidation (FR-OBS-3)
+	// exactInvalidation: one primary key covers every stored response of a
+	// URI (no keyed header, keyed cookie or experiment) and the store is in
+	// this process, so no other node fetches for it. Set once by New
+	// (needsEpoch, FR-INV-1).
+	exactInvalidation bool
 
 	mu        sync.Mutex  // orders setting closed against wg.Add in goBackground
 	closed    atomic.Bool // written under mu; read without it on the Serve path
@@ -101,6 +106,7 @@ func New(cfg Config) (*Engine, error) {
 	e := &Engine{cfg: c, kcfg: keysConfig(&c), sg: newStoreGuard(c.Store, c.Timeouts.Store, c.Observer), ownStore: own, cr: newCookieReport(&c), closeDone: make(chan struct{})}
 	e.kcfgWarm, e.kcfgPurge = e.kcfg, e.kcfg
 	e.experimentsKeys()
+	e.exactInvalidation = !e.sg.remote && len(c.Key.Headers) == 0 && len(c.Key.Cookies) == 0 && e.kcfg.Assign == nil
 	l := &c.Limiter
 	e.lim = limiter.New(limiter.Config{
 		Max: l.MaxConcurrent, MaxQueue: l.MaxQueue, PerPartition: l.MaxPerPartition, PerHost: l.MaxPerHost,
