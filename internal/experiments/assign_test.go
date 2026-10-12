@@ -109,6 +109,29 @@ func TestAssignIgnoresBadCookie(t *testing.T) {
 	}
 }
 
+// T-50: a second assignment cookie with another value (planted by a sibling
+// subdomain, or a stale copy on another path) means no assignment, even when
+// both are validly signed, so the planted one is never the one that counts.
+// The same value twice is one cookie.
+func TestAssignCookieRepeatedMeansNone(t *testing.T) {
+	c := assignConfig()
+	mine := enc(t, Cookie{VisitorID: "me", Assignments: []Assignment{{Experiment: "checkout-copy", Variant: "b"}}}, keyA)
+	theirs := enc(t, Cookie{VisitorID: "attacker", Assignments: []Assignment{{Experiment: "checkout-copy", Variant: "control"}}}, keyA)
+	for name, lines := range map[string][]string{
+		"one line":  {"weir_v=" + theirs + "; weir_v=" + mine},
+		"two lines": {"weir_v=" + mine, "weir_v=" + theirs},
+	} {
+		r := c.Assign("h", "/checkout", lines, rndOf(0.9))
+		if !r.Changed || r.Cookie.VisitorID == "me" || r.Cookie.VisitorID == "attacker" {
+			t.Fatalf("%s: a repeated cookie was trusted: %+v", name, r)
+		}
+	}
+	r := c.Assign("h", "/checkout", []string{"weir_v=" + mine + "; weir_v=" + mine}, rndOf(0.9))
+	if r.Cookie.VisitorID != "me" {
+		t.Fatalf("the same value twice was not accepted: %+v", r)
+	}
+}
+
 // E6: without consent the visitor gets control, even with a valid assignment.
 func TestAssignConsentAbsentGetsControl(t *testing.T) {
 	c := assignConfig()

@@ -29,6 +29,9 @@ func TestConfigValidate(t *testing.T) {
 		{"valid", func(*Config) {}, ""},
 		{"short signing key", func(c *Config) { c.SigningKeys = [][]byte{[]byte("short")} }, "signing key 0"},
 		{"no signing key", func(c *Config) { c.SigningKeys = nil }, "no signing key"},
+		// T-50: the browser-enforced defense against a cookie planted by a
+		// sibling subdomain is a __Host- name, so the config must take one.
+		{"__Host- cookie name", func(c *Config) { c.CookieName = "__Host-weir_v" }, ""},
 		// NFR-3, T-35: verification does one HMAC per key per request.
 		{"four signing keys", func(c *Config) { c.SigningKeys = [][]byte{keyA, keyA, keyA, keyA} }, ""},
 		{"five signing keys", func(c *Config) { c.SigningKeys = [][]byte{keyA, keyA, keyA, keyA, keyA} }, "more than 4 signing keys"},
