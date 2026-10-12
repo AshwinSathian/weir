@@ -1964,3 +1964,11 @@ Entry template:
 - Incident: this session created `site/launch` with `git checkout -b` in the shared checkout while the release session was mid-procedure there (see the release-v1.0.0 entry). Site or doc sessions that run beside another session should use a separate worktree.
 - Follow-ups: the custom domain and the post-launch list (plan record §10.3); Ashwin edits the About page; Lighthouse and axe not in CI; outside tester for the quickstart.
 - Context: high
+
+## 2026-10-12 · site-consistency-check · done
+- Branch / PR: site/repo-link-fix / see the PR list
+- Done: after PR 117 merged and `weir.ashwinsathian.com` was attached, crawled the 28 live pages against `main`. Consistent: the deployed tree equals `main`; every install line says `v1.0.0`; all four modules resolve on the proxy and pkg.go.dev serves all eight package pages at `v1.0.0`; Go 1.27.0 minimum and 1.27.2 for deployment match `go.mod` and the CHANGELOG; Caddy v2.11.7 matches `caddy/go.mod`; 45 threats, 365/284/81 cache-tests and the canonical URLs match. `go run .../examples/weirproxy@v1.0.0` works from the proxy. Found five GitHub links from included runbook, threat-model and benchmark text that lacked their `docs/` directory (404 on GitHub). Fixed in `site/lib/content.ts` (relative links in included text are rebased to the source file's directory) and `postbuild.mjs` now fails on a GitHub link to a file missing from the tree. Repository homepage set to the site.
+- Tests: `pnpm check`, `pnpm typecheck`, `pnpm build` with the new link check. No Go change.
+- Deviations: none.
+- Follow-ups: the README inside the `v1.0.0` tag (what pkg.go.dev shows) is the pre-site README; it changes with the next tag.
+- Context: medium
