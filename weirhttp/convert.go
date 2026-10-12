@@ -52,10 +52,14 @@ func RequestFrom(r *http.Request) *weir.Request {
 	} else {
 		req.Path, req.RawQuery = r.URL.EscapedPath(), r.URL.RawQuery
 	}
-	// The body goes along for every method. A GET or HEAD without one has
-	// http.NoBody, which the engine reads as no body; one that does carry a
-	// body is passed through with it and never cached (FR-FWD-10).
-	req.Body = r.Body
+	// A GET or HEAD hands its body over only when the request declares one
+	// (a Content-Length above 0, or chunked): it is then passed through with
+	// it and never cached (FR-FWD-10). The body's type cannot decide that:
+	// a server in front may wrap the http.NoBody of a bodyless request, as
+	// Caddy does to count bytes, and every GET would then skip the cache.
+	if (r.Method != http.MethodGet && r.Method != http.MethodHead) || r.ContentLength != 0 {
+		req.Body = r.Body
+	}
 	return req
 }
 

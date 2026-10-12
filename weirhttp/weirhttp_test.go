@@ -637,3 +637,36 @@ func TestRequestFromSetsClient(t *testing.T) {
 		}
 	}
 }
+
+// wrappedNoBody is what a server in front of weir can leave in a bodyless
+// request: http.NoBody inside a wrapper, as Caddy's byte counter does.
+type wrappedNoBody struct{ io.ReadCloser }
+
+// FR-FWD-10: whether a GET has a body is read from its declared length, not
+// from the body's type, so a wrapped empty body does not turn every GET into
+// an uncached pass-through.
+func TestRequestFromBodyOfGet(t *testing.T) {
+	mk := func(method string, length int64, body io.ReadCloser) *http.Request {
+		r := httptest.NewRequestWithContext(t.Context(), method, "http://example.com/a", nil)
+		r.Body, r.ContentLength = body, length
+		return r
+	}
+	payload := func() io.ReadCloser { return io.NopCloser(strings.NewReader("q")) }
+	for _, tc := range []struct {
+		name string
+		r    *http.Request
+		want bool
+	}{
+		{"GET, no body", mk(http.MethodGet, 0, http.NoBody), false},
+		{"GET, wrapped empty body", mk(http.MethodGet, 0, wrappedNoBody{http.NoBody}), false},
+		{"HEAD, wrapped empty body", mk(http.MethodHead, 0, wrappedNoBody{http.NoBody}), false},
+		{"GET with a body", mk(http.MethodGet, 1, payload()), true},
+		{"GET with a chunked body", mk(http.MethodGet, -1, payload()), true},
+		{"POST", mk(http.MethodPost, 1, payload()), true},
+		{"POST, wrapped empty body", mk(http.MethodPost, 0, wrappedNoBody{http.NoBody}), true},
+	} {
+		if got := weirhttp.RequestFrom(tc.r).Body != nil; got != tc.want {
+			t.Errorf("%s: body handed to the engine = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
