@@ -1,6 +1,6 @@
 # Runbook
 
-Updated: 2026-10-11
+Updated: 2026-10-12
 
 For the person running Weir in front of an origin. It covers first deployment, the signals to watch and what to do when each one fires. Setting names are in [01 §6](01-technical-spec.md); the reasoning behind the defaults is in [06](06-threat-model.md). This is not a design document: when it disagrees with 01 to 07, they win.
 
@@ -252,7 +252,7 @@ A purge body that names nothing is a 400. A reply of 202 means the epochs are wr
 2. `caddy adapt --pretty` and check the handler order (7.3).
 3. One request twice with `curl -si`: the second shows `Cache-Status: Weir; hit`.
 4. A purge on a test URL (7.7), wait 2 s (a soft purge on the memory store can land up to 1 s late), then a request showing `fwd=stale` or `fwd=uri-miss`.
-5. Stop and start the service and confirm the snapshot file `<snapshot_dir>/<name>.weir` exists and the first request after the start is a hit.
+5. Stop the service and confirm the snapshot file `<snapshot_dir>/<name>.weir` exists (the next start reads and removes it, so look while Caddy is stopped). Start it again: the first request for a URL cached before the stop shows `fwd=stale`, not `hit` and not `fwd=uri-miss`. Loaded entries are revalidated once before use (FR-SNP-2), which costs a 304 when the origin sends a validator and a full fetch when it does not; the second request is a hit.
 
 ### 7.9 Rotating experiment signing keys
 

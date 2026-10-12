@@ -1921,3 +1921,12 @@ Entry template:
 - Deviations: none.
 - Follow-ups: Ashwin upgrades Go, reruns `make vuln` (also look at `-show verbose` for the 2+2 findings that are imported or required but not called) and `make cache-tests` on the Mac, then the rc rehearsal. The gate ran on Go 1.27.0; consider one more full run on 1.27.2 before the real tag if the rc is clean.
 - Context: low
+
+## 2026-10-12 · rc-rehearsal · done
+- Branch / PR: claude/rc1-rehearsal-fixes / see STATUS
+- Done: audited Ashwin's `v1.0.0-rc.1` tags (all four modules on the proxy) with Go 1.27.2. `make check`, `make vuln`, `make cache-tests` pass on `main`. Outside the repository: `go get`, a README-only program, the published tests from the module cache, `go install` of weirproxy, the README xcaddy build, runbook 7.8 on that binary, two Caddy nodes on one store, cross-builds, pkg.go.dev licenses. Details in the rehearsal log in docs/release.md.
+- Found and fixed: `caddy/v1.0.0-rc.1` lacks its siblings' `go.sum` lines (`release-check` now refuses uncommitted `go.mod`/`go.sum` and runs before the `caddy` tag); runbook 7.8 step 5 promised a hit after a restart (it is `fwd=stale`, FR-SNP-2); release steps 8 and 9 now match the README's two-pin xcaddy line; new CI job `caddy-published` builds from the tags.
+- Tests: no Go code changed. The corrected pin procedure was dry-run on a throwaway branch: `release-check` fails with `go.sum` uncommitted and passes once it is committed. `make check` passes.
+- Deviations: docs/runbook.md 7.8 corrected to match 01 FR-SNP-2; README and CHANGELOG state that wasm targets do not build.
+- Follow-ups: stray `caddy/v1.0.0-rc.2` tag means a second rehearsal is rc.3; final gate run on Go 1.27.2; wasm decision. The store integration tests ran against Redis 8.8 here (no Valkey or Docker on the Mac); CI covers Valkey 8.1.
+- Context: medium
