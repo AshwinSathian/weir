@@ -24,3 +24,12 @@ coverage.*
 
 # Claude Code personal settings (project settings in .claude/settings.json are shared)
 .claude/settings.local.json
+
+# Site and browser tooling
+/site/node_modules/
+/site/.next/
+/site/out/
+/.playwright-mcp/
+/.wrangler/
+/site/next-env.d.ts
+/site/*.tsbuildinfo

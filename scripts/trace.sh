@@ -8,7 +8,7 @@ cd "$(dirname "$0")/.."
 ids=$( { grep -oE '^- (FR-[A-Z]+-[0-9]+|NFR-[0-9]+)\.' docs/01-technical-spec.md | sed -E 's/^- //; s/\.$//'
          grep -oE '^- (INV-[0-9]+) ' docs/06-threat-model.md | sed -E 's/^- //; s/ $//'; } | sort -u )
 
-tests=$(find . -name '*_test.go' -not -path './.git/*' 2>/dev/null || true)
+tests=$(find . -name '*_test.go' -not -path './.git/*' -not -path './site/*' 2>/dev/null || true)
 cited=""
 if [ -n "$tests" ]; then
   cited=$(grep -hoE '(FR-[A-Z]+-[0-9]+|NFR-[0-9]+|INV-[0-9]+)' $tests | sort -u || true)

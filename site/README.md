@@ -1,0 +1,92 @@
+# Weir website
+
+The site at [weir.ashwinsathian.com](https://weir.ashwinsathian.com). Static files, built with Next.js and hosted on Cloudflare Pages. It is not a Go module: there are no `.go` files and no `go.mod` here, and nothing in this directory is imported by Weir.
+
+## Run it
+
+Node 24 (see `.nvmrc`) and pnpm.
+
+```sh
+pnpm install
+pnpm dev          # http://localhost:3000, no search
+pnpm build        # static site in out/, with CSP, link check and the search index
+pnpm check        # style lint, claims register, benchmark data, README program
+```
+
+From the repository root, `make site-check` runs the whole gate and `make site-deploy` uploads `out/` with wrangler.
+
+## Where content comes from
+
+A fact has one home. The site reads the repository at build time and fails the build when an anchor it depends on is gone.
+
+| Page | Source |
+|---|---|
+| Configuration reference | `docs/01-technical-spec.md` §6 |
+| Threat table, invariants, assets | `docs/06-threat-model.md` |
+| Conformance | `docs/cache-tests-expected-failures.md` |
+| Benchmark tables | `docs/benchmarks.md` |
+| Production, incidents, observability, parts of the Caddy guide | `docs/runbook.md` |
+| Changelog and the Atom feed | `CHANGELOG.md` |
+| Cache-Status and error tables | `cachestatus.go`, `errors.go` (values from code, meanings in `lib/tables.ts`) |
+| Go programs | the README's program and `Example` functions in `example_test.go` |
+
+Hand-written pages are Markdown in `content/docs/` and `content/pages/`, with `title` and `description` front matter. They can pull repository text in with directives, each alone on a line:
+
+```text
+{{include docs/runbook.md "## 4. Incidents" demote=-1}}   a section, by the start of its heading line
+{{example example_test.go ExampleEngine_Serve}}           the body of a tested Example function
+{{fenced README.md go}}                                   the first fenced block of that language
+{{figure budget}}                                         a diagram from components/diagrams.tsx
+```
+
+`{{version}}`, `{{go_min}}`, `{{go_deploy}}` and `{{caddy_version}}` come from `data/release.ts`. Callouts use `> [!NOTE]`, `> [!CAUTION]`, `> [!PROTECTION]` and `> [!LIMITS]`. Requirement, threat and risk IDs in prose (`FR-COA-4`, `T-13`, `R-2`) become links automatically.
+
+## Rules the checks enforce
+
+- No em dashes and none of the words the project style bans. At most one bold phrase per section.
+- A measured figure in hand-written copy (a time, an allocation count, a count of four digits or more) must be listed in `content/claims.md` with its source, and must appear in that source.
+- The README's Go program must compile against the working tree.
+- Every internal link and anchor in the built site must resolve.
+
+`content/claims.md` is not published. Statements about other projects on the compare page are listed there with the URL and the date they were read. Re-read them before changing that page.
+
+## Release state
+
+`data/release.ts` has one switch. `RELEASED = true` shows `v1.0.0` in every install line. `RELEASED = false` shows the release candidate and a banner. The `release-state` CI job runs `node scripts/check.mjs release`, which fails while the site claims a release that the Go module proxy cannot resolve for all four modules.
+
+The production domain is attached only when that job is green (the launch gate in `docs/progress/surfaces-and-site-plan.md` §10).
+
+## Deployment
+
+Cloudflare Pages, direct upload, project `weir-site`. Chosen on 2026-10-12: Pages serves a static directory with `_headers` and `_redirects` and gives every branch a preview URL, which is all this site needs. There is no Worker and no build on Cloudflare's side.
+
+```sh
+make site-deploy BRANCH=main        # production: weir-site.pages.dev, and the custom domain once attached
+make site-deploy BRANCH=site-launch # a preview URL
+```
+
+Security headers are in two places because a static export has inline bootstrap scripts. `scripts/postbuild.mjs` writes a Content-Security-Policy `<meta>` into each page with the SHA-256 of that page's inline scripts (no `unsafe-inline` for scripts), and writes `out/_headers` for the headers a `<meta>` cannot set. Styles allow `unsafe-inline` because the syntax highlighter and the search UI set style attributes.
+
+No analytics, no cookies, no third-party requests. Fonts are self-hosted from `@fontsource`.
+
+## Design
+
+Dark by default with a stored light override. IBM Plex Sans and IBM Plex Mono. One accent (teal), amber only for "takes a protection back", red only for cautions. Tokens are at the top of `styles/site.css`.
+
+Design references looked at on 2026-10-12, desktop, before choosing:
+
+| Site | Taken | Avoided |
+|---|---|---|
+| hono.dev | definition left, working artefact right; one install line under the buttons | emoji feature cards |
+| litestream.io | one calm column, one button, version state in a plain strip | |
+| ghostty.org/docs, tailscale.com/docs | three zones: navigation, 720px prose, on-this-page; breadcrumbs | "Ask AI" widget |
+| caddyserver.com | a real transcript as the hero's evidence | gradient, capitals, sponsor wall, star count |
+| valkey.io | | cookie bar, slogan headline |
+
+The home page figure (demand against origin load across a weir) is the one piece of imagery. Its shape is a schematic and its labels are measured numbers; keep it that way.
+
+`public/og.png` is a 1200x630 screenshot of `scripts/og.html`.
+
+## What is not here, on purpose
+
+A blog, comments, accounts, a cookie banner, a docs version switcher (add one when a v2 exists), and an in-browser playground.

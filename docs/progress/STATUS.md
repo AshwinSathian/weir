@@ -3,12 +3,16 @@
 Updated: 2026-10-12
 Phase: released (v1.0.0, 2026-10-12)
 Current card: none
-Card state: ready
-Branch: main
-PR: none open for the release
+Card state: awaiting-merge (surfaces and website, outside the card system)
+Branch: site/launch
+PR: 117
 Next card: none (all cards done; M16-02 deferred)
 
 ## Waiting on Ashwin
+
+- Review and merge PR 117 (`site/launch`): new README, `site/` (Next.js static site), wording fixes in docs 01, 03, PLAN, runbook and benchmarks, plus CONTRIBUTING, CODE_OF_CONDUCT, issue templates and the `site` workflow. The PR body lists every normative-document edit.
+- The site is deployed to `weir-site.pages.dev` and says `v1.0.0`. Attach `weir.ashwinsathian.com` to the Pages project `weir-site` in the Cloudflare dashboard (the wrangler token cannot edit DNS), then run the post-launch list in docs/progress/surfaces-and-site-plan.md §10.3.
+- The About page (`site/content/pages/about.md`) is drafted in your voice; edit it before the domain goes live.
 
 - Nothing blocks. `v1.0.0` is tagged for all four modules and published (docs/release.md, rehearsal log).
 - Optional: delete the branches `release/v1.0.0-rc.1` and `release/v1.0.0-rc.3` (their tags keep the commits); decide whether `release/v1.0.0` stays as the base for a `v1.0.1`.
@@ -16,6 +20,9 @@ Next card: none (all cards done; M16-02 deferred)
 - The five behavior changes of PR 111 shipped in v1.0.0 (FR-KEY-5, FR-FWD-1, FR-RNG-6, `Entry.Size`, `valkey.Config.MaxObjectBytes`).
 
 ## Notes for the next session
+
+- Site work: `make site-check` (Node 24, pnpm) is the gate; `make site-deploy BRANCH=main` uploads with wrangler. `site/README.md` explains the include directives and the claims register. Not done: Lighthouse and axe in CI, per-page OG images, an outside tester on the quickstart.
+- Use a separate worktree for site or doc work when another session is using this checkout.
 
 - The sub-modules require weir v0.0.0 with `replace` on `main`; the pinned `go.mod` files live only on a release branch. `make release-check` fails on `main` by design. The four `v1.0.0-rc.1` modules are on the proxy and work for outsiders (docs/release.md, rehearsal log).
 - `GOTOOLCHAIN=go1.27.2` runs everything on a machine whose installed Go is older.

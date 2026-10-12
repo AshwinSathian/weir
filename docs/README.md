@@ -1,5 +1,26 @@
 # Weir design documents
 
+Updated: 2026-10-12
+
+Pick the section that matches why you are here. The website at [weir.ashwinsathian.com](https://weir.ashwinsathian.com) is the front door for users; the documents below are the source it is built from.
+
+## Use Weir
+
+- [README](../README.md): what it is, install, a first program.
+- [Quickstart](https://weir.ashwinsathian.com/docs/quickstart/) and [concept pages](https://weir.ashwinsathian.com/docs/concepts/) on the site.
+- [01 §6](01-technical-spec.md): every configuration field and default.
+- [08-caddy-adapter-spec](08-caddy-adapter-spec.md): the Caddyfile and JSON surface.
+- [10-experiments-spec](10-experiments-spec.md): A/B dimensions in the key.
+
+## Operate Weir
+
+- [runbook](runbook.md): deployment checklist, signals, alerts, incidents, Caddy on one node and on several.
+- [benchmarks](benchmarks.md): what it costs, with the machine and the command.
+- [cache-tests-expected-failures](cache-tests-expected-failures.md): where Weir differs from the conformance suite, and why.
+- [SECURITY.md](../SECURITY.md) and [06 §5](06-threat-model.md): how to report a vulnerability, and the residual risks.
+
+## Understand Weir
+
 Read in this order the first time. After that, go straight to the one you need.
 
 | # | Document | Answers | Status |
@@ -10,13 +31,15 @@ Read in this order the first time. After that, go straight to the one you need.
 | 03 | [hld](03-hld.md) | request flows and state machines | descriptive |
 | 04 | [lld](04-lld.md) | exact types, algorithms, locking, pseudo-code, event catalog | normative for implementers |
 | 05 | [storage-interface-spec](05-storage-interface-spec.md) | `store.Store` contract, epochs, memory store (S3-FIFO), codec, Valkey on paper, conformance suite | normative |
-| 06 | [threat-model](06-threat-model.md) | threats T-1–T-44, invariants INV-1–INV-7, security review checklist | normative |
+| 06 | [threat-model](06-threat-model.md) | threats T-1–T-45, invariants INV-1–INV-7, security review checklist | normative |
 | 07 | [testing-strategy](07-testing-strategy.md) | test levels, harness, per-failure-mode tests with pass criteria, CI, definition of done | normative |
 | 08 | [caddy-adapter-spec](08-caddy-adapter-spec.md) | Phase 2 adapter | normative (v1.0) |
 | 09 | [research-notes](09-research-notes.md) | sources, verified facts, seed errata | living |
 | 10 | [experiments-spec](10-experiments-spec.md) | Phase 3 experiment dimensions: locked decisions E1–E9 | v1.0 |
 
-Operators start with the [runbook](runbook.md) (deployment checklist, signals and incident steps) and the [benchmarks](benchmarks.md). The roadmap with milestones, tasks and acceptance criteria is [PLAN-weir.md](../PLAN-weir.md). Session-sized task cards are in [cards/](cards/README.md), and current progress in [progress/STATUS.md](progress/STATUS.md) with history in [progress/LOG.md](progress/LOG.md). Instructions for coding agents are in [CLAUDE.md](../CLAUDE.md).
+## Contribute
+
+[CONTRIBUTING.md](../CONTRIBUTING.md) is the short version. The roadmap with milestones and acceptance criteria is [PLAN-weir.md](../PLAN-weir.md). Session-sized task cards are in [cards/](cards/README.md), current progress in [progress/STATUS.md](progress/STATUS.md) with history in [progress/LOG.md](progress/LOG.md), and the release procedure in [release.md](release.md). Instructions for coding agents are in [CLAUDE.md](../CLAUDE.md). The plan for the website and the other user-facing surfaces is [progress/surfaces-and-site-plan.md](progress/surfaces-and-site-plan.md); the site's source is in [site/](../site/).
 
 ## Mapping from the seed's planned document names
 
