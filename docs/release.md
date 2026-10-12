@@ -4,6 +4,10 @@ Updated: 2026-10-11
 
 How to cut `v1.0.0` (and later releases). Weir is four Go modules in one repository: the root module, `observe/prom`, `store/valkey` and `caddy`. They are released together under one version number. The order matters because a `replace` directive in a `go.mod` is ignored when another module imports it, so each sub-module must require published versions of its siblings before it is tagged.
 
+## Toolchain
+
+Build, test and release with Go 1.27.2 or later. `make vuln` on 1.27.1 reports nine reachable standard library vulnerabilities, all fixed in 1.27.2 (GO-2026-6617, 6613, 6612, 6611, 6610, 6608, 6607, 6605, 6603), through `weirhttp`, the memory store's snapshot writer and the example proxy; it must be clean on the release machine. Upgrade with `brew upgrade go` or `go install golang.org/dl/go1.27.2@latest && go1.27.2 download`. The workflows use `go-version: "1.27"`, which resolves to the latest patch. The `release-gate` run of 2026-10-12 used Go 1.27.0, so its results cover this code and not that toolchain; the standard library fixes do not change Weir's own behavior.
+
 ## Gate before any tag
 
 The definition of done is [docs/07 §12](07-testing-strategy.md). Where each item is checked:

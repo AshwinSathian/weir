@@ -16,7 +16,8 @@ WORK="$(mktemp -d)"
 ORIGIN_PORT=8000
 PROXY_PORT=8001
 pids=()
-# Each service runs in its own process group (setsid) so the node child of
+# Each service runs in its own process group (job control, set -m: macOS has
+# no setsid) so the node child of
 # `npm run` dies with it; a leaked origin would answer the next run's probes.
 cleanup() {
   for p in "${pids[@]:-}"; do [ -n "$p" ] && { kill -- "-$p" 2>/dev/null || kill "$p" 2>/dev/null || true; }; done
@@ -37,13 +38,15 @@ git -C "$WORK/suite" checkout --quiet "$CACHE_TESTS_REF"
 (cd "$WORK/suite" && npm ci --no-audit --no-fund --silent 2>/dev/null || npm install --no-audit --no-fund --silent)
 (cd "$ROOT" && go build -o "$WORK/weirproxy" ./examples/weirproxy)
 
-(cd "$WORK/suite" && exec setsid npm run --silent server --port="$ORIGIN_PORT" >"$WORK/server.log" 2>&1) &
+set -m # a background job gets its own process group; $! is its group id
+(cd "$WORK/suite" && exec npm run --silent server --port="$ORIGIN_PORT" >"$WORK/server.log" 2>&1) &
 pids+=($!)
 # The suite's headers (Req-Num, Test-ID, Test-Name) and the request headers its
 # Vary tests set are unkeyed, so strict forwarding (D4) would hide them.
-setsid "$WORK/weirproxy" -listen "127.0.0.1:$PROXY_PORT" -origin "http://127.0.0.1:$ORIGIN_PORT" \
+"$WORK/weirproxy" -listen "127.0.0.1:$PROXY_PORT" -origin "http://127.0.0.1:$ORIGIN_PORT" \
   -forward-allow Req-Num,Test-ID,Test-Name,Foo,Bar,Baz,Abc >"$WORK/proxy.log" 2>&1 &
 pids+=($!)
+set +m
 wait_for() {
   for _ in $(seq 100); do
     curl -sS -o /dev/null "http://127.0.0.1:$1/" 2>/dev/null && return 0

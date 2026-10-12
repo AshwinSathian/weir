@@ -29,6 +29,10 @@ First stable release. It supersedes the `v0.1.0` tag, which predates most of the
 - `TransportOrigin` no longer panics when `http.DefaultTransport` has been replaced, and returns an error for a missing `Target`.
 - An origin body whose `Read` panics is closed instead of leaked.
 
+### Requirements
+
+- Go 1.27.2 or later for anything you deploy. Earlier 1.27 releases carry standard library vulnerabilities that `govulncheck` reports against `weirhttp`.
+
 ### Known limits
 
 - Pointer-light memory layout deferred (M16-02, D36): GC cost at 1M entries is 1.76 µs per request on the measured machine, inside the 2 µs gate.

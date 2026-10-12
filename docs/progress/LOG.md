@@ -1913,3 +1913,11 @@ Entry template:
 - Deviations: none.
 - Follow-ups: Ashwin: `make check`, `make vuln`, `make cache-tests` on the Mac; the `v1.0.0-rc.1` rehearsal; decide the behavior follow-ups (If-Match, unkeyed Pragma/Cache-Control storage, QuerySort order) before the real tag.
 - Context: low
+
+## 2026-10-12 · local-checks · done
+- Branch / PR: claude/magical-carson-rwdd4q (restarted from main after PR 108 merged) / see STATUS
+- Done: Ashwin's Mac run of the local checks. `make check` clean (0 lint issues, all four modules, trace 146/146). `make vuln` on Go 1.27.1 found nine reachable standard library vulnerabilities, all fixed in 1.27.2 (net/http, HTTP/2, net/textproto, crypto/tls); not a Weir defect, the toolchain needs upgrading. `make cache-tests` failed on macOS: `setsid` does not exist there. `scripts/cache-tests.sh` now uses job control (`set -m`) for its process groups; verified on Linux (passes, leaves no process on ports 8000 and 8001). The nightly and release-gate workflows used `go-version-file: go.mod` (1.27.0); they now use "1.27", the latest patch. README, CHANGELOG and docs/release.md state the 1.27.2 requirement.
+- Tests: `scripts/cache-tests.sh` run end to end on Linux.
+- Deviations: none.
+- Follow-ups: Ashwin upgrades Go, reruns `make vuln` (also look at `-show verbose` for the 2+2 findings that are imported or required but not called) and `make cache-tests` on the Mac, then the rc rehearsal. The gate ran on Go 1.27.0; consider one more full run on 1.27.2 before the real tag if the rc is clean.
+- Context: low
