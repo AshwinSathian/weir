@@ -630,7 +630,7 @@ func TestRequestFromSetsClient(t *testing.T) {
 		"@":                  "@", // a unix socket peer
 		"":                   "",
 	} {
-		r := httptest.NewRequest(http.MethodGet, "http://example.com/a", nil)
+		r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "http://example.com/a", nil)
 		r.RemoteAddr = addr
 		if got := weirhttp.RequestFrom(r).Client; got != want {
 			t.Errorf("RemoteAddr %q: Client = %q, want %q", addr, got, want)

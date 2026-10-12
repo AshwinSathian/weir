@@ -527,7 +527,12 @@ func TestResponseTrailersReachClient(t *testing.T) {
 	front := httptest.NewServer(weirhttp.Handler(e, &weirhttp.TransportOrigin{Target: u}))
 	defer front.Close()
 
-	resp, err := http.Post(front.URL+"/a", "text/plain", strings.NewReader("x")) // passed through, so streamed
+	// A POST is passed through, so its response is streamed.
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, front.URL+"/a", strings.NewReader("x"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}

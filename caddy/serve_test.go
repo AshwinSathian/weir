@@ -572,7 +572,7 @@ func TestBackgroundRefreshNeverSeesClientWriter(t *testing.T) {
 // FR-FAIR-4: the engine's client is Caddy's client_ip, the address
 // trusted_proxies resolves, and the peer address when Caddy set none.
 func TestRequestForClient(t *testing.T) {
-	r := httptest.NewRequest(http.MethodGet, "http://example.com/a", nil)
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "http://example.com/a", nil)
 	r.RemoteAddr = "10.0.0.5:4711"
 	if got := requestFor(r).Client; got != "10.0.0.5" {
 		t.Fatalf("Client without client_ip = %q, want the peer address", got)
