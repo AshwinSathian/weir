@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/AshwinSathian/weir"
@@ -25,9 +26,9 @@ func ExampleHandler() {
 		e.Close(ctx)
 	}()
 
-	calls := 0
+	var calls atomic.Int64
 	origin := weir.OriginFunc(func(_ context.Context, _ *weir.Request) (*weir.Response, error) {
-		calls++
+		calls.Add(1)
 		return &weir.Response{
 			StatusCode: http.StatusOK,
 			Header:     http.Header{"Cache-Control": {"max-age=60"}},
@@ -41,7 +42,7 @@ func ExampleHandler() {
 		h.ServeHTTP(rec, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "http://example.com/page", nil))
 		fmt.Println(rec.Code, rec.Body.String())
 	}
-	fmt.Println("origin calls:", calls)
+	fmt.Println("origin calls:", calls.Load())
 	// Output:
 	// 200 hello
 	// 200 hello
