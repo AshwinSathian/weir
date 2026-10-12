@@ -5,12 +5,12 @@ Phase: released (v1.0.1, 2026-10-12)
 Current card: none
 Card state: ready
 Branch: main
-PR: the v1.0.1 post-release PR
+PR: 119 (site and README sync, v1.0.1 changelog section), after 118
 Next card: none (all cards done; M16-02 deferred)
 
 ## Waiting on Ashwin
 
-- `v1.0.1` is tagged for all four modules; the site and the `caddy-published` CI job use it. Remaining by hand: `make site-deploy BRANCH=main` and `gh release create v1.0.1` if not done yet.
+- `v1.0.1` is tagged for all four modules; the site and the `caddy-published` CI job use it (this PR). The site is redeployed from `main` after this merges.
 - The site is live at https://weir.ashwinsathian.com (Pages project `weir-site`, direct upload; nothing deploys on merge). The About page (`site/content/pages/about.md`) is drafted in your voice and still wants your edit.
 
 - `v1.0.0` is tagged for all four modules and published (docs/release.md, rehearsal log).
