@@ -93,7 +93,7 @@ From `v1.0.0` the exported Go API of the root module, `store`, `store/memory`, `
 
 ## Security
 
-Weir decides what a shared cache stores and serves, so a bug can hand one user's response to another. The [threat model](docs/06-threat-model.md) lists 51 threats with the answer and the test for each, 7 invariants and 10 residual risks; the [security page](https://weir.ashwinsathian.com/security/) puts the residual risks in plain language. Report a vulnerability privately through the repository's Security tab ([SECURITY.md](SECURITY.md)).
+Weir decides what a shared cache stores and serves, so a bug can hand one user's response to another. The [threat model](docs/06-threat-model.md) lists 51 threats with the answer and the test for each, 7 invariants and 15 residual risks; the [security page](https://weir.ashwinsathian.com/security/) puts the residual risks in plain language. Report a vulnerability privately through the repository's Security tab ([SECURITY.md](SECURITY.md)).
 
 ## Performance
 

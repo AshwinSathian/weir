@@ -17,7 +17,7 @@ With defaults:
 - A request that finds no free slot queues. The queue holds `MaxQueue` (1,024) waiters and each waits at most `MaxQueueWait` (2 seconds) (FR-LIM-2).
 - A request that cannot queue, or waits too long, is shed. It gets a stale entry if stale-if-error allows one, and otherwise a 503 with `Retry-After` (FR-LIM-5).
 - Background refreshes never queue and never use the last 25% of slots, so they cannot starve the requests people are waiting on (FR-LIM-4).
-- Requests with a body draw from a separate pool of `MaxUpload` slots (16). A slow uploader can exhaust that pool and nothing else (FR-LIM-7).
+- Requests with a body draw from a separate pool of `MaxUpload` slots (16), of which one path may hold half. A slow uploader can exhaust that pool and nothing else (FR-LIM-7), and a body that stalls or breaks is the client's failure, not the origin's: the breaker does not count it.
 
 So the origin sees at most `MaxConcurrent + MaxUpload` fetches at once, 80 by default, whatever happens in front: a full purge, a restart with a cold cache, a storage outage that turns every lookup into a miss. Set `MaxConcurrent` to what your origin can serve concurrently and still answer in reasonable time.
 
@@ -31,11 +31,13 @@ Weir caps each partition (scheme, host and path, without the query) at `Limiter.
 
 For sites serving many hostnames, `Limiter.MaxPerHost` adds the same cap per host. The Caddy module sets it to 25% when you declare `multi_host`.
 
+Both caps are keyed on the URL, and the client chooses the URL. A client that asks for thousands of distinct paths has no partition to be capped in. `Limiter.MaxPerClient` caps how many of one client's requests may be at the origin, or waiting for it, whatever they name (FR-FAIR-4). Hits are never counted. It is off by default, because behind a load balancer every client has the balancer's address: `weirhttp` uses the peer address, the Caddy module uses Caddy's `client_ip`, and a Go program can set `Request.Client` from whatever it trusts. An IPv6 client counts as its /64.
+
 ## The circuit breaker
 
 A limiter protects a healthy origin from too much work. A breaker protects a failing origin from any work, and protects your clients from waiting on it.
 
-One breaker per engine watches all origin fetches over a 10-second window (FR-CB-1). When at least 20 have completed and half or more failed, it opens (FR-CB-2). A failure here means the origin's health is in doubt: a timeout, a connection error, a 502, 503 or 504. A 500 or a 4xx is the origin answering, and does not count unless you set `Breaker.CountStatus500`.
+One breaker per engine watches all origin fetches over a 10-second window (FR-CB-1). When at least 20 have completed and half or more failed, it opens (FR-CB-2), provided the failures come from at least two paths or nothing succeeded at all. One broken endpoint, asked a thousand ways, does not open the breaker for the rest of the site (`Breaker.MinPartitions`). A failure here means the origin's health is in doubt: a timeout, a connection error, a 502, 503 or 504. A 500 or a 4xx is the origin answering, and does not count unless you set `Breaker.CountStatus500`.
 
 While open, nothing reaches the origin (FR-CB-5). Requests get a stale entry where allowed (`detail=circuit-open`) and a fast 503 otherwise. After 5 seconds, give or take 20%, one probe request is let through. Success closes the breaker; failure reopens it for twice as long, up to 60 seconds (FR-CB-3, FR-CB-4).
 
@@ -65,4 +67,4 @@ A remote store can time out. Each call to one is bounded by `Timeouts.Store`, 50
 ## Limits
 
 > [!LIMITS]
-> The limiter bounds concurrency, not request rate, and it does not tell clients apart. A flood of distinct paths (not distinct queries on one path) spreads across partitions and can use the whole budget; put a rate limiter in front (T-12, R-2). The breaker is per engine, not per path or per upstream host, so one broken endpoint with enough traffic can open it for all. `Limiter.MaxConcurrent` is yours to size: 64 is a default, not a measurement of your origin.
+> The limiter bounds concurrency, not request rate, and it tells clients apart only when you turn `Limiter.MaxPerClient` on. Without it a flood of distinct paths (not distinct queries on one path) spreads across partitions and can use the whole budget, and a flood from many addresses does so either way; put a rate limiter in front (T-12, R-2, R-13). The breaker is per engine, not per upstream host: two or more failing paths with enough traffic can still open it for all (R-12). `Limiter.MaxConcurrent` is yours to size: 64 is a default, not a measurement of your origin.

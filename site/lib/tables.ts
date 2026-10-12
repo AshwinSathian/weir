@@ -47,6 +47,8 @@ const status: Record<string, string> = {
   ErrOriginTimeout: '504',
   ErrMustRevalidate: '504',
   ErrOnlyIfCached: '504',
+  ErrRequestBody: '400',
+  ErrRequestBodyTimeout: '408',
   ErrOrigin: '502',
   ErrClosed: '503',
   ErrUpgradeNotSupported: '501',

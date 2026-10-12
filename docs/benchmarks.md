@@ -46,6 +46,8 @@ What moved the numbers:
 - HRD-19 keeps the request's classification on the stack for a hit and does not build the forwarded header until a miss, a pass-through or a vary lookup needs it. That is the 928 B and the 4 allocations, and with less to collect the parallel rows fall again.
 - A request that creates a flight looks at the store once more first, so the window in which a follower's lookup misses just before the leader stores no longer costs a second fetch (1.003 to 1.000 calls per key).
 
+In round figures, as the README quotes them: hits from 12 goroutines take 225 ns each on the branch and 1,005 ns on `v1.0.1`.
+
 Smaller measurements on the same machine: `BenchmarkLimiterReleaseFullQueue` (one release with 1 024 waiters of distinct partitions) 1 750 to 225 ns; `BenchmarkObserveRequest` in `observe/prom` (one request event, 12 goroutines) 95 to 30 ns.
 
 `make load`, scale 1, on the same machine. The first column is the record of 2026-10-12 further down; the other two are this branch before and after HRD-19.

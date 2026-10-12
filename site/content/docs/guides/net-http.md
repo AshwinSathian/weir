@@ -35,6 +35,10 @@ origin := &weirhttp.TransportOrigin{Target: target} // target is a *url.URL; its
 
 It sends the forwarded request to `Target` over an `http.RoundTripper`. Leave `Transport` nil and you get a clone of `http.DefaultTransport` with compression disabled and no proxy. If you pass your own `*http.Transport`, set `DisableCompression: true` as well. Go's transport otherwise adds `Accept-Encoding: gzip` to requests that have none, and that is a header the origin sees and the key does not (INV-1).
 
+`TransportOrigin` removes `Forwarded`, `X-Real-Ip` and every `X-Forwarded-*` field from what it sends (FR-FWD-8). On a request that is passed through, those are whatever the client wrote, and an origin that trusts its proxy would believe them. Set `XForwarded: weirhttp.XForwardedSet` when Weir faces the clients itself: a passed-through request then carries the client address, scheme and host that Weir saw, and a cacheable fetch still carries none, because its response is shared. `XForwardedKeep` sends the fields through untouched, for a deployment behind a proxy that overwrites them.
+
+Trailers of a streamed response reach the client. A response that is stored has none.
+
 > [!PROTECTION]
 > `TransportOrigin.Rewrite` edits each outgoing request, for a `Via` header or origin authentication. Any header it adds to a cacheable request is unkeyed input (T-4). Add only headers that cannot change the response. A proxy in front of Weir that appends `X-Forwarded-For` has the same effect if the origin reads it (R-1).
 

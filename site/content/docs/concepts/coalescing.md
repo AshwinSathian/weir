@@ -17,7 +17,7 @@ The fetch does not belong to the leader. It runs on its own goroutine with a con
 
 Two bounds, both 10 seconds by default and both capped by `Timeouts.Origin`:
 
-- **A follower waits at most `Coalesce.FollowerMaxWait`** (FR-COA-4). After that it serves a stale entry if one is allowed (the response says `detail=coalesce-timeout`), and otherwise does its own fetch through the limiter.
+- **At `Coalesce.FollowerMaxWait` a follower takes a stale entry if one is allowed** (FR-COA-4; the response says `detail=coalesce-timeout`). Without one it keeps waiting for the fetch in progress, which the origin timeout already bounds. Fetching for itself at that point would turn one slow fetch into sixteen and shed everyone else. It gives up on the flight and fetches for itself only if the flight is still running after `Timeouts.Origin` plus the queue wait, which takes an origin that ignores cancellation.
 - A flight older than `Coalesce.LeaderMaxAge` stops accepting followers (FR-COA-3). The next request for that key starts a fresh flight. So one stuck fetch delays the requests that joined it, and nobody who arrives later.
 
 Without these bounds a single hung origin connection holds every request for that key until the origin timeout, which is how coalescing turns a slow origin into an outage.
