@@ -1,16 +1,17 @@
 # Status
 
-Updated: 2026-10-12
+Updated: 2026-10-13
 Phase: released (v1.0.1, 2026-10-12)
 Current card: none
 Card state: ready
 Branch: main
-PR: 119 (site and README sync, v1.0.1 changelog section), after 118
+PR: the v1.0.1 wrap-up (site and CI at v1.0.1, `site/go.mod`, branch rules)
 Next card: none (all cards done; M16-02 deferred)
 
 ## Waiting on Ashwin
 
-- `v1.0.1` is tagged for all four modules; the site and the `caddy-published` CI job use it (this PR). The site is redeployed from `main` after this merges.
+- `v1.0.1` is tagged for all four modules and published (docs/release.md, release log). Merge the wrap-up PR, which moves the site and the `caddy-published` CI job to it and adds `site/go.mod` and the branch-rule documents. Then redeploy the site: `make site-deploy BRANCH=main` (the site session that prepared this has ended, and nothing deploys on merge).
+- `main` and `release/*` are protected by rulesets since 2026-10-13 (docs/release.md, Branch rules). PR 120 (Dependabot, TypeScript 7 in `site/`) is open; the site session advised reviewing it as a major bump.
 - The site is live at https://weir.ashwinsathian.com (Pages project `weir-site`, direct upload; nothing deploys on merge). The About page (`site/content/pages/about.md`) is drafted in your voice and still wants your edit.
 
 - `v1.0.0` is tagged for all four modules and published (docs/release.md, rehearsal log).

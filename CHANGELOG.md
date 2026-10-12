@@ -4,7 +4,8 @@ Format: one section per release, newest first. Changes land under "Unreleased" i
 
 ## Unreleased
 
-Nothing yet.
+- The root module no longer ships the website: `site/` has its own `go.mod`, which keeps it out of the module zip (about 0.16 MB smaller than `v1.0.1`). No change to any Go package.
+- Repository: `main` and `release/*` are protected by GitHub rulesets (pull request and a green `check` for `main`; no force-push or deletion for both).
 
 ## v1.0.1 (2026-10-12)
 

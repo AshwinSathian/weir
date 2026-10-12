@@ -52,7 +52,10 @@ Stay inside the card. Anything that belongs elsewhere goes into STATUS "Notes fo
 ### Git and PRs
 
 - Branch per card: `card/<ID>-<slug>` from an up-to-date `main`. One PR per card, opened by `/handoff` with `.github/pull_request_template.md`. The user reviews and merges; sessions never merge, force-push to `main`, or delete branches.
-- Planning or doc-only work outside a card (like the session that created this setup) may commit to `main` directly when the user asks for it.
+- `main` is protected on GitHub (ruleset `protect-main`): changes arrive only through a pull request whose `check` job is green, and force-pushes and deletion are refused, for admins too. Planning or doc-only work outside a card therefore also goes through a branch and a pull request; nothing is pushed to `main` directly. Sessions do not merge pull requests: the user does.
+- `release/*` branches are protected too (ruleset `protect-release-branches`): no force-push and no deletion. The release procedure pushes its pin commits to them directly, which the rules allow. A wrong pin commit that is already pushed is corrected by a new commit, never by rewriting the branch.
+- Never change, disable or bypass these rulesets from a session. If one blocks a step, stop and tell the user.
+- Use a separate `git worktree` for any work while another session may be using the main checkout.
 
 ## Commands
 
