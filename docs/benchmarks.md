@@ -192,7 +192,7 @@ The D36 gate (at most 2 µs of GC per request at 1M entries) holds with 1.08 µs
 | 6 | 1 545 | 1 640 | 14 |
 | median of 6 | 1 286 | 1 640 | 14 |
 
-The median is 1.29 µs and the allocation count is 14, inside the bound of 16. NFR-5 sets the ns/op ceiling at 1.5 times this median, 1.9 µs (docs/01 updated). Runs 1 and 6 are noisy; the four quiet runs sit within 1 247 to 1 304.
+The median is 1.29 µs and the allocation count is 14, inside the bound of 16. NFR-5 first set the ns/op ceiling at 1.5 times this median, 1.9 µs; the optimized hit path below supersedes it with 1.25 µs. Runs 1 and 6 are noisy; the four quiet runs sit within 1 247 to 1 304.
 
 **Growth since M1, measured back to back.** The M1 row above (847 ns/op) was taken on another day and is not comparable with this run: `73e4d2e`, `b909550` (M10) and `138d4ff` rerun on the same machine in one session with `-count 10` and compared with `benchstat` (raw: [benchmarks/reference-2026-10-11-benchstat.txt](benchmarks/reference-2026-10-11-benchstat.txt)):
 
@@ -207,7 +207,7 @@ So the +52% in the first table was a comparison with a stale number; the real gr
 - M1 to M10, +24%: the miss-rate tracker, the breaker and the event plumbing, which arrived after M1. The M10 review already measured +18% on the Linux box, called it the edge of the rule and accepted it (section above). Allocations and bytes are unchanged.
 - M10 to the release candidate, +6% (the same +6% as on the Linux box): `keys.Classified`, which `Serve` allocates once per request, grew from 408 to 528 bytes as range, experiment and conditional fields were added. That moves it up an allocator size class, which accounts for all of the +160 B/op (an allocation profile shows the whole difference in `(*Engine).Serve`, and the count of 14 allocations did not change); the extra bytes to zero and copy account for the time.
 
-Decision for v1: accept. The hit path is still 1.2 µs with 14 allocations, about 1.5x under the 1.9 µs ceiling that this run sets, and the growth buys features that are in the spec. From this run on, the 20% rule is measured against the reference run above, so the next regression is judged against 1.29 µs. If the Classified size is worth recovering, trimming it below 512 bytes would drop it to the 512-byte size class (about 128 B/op less) and is a candidate for v1.1, with no behavior change.
+Resolved by the hit path optimization at the end of this file: on the M4 Pro the optimized branch is 4% faster than M1, so the growth is gone. The decision to accept it, proposed here first, is superseded.
 
 ## Hit path optimization (2026-10-11)
 
@@ -226,4 +226,20 @@ B/op fell from 1 640 to 1 536. What changed, in order of gain:
 - One `time.Now` per request instead of three, and not under the miss-rate mutex.
 - Fewer map reads (Range, If-Range, If-None-Match, Cache-Control read once; `IsUpgrade` indexes instead of canonicalizing constant keys), one canonical-key scan per request, one allocation for origin and partition, one for the stored body, and an early exit in the Accept-Encoding parser.
 
-Every change to `internal/keys` is held to the old behavior by a differential fuzz target that keeps the previous implementation in the test files (`FuzzForwardHeaderMatchesReference`, `FuzzAcceptEncodingMatchesReference`, `FuzzIsCanonicalKey`) next to `FuzzForwardEqualsKey`. The numbers on the M4 Pro are not measured yet: rerun the three-commit comparison there (`73e4d2e`, `b909550`, the tip of this branch) before changing the baseline in this file. Until then the reference run above stays the 20% baseline.
+Every change to `internal/keys` is held to the old behavior by a differential fuzz target that keeps the previous implementation in the test files (`FuzzForwardHeaderMatchesReference`, `FuzzAcceptEncodingMatchesReference`, `FuzzIsCanonicalKey`) next to `FuzzForwardEqualsKey`.
+
+### On the reference machine
+
+Two back-to-back runs on the M4 Pro, machine otherwise idle, three builds interleaved by `benchstat` (`-count 10` each; raw: [benchmarks/hit-path-opt-m4pro.txt](benchmarks/hit-path-opt-m4pro.txt)). An earlier run with several Claude Code sessions and a Chrome video stream open had a ±38% spread and is discarded.
+
+| Build | Run 1 ns/op | Run 2 ns/op | vs M1 (run 1 / run 2) | B/op | allocs/op |
+|---|---:|---:|---|---:|---:|
+| M1 `73e4d2e` | 870.5 ± 1% | 854.1 ± 2% | | 1 480 | 14 |
+| M10 `b909550` | 1 087 ± 3% | 1 070.5 ± 1% | +24.9% / +25.3% | 1 480 | 14 |
+| optimized branch | 833.5 ± 3% | 821.4 ± 4% | **-4.3% / -3.8%** (p<0.01) | 1 536 | 12 |
+
+The optimized hit path is about 4% faster than M1 and 23% faster than M10 on the M4 Pro, with two fewer allocations. The +32% growth since M1 that the first reference run exposed is gone. Bytes per op are 56 above M1 (1 536 against 1 480), not the 160 above M1 of the release candidate, and the allocation count is lower.
+
+The gain is smaller on the M4 Pro than on the Xeon (-30% there against M10-to-branch -23% here, relative to the release candidate), as expected: SHA-256 is cheaper with the ARM instructions, so the two tags no longer hashed per hit saved less.
+
+**New baseline.** The 20% regression rule is measured from this run, a median of about 0.83 µs. NFR-5 sets the ns/op ceiling at 1.5 times that, 1.25 µs (docs/01), replacing the 1.9 µs derived from the first, noisier reference run. The first reference run above stays as the record of the release candidate.

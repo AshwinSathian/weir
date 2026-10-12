@@ -1889,3 +1889,11 @@ Entry template:
 - Deviations: none in the docs' requirements; `Classified.URITag` and `OriginTag` became methods (internal package).
 - Follow-ups: Ashwin to rerun the three-commit benchstat on the M4 Pro with the branch tip, then I update the baseline in docs/benchmarks.md; remaining cost is mostly inherent (header map clone for P4, Cache-Status string, the forwarded map).
 - Context: high
+
+## 2026-10-12 · hit-path · done
+- Branch / PR: claude/magical-carson-rwdd4q / https://github.com/AshwinSathian/weir/pull/106
+- Done: Ashwin's M4 Pro reruns (machine idle, `benchstat` of M1, M10 and the optimized tip, 10 runs each, twice): M1 870 / 854 ns, M10 1 087 / 1 070 ns (+25%), optimized 833 / 821 ns (-4% against M1, p<0.01), 12 allocs/op against 14. The +32% is gone. An earlier run taken with several sessions and Chrome video open (±38%) is discarded. Baseline for the 20% rule is now this run (about 0.83 µs); NFR-5 ceiling set to 1.25 µs, replacing the 1.9 µs derived from the first, noisier run.
+- Tests: none (docs only).
+- Deviations: docs/01 NFR-5 value; supersedes the "accept +32%" proposal in docs/benchmarks.md.
+- Follow-ups: still waiting on Ashwin for the release-gate workflow results and the tag procedure.
+- Context: low
