@@ -1938,3 +1938,11 @@ Entry template:
 - Deviations: docs/01 FR-KEY-5, FR-FWD-1, FR-RNG-6 (new); docs/04 §2; docs/05 §7; docs/06 T-1, T-21, T-31; runbook 8. Each is a requirement or public-contract change made on Ashwin's instruction to address the follow-ups; he reviews them in the PR.
 - Follow-ups: Ashwin merges; then the full release-gate on merged `main`, then rc.3. No card-reviewer run (no card); the PR answers the docs/06 §6 checklist. Left as documented: a planted Valkey value that fits but does not decode still opens the store breaker; request `Cache-Control` still reaches the origin unkeyed in its plain form (an inner cache at the origin honors `no-cache`).
 - Context: high
+
+## 2026-10-12 · rc3-rehearsal · done
+- Branch / PR: claude/rc3-rehearsal / see STATUS
+- Done: after Ashwin merged PRs 110 and 111, cut `release/v1.0.0-rc.3` from `main` (`7be254b`) and tagged all four modules by the corrected procedure: root, then `observe/prom` and `store/valkey` on `fc8a83d`, then `caddy` on `b85d3e2` after `make release-check` and the `GOWORK=off` race tests passed. Nothing broke. Outside checks repeated with Go 1.27.2 and an empty module cache, plus the PR 111 behaviors on a Caddy built from the tags (Range with If-Match, the directive filter, a 70 MiB value planted in the shared store). New `scripts/release-smoke.sh` and `make release-smoke VERSION=...` run the automatable part of step 9; it passes for rc.3 and fails for a version that does not exist.
+- Tests: no Go code changed. `make check` on `main` passed before the tags (same tree as PR 111).
+- Deviations: none. docs/release.md gains the rc.3 row and the smoke target.
+- Follow-ups: `v1.0.0` is Ashwin's call. A full `release-gate` run holds all hosted runners, so `ci` on `main` queued behind it for the whole run.
+- Context: high

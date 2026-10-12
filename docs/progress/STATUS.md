@@ -4,16 +4,15 @@ Updated: 2026-10-12
 Phase: release
 Current card: none
 Card state: awaiting-merge
-Branch: claude/v1-hardening (stacked on claude/rc1-rehearsal-fixes, PR 110)
+Branch: claude/rc3-rehearsal (rc.3 record, `release-smoke`)
 PR: see the PR list
 Next card: none (all cards done; M16-02 deferred)
 
 ## Waiting on Ashwin
 
-- Merge the hardening PR (it contains PR 110's commit; merging it alone is enough, or merge 110 first). A session cannot merge: the permission layer refused `gh pr merge`.
-- Then, on the merged `main` commit, in this order: full `release-gate` run (Go code changed in `internal/keys`, `store`, `store/memory`, `store/valkey` and the root package, so the gate of 2026-10-12 no longer covers it); `v1.0.0-rc.3` for all four modules by the corrected procedure in docs/release.md (`caddy/v1.0.0-rc.2` is taken); set `WEIR_VERSION: v1.0.0-rc.3` in the `caddy-published` CI job.
-- Review the five behavior changes in the hardening PR; each changes a requirement or a public contract (FR-KEY-5, FR-FWD-1, new FR-RNG-6, `Entry.Size`, new `valkey.Config.MaxObjectBytes`). Say so if one should be reverted before rc.3.
-- After the `v1.0.0` tags: `WEIR_VERSION: v1.0.0`, date the CHANGELOG section, publish the GitHub release, delete the rc branches.
+- Merge the rc.3 record PR (docs, `scripts/release-smoke.sh`, `WEIR_VERSION: v1.0.0-rc.3` in CI). No Go code.
+- Then `v1.0.0` by docs/release.md steps 2 to 10, from the `main` commit the gate covers. The rc.3 rehearsal ran those steps without a change. The gate log in docs/release.md has the run for the rc.3 tree; a docs-only merge after it does not restart it.
+- After the `v1.0.0` tags: `make release-smoke VERSION=v1.0.0`, runbook 7.8 on the built Caddy, pkg.go.dev pages, `WEIR_VERSION: v1.0.0`, date the CHANGELOG section, publish the GitHub release, delete `release/v1.0.0-rc.1` and `release/v1.0.0-rc.3`.
 - Confirm the decisions taken for you: D24 amended, D43 added, README Stability promises, signing key caps, `servableStatus` miss.
 
 - Decide on the review follow-ups listed in the last LOG entry (If-Match handling, unkeyed Pragma/Cache-Control storage, QuerySort order, Entry.Size accounting, Valkey record size limit).
