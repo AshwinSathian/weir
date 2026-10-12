@@ -1,34 +1,33 @@
 # Status
 
 Updated: 2026-10-12
-Phase: release
-Current card: none (surfaces and website, outside the card system)
-Card state: awaiting-merge
+Phase: released (v1.0.0, 2026-10-12)
+Current card: none
+Card state: awaiting-merge (surfaces and website, outside the card system)
 Branch: site/launch
-PR: see the PR list ("docs(site): website, README and user-facing surfaces")
+PR: 117
 Next card: none (all cards done; M16-02 deferred)
 
 ## Waiting on Ashwin
 
-- Review and merge the `site/launch` PR: new README, `site/` (Next.js static site), truth-pass wording in docs 01, 03, PLAN, runbook, benchmarks, CHANGELOG, plus CONTRIBUTING, CODE_OF_CONDUCT, issue templates and `site.yml`. The PR body lists every normative-document edit.
-- The site is deployed to `weir-site.pages.dev` and says `v1.0.0` everywhere. All four `v1.0.0` tags resolve from the Go proxy (checked 2026-10-12), so the `release-state` job passes. Before announcing: confirm launch-gate items 2 to 4 and run the post-launch list (docs/progress/surfaces-and-site-plan.md §10).
-- The About page is drafted in your voice; edit it before the domain goes live.
+- Review and merge PR 117 (`site/launch`): new README, `site/` (Next.js static site), wording fixes in docs 01, 03, PLAN, runbook and benchmarks, plus CONTRIBUTING, CODE_OF_CONDUCT, issue templates and the `site` workflow. The PR body lists every normative-document edit.
+- The site is deployed to `weir-site.pages.dev` and says `v1.0.0`. Attach `weir.ashwinsathian.com` to the Pages project `weir-site` in the Cloudflare dashboard (the wrangler token cannot edit DNS), then run the post-launch list in docs/progress/surfaces-and-site-plan.md §10.3.
+- The About page (`site/content/pages/about.md`) is drafted in your voice; edit it before the domain goes live.
 
-- Merge the rc.3 record PR (docs, `scripts/release-smoke.sh`, `WEIR_VERSION: v1.0.0-rc.3` in CI). No Go code.
-- Then `v1.0.0` by docs/release.md steps 2 to 10, from the `main` commit the gate covers. The rc.3 rehearsal ran those steps without a change. The gate log in docs/release.md has the green run for the rc.3 tree (38259811052, all 35 jobs); a docs-only merge after it does not restart it.
-- After the `v1.0.0` tags: `make release-smoke VERSION=v1.0.0`, runbook 7.8 on the built Caddy, pkg.go.dev pages, `WEIR_VERSION: v1.0.0`, date the CHANGELOG section, publish the GitHub release, delete `release/v1.0.0-rc.1` and `release/v1.0.0-rc.3`.
-- Confirm the decisions taken for you: D24 amended, D43 added, README Stability promises, signing key caps, `servableStatus` miss.
-
-- Decide on the review follow-ups listed in the last LOG entry (If-Match handling, unkeyed Pragma/Cache-Control storage, QuerySort order, Entry.Size accounting, Valkey record size limit).
+- Nothing blocks. `v1.0.0` is tagged for all four modules and published (docs/release.md, rehearsal log).
+- Optional: delete the branches `release/v1.0.0-rc.1` and `release/v1.0.0-rc.3` (their tags keep the commits); decide whether `release/v1.0.0` stays as the base for a `v1.0.1`.
+- PR 99 (experiments spec review, v1.1) is still open and unrelated to the release.
+- The five behavior changes of PR 111 shipped in v1.0.0 (FR-KEY-5, FR-FWD-1, FR-RNG-6, `Entry.Size`, `valkey.Config.MaxObjectBytes`).
 
 ## Notes for the next session
 
-- Site work: `make site-check` (Node 24, pnpm) is the gate; `make site-deploy BRANCH=main` uploads with wrangler. `site/README.md` explains the include directives and the claims register.
-- Not done for the site: Lighthouse and axe in CI, per-page OG images, an outside tester on the quickstart. The original plan file was a session attachment and is not in the repository; `docs/progress/surfaces-and-site-plan.md` records the decisions and the launch gate.
+- Site work: `make site-check` (Node 24, pnpm) is the gate; `make site-deploy BRANCH=main` uploads with wrangler. `site/README.md` explains the include directives and the claims register. Not done: Lighthouse and axe in CI, per-page OG images, an outside tester on the quickstart.
+- Use a separate worktree for site or doc work when another session is using this checkout.
 
 - The sub-modules require weir v0.0.0 with `replace` on `main`; the pinned `go.mod` files live only on a release branch. `make release-check` fails on `main` by design. The four `v1.0.0-rc.1` modules are on the proxy and work for outsiders (docs/release.md, rehearsal log).
 - `GOTOOLCHAIN=go1.27.2` runs everything on a machine whose installed Go is older.
-- Deferred to v1.1: see the last LOG entry (export for `caddy`, `Event.Count`, zero-able knobs, prom options, apidiff job).
+- Deferred to v1.1: export for `caddy` (lifts the same-version constraint), `Event.Count`, zero-able knobs, prom options, the `apidiff` job against `v1.0.0`, `max_object_bytes` for the Caddy `store valkey` block, a decode failure on a planted Valkey value as a miss instead of `ErrUnavailable`.
+- Releases: use a separate worktree, never probe the proxy for a version before its tag, and keep `set -o pipefail` (docs/release.md steps 4 and 5).
 - `caddy validate` against a Valkey store can spend the key-generation purge; Caddy gives modules no way to detect validate (runbook 7.8).
 - Lint can run here: `GOTOOLCHAIN=go1.27.0 GOBIN=/tmp/lintbin go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0`, then `GOTOOLCHAIN=go1.27.0 make check GOLANGCI=/tmp/lintbin/golangci-lint`.
 - `TestE2EPurgeHerd` (real-clock caddytest) did not flake in 15 local runs.

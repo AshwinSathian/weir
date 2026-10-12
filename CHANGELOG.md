@@ -1,10 +1,21 @@
 # Changelog
 
-Format: one section per release, newest first. Versions follow [semantic versioning](https://semver.org). The root module and the `observe/prom`, `store/valkey` and `caddy` modules carry the same version number.
+Format: one section per release, newest first. Changes land under "Unreleased" in the pull request that makes them. Versions follow [semantic versioning](https://semver.org). The root module and the `observe/prom`, `store/valkey` and `caddy` modules carry the same version number.
+
+## Unreleased
+
+No change to the Go modules.
+
+- Documentation: a website at https://weir.ashwinsathian.com (source in `site/`, built from this repository), a shorter README that links to it, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md` and issue templates. The README's table of settings that take a protection back moved to the site's tuning page.
+- Wording corrections in docs/01 (status line, the targeted cache-control non-goal), docs/03 (a note on what its flows do not cover), the runbook (8.9 step 1 agrees with 7.8 about `caddy validate`) and docs/benchmarks.md (a "Current results" section). No requirement, default or signature changed.
 
 ## v1.0.0 (2026-10-12)
 
 First stable release. It supersedes the `v0.1.0` tag, which predates most of the engine and cannot be used with the sub-modules.
+
+The copy of this file inside the `v1.0.0` tag reads "v1.0.0 (unreleased)": the date was added on `main` after the tag. It lists the same changes; two headings and three lines were corrected here afterwards.
+
+Tags: `v1.0.0`, `observe/prom/v1.0.0`, `store/valkey/v1.0.0` and `caddy/v1.0.0`. The release candidates `v1.0.0-rc.1` and `v1.0.0-rc.3` stay on the module proxy for all four modules; `caddy/v1.0.0-rc.2` is the same commit as `caddy/v1.0.0-rc.1` and has no counterpart in the other modules.
 
 ### Engine (root module)
 
@@ -15,22 +26,21 @@ First stable release. It supersedes the `v0.1.0` tag, which predates most of the
 - Memory store (S3-FIFO) with snapshots across restarts; the `store.Store` interface and its optional capability interfaces.
 - Experiment-aware key dimensions (`Config.Experiments`): signed assignment cookie, consent gate, up to 4 signing keys of 32 to 256 bytes, `EvExposure`.
 - `weirhttp` adapters for `net/http`.
-- Hit path: one cached hit costs 852 ns and 12 allocations in process on an Apple M4 Pro with Go 1.27.2 (`BenchmarkServeHitSmall`), inside the budget of 1.25 µs and 16 allocations (NFR-5). Numbers and method are in docs/benchmarks.md.
 
 ### Modules
 
 - `observe/prom`: Prometheus observer and collector.
-- `store/valkey`: shared store for several nodes (tested against Valkey 8.1; `volatile-lfu` or `noeviction`).
+- `store/valkey`: shared store for several nodes (Valkey 7 or later; `maxmemory-policy` must be `volatile-lfu`, another `volatile-*` policy or `noeviction`).
 - `caddy`: the `weir` handler, Caddyfile and JSON configuration, admin purge API, `experiments` block. Built against Caddy v2.11.7.
 
-### Changed since the last pre-release work
+### Fixed before the first release candidate
 
 - Experiment signing keys are limited to 4 keys and 256 bytes each.
 - A stored response or negative entry whose status cannot be written by an HTTP server is treated as a miss.
 - `TransportOrigin` no longer panics when `http.DefaultTransport` has been replaced, and returns an error for a missing `Target`.
 - An origin body whose `Read` panics is closed instead of leaked.
 
-### Changed after v1.0.0-rc.1
+### Changed between v1.0.0-rc.1 and v1.0.0
 
 - `Key.QuerySort` sorts by parameter name only and keeps the order of a repeated name's values (`ids=3&ids=1` is no longer rewritten to `ids=1&ids=3`).
 - An unkeyed `Cache-Control` or `Pragma` request field is forwarded only as a plain directive list (at most 8 lines and 256 bytes, letters, digits, `-`, `_`, `=`, `,` and space); anything else is dropped for that request.
@@ -45,8 +55,9 @@ First stable release. It supersedes the `v0.1.0` tag, which predates most of the
 
 ### Known limits
 
-- Pointer-light memory layout deferred (M16-02, D36): GC cost at 1M entries is 1.08 µs per request on the reference machine (Apple M4 Pro) and 1.76 µs on a 4-vCPU Linux container, inside the 2 µs gate.
+- Pointer-light memory layout deferred (M16-02, D36): GC cost at 1M entries is about 1 µs per request on the reference machine (Apple M4 Pro; 1.76 µs on a 4-core Xeon), inside the 2 µs gate.
 - The `caddy` module imports the root module's `internal/keys`, so the four modules must be used at the same version (with xcaddy, pin the root module and `caddy` to it explicitly).
 - `Engine.Close` waits for origin goroutines; an `Origin` that ignores its context can delay it.
+- `store/valkey`: a new or flushed server stores nothing usable for `MaxClockSkew` + 1 s (2 s by default) after the first request; a value at an entry key that fits `MaxObjectBytes` but is not a Weir record counts as a store error. The Caddyfile has no key for `MaxObjectBytes`.
 
-Install: see the README. Documentation: https://weir.ashwinsathian.com
+Install: see the README.

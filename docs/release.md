@@ -30,10 +30,10 @@ Run `release-gate` on the release candidate commit, not on a branch that will st
 
 ## Order
 
-1. Merge everything. `main` is the release candidate; the gate above ran on it.
+1. Merge everything, including the pull request that turns the CHANGELOG's "Unreleased" heading into `v1.0.0 (date)` and adds a new empty "Unreleased" section above it, so the tag carries its own date (the `v1.0.0` tag was cut before that and says "(unreleased)" inside). A documents-only merge does not restart the gate. `main` is the release candidate; the gate above ran on its code.
 2. `git switch -c release/v1.0.0` from that commit.
 3. Rehearse with a release candidate tag before the real one. Module proxy entries are immutable, so run steps 4 to 7 and step 9 once with `v1.0.0-rc.N` for every module, fix what breaks (on `main`, then recut the release branch), and only then use `v1.0.0`. A bad `v1.0.0` can only be retracted, never replaced. Use one rc number for all four modules; if one module needs a new rc, all four get it. Delete the rc branch afterwards; the rc tags stay. Results are in the rehearsal log below.
-4. Tag the root on the release branch: `git tag -a v1.0.0 -m "weir v1.0.0" && git push origin release/v1.0.0 v1.0.0`. Check from outside the repository: `GOWORK=off GOFLAGS=-mod=mod go list -m github.com/AshwinSathian/weir@v1.0.0`.
+4. Do not ask the module proxy for the version before its tag is pushed (no `go list -m ...@v1.0.0`, no `curl` of its `.info` or `.mod`): the proxy caches the "unknown revision" answer per URL for about half an hour, and the pin in step 5 fails until it expires. Tag the root on the release branch: `git tag -a v1.0.0 -m "weir v1.0.0" && git push origin release/v1.0.0 v1.0.0`. Check from outside the repository: `GOWORK=off GOFLAGS=-mod=mod go list -m github.com/AshwinSathian/weir@v1.0.0`.
 5. Pin and tag the leaf modules. For `observe/prom` and `store/valkey`:
    ```sh
    scripts/release-pin.sh v1.0.0 observe/prom
@@ -41,7 +41,7 @@ Run `release-gate` on the release candidate commit, not on a branch that will st
    git add observe/prom store/valkey && git commit -m "chore(release): pin sub-modules to v1.0.0"
    ```
    `git add` takes the directory on purpose: the pin changes `go.sum` as well as `go.mod`, and a tag without the new `go.sum` lines does not build alone.
-   `release-pin.sh` runs `go mod tidy` and `go vet` against the module proxy. If it fails right after you pushed a tag, the proxy has not seen it yet (or cached a 404): wait a few minutes and run it again. Push the branch, then tag the commit with the directory as the prefix: `git tag -a observe/prom/v1.0.0` and `git tag -a store/valkey/v1.0.0`, and push both tags.
+   Work in a checkout nobody else is using (`git worktree add ../weir-release release/v1.0.0`): `release-pin.sh` edits whatever branch the directory has checked out. `release-pin.sh` runs `go mod tidy` and `go vet` against the module proxy. Do not pipe its output through `tail` or `grep` in a `&&` chain without `set -o pipefail`, or a failed pin looks like a success and the commit that follows carries a `go.mod` with no `go.sum`. If it fails right after you pushed a tag, the proxy has not seen it yet (or cached a 404): wait a few minutes and run it again. Push the branch, then tag the commit with the directory as the prefix: `git tag -a observe/prom/v1.0.0` and `git tag -a store/valkey/v1.0.0`, and push both tags.
 6. Pin and tag `caddy`, which needs all three:
    ```sh
    scripts/release-pin.sh v1.0.0 caddy observe/prom store/valkey
@@ -54,7 +54,7 @@ Run `release-gate` on the release candidate commit, not on a branch that will st
    - `go install github.com/AshwinSathian/weir/examples/weirproxy@v1.0.0`.
    - The README's xcaddy line, with both pins: `xcaddy build --with github.com/AshwinSathian/weir@v1.0.0 --with github.com/AshwinSathian/weir/caddy@v1.0.0`, then `./caddy list-modules --versions | grep weir` (two modules, both at the version) and the checklist in [runbook 7.8](runbook.md) against a scratch origin.
    - Open `https://pkg.go.dev/github.com/AshwinSathian/weir@v1.0.0` and the three sub-module pages. A page that answers 404 has not been fetched yet: its "Request" button, or `curl -X POST https://pkg.go.dev/fetch/<module>@v1.0.0`, fetches it. Each must show the Apache-2.0 license (the sub-module zips get the repository's `LICENSE` from the go command).
-10. Publish a GitHub release for `v1.0.0` from the CHANGELOG section. On `main`, replace "(unreleased)" in [CHANGELOG.md](../CHANGELOG.md) with the date and move the README Install block's version if it changed.
+10. Publish a GitHub release for `v1.0.0` from the CHANGELOG section (`gh release create v1.0.0 --verify-tag --notes-file ...`). On `main`, set `WEIR_VERSION` in the `caddy-published` job to the new version and move the README Install block's version if it changed.
 
 ## Keeping the modules in step
 
@@ -66,13 +66,14 @@ Do not delete or move a tag that the proxy may have fetched. Release the next pa
 
 ## After the release
 
-- Add an API compatibility check (`gorelease` or `apidiff`) for the root, `store` and `weirhttp` to CI, comparing against the latest tag.
-- Move `STATUS.md` to `ready` with no open card.
+- Add an API compatibility check (`gorelease` or `apidiff`) for the root, `store` and `weirhttp` to CI, comparing against the latest tag (open, v1.1).
+- Move `STATUS.md` to `ready` with no open card (done for v1.0.0).
 
 ## Rehearsal log
 
 | Date | Tags | Result |
 |---|---|---|
+| 2026-10-12 | **`v1.0.0`** on `46dc73c`; `observe/prom/v1.0.0`, `store/valkey/v1.0.0` on `6a7ff35`; `caddy/v1.0.0` on `60ac90a` (branch `release/v1.0.0`) | The release. Code identical to `v1.0.0-rc.3` (`git diff 7be254b 46dc73c` touches no Go file), which the gate run 38259811052 covers. `make release-check` and the `GOWORK=off` race tests passed before each sub-module tag; pins were resolved with `GOPROXY=https://proxy.golang.org` alone. `make release-smoke VERSION=v1.0.0` passes; the Caddy binary built from the tags passed runbook 7.8; pkg.go.dev shows Apache-2.0 for all four modules; `@latest` resolves to `v1.0.0`. GitHub release published. Three things went wrong on the way, none of which reached a pushed commit or tag: a `go list` of `v1.0.0` before the tag made the proxy cache a not-found for about 30 minutes; a pin that failed for that reason was hidden by a `tail` in the command chain and produced a local commit without `go.sum`, corrected before the push; and another session switched the shared checkout to a different branch between two steps, so one pin ran on the wrong branch and was reverted there. Step 4 and step 5 now warn about all three. The CHANGELOG inside the `v1.0.0` tag still says "(unreleased)"; `main` has the date. |
 | 2026-10-12 | `v1.0.0-rc.3` on `7be254b`; `observe/prom/v1.0.0-rc.3`, `store/valkey/v1.0.0-rc.3` on `fc8a83d`; `caddy/v1.0.0-rc.3` on `b85d3e2` (branch `release/v1.0.0-rc.3`) | Second rehearsal, by the corrected steps 4 to 7 and 9, after the hardening changes of PR 111. Nothing broke and no step needed a retry: the proxy served each tag on the first `release-pin.sh` run. `make release-check` passed on the `caddy` pin commit before the `caddy` tag, and each sub-module passed its race tests with `GOWORK=off` against the published siblings. From outside the repository, empty module cache, Go 1.27.2: `go get` of the three library modules; the README program; the published tests of all three from the module cache; `go install .../examples/weirproxy@v1.0.0-rc.3`; builds for `js/wasm`, `wasip1/wasm`, linux/386 and windows; the README xcaddy line (Caddy v2.11.7, both weir modules at `v1.0.0-rc.3`). On that Caddy binary: runbook 7.8 as corrected (`fwd=stale` after a restart, snapshot file gone after the start), a 206 for `Range` on a hit, the full 200 for `Range` with `If-Match` on a hit and on a miss (the origin saw neither field), a `Cache-Control` with markup not forwarded and a plain one forwarded. Two nodes on one store shared a hit and a hard purge, and a 70 MiB value planted at an entry key was a miss, was overwritten by the next response and left the store breaker closed. pkg.go.dev shows Apache-2.0 for all four modules. |
 | 2026-10-12 | `v1.0.0-rc.1` on `3f7eefa`; `observe/prom/v1.0.0-rc.1`, `store/valkey/v1.0.0-rc.1` on `72541bf`; `caddy/v1.0.0-rc.1` on `1c8e0ad` | Go 1.27.2, macOS arm64. On `main` (`3f7eefa`): `make check`, `make vuln` (no reachable finding; one in a required module that is not called) and `make cache-tests` pass. From outside the repository, with an empty module cache: `go get` of the three library modules, a program written from the README (miss, then hits; tracking parameters dropped; metrics registered), the published tests of the root, `observe/prom` and `store/valkey` run from the module cache, `go install .../examples/weirproxy@v1.0.0-rc.1`, and the README's xcaddy line (Caddy v2.11.7; `admin.api.weir` and `http.handlers.weir` at `v1.0.0-rc.1`). The Caddy binary passed the runbook 7.8 checklist, and two nodes on one store shared a hit and a hard purge. `store/valkey`'s integration tests and `caddy`'s race tests pass with `GOWORK=off` against the published siblings. The library builds for linux, darwin, windows, the BSDs, solaris, aix and plan9, 32-bit included. pkg.go.dev shows Apache-2.0 for all four modules. |
 

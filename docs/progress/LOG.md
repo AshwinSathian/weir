@@ -1947,10 +1947,20 @@ Entry template:
 - Follow-ups: `v1.0.0` is Ashwin's call. A full `release-gate` run holds all hosted runners, so `ci` on `main` queued behind it for the whole run.
 - Context: high
 
+## 2026-10-12 · release-v1.0.0 · done
+- Branch / PR: release/v1.0.0 (tags) and claude/v1-post-release / see the PR list
+- Done: `v1.0.0` tagged on `main` at `46dc73c`, `observe/prom/v1.0.0` and `store/valkey/v1.0.0` on `6a7ff35`, `caddy/v1.0.0` on `60ac90a`. `make release-check` and the `GOWORK=off` race tests passed before each sub-module tag. `make release-smoke VERSION=v1.0.0`, runbook 7.8 on the built Caddy, the README program and pkg.go.dev all pass. GitHub release published from the CHANGELOG section. `caddy-published` in CI builds `v1.0.0`.
+- Tests: none added. The gate run 38259811052 covers the code (no Go file changed since).
+- Deviations: none in behavior. The CHANGELOG inside the tag says "(unreleased)" because PR 113 was merged after the root tag; `main` is dated.
+- Incidents, all caught before a push: a pre-tag proxy probe cached a not-found for about 30 minutes; a failed pin hidden by `tail` in an `&&` chain made a local commit without `go.sum`; another session switched the shared checkout to `site/launch` mid-procedure, so one pin ran on that branch and was reverted there (only the four `go.mod`/`go.sum` files). docs/release.md steps 4 and 5 now cover each.
+- Follow-ups: v1.1 list in STATUS; rc branches can be deleted.
+- Context: high
+
 ## 2026-10-12 · surfaces-and-site · done
 - Branch / PR: site/launch / see STATUS
 - Done: the plan for user-facing surfaces, in one branch at Ashwin's request. README rewritten (128 lines: definition, real `curl` transcript, non-goals, comparison table; the settings table moved to the site). New `site/`: Next.js static export, 28 pages, dark by default, content in Markdown that includes sections of docs/01, 06, runbook, benchmarks, cache-tests and CHANGELOG at build time, Cache-Status and error tables read from `cachestatus.go` and `errors.go`. `site.yml` workflow, `make site-check` and `make site-deploy`. CONTRIBUTING, CODE_OF_CONDUCT, issue templates, release-notes categories, dependabot for `/site`, `examples/weirproxy/README.md`. Deployed to Cloudflare Pages project `weir-site`.
 - Tests: no Go code changed except the xcaddy line in the `caddy/doc.go` comment. `make check` and `make site-check` results are in the PR body. Site checks: style lint, claims register against source files, README program compiles, internal links and anchors, no horizontal overflow at 360 px on any page.
-- Deviations: wording-only edits to normative documents, listed in the PR: docs/01 status line and §1.2 (targeted cache-control is implemented), PLAN testing-strategy line (D24 as amended), docs/03 "Updated since" note and date, runbook 8.9 step 1 (agrees with 7.8) and a contents line, docs/README split by reader and T-45, benchmarks "Current results" section, cache-tests "Last verified", CHANGELOG (Valkey 8.1 only, GC figure with both machines, hit-path line).
+- Deviations: wording-only edits to normative documents, listed in the PR: docs/01 status line and §1.2 (targeted cache-control is implemented), PLAN testing-strategy line (D24 as amended), docs/03 "Updated since" note and date, runbook 8.9 step 1 (agrees with 7.8) and a contents line, docs/README split by reader and T-45, benchmarks "Current results" section, cache-tests "Last verified", CHANGELOG (an Unreleased entry for the README and the site; the v1.0.0 section is untouched, as corrected on `main` by PRs 115 and 116).
+- Incident: this session created `site/launch` with `git checkout -b` in the shared checkout while the release session was mid-procedure there (see the release-v1.0.0 entry). Site or doc sessions that run beside another session should use a separate worktree.
 - Follow-ups: the custom domain and the post-launch list (plan record §10.3); Ashwin edits the About page; Lighthouse and axe not in CI; outside tester for the quickstart.
 - Context: high
