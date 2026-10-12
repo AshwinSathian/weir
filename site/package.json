@@ -1,0 +1,40 @@
+{
+  "name": "weir-site",
+  "private": true,
+  "version": "0.0.0",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "packageManager": "pnpm@11.23.0",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build && node scripts/postbuild.mjs && pagefind --site out",
+    "typecheck": "tsc --noEmit",
+    "check": "node scripts/check.mjs"
+  },
+  "dependencies": {
+    "@fontsource/ibm-plex-mono": "^5.3.0",
+    "@fontsource/ibm-plex-sans": "^5.3.0",
+    "@shikijs/rehype": "^4.5.0",
+    "gray-matter": "^4.0.3",
+    "next": "16.4.0",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "rehype-raw": "^7.0.0",
+    "rehype-slug": "^6.0.0",
+    "rehype-stringify": "^10.0.1",
+    "remark-gfm": "^4.0.1",
+    "remark-parse": "^11.0.0",
+    "remark-rehype": "^11.1.2",
+    "shiki": "^4.5.0",
+    "unified": "^11.0.5"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "pagefind": "^1.5.2",
+    "typescript": "^5.9.3"
+  }
+}

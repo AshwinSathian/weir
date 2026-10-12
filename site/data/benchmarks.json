@@ -1,0 +1,13 @@
+{
+  "source": "docs/benchmarks.md",
+  "hitPath": {
+    "title": "BenchmarkServeHitSmall, three builds run back to back",
+    "machine": "Apple M4 Pro, 12 cores, Go 1.27.1, -count 10",
+    "unit": "ns/op",
+    "rows": [
+      { "build": "M1 (first engine)", "ns": "870.5", "allocs": "14" },
+      { "build": "M10 (all defenses on)", "ns": "1 087", "allocs": "14" },
+      { "build": "optimized hit path", "ns": "833.5", "allocs": "12" }
+    ]
+  }
+}
