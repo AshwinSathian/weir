@@ -3,7 +3,8 @@
 //      scripts, so each page gets a <meta> policy listing the SHA-256 of its
 //      own inline scripts. No 'unsafe-inline' for scripts.
 //   2. _headers for Cloudflare Pages: the headers a <meta> cannot set, and caching.
-//   3. Link check: every internal href and #fragment must resolve.
+//   3. Link check: every internal href and #fragment must resolve, and every
+//      GitHub link into this repository must name a file that exists.
 import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -69,6 +70,9 @@ for (const file of pages) {
   const from = '/' + path.relative(OUT, file).replace(/index\.html$/, '')
   for (const m of read(file).matchAll(/<a\s[^>]*href="([^"]+)"/g)) {
     const href = m[1].replace(/&amp;/g, '&')
+    // A link into this repository on GitHub must name a file that exists in the working tree.
+    const gh = /^https:\/\/github\.com\/AshwinSathian\/weir\/(?:blob|tree|edit)\/main\/([^#?]*)/.exec(href)
+    if (gh && !fs.existsSync(path.join(OUT, '../..', decodeURIComponent(gh[1])))) errors.push(`${from}: GitHub link to a file not in the repository: ${gh[1]}`)
     if (/^(https?:|mailto:)/.test(href)) continue
     const [p, frag] = href.split('#')
     let target = file
@@ -84,7 +88,7 @@ for (const file of pages) {
 }
 if (errors.length) {
   console.error(errors.join('\n'))
-  console.error(`postbuild: ${errors.length} broken internal links`)
+  console.error(`postbuild: ${errors.length} broken links`)
   process.exit(1)
 }
-console.log(`postbuild: CSP on ${pages.length} pages, internal links ok`)
+console.log(`postbuild: CSP on ${pages.length} pages, internal and repository links ok`)

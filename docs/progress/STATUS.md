@@ -5,16 +5,16 @@ Phase: released (v1.0.0, 2026-10-12)
 Current card: none
 Card state: ready
 Branch: main
-PR: none open after the threat-rows PR (118)
+PR: 119 (site and README sync, v1.0.1 changelog section), after 118
 Next card: none (all cards done; M16-02 deferred)
 
 ## Waiting on Ashwin
 
-- The site is deployed to `weir-site.pages.dev` and says `v1.0.0`. Attach `weir.ashwinsathian.com` to the Pages project `weir-site` in the Cloudflare dashboard (the wrangler token cannot edit DNS), then run the post-launch list in docs/progress/surfaces-and-site-plan.md §10.3.
-- The About page (`site/content/pages/about.md`) is drafted in your voice; edit it before the domain goes live.
+- `v1.0.1` (documentation release, so pkg.go.dev shows the current README). Merge PR 119; `main` is then the commit to tag. The release session tags all four modules from a new `release/v1.0.1` branch in its own worktree (docs/release.md steps 2 to 7), runs `make release-smoke VERSION=v1.0.1` and publishes the GitHub release. Nothing may ask the module proxy for `v1.0.1` before the tags are pushed (docs/release.md step 4), which is why `site/data/release.ts` and `WEIR_VERSION` in ci.yml still say `v1.0.0` here. After the tags, the site session opens the PR from `claude/v1.0.1-post-release` (both bumps) and redeploys the site.
+- The site is live at https://weir.ashwinsathian.com (Pages project `weir-site`, direct upload; nothing deploys on merge). The About page (`site/content/pages/about.md`) is drafted in your voice and still wants your edit.
 
-- Nothing blocks. `v1.0.0` is tagged for all four modules and published (docs/release.md, rehearsal log).
-- Optional: decide whether `release/v1.0.0` stays as the base for a `v1.0.1` (the rc branches are deleted; their tags keep the commits).
+- `v1.0.0` is tagged for all four modules and published (docs/release.md, rehearsal log).
+- `release/v1.0.0` is not the base for `v1.0.1`: cut `release/v1.0.1` from `main`, which has the new README. The old branch can go once nothing needs it (its tags keep the commits).
 - PR 99 is closed; its six threat rows are in docs/06 as T-46 to T-51, checked against v1.0.0 (PR 118).
 - The five behavior changes of PR 111 shipped in v1.0.0 (FR-KEY-5, FR-FWD-1, FR-RNG-6, `Entry.Size`, `valkey.Config.MaxObjectBytes`).
 

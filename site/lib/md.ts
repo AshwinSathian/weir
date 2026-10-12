@@ -25,7 +25,7 @@ function idHref(id: string): string {
   return blob('docs/01-technical-spec.md')
 }
 
-const ID = /\b(FR-[A-Z]+-\d+|NFR-\d+|INV-\d+|T-\d+|R-[1-8]|D\d{1,2})\b/g
+const ID = /\b(FR-[A-Z]+-\d+|NFR-\d+|INV-\d+|T-\d+|R-\d{1,2}|D\d{1,2})\b/g
 
 const text = (n: Node): string => (n.type === 'text' ? (n.value ?? '') : (n.children ?? []).map(text).join(''))
 

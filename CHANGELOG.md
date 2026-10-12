@@ -4,11 +4,18 @@ Format: one section per release, newest first. Changes land under "Unreleased" i
 
 ## Unreleased
 
-No change to the Go modules.
+Nothing yet.
+
+## v1.0.1 (2026-10-12)
+
+Documentation release. No change to the behavior or the API of any module; the only Go changes are two tests and one doc comment. It exists so that pkg.go.dev shows the current README.
 
 - Documentation: a website at https://weir.ashwinsathian.com (source in `site/`, built from this repository), a shorter README that links to it, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md` and issue templates. The README's table of settings that take a protection back moved to the site's tuning page.
+- Site: links inside text taken from repository documents now point at the right GitHub path, and the build fails on a GitHub link to a file that is not in the repository.
 - Wording corrections in docs/01 (status line, the targeted cache-control non-goal), docs/03 (a note on what its flows do not cover), the runbook (8.9 step 1 agrees with 7.8 about `caddy validate`) and docs/benchmarks.md (a "Current results" section). No requirement, default or signature changed.
 - Documents: threat model rows T-46 to T-51 for the experiment dimensions (signing keys, header aliases, `Set-Cookie` isolation, the assignment cookie on the forward, cookie tossing, exposure floods), with residual risks R-9 and R-10 and runbook advice to use `{env.NAME}` key placeholders and a `__Host-` cookie name. No behavior change.
+- `store/valkey` is tested only against Valkey 8.1 (in CI). The v1.0.0 notes below said "Valkey 7 or later" without saying what was tested; they now do.
+- README, runbook and the Caddy package comment name `v1.0.1` in their install lines. Tags: `v1.0.1`, `observe/prom/v1.0.1`, `store/valkey/v1.0.1` and `caddy/v1.0.1`.
 
 ## v1.0.0 (2026-10-12)
 
@@ -31,7 +38,7 @@ Tags: `v1.0.0`, `observe/prom/v1.0.0`, `store/valkey/v1.0.0` and `caddy/v1.0.0`.
 ### Modules
 
 - `observe/prom`: Prometheus observer and collector.
-- `store/valkey`: shared store for several nodes (Valkey 7 or later; `maxmemory-policy` must be `volatile-lfu`, another `volatile-*` policy or `noeviction`).
+- `store/valkey`: shared store for several nodes (written for Valkey 7 or later; tested only against Valkey 8.1, in CI; `maxmemory-policy` must be `volatile-lfu`, another `volatile-*` policy or `noeviction`).
 - `caddy`: the `weir` handler, Caddyfile and JSON configuration, admin purge API, `experiments` block. Built against Caddy v2.11.7.
 
 ### Fixed before the first release candidate

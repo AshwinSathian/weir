@@ -1,6 +1,6 @@
 ---
 title: Threat table
-description: All 45 threats in the model, each with Weir's answer, the requirement behind it and the test that proves it.
+description: All {{threat_count}} threats in the model, each with Weir's answer, the requirement behind it and the test that proves it.
 wide: true
 idRows: true
 source: docs/06-threat-model.md

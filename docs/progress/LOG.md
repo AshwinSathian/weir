@@ -1965,10 +1965,25 @@ Entry template:
 - Follow-ups: the custom domain and the post-launch list (plan record §10.3); Ashwin edits the About page; Lighthouse and axe not in CI; outside tester for the quickstart.
 - Context: high
 
+## 2026-10-12 · site-consistency-check · done
+- Branch / PR: site/repo-link-fix / see the PR list
+- Done: after PR 117 merged and `weir.ashwinsathian.com` was attached, crawled the 28 live pages against `main`. Consistent: the deployed tree equals `main`; every install line says `v1.0.0`; all four modules resolve on the proxy and pkg.go.dev serves all eight package pages at `v1.0.0`; Go 1.27.0 minimum and 1.27.2 for deployment match `go.mod` and the CHANGELOG; Caddy v2.11.7 matches `caddy/go.mod`; 45 threats, 365/284/81 cache-tests and the canonical URLs match. `go run .../examples/weirproxy@v1.0.0` works from the proxy. Found five GitHub links from included runbook, threat-model and benchmark text that lacked their `docs/` directory (404 on GitHub). Fixed in `site/lib/content.ts` (relative links in included text are rebased to the source file's directory) and `postbuild.mjs` now fails on a GitHub link to a file missing from the tree. Repository homepage set to the site.
+- Tests: `pnpm check`, `pnpm typecheck`, `pnpm build` with the new link check. No Go change.
+- Deviations: none.
+- Follow-ups: the README inside the `v1.0.0` tag (what pkg.go.dev shows) is the pre-site README; it changes with the next tag.
+- Context: medium
 ## 2026-10-12 · threat-rows-experiments · done
 - Branch / PR: claude/threat-rows-experiments / see the PR list
 - Done: ported the six threat rows of the closed PR 99 (T-46 to T-51) into docs/06 after checking each against v1.0.0 as shipped, with real test names; T-35's test column names its tests. Two claims of PR 99 did not hold and are residual risks instead: signing keys are not redacted anywhere (R-9), and a `__Host-` cookie name is accepted but never recommended (R-10). Runbook 7.9 gains both pieces of advice.
 - Tests: `TestAssignCookieRepeatedMeansNone` (a repeated assignment cookie with different values is no assignment), one `TestConfigValidate` row (`__Host-` name accepted). `make check` passes.
 - Deviations: none in behavior. docs/07 gets no Phase 3 section: the threat table carries the test names, as it does for every other row.
 - Follow-ups: v1.1 candidates in STATUS (redacting formatter for `ExperimentsConfig`).
+- Context: high
+
+## 2026-10-12 · v1.0.1-prep · done
+- Branch / PR: site/repo-link-fix / 119 (merge after 118)
+- Done: PR 118's branch merged in, so the site builds against T-46 to T-51 and R-9, R-10. Threat, risk and invariant counts on the site are now read from docs/06 at build time; the security page has plain-language rows for R-9 and R-10; the experiments guide cites T-50, R-10 and the `__Host-` advice instead of "no row yet". README says 51 threats, 7 invariants, 10 residual risks; docs/README says T-1 to T-51. The Valkey claim says what is tested (8.1, CI only) in the CHANGELOG and on the stores page. CHANGELOG: "Unreleased" became `v1.0.1 (2026-10-12)` with a new empty "Unreleased". Install lines in README, runbook 7.0, docs/08, `caddy/doc.go` and the weirproxy README name `v1.0.1`. New checks in `site/scripts/check.mjs`: `counts` (numbers in the copy equal docs/06 and the cache-tests baseline, every residual risk has a row on the security page) and `versions` (every install line in the documents names one version). Included repository text on the site always shows the site's own version, so a document bumped before its tag cannot put an unpublished version on the site.
+- Tests: `make check`, `pnpm check`, `pnpm typecheck`, `pnpm build`; results in the PR. The `counts` check was seen to fail on a wrong number.
+- Deviations: none. docs/06, docs/10 and the runbook's 7.9 text are PR 118's; this branch only changed the runbook's install line.
+- Follow-ups: the release session tags `v1.0.1` after the merge; then the post-release branch `claude/v1.0.1-post-release` and a site deploy (STATUS). No job or command asks the proxy for `v1.0.1` before the tags. If the tag is not cut on 2026-10-12, change the date in the CHANGELOG heading first.
 - Context: high

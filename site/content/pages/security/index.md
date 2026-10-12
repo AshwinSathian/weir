@@ -4,7 +4,7 @@ description: What Weir protects, the invariants every build holds, the risks tha
 idRows: true
 ---
 
-A shared cache decides which stored response a user receives. A bug in that decision can hand one user's page to another, or let one request change what everyone sees. Weir treats the cache key as a security boundary and keeps a written threat model. This page is the summary; the [threat table](/security/threats/) has all 45 rows and the normative document is [docs/06-threat-model.md](https://github.com/AshwinSathian/weir/blob/main/docs/06-threat-model.md).
+A shared cache decides which stored response a user receives. A bug in that decision can hand one user's page to another, or let one request change what everyone sees. Weir treats the cache key as a security boundary and keeps a written threat model. This page is the summary; the [threat table](/security/threats/) has all {{threat_count}} rows and the normative document is [docs/06-threat-model.md](https://github.com/AshwinSathian/weir/blob/main/docs/06-threat-model.md).
 
 ## Reporting a vulnerability
 
@@ -24,7 +24,7 @@ The latest `v1.x` minor release gets security fixes. All four modules are in sco
 
 ## Threat families
 
-The model groups its 45 threats into three families:
+The model groups its {{threat_count}} threats into three families:
 
 - **Poisoning and deception.** Getting a wrong or private response stored and served to others. Answered mainly by strict forwarding (the origin never sees unkeyed input) and by storability rules that refuse `private`, `Set-Cookie`, credentialed and `Vary: *` responses. Start at T-1.
 - Availability. Making the origin or the engine do unbounded work: cache busting, stampedes, slow uploads, memory growth. Answered by the limiter, coalescing bounds, per-path fairness and a stated bound on every in-memory structure. Start at T-11.
@@ -48,6 +48,8 @@ No design removes every risk. These are the ones that remain after the defaults 
 | R-6 | An in-process origin reads values that middleware in front of Weir put in the request context, such as the logged-in user. The response is built for that user and shared | Put that middleware behind Weir, or bypass the route |
 | R-7 | A request carrying unkeyed input (`Cache-Control`, a `Forward.Allow` header) leads a coalesced fetch, the origin answers it with a 5xx, and the followers of that one fetch receive the same error. Nothing is stored | Accepted: the reach is one flight, bounded by the origin timeout |
 | R-8 | With `MissRate.Throttle` on, a client flooding one path with distinct queries keeps that path's legitimate misses throttled for as long as the flood lasts | Leave `Throttle` off unless you have read the warnings from a run without it |
+| R-9 | Experiment signing keys are plain bytes in `weir.Config`. Weir never logs its configuration, but your own code might: printing the struct with `%v`, or handing it to a logger, prints the keys | In Caddy, keep the keys as `{env.NAME}` placeholders so the stored configuration and the admin API hold the placeholder. In Go, do not log the config |
+| R-10 | Cookie tossing on the experiment cookie. A sibling subdomain you do not control can set a cookie for the parent domain. If a visitor has no assignment cookie yet, Weir accepts a validly signed one an attacker planted, so the attacker chooses that visitor's variant | Name the cookie with a `__Host-` prefix (https only). Browsers then refuse to let a subdomain set it |
 
 ## Out of scope
 
@@ -55,4 +57,4 @@ Network attackers (TLS is the adapter's job), HTTP request smuggling (the HTTP s
 
 ## How it is checked
 
-Each threat row names a test. Parsers of request or origin bytes have fuzz targets, 29 in all, and each ran for an hour before the release with no new crasher. The tests for the failure modes ran 100 times under the race detector. The root module imports only the Go standard library, enforced by `deps_test.go`, so its supply chain is the Go toolchain.
+Most threat rows name a test; a few are operator rules or accepted limits and say so. Parsers of request or origin bytes have fuzz targets, 29 in all, and each ran for an hour before the release with no new crasher. The tests for the failure modes ran 100 times under the race detector. The root module imports only the Go standard library, enforced by `deps_test.go`, so its supply chain is the Go toolchain.
