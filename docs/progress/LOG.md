@@ -1905,3 +1905,11 @@ Entry template:
 - Deviations: none.
 - Follow-ups: Ashwin reruns the gate narrowed to `fuzz=false`, `pkgs=["./store/..."]`, then the rc rehearsal and the tags.
 - Context: low
+
+## 2026-10-12 · release-gate · done
+- Branch / PR: claude/magical-carson-rwdd4q / see STATUS
+- Done: Ashwin's full `release-gate` rerun on `92a1e56` (run 38213460051), which includes the store test fix: all 35 jobs passed (29 fuzz targets x 60 min, repeat x100 under `-race` for four package groups, allocation budget). Recorded in the gate log in docs/release.md.
+- Tests: none (docs only).
+- Deviations: none.
+- Follow-ups: Ashwin: `make check`, `make vuln`, `make cache-tests` on the Mac; the `v1.0.0-rc.1` rehearsal; decide the behavior follow-ups (If-Match, unkeyed Pragma/Cache-Control storage, QuerySort order) before the real tag.
+- Context: low
