@@ -1,7 +1,7 @@
 # Weir low-level design
 
 Status: v1.0
-Date: 2026-10-12
+Date: 2026-10-13
 Depends on: [01-technical-spec.md](01-technical-spec.md), [02-architecture.md](02-architecture.md), [03-hld.md](03-hld.md)
 
 This document is written for the person (or agent) implementing a milestone. It gives exact type definitions, algorithms, locking rules and pseudo-code. Code may differ in naming of unexported identifiers; exported names, behavior, bounds and locking rules may not change without updating this document in the same commit.
@@ -730,8 +730,10 @@ func (e *Engine) fetchCoalesced(ctx, c, lk, origin, attempt):
         if lk.entry != nil && staleIfErrorOK(lk):
             if created: e.leaveFlight(f)
             return e.fromEntry(c, lk.entry, staleInfo(StaleCoalesceTimeout))
-        if !created: return e.fetchDirect(ctx, c, lk, origin)
-        wait for f.Done() or ctx.Done() as above        // the creator keeps waiting on its own fetch
+        if created: wait for f.Done() or ctx.Done() as above   // the creator keeps waiting on its own fetch
+        // a follower keeps the flight until the flight's own bound has passed (FR-COA-4)
+        timer.Reset(Timeouts.Origin + Limiter.MaxQueueWait - FollowerMaxWait)
+        on the second expiry: e.emit(EvCoalesceTimeout{direct}); return e.fetchDirect(ctx, c, lk, origin)
     case <-ctx.Done():
         if created: e.leaveFlight(f)
         return nil, ctx.Err()
@@ -740,6 +742,8 @@ func (e *Engine) fetchCoalesced(ctx, c, lk, origin, attempt):
 `staleIfErrorOK(lk)` re-runs `Evaluate` at the current time and checks `sieOK`.
 
 The timer covers the creator too, so it can serve stale under stale-if-error like any follower. Without a stale entry the creator does not fetch again: its fetch is the flight, already bounded by `Timeouts.Origin`, and the default `FollowerMaxWait` equals `Timeouts.Origin` whenever that is under 10 s, so a second fetch would start just as the first one times out and double the origin load of every slow request.
+
+A follower without a stale entry does not fetch at `FollowerMaxWait` either (v1.1). The flight it waits on ends within `Limiter.MaxQueueWait + Timeouts.Origin` unless its origin ignores the context, so the follower waits that long, counted from when it joined, and fetches for itself only after that. Before v1.1 it fetched at `FollowerMaxWait`: with the defaults, 100 requests for one key behind an origin that answered in 15 s made 16 fetches and shed 84 requests.
 
 Before publishing, `runFlight` checks the built entry against epochs newer than its `RequestTime` (FR-PRG-7). If one applies, the entry is not shared: a follower may have arrived after the purge, and every follower arrived before `Publish`, so one check covers them all. The creator still gets its own response. If the origin calls `runtime.Goexit`, the flight publishes an `*OriginError` instead of leaving its waiters blocked.
 
@@ -1177,7 +1181,7 @@ type Event struct {
 | `EvRequest` | every `Serve` return; `Duration` is the time in `Serve`, `Status` the response status or `StatusCode(err)`, `Partition` empty when the request was refused before classification | `hit`, `stale`, `miss`, `revalidated` (the origin answered 304 to a forward made for a stale entry), `collapsed` (a follower answered from its flight's response or buffered 5xx; it sent nothing to the origin, and FR-MR-1 counts it like a hit), `pass` (includes a Range request no entry answered), `bypass`, `negative`, `error`. So `miss` plus `revalidated` plus `pass` plus `bypass` is the number of requests that fetched for themselves |
 | `EvFetchStart`, `EvFetchEnd` | around every `Origin.Fetch`, so twice for a conditional fetch repeated without validators; `EvFetchEnd` is the headers arriving or the error, with `Duration` since the start and `Status` (0 for an error). Every start has an end, also when the origin panics or calls `runtime.Goexit` | `foreground`, `background`, `warm`, `pass` |
 | `EvCoalesceJoin` | a request joined an existing flight | |
-| `EvCoalesceTimeout` | a wait on a flight expired and the request stopped waiting: any waiter that serves stale, or a follower that fetches for itself. The creator without a stale entry keeps waiting on its own fetch and emits nothing | `stale`, `direct` |
+| `EvCoalesceTimeout` | a wait on a flight expired and the request stopped waiting: any waiter that serves stale at `FollowerMaxWait`, or a follower that fetches for itself once the flight has outlived `Timeouts.Origin + Limiter.MaxQueueWait`. A waiter that keeps waiting emits nothing | `stale`, `direct` |
 | `EvShed` | limiter refused | `queue-full`, `queue-timeout`, `background` |
 | `EvStaleServed` | a stale response was served | `swr`, `sie`, `shed`, `circuit-open`, `coalesce-timeout` |
 | `EvRefreshDropped` | background refresh not started | `no-slot`, `circuit-open`, `closed` |

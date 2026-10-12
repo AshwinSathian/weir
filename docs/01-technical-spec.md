@@ -1,7 +1,7 @@
 # Weir technical specification
 
 Status: v1.0, implemented through Phase 3 (first approved for Phase 0 and Phase 1; later phases added in §13, §14 and docs 08 and 10)
-Date: 2026-10-12
+Date: 2026-10-13
 Owner: Ashwin Sathian
 Module: `github.com/AshwinSathian/weir`
 Supersedes: the interface sketch in [00-design-doc.md §7.2](00-design-doc.md)
@@ -293,7 +293,7 @@ A response is stored only if all of the following hold. Each failed check increm
 - FR-COA-1. Concurrent requests that resolve to the same coalescing key share one flight. The coalescing key is the variant key when a vary spec is already stored, otherwise the primary key.
 - FR-COA-2. The origin fetch of a flight runs on its own goroutine with a context detached from every requester (`context.WithoutCancel` plus `Timeouts.Origin`, or `Timeouts.Background` for background and warm flights). No requester's cancellation cancels the shared fetch.
 - FR-COA-3. A flight older than `Coalesce.LeaderMaxAge` (default 10 s) is aged. New requests for that key do not join an aged flight; the first one starts a new flight. At most one new flight per key per `LeaderMaxAge` results.
-- FR-COA-4. A follower waits at most `Coalesce.FollowerMaxWait` (default 10 s), bounded by its own context. On timeout it serves a stale entry if §5.8 permits (reason `coalesce-timeout`), otherwise it performs its own fetch through the limiter, and that fetch's storable result is stored.
+- FR-COA-4. A follower waits at most `Coalesce.FollowerMaxWait` (default 10 s), bounded by its own context. On timeout it serves a stale entry if §5.8 permits (reason `coalesce-timeout`). Without one it keeps waiting for the flight, which `Limiter.MaxQueueWait` and `Timeouts.Origin` already bound: fetching for itself would turn one slow fetch into `MaxPerPartition` fetches and shed the other waiters (decided 2026-10-13, v1.1). Only when the flight has still not published `Timeouts.Origin + Limiter.MaxQueueWait` after the follower joined (an origin that ignores its context) does the follower perform its own fetch through the limiter, and that fetch's storable result is stored.
 - FR-COA-5. When a flight's response is not reusable for a follower (not storable, oversized, or its Vary does not match the follower), the follower re-enters lookup once. A 500, 502, 503 or 504 flight response is an error condition, not an unreusable one: every waiter gets it through §7.2, as stale from its own lookup when stale-if-error permits, else the response itself, so followers never refetch from a failing origin (decided 2026-10-01). On the second pass it may coalesce again only if its coalescing key changed (typically because the first flight stored a vary spec and the follower now resolves to a different variant key), otherwise it fetches independently. Followers never wait on each other serially. A storable flight response is shared even when it needs validation before its next reuse (`no-cache`, `max-age=0`), as Varnish and nginx do: a strict reading of RFC 9111 §4 would have each follower refetch, which ends coalescing for typical `no-cache` HTML (decided 2026-10-01).
 - FR-COA-6. A panic in `Origin.Fetch` is recovered, converted to `*OriginError`, and delivered to every waiter. The limiter slot and flight entry are always released.
 - FR-COA-7. The flight table is independent of the store. Coalescing keeps working while the store is unavailable.
@@ -474,7 +474,7 @@ Evaluated in order after validation, bypass check, and store lookup.
 | 500 response | serve stale | pass the response through, no negative entry |
 | shed | serve stale | `ErrShed` (503) |
 | breaker open | serve stale | `ErrCircuitOpen` (503) |
-| follower wait expired | serve stale | fetch independently (FR-COA-4) |
+| follower wait expired | serve stale | keep waiting for the flight; fetch independently once it has outlived `Timeouts.Origin + Limiter.MaxQueueWait` (FR-COA-4) |
 | any of the above on a `must-revalidate` or `proxy-revalidate` entry | not permitted | `ErrMustRevalidate` (504), except a 500/502/503/504 response is passed through |
 
 "Negative entry" in this table means: written only by a foreground fetch, when no stored response exists for the key and none of the FR-NEG-4 exclusions apply (`Authorization`, request `no-store`, unkeyed forwarded input) (FR-NEG-1, FR-NEG-4).

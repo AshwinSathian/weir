@@ -138,8 +138,13 @@ type FreshnessConfig struct {
 
 // CoalesceConfig bounds request coalescing (FR-COA).
 type CoalesceConfig struct {
-	LeaderMaxAge    time.Duration // 0: min(10s, Timeouts.Origin); at most Timeouts.Origin
-	FollowerMaxWait time.Duration // 0: min(10s, Timeouts.Origin); at most Timeouts.Origin
+	LeaderMaxAge time.Duration // 0: min(10s, Timeouts.Origin); at most Timeouts.Origin
+	// FollowerMaxWait is how long a request waits on another request's fetch
+	// before it serves a stale entry that stale-if-error permits. Without
+	// one it keeps waiting until the fetch's own bound has passed
+	// (Timeouts.Origin plus Limiter.MaxQueueWait) and only then fetches for
+	// itself. 0: min(10s, Timeouts.Origin); at most Timeouts.Origin.
+	FollowerMaxWait time.Duration
 	// HitForMissTTL is how long an unstorable URI is remembered so requests
 	// skip coalescing. Zero means the default 30s; there is no way to set a
 	// zero TTL today.

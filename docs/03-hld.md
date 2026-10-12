@@ -1,7 +1,7 @@
 # Weir high-level design
 
 Status: v1.0
-Date: 2026-10-12
+Date: 2026-10-13
 Depends on: [01-technical-spec.md](01-technical-spec.md), [02-architecture.md](02-architecture.md)
 
 This document walks through what happens to a request, step by step, for every path the spec defines. It names components and the order they are consulted. It does not give type definitions; [04-lld.md](04-lld.md) does.
@@ -120,12 +120,15 @@ t=0..10 B, C join F1 and wait
 t=10    D arrives; F1 age >= LeaderMaxAge -> D creates F2 (F1 is left alone)
 t=10    B, C hit FollowerMaxWait:
           stale permitted? serve stale, detail=coalesce-timeout
-          otherwise fetch independently through the limiter
+          otherwise keep waiting for F1 (FR-COA-4)
 t=12    F2 completes; D and anything that joined F2 get the result; entry stored
-t=30    F1's fetch hits Timeouts.Origin and ends; its late result is stored only if it is newer
+t=30    F1's fetch hits Timeouts.Origin and ends; B and C get its result or its error;
+        a late result is stored only if it is newer
+t=32    only if F1 still has not published (its origin ignores the context):
+          B and C fetch independently through the limiter
 ```
 
-The worst case for one key is one new flight per `LeaderMaxAge` plus independent follower fetches, all inside the per-partition cap.
+The worst case for one key is one new flight per `LeaderMaxAge`. Followers add fetches of their own only behind an origin that ignores its context, and then inside the per-partition cap.
 
 ### 2.8 Origin failure, breaker, negative entries
 

@@ -80,6 +80,7 @@ func (e *Engine) fetchCoalesced(ctx context.Context, sp *fetchSpec, origin Origi
 	timer := time.NewTimer(e.cfg.Coalesce.FollowerMaxWait)
 	defer timer.Stop()
 	tc := timer.C
+	waited := false     // FollowerMaxWait has passed
 	for !published(f) { // a result published as the timer fired is still used
 		select {
 		case <-f.Done():
@@ -87,6 +88,13 @@ func (e *Engine) fetchCoalesced(ctx context.Context, sp *fetchSpec, origin Origi
 			if published(f) {
 				continue
 			}
+			if waited {
+				// The flight outlived its own bound: its origin ignores the
+				// context, so this follower stops trusting it (T6.2a).
+				emit(e.cfg.Observer, Event{Kind: EvCoalesceTimeout, Time: time.Now(), Partition: c.Partition, Reason: "direct"})
+				return e.fetchDirect(ctx, sp, origin)
+			}
+			waited = true
 			if r := e.staleOnTimeout(sp); r != nil {
 				emit(e.cfg.Observer, Event{Kind: EvCoalesceTimeout, Time: time.Now(), Partition: c.Partition, Reason: "stale"})
 				if created {
@@ -94,14 +102,18 @@ func (e *Engine) fetchCoalesced(ctx context.Context, sp *fetchSpec, origin Origi
 				}
 				return r, nil
 			}
-			if !created {
-				emit(e.cfg.Observer, Event{Kind: EvCoalesceTimeout, Time: time.Now(), Partition: c.Partition, Reason: "direct"})
-				return e.fetchDirect(ctx, sp, origin)
+			if created {
+				// The creator's fetch is the flight, already bounded by the
+				// origin timeout; a second fetch would only race it. It keeps
+				// waiting, which is neither outcome of 04 §9.2: no event.
+				tc = nil
+				continue
 			}
-			// The creator's fetch is the flight, already bounded by the
-			// origin timeout; a second fetch would only race it. It keeps
-			// waiting, which is neither outcome of 04 §9.2: no event.
-			tc = nil
+			// FR-COA-4: a follower keeps a flight that is still inside its
+			// bound, the queue wait plus the origin timeout. Fetching now
+			// would turn one slow fetch into MaxPerPartition of them and
+			// shed the rest (T-19).
+			timer.Reset(e.cfg.Timeouts.Origin + e.cfg.Limiter.MaxQueueWait - e.cfg.Coalesce.FollowerMaxWait)
 		case <-ctx.Done():
 			if created {
 				e.leaveFlight(f)
