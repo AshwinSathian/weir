@@ -10,7 +10,7 @@ endif
 # leans on an unpublished sibling by accident (docs/02 §3.2).
 SUBMODULES := $(patsubst ./%/go.mod,%,$(shell find . -mindepth 2 -name go.mod -not -path './testdata/*' -not -path './.claude/*' -not -path './.git/*' | sort))
 
-.PHONY: release-check check fmt-check vet lint test modules test-short trace trace-strict fuzz-short bench load cache-tests vuln card next test-valkey
+.PHONY: release-smoke release-check check fmt-check vet lint test modules test-short trace trace-strict fuzz-short bench load cache-tests vuln card next test-valkey
 
 ## check: everything a card must pass before handoff (CI runs the same)
 check: fmt-check vet lint test modules trace-strict
@@ -43,6 +43,10 @@ release-check:
 	  (cd $$m && GOWORK=off go list -m all >/dev/null) || { echo "$$m does not resolve alone (is its go.sum committed?)"; fail=1; }; \
 	  if [ -n "$$(git status --porcelain -- $$m/go.mod $$m/go.sum)" ]; then echo "$$m: go.mod or go.sum differs from the commit; a tag would not carry it"; fail=1; fi; \
 	done; exit $$fail
+
+## release-smoke: the published tags as a user meets them (docs/release.md step 9): make release-smoke VERSION=v1.0.0
+release-smoke:
+	@scripts/release-smoke.sh $(VERSION)
 
 ## test-valkey: integration tests (store/valkey, and the two-node Caddy test in caddy/) against a real server (WEIR_VALKEY_ADDR, default 127.0.0.1:6379; start Valkey with --maxmemory-policy volatile-lfu; WEIR_VALKEY_STORM_ADDR, a throwaway server with --maxmemory 16mb, enables the eviction storm)
 test-valkey:
