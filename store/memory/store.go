@@ -32,6 +32,9 @@ type Config struct {
 	// zero Owner are never limited.
 	MaxBytesPerOwner int64
 	// SnapshotPath, when set, makes Close write a snapshot there (FR-SNP-1).
+	// A snapshot holds entries stored under the forwarding rules of the
+	// engine that wrote it. Put weir.Config.KeyGeneration() in the file name
+	// so that an engine with other rules does not load them (FR-SNP-4).
 	SnapshotPath string
 	// SnapshotTimeout bounds the snapshot written by Close; CloseContext uses
 	// its own context instead. 0: 5s.

@@ -103,6 +103,7 @@ func TestCaddyfileParse(t *testing.T) {
 		max_bytes  512MiB          # memory store size
 		snapshot_dir /var/lib/weir
 		multi_host
+		client_placeholders
 		key {
 			query_drop utm_* fbclid gclid
 			query_keep id
@@ -145,7 +146,7 @@ func TestCaddyfileParse(t *testing.T) {
 		}
 		var want Handler
 		const raw = `{
-			"name": "site-a", "max_bytes": "512MiB", "snapshot_dir": "/var/lib/weir", "multi_host": true,
+			"name": "site-a", "max_bytes": "512MiB", "snapshot_dir": "/var/lib/weir", "multi_host": true, "client_placeholders": true,
 			"key": {"query_drop": ["utm_*", "fbclid", "gclid"], "query_keep": ["id"], "query_sort": true,
 				"normalize_path": true, "headers": ["Accept-Language"], "cookies": ["currency"],
 				"accept_encoding": ["br", "gzip"]},
