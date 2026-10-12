@@ -326,3 +326,55 @@ func TestNewWarnsOnCredentialForwarding(t *testing.T) {
 		})
 	}
 }
+
+// FR-LCY-2: an Origin that ignores its context does not hold Close forever.
+// Close gives up 5 s after it cancelled, and its error says why. Before v1.1
+// it never returned.
+func TestCloseReturnsWhenOriginIgnoresContext(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		stuck := make(chan struct{})
+		o := weir.OriginFunc(func(context.Context, *weir.Request) (*weir.Response, error) {
+			<-stuck // ignores its context
+			return nil, errors.New("late")
+		})
+		e := newEngine(t, cacheCfg)
+		req := serveAsync(context.Background(), e, getReq("/a"), o)
+		synctest.Wait()
+
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		start := time.Now()
+		err := e.Close(ctx)
+		if got := time.Since(start); got != 6*time.Second {
+			t.Fatalf("Close returned after %v, want the 1 s grace period plus 5 s", got)
+		}
+		if !errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), "still running") {
+			t.Fatalf("Close = %v, want the context's error and a note about running goroutines", err)
+		}
+		close(stuck)
+		<-req
+	})
+}
+
+// FR-LCY-2: an Origin that honors its context is unaffected by that bound.
+func TestCloseWaitsForHonestOrigin(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		o := testorigin.New()
+		o.Default(testorigin.Behavior{Gate: make(chan struct{})}) // ends when its context does
+		e := newEngine(t, cacheCfg)
+		req := serveAsync(context.Background(), e, getReq("/a"), o)
+		synctest.Wait()
+
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		start := time.Now()
+		err := e.Close(ctx)
+		if got := time.Since(start); got != time.Second {
+			t.Fatalf("Close returned after %v, want the grace period", got)
+		}
+		if !errors.Is(err, context.DeadlineExceeded) || strings.Contains(err.Error(), "still running") {
+			t.Fatalf("Close = %v, want only the context's error", err)
+		}
+		<-req
+	})
+}

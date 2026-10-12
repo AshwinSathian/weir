@@ -1284,7 +1284,7 @@ The memory store's hit path takes only a shard read lock plus an atomic frequenc
 | flight fetch | first requester of a key, background refresh | `MaxConcurrent + MaxQueue` flights | fetch done and published |
 | warm workers | `Warm` | `Warm.Concurrency` | `Warm` returns |
 
-All are added to `e.wg`. `Close` sets `closed`, waits on `wg` until its context ends, then cancels `bgCtx` (which cancels in-flight origin calls via the fetch context derived from it) and waits again.
+All are added to `e.wg`. `Close` sets `closed`, waits on `wg` until its context ends, then cancels `bgCtx` (which cancels in-flight origin calls via the fetch context derived from it) and waits again, for at most 5 s (`closeAbandon`). An `Origin` that ignores its context is the only way to outlast that; `Close` then returns the context's error joined with `errCloseAbandoned` and closes its own store, and the goroutines left behind get `ErrUnavailable` from it (FR-LCY-2).
 
 ## 13. Phase 1.x designs (M11 to M15)
 

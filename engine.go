@@ -202,11 +202,20 @@ func (e *Engine) goBackground(f func(context.Context)) bool {
 	return true
 }
 
+// closeAbandon is how long Close waits for engine goroutines after it has
+// cancelled them (FR-LCY-2).
+const closeAbandon = 5 * time.Second
+
+var errCloseAbandoned = errors.New("weir: close: engine goroutines still running after cancellation (an Origin ignores its context)")
+
 // Close rejects new Serve calls with ErrClosed, waits for engine goroutines
-// until ctx is done, then cancels the rest and waits for them (FR-LCY-2). It
-// returns ctx's error when the grace period ran out. It closes the store only
-// if the engine created it. Later calls wait for the first until their own
-// ctx is done and return nil or ctx's error.
+// until ctx is done, then cancels the rest and waits up to 5 s more for them
+// (FR-LCY-2). It returns ctx's error when the grace period ran out. An Origin
+// that honors its context has returned by then; one that does not would hold
+// Close forever, so Close gives up on its goroutines, says so in the error it
+// returns, and leaves them to end when that Origin does. It closes the store
+// only if the engine created it. Later calls wait for the first until their
+// own ctx is done and return nil or ctx's error.
 func (e *Engine) Close(ctx context.Context) error {
 	e.mu.Lock()
 	first := !e.closed.Swap(true)
@@ -230,7 +239,14 @@ func (e *Engine) Close(ctx context.Context) error {
 		graceErr = ctx.Err()
 	}
 	e.bgCancel()
-	<-done
+	var abandoned error
+	t := time.NewTimer(closeAbandon)
+	select {
+	case <-done:
+		t.Stop()
+	case <-t.C:
+		abandoned = errCloseAbandoned
+	}
 	var storeErr error
 	if e.ownStore {
 		if ctx.Err() != nil {
@@ -242,7 +258,7 @@ func (e *Engine) Close(ctx context.Context) error {
 			storeErr = closeStore(ctx, e.sg.s)
 		}
 	}
-	return errors.Join(graceErr, storeErr)
+	return errors.Join(graceErr, abandoned, storeErr)
 }
 
 // closeStore closes s, bounding a snapshot write by the caller's grace period
