@@ -78,7 +78,9 @@ func (e *Engine) serve(ctx context.Context, req *Request, origin Origin, c *keys
 	if req == nil {
 		return nil, &RequestError{Reason: "nil request"}
 	}
-	cl, err := keys.Classify((*keys.Request)(req), &e.kcfg)
+	// The forwarded header is built when a path first needs it (shared):
+	// a hit reads only the key (NFR-5).
+	cl, err := keys.ClassifyDeferred((*keys.Request)(req), &e.kcfg)
 	if err != nil {
 		return nil, e.rejected(err)
 	}
@@ -192,8 +194,21 @@ func (e *Engine) maxForwards(c *keys.Classified) *Response {
 	return e.finish(&Response{StatusCode: status, Header: http.Header{"Allow": {"GET, HEAD, OPTIONS"}}, Body: http.NoBody}, CacheInfo{})
 }
 
+// shared returns a copy of c on the heap, with its forwarded header built,
+// for the paths that hand the request to the origin or to another goroutine
+// (a flight, a background fetch). Serve's own Classified then stays on the
+// stack for a hit: the copy is made here, never by taking c's address, so
+// nothing a hit does makes it escape (NFR-5). The copy shares c's maps and
+// slices, which nothing writes after classification.
+func shared(c *keys.Classified) *keys.Classified {
+	c.Forward()
+	h := *c
+	return &h
+}
+
 // pass forwards a request that is never stored, streaming the response.
-func (e *Engine) pass(ctx context.Context, c *keys.Classified, origin Origin, fwd FwdReason) (*Response, error) {
+func (e *Engine) pass(ctx context.Context, rc *keys.Classified, origin Origin, fwd FwdReason) (*Response, error) {
+	c := shared(rc)
 	if resp := e.maxForwards(c); resp != nil {
 		return resp, nil
 	}
@@ -312,6 +327,7 @@ func (e *Engine) lookup(ctx context.Context, c *keys.Classified, now time.Time) 
 	if rec.Kind == store.KindVarySpec {
 		// Secondary values come from the forwarded request, which is what
 		// the origin sees (FR-KEY-7, INV-1).
+		c.Forward()
 		lk.ck = keys.VariantKey(c.Primary, rec.VaryNames, c.Forwarded.Header)
 		if rec, err = e.sg.get(ctx, lk.ck); err != nil || rec.Expires.Before(now) {
 			lk.fwd = FwdVaryMiss
@@ -377,6 +393,13 @@ func (e *Engine) cacheable(ctx context.Context, c *keys.Classified, origin Origi
 	if c.Range {
 		return e.rangeMiss(ctx, c, lk, origin)
 	}
+	return e.miss(ctx, shared(c), origin, lk, prior, found, purged, prevCK)
+}
+
+// miss is the rest of cacheable for a request nothing in the store answers:
+// it takes the client's place, then fetches through a flight or directly.
+// c is the shared copy (shared), since the fetch may outlive this call.
+func (e *Engine) miss(ctx context.Context, c *keys.Classified, origin Origin, lk lookupResult, prior, found, purged *store.Entry, prevCK *store.Key) (*Response, error) {
 	sp := &fetchSpec{c: c, lk: lk, prior: prior, found: found, purged: purged, reentered: prevCK != nil}
 	if prevCK == nil { // a re-entering follower already holds its place
 		// FR-FAIR-4: before any flight is joined or created, so a client

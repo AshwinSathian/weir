@@ -1,0 +1,9 @@
+go test fuzz v1
+byte('\x01')
+string("GET")
+string("/a%7e")
+string("b=2&utm_x=1")
+string("sid=1; lang=en")
+string("gzip, br")
+string("close, X-Tenant")
+string("Connection")

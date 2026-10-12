@@ -6,6 +6,7 @@ import (
 	"io"
 	"maps"
 	"net/http"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -621,4 +622,99 @@ func TestGetWithBodyIsPass(t *testing.T) {
 			}
 		}
 	}
+}
+
+// deferCfgs are configurations for the deferred-forward property: the first
+// three defer the header (nothing keyed), the last two build it at once.
+var deferCfgs = []Config{
+	{MaxPathBytes: 256, MaxQueryBytes: 256, MaxQueryParams: 8, MaxKeyedHeaderBytes: 128, AcceptEncoding: []string{"gzip"}},
+	{MaxPathBytes: 256, MaxQueryBytes: 256, MaxQueryParams: 8, MaxKeyedHeaderBytes: 128, AcceptEncoding: []string{"zstd", "gzip"},
+		Allow: []string{"X-Tenant", "Cookie", "Range"}, QueryDrop: []string{"utm_*"}, QuerySort: true, NormalizePath: true, HonorRevalidation: true},
+	{MaxPathBytes: 256, MaxQueryBytes: 256, MaxQueryParams: 8, MaxKeyedHeaderBytes: 128, AcceptEncoding: []string{"gzip"},
+		ForwardAll: true, NoTraceHeaders: true, BypassHeaders: []string{"X-Admin"}},
+	{MaxPathBytes: 256, MaxQueryBytes: 256, MaxQueryParams: 8, MaxKeyedHeaderBytes: 128, AcceptEncoding: []string{"gzip"},
+		Headers: []string{"X-Tenant"}},
+	{MaxPathBytes: 256, MaxQueryBytes: 256, MaxQueryParams: 8, MaxKeyedHeaderBytes: 128, AcceptEncoding: []string{"gzip"},
+		Cookies: []string{"sid"}},
+}
+
+// checkDeferred asserts that ClassifyDeferred followed by Forward gives what
+// Classify gives: the same error, key, forwarded request and flags (INV-1).
+func checkDeferred(t *testing.T, r *Request, cfg *Config) {
+	t.Helper()
+	want, werr := Classify(r, cfg)
+	got, gerr := ClassifyDeferred(r, cfg)
+	if (werr == nil) != (gerr == nil) {
+		t.Fatalf("errors differ: %v against %v", werr, gerr)
+	}
+	if werr != nil {
+		return
+	}
+	if got.Primary != want.Primary {
+		t.Fatalf("the deferred key differs from the eager one")
+	}
+	pending := got.fwdPending
+	if pending && got.Forwarded.Header != nil {
+		t.Fatal("a pending forward already has a header")
+	}
+	if nothingKeyed := len(cfg.Headers) == 0 && len(cfg.Cookies) == 0 && cfg.Assign == nil; pending && (!nothingKeyed || want.Class != ClassCacheable) {
+		t.Fatalf("forward deferred although the key or the class needs it (class %v)", want.Class)
+	}
+	got.Forward()
+	got.Forward() // a second call changes nothing
+	if got.fwdPending {
+		t.Fatal("still pending after Forward")
+	}
+	// The unexported bookkeeping differs by design; everything the engine
+	// reads must not.
+	got.cfg, want.cfg = nil, nil
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("deferred then Forward:\n got %+v\nwant %+v", got, want)
+	}
+}
+
+// INV-1, NFR-5, FR-FWD-1: deferring the forwarded header changes when it is
+// built and nothing else.
+func TestDeferredForwardEqualsClassify(t *testing.T) {
+	headers := []http.Header{
+		nil,
+		{"Accept-Encoding": {"gzip, br"}, "Cookie": {"sid=1; lang=en"}, "X-Tenant": {"a"}},
+		{"Authorization": {"Bearer t"}, "Cache-Control": {"no-store"}, "Pragma": {"no-cache"}, "Connection": {"close, X-Tenant"}, "X-Tenant": {"b"}},
+		{"Range": {"bytes=0-1"}, "If-Range": {`"a"`}, "If-None-Match": {`"a", W/"b"`}, "Traceparent": {"00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"}},
+		{"X-Admin": {"1"}, "Cookie": {"a\x00b"}, "Accept-Encoding": {"\xff"}},
+		{"accept-encoding": {"gzip"}, "x-tenant": {"lower"}}, // non-canonical keys
+		{"Upgrade": {"websocket"}, "Connection": {"upgrade"}},
+	}
+	for ci := range deferCfgs {
+		for _, method := range []string{"GET", "HEAD", "POST", "OPTIONS", "get"} {
+			for hi, h := range headers {
+				r := &Request{Method: method, Scheme: "https", Host: "Example.com:443", Path: "/a%7e", RawQuery: "b=2&utm_x=1&a=1", Header: h.Clone()}
+				t.Run(fmt.Sprintf("cfg%d/%s/h%d", ci, method, hi), func(t *testing.T) { checkDeferred(t, r, &deferCfgs[ci]) })
+			}
+		}
+	}
+	// The common case really is deferred: without it this card saves nothing.
+	c, err := ClassifyDeferred(&Request{Method: "GET", Scheme: "https", Host: "example.com", Path: "/a", Header: http.Header{}}, &deferCfgs[0])
+	if err != nil || !c.fwdPending {
+		t.Fatalf("a plain GET under a config with nothing keyed is not deferred (err %v)", err)
+	}
+}
+
+func FuzzDeferredForward(f *testing.F) {
+	// INV-1, FR-FWD-1, NFR-5
+	f.Add(byte(0), "GET", "/a", "a=1&utm_x=2", "sid=1; x=2", "gzip;q=0.5, br", "evil", "X-Tenant")
+	f.Add(byte(1), "HEAD", "/%7e/%2f", "b2=1&a=0", "lang=en", "*", "close, cookie", "Connection")
+	f.Add(byte(2), "GET", "/", "", "a=1; a=2", "zstd;q=0", "1", "X-Admin")
+	f.Add(byte(3), "GET", "/a", "", "sid=1", "gzip", " a ,b", "X-Tenant")
+	f.Add(byte(4), "POST", "/a", "x", "sid=\xff", "", "bytes=0-1", "Range")
+	f.Fuzz(func(t *testing.T, sel byte, method, path, query, cookie, ae, extra, name string) {
+		h := http.Header{}
+		for k, v := range map[string]string{"Cookie": cookie, "Accept-Encoding": ae, name: extra} {
+			if v != "" && k != "" {
+				h[k] = []string{v}
+			}
+		}
+		r := &Request{Method: method, Scheme: "https", Host: "example.com", Path: path, RawQuery: query, Header: h}
+		checkDeferred(t, r, &deferCfgs[int(sel)%len(deferCfgs)])
+	})
 }
