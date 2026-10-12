@@ -210,6 +210,8 @@ var (
 	ErrOriginTimeout  = errors.New("weir: origin timeout")
 	ErrMustRevalidate = errors.New("weir: must-revalidate response could not be validated")
 	ErrOnlyIfCached   = errors.New("weir: only-if-cached and no stored response")
+	ErrRequestBody        = errors.New("weir: request body read failed")
+	ErrRequestBodyTimeout = errors.New("weir: request body timed out")
 	ErrOrigin         = errors.New("weir: origin error")
 	ErrClosed         = errors.New("weir: engine closed")
 	ErrUpgradeNotSupported = errors.New("weir: connect and protocol upgrades not supported") // FR-UPG-1
@@ -220,7 +222,7 @@ type RequestError struct{ Reason string } // Is(ErrInvalidRequest) == true
 type OriginError struct{ Err error }       // Is(ErrOrigin) == true; Unwrap returns Err
 ```
 
-`StatusCode`: `ErrInvalidRequest` 400; `ErrUpgradeNotSupported` 501; `ErrShed`, `ErrCircuitOpen`, `ErrClosed` 503; `ErrOriginTimeout`, `ErrMustRevalidate`, `ErrOnlyIfCached`, `context.DeadlineExceeded` 504; `ErrOrigin` 502; `context.Canceled` 499 (a hint for logs only; the client is gone and adapters should not write); anything else 502. The outermost recognized error in the chain decides, in `errors.Is` walk order, and an `*OriginError` maps to 502 whatever it wraps. An origin that returns weir errors (another engine used as origin) or its own `context` errors (an `http.Client` timeout matches `context.DeadlineExceeded`) cannot turn an origin failure into 400, 499, 503 or 504, and its `RetryError` hint is not returned by `RetryAfter`. So `timeoutOrOrigin(err, ctx, tctx)` (§6.7) decides from the contexts, never from `err`. When `ctx` is done, it returns `ctx.Err()` unwrapped for direct and pass-through fetches, whose `ctx` is the request context, and `ErrClosed` for flights and background fetches, whose context ends only on `Close` (§6.4). Otherwise, when `context.Cause(tctx)` is `ErrOriginTimeout`, it returns `ErrOriginTimeout`. In every other case it returns `*OriginError{err}`. A waiter on a flight cut short by `Close` therefore gets 503, not 499.
+`StatusCode`: `ErrInvalidRequest`, `ErrRequestBody` 400; `ErrRequestBodyTimeout` 408; `ErrUpgradeNotSupported` 501; `ErrShed`, `ErrCircuitOpen`, `ErrClosed` 503; `ErrOriginTimeout`, `ErrMustRevalidate`, `ErrOnlyIfCached`, `context.DeadlineExceeded` 504; `ErrOrigin` 502; `context.Canceled` 499 (a hint for logs only; the client is gone and adapters should not write); anything else 502. The outermost recognized error in the chain decides, in `errors.Is` walk order, and an `*OriginError` maps to 502 whatever it wraps. An origin that returns weir errors (another engine used as origin) or its own `context` errors (an `http.Client` timeout matches `context.DeadlineExceeded`) cannot turn an origin failure into 400, 499, 503 or 504, and its `RetryError` hint is not returned by `RetryAfter`. So `timeoutOrOrigin(err, ctx, tctx)` (§6.7) decides from the contexts, never from `err`. When `ctx` is done, it returns `ctx.Err()` unwrapped for direct and pass-through fetches, whose `ctx` is the request context, and `ErrClosed` for flights and background fetches, whose context ends only on `Close` (§6.4). Otherwise, when `context.Cause(tctx)` is `ErrOriginTimeout`, it returns `ErrOriginTimeout`. In every other case it returns `*OriginError{err}`. A waiter on a flight cut short by `Close` therefore gets 503, not 499.
 
 ```go
 type RetryError struct {

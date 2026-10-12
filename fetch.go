@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/AshwinSathian/weir/internal/breaker"
@@ -101,7 +102,20 @@ func (e *Engine) fetch(ctx context.Context, c *keys.Classified, origin Origin, c
 	// A timer, not WithTimeout, so a stream can drop the deadline at its
 	// headers and keep the context (04 §14).
 	tctx, cancelCause := context.WithCancelCause(ctx)
-	deadline := time.AfterFunc(e.timeoutFor(class), func() { cancelCause(ErrOriginTimeout) })
+	// FR-CB-1, T-39: the origin reads a request body from the client, so a
+	// fetch that fails while that read is stuck or broken says nothing about
+	// the origin. upload is nil for a fetch without a body.
+	var upload *uploadBody
+	if c.HasBody && req.Body != nil {
+		upload = &uploadBody{ReadCloser: req.Body, ctx: tctx}
+		r := *req // c.Forwarded is not modified
+		r.Body = upload
+		req = &r
+	}
+	deadline := time.AfterFunc(e.timeoutFor(class), func() {
+		upload.sample() // before the cancel, which ends the blocked Read
+		cancelCause(ErrOriginTimeout)
+	})
 	cancel := func() { deadline.Stop(); cancelCause(nil) }
 	fwd := req
 	if prior != nil {
@@ -145,6 +159,11 @@ func (e *Engine) fetch(ctx context.Context, c *keys.Classified, origin Origin, c
 		}
 	}
 	if err != nil {
+		if berr := upload.blame(); berr != nil && ctx.Err() == nil {
+			cancelProbe() // not an outcome of the origin
+			cancel()
+			return fetchResult{err: berr}
+		}
 		record(breaker.Failure)
 		cancel()
 		return fetchResult{err: timeoutOrOrigin(ctx, tctx, err)}
@@ -366,6 +385,52 @@ func timeoutOrOrigin(ctx, tctx context.Context, err error) error {
 		return ErrOriginTimeout
 	}
 	return &OriginError{Err: err}
+}
+
+// uploadBody is a request body on its way to the origin. It records whether
+// the client, not the origin, is why a fetch failed (FR-CB-1, T-39): a Read
+// that returned an error while the fetch was still live, or a Read still
+// blocked when the origin deadline fired. An origin that is slow to read the
+// body, or slow to answer after it, leaves no Read blocked and is counted as
+// an origin failure like any other.
+type uploadBody struct {
+	io.ReadCloser
+	ctx     context.Context // the fetch context
+	reading atomic.Bool     // a Read is in progress
+	failed  atomic.Bool     // a Read failed while the fetch was live
+	stalled atomic.Bool     // a Read was in progress when the deadline fired
+}
+
+func (b *uploadBody) Read(p []byte) (int, error) {
+	b.reading.Store(true)
+	n, err := b.ReadCloser.Read(p)
+	b.reading.Store(false)
+	// A Read that the fetch's own cancellation ended is not the client's.
+	if err != nil && !errors.Is(err, io.EOF) && b.ctx.Err() == nil {
+		b.failed.Store(true)
+	}
+	return n, err
+}
+
+// sample runs when the origin deadline fires, before the fetch is cancelled.
+func (b *uploadBody) sample() {
+	if b != nil && b.reading.Load() {
+		b.stalled.Store(true)
+	}
+}
+
+// blame returns the error for a fetch that failed because of the client's
+// body, or nil when the body is not the reason.
+func (b *uploadBody) blame() error {
+	switch {
+	case b == nil:
+		return nil
+	case b.stalled.Load():
+		return ErrRequestBodyTimeout
+	case b.failed.Load():
+		return ErrRequestBody
+	}
+	return nil
 }
 
 // idleBody is a streamed origin body (FR-TMO-2). Each Read arms a timer of

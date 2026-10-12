@@ -30,6 +30,14 @@ var (
 	// ErrOnlyIfCached means an only-if-cached request found no usable stored
 	// response.
 	ErrOnlyIfCached = errors.New("weir: only-if-cached and no stored response")
+	// ErrRequestBody means the client's request body could not be read while
+	// the origin was receiving it. It is the client's failure: the breaker
+	// does not count it (FR-CB-1).
+	ErrRequestBody = errors.New("weir: request body read failed")
+	// ErrRequestBodyTimeout means the origin deadline passed while the origin
+	// was still waiting for the client's request body. The breaker does not
+	// count it (FR-CB-1, T-39).
+	ErrRequestBodyTimeout = errors.New("weir: request body timed out")
 	// ErrOrigin means the origin returned a transport error. Serve returns it
 	// wrapped in *OriginError.
 	ErrOrigin = errors.New("weir: origin error")
@@ -167,8 +175,10 @@ func classify(err error) (int, *RetryError) {
 // sentinelStatus returns the status for e itself, without unwrapping, or 0.
 func sentinelStatus(e error) int {
 	switch {
-	case is(e, ErrInvalidRequest):
+	case is(e, ErrInvalidRequest), is(e, ErrRequestBody):
 		return http.StatusBadRequest
+	case is(e, ErrRequestBodyTimeout):
+		return http.StatusRequestTimeout
 	case is(e, ErrUpgradeNotSupported):
 		return http.StatusNotImplemented
 	case is(e, ErrShed), is(e, ErrCircuitOpen), is(e, ErrClosed):

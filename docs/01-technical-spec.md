@@ -197,6 +197,8 @@ Errors (all comparable with `errors.Is`):
 | `ErrOriginTimeout` | the origin did not answer within `Timeouts.Origin` (`Timeouts.Background` for background refresh and `Warm`) | 504 |
 | `ErrMustRevalidate` | a `must-revalidate` entry could not be validated | 504 |
 | `ErrOnlyIfCached` | `only-if-cached` request with no usable stored response | 504 |
+| `ErrRequestBody` | the client's request body could not be read while the origin was receiving it (FR-CB-1) | 400 |
+| `ErrRequestBodyTimeout` | the origin deadline passed while the origin was waiting for the client's request body (FR-CB-1) | 408 |
 | `ErrOrigin` (wrapped in `*OriginError`) | the origin returned a transport error | 502 |
 | `ErrClosed` | the engine is closed | 503 |
 | `ErrUpgradeNotSupported` | `CONNECT` or protocol upgrade reached `Serve` (FR-UPG-1) | 501 |
@@ -324,7 +326,7 @@ A response is stored only if all of the following hold. Each failed check increm
 
 ### 5.11 Circuit breaker (T6.6)
 
-- FR-CB-1. One breaker per `Engine`. It counts outcomes of all origin fetches over a rolling window of `Breaker.Window` (default 10 s, 10 buckets).
+- FR-CB-1. One breaker per `Engine`. It counts outcomes of all origin fetches over a rolling window of `Breaker.Window` (default 10 s, 10 buckets). A fetch that failed because of the client's request body is not an outcome (v1.1): a body read that returned an error while the fetch was live fails the request with `ErrRequestBody`, and a body read still blocked when `Timeouts.Origin` fired fails it with `ErrRequestBodyTimeout`. An origin that is slow to read the body, or slow to answer after it, leaves no read blocked and counts as before.
 - FR-CB-2. The breaker opens when the window holds at least `Breaker.MinRequests` (default 20) outcomes and the fraction of origin-health failures is at least `Breaker.FailureRatio` (default 0.5), and the failures come from at least `Breaker.MinPartitions` (default 2) distinct partitions unless no fetch in the window succeeded. One failing path, however many query strings it is asked with, therefore cannot open the breaker for every other path, and an origin that answers nothing still opens it from one URL (v1.1; `MinPartitions` 1 is the rule before it). The set of failing partitions is bounded: at most 8 per bucket, and a bucket that saw more counts as enough. Status 500 and 4xx never count as failures. `Breaker.CountStatus500` makes 500 count.
 - FR-CB-3. Open lasts `Breaker.OpenFor` (default 5 s) with ±20% jitter. Each consecutive reopen doubles the duration up to `Breaker.MaxOpenFor` (default 60 s, or `OpenFor` when that is longer); closing resets it. `New` rejects a `MaxOpenFor` below `OpenFor`, which would make a reopen shorter than the first open.
 - FR-CB-4. After the open period, up to `Breaker.HalfOpenProbes` (default 1) concurrent foreground fetches are admitted as probes. One success closes the breaker. One failure reopens it. A partition whose probe failed is not admitted as a probe during the first second of a later half-open period, until the breaker closes, so one failing path cannot take every probe (v1.1, off with `MinPartitions` 1); at most 8 such partitions are remembered.
@@ -606,7 +608,7 @@ Open: none.
 
 ### 14.1 Upload pool (D25)
 
-- FR-LIM-7. A request whose body is non-empty or of unknown length (any method) takes its slot from a separate upload pool of `Limiter.MaxUpload` slots with its own queue rules, never from the main pool. Bodyless requests, including bypassed `GET`s from logged-in users, use the main pool. Total origin concurrency is therefore bounded by `MaxConcurrent + MaxUpload`. A slow uploader can exhaust only the upload pool (T-39). Adapters MUST enforce a request body size limit and a body read timeout (Caddy `request_body max_size` and server `read_body` timeout; `http.Server.ReadTimeout` for weirhttp); the adapter docs say so.
+- FR-LIM-7. A request whose body is non-empty or of unknown length (any method) takes its slot from a separate upload pool of `Limiter.MaxUpload` slots with its own queue rules, never from the main pool. Bodyless requests, including bypassed `GET`s from logged-in users, use the main pool. Total origin concurrency is therefore bounded by `MaxConcurrent + MaxUpload`. A slow uploader can exhaust only the upload pool (T-39), and one partition holds at most half of it (at least 1 slot; v1.1), so slow uploads to one URL leave slots for uploads to others. Adapters MUST enforce a request body size limit and a body read timeout (Caddy `request_body max_size` and server `read_body` timeout; `http.Server.ReadTimeout` for weirhttp); the adapter docs say so.
 
 ### 14.2 Timeouts (D26)
 

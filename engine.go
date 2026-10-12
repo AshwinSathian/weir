@@ -107,9 +107,10 @@ func New(cfg Config) (*Engine, error) {
 		Reserve: l.ReserveForeground, MaxWait: l.MaxQueueWait,
 	})
 	// Only foreground pass requests carry a body, so the upload pool has no
-	// reserve (04 §14).
+	// reserve (04 §14). T-39: one path gets at most half of it, so slow
+	// uploads to one URL leave slots for uploads to the others.
 	e.upl = limiter.New(limiter.Config{
-		Max: l.MaxUpload, MaxQueue: l.MaxQueue, PerPartition: min(l.MaxPerPartition, l.MaxUpload),
+		Max: l.MaxUpload, MaxQueue: l.MaxQueue, PerPartition: min(l.MaxPerPartition, max(1, l.MaxUpload/2)),
 		PerHost: l.MaxPerHost, MaxWait: l.MaxQueueWait,
 	})
 	if b := &c.Breaker; !b.Disable {

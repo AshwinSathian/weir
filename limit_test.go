@@ -538,7 +538,8 @@ func TestSlowUploadsDoNotStarveMisses(t *testing.T) {
 		stop := make(chan struct{})
 		uploads := make([]<-chan timedServe, 200)
 		for i := range uploads {
-			uploads[i] = serveTimed(t, e, uploadReq(t.Context(), "/upload", stop), origin)
+			// Four paths: one path holds at most half the pool (T-39).
+			uploads[i] = serveTimed(t, e, uploadReq(t.Context(), fmt.Sprintf("/upload%d", i%4), stop), origin)
 		}
 		synctest.Wait()
 		misses := make([]<-chan timedServe, slots)
