@@ -232,7 +232,7 @@ func (e *Engine) warmFollow(ctx context.Context, f *coalesce.Flight, c *keys.Cla
 		return ctx.Err() == nil
 	case fr.err != nil:
 		st.Failed++
-	case fr.ci.Stored:
+	case fr.ci.Stored, fr.fromStore: // stored by that flight, or found stored when it began
 		st.Skipped++
 	default:
 		st.NotStored++
