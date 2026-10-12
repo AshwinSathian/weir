@@ -2,7 +2,7 @@
 
 Format: one section per release, newest first. Versions follow [semantic versioning](https://semver.org). The root module and the `observe/prom`, `store/valkey` and `caddy` modules carry the same version number.
 
-## v1.0.0 (unreleased)
+## v1.0.0 (2026-10-12)
 
 First stable release. It supersedes the `v0.1.0` tag, which predates most of the engine and cannot be used with the sub-modules.
 
