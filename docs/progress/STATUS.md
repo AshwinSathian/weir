@@ -11,7 +11,7 @@ Next card: none (all cards done; M16-02 deferred)
 ## Waiting on Ashwin
 
 - Merge the rc.3 record PR (docs, `scripts/release-smoke.sh`, `WEIR_VERSION: v1.0.0-rc.3` in CI). No Go code.
-- Then `v1.0.0` by docs/release.md steps 2 to 10, from the `main` commit the gate covers. The rc.3 rehearsal ran those steps without a change. The gate log in docs/release.md has the run for the rc.3 tree; a docs-only merge after it does not restart it.
+- Then `v1.0.0` by docs/release.md steps 2 to 10, from the `main` commit the gate covers. The rc.3 rehearsal ran those steps without a change. The gate log in docs/release.md has the green run for the rc.3 tree (38259811052, all 35 jobs); a docs-only merge after it does not restart it.
 - After the `v1.0.0` tags: `make release-smoke VERSION=v1.0.0`, runbook 7.8 on the built Caddy, pkg.go.dev pages, `WEIR_VERSION: v1.0.0`, date the CHANGELOG section, publish the GitHub release, delete `release/v1.0.0-rc.1` and `release/v1.0.0-rc.3`.
 - Confirm the decisions taken for you: D24 amended, D43 added, README Stability promises, signing key caps, `servableStatus` miss.
 
