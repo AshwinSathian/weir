@@ -1,0 +1,11 @@
+version: 2
+updates:
+  # The website's npm dependencies. Nothing here reaches a Go module.
+  - package-ecosystem: npm
+    directory: /site
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      site:
+        patterns: ["*"]

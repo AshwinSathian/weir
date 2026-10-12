@@ -4,6 +4,8 @@ Updated: 2026-10-12
 
 For the person running Weir in front of an origin. It covers first deployment, the signals to watch and what to do when each one fires. Setting names are in [01 §6](01-technical-spec.md); the reasoning behind the defaults is in [06](06-threat-model.md). This is not a design document: when it disagrees with 01 to 07, they win.
 
+Contents: [1. Before the first deployment](#1-before-the-first-deployment), [2. What to watch](#2-what-to-watch), [3. Alerts worth having](#3-alerts-worth-having), [4. Incidents](#4-incidents), [5. Planned operations](#5-planned-operations), [6. Errors clients see](#6-errors-clients-see), [7. Deploying on Caddy (single node)](#7-deploying-on-caddy-single-node), [8. Deploying on Caddy (several nodes, one Valkey)](#8-deploying-on-caddy-several-nodes-one-valkey).
+
 ## 1. Before the first deployment
 
 1. Set `GOMEMLIMIT` (plain library use; the `caddy` binary derives its own limit, see 7.5). The default memory store takes 40% of it, clamped to 16 MiB to 8 GiB. Without it the store takes 256 MiB and `New` logs a warning. Weir does not look at cgroup limits for you.
@@ -349,7 +351,7 @@ A node closes its store when Caddy stops it, and it does not touch other nodes' 
 
 ### 8.9 Before you go live
 
-1. `caddy validate` on every node's config. It builds the store lazily: a wrong address passes validation and shows up as an open breaker (8.7), so also run the next step.
+1. `caddy validate` on every node's config, with the caution from 7.8 step 1: validate provisions the store, and when the `forward` block changed it runs the key-generation check against the server it can reach and writes the purge, so validate against a scratch Valkey. The connection itself is lazy: a wrong address passes validation and shows up as an open breaker (8.7), so also run the next step.
 2. On a new cache, wait 3 s after the first request (8.3). Then request a URL once through node A; the store write happens after the response, so repeat until A shows `Cache-Status: Weir; hit`, and only then request it through node B. B shows `hit` too.
 3. A purge on node A (7.7), then a request through node B showing `fwd=stale` or `fwd=uri-miss`.
 4. `CONFIG GET maxmemory-policy` on the server shows a `volatile-*` policy or `noeviction`.

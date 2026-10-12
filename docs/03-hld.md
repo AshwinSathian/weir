@@ -1,10 +1,12 @@
 # Weir high-level design
 
 Status: v1.0
-Date: 2026-09-27
+Date: 2026-10-12
 Depends on: [01-technical-spec.md](01-technical-spec.md), [02-architecture.md](02-architecture.md)
 
 This document walks through what happens to a request, step by step, for every path the spec defines. It names components and the order they are consulted. It does not give type definitions; [04-lld.md](04-lld.md) does.
+
+Updated since: the flows below were written for Phase 1 (2026-09-27) and are still correct for what they cover. They do not yet walk through features added later: incident modes (`SetMode`, 01 §14.7), the upload pool (01 §14.1), event streams and stream idle timeouts (01 §14.2, §14.4), upgrade routing (01 §14.3), snapshots (01 §13.3), experiment dimensions (docs/10) and the Valkey store (05 §7). For those, the cited sections are the description. This document is descriptive and loses to them (see the precedence order in docs/README.md).
 
 ## 1. The serve pipeline
 

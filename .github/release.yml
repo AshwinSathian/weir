@@ -1,0 +1,14 @@
+# Categories for GitHub's generated release notes. CHANGELOG.md stays the
+# hand-written record; paste its section above the generated list.
+changelog:
+  categories:
+    - title: Security
+      labels: [security]
+    - title: Behavior changes
+      labels: [breaking, behavior]
+    - title: Fixes
+      labels: [bug]
+    - title: Documentation and website
+      labels: [documentation]
+    - title: Other changes
+      labels: ["*"]

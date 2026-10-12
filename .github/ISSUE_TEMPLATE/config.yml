@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Report a vulnerability
+    url: https://github.com/AshwinSathian/weir/security/advisories/new
+    about: Private report. Use this for anything that could leak or poison a cached response.
+  - name: Documentation
+    url: https://weir.ashwinsathian.com
+    about: Quickstart, concepts, guides and reference.

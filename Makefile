@@ -8,9 +8,11 @@ endif
 
 # Every module below the root. Each is also built alone (GOWORK=off) so none
 # leans on an unpublished sibling by accident (docs/02 §3.2).
-SUBMODULES := $(patsubst ./%/go.mod,%,$(shell find . -mindepth 2 -name go.mod -not -path './testdata/*' -not -path './.claude/*' -not -path './.git/*' | sort))
+SUBMODULES := $(patsubst ./%/go.mod,%,$(shell find . -mindepth 2 -name go.mod -not -path './testdata/*' -not -path './.claude/*' -not -path './.git/*' -not -path './site/*' | sort))
 
-.PHONY: release-smoke release-check check fmt-check vet lint test modules test-short trace trace-strict fuzz-short bench load cache-tests vuln card next test-valkey
+SITE_PROJECT ?= weir-site
+
+.PHONY: site-check site-build site-deploy release-smoke release-check check fmt-check vet lint test modules test-short trace trace-strict fuzz-short bench load cache-tests vuln card next test-valkey
 
 ## check: everything a card must pass before handoff (CI runs the same)
 check: fmt-check vet lint test modules trace-strict
@@ -100,3 +102,16 @@ card:
 
 next:
 	@scripts/card.sh next
+
+## site-check: the website gate (CI runs the same): source checks, type check, static build with link check. Needs Node 24 and pnpm; not part of `check`, so Go contributors need no Node
+site-check:
+	cd site && pnpm install --frozen-lockfile && pnpm check && pnpm typecheck && pnpm build
+
+## site-build: static site into site/out
+site-build:
+	cd site && pnpm install --frozen-lockfile && pnpm build
+
+## site-deploy: build and upload to Cloudflare Pages (wrangler must be logged in): make site-deploy BRANCH=main
+BRANCH ?= main
+site-deploy: site-check
+	cd site && wrangler pages deploy out --project-name $(SITE_PROJECT) --branch $(BRANCH)

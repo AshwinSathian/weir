@@ -1,0 +1,53 @@
+name: site
+
+# The website gate. Separate from ci.yml so a Go-only change needs no Node,
+# and so a red release-state job cannot hide a green Go build.
+on:
+  push:
+    branches: [main]
+    paths: ["site/**", "docs/**", "README.md", "CHANGELOG.md", "SECURITY.md", "CONTRIBUTING.md", "cachestatus.go", "errors.go", "example_test.go", ".github/workflows/site.yml"]
+  pull_request:
+    paths: ["site/**", "docs/**", "README.md", "CHANGELOG.md", "SECURITY.md", "CONTRIBUTING.md", "cachestatus.go", "errors.go", "example_test.go", ".github/workflows/site.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  site-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.27"
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: site/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: site/.nvmrc
+          cache: pnpm
+          cache-dependency-path: site/pnpm-lock.yaml
+      # Style lint, claims register, benchmark data, README program, then the
+      # type check and the static build with its internal link check.
+      - name: make site-check
+        run: make site-check
+      - uses: actions/upload-artifact@v4
+        with:
+          name: site
+          path: site/out
+          retention-days: 7
+
+  # The launch gate (docs/progress/surfaces-and-site-plan.md §10): while the
+  # site says v1.0.0 is released, every module must resolve at that version.
+  release-state:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.27"
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: site/.nvmrc
+      - run: node site/scripts/check.mjs release

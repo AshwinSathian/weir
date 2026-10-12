@@ -4,6 +4,10 @@ Format: one section per release, newest first. Changes land under "Unreleased" i
 
 ## Unreleased
 
+No change to the Go modules.
+
+- Documentation: a website at https://weir.ashwinsathian.com (source in `site/`, built from this repository), a shorter README that links to it, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md` and issue templates. The README's table of settings that take a protection back moved to the site's tuning page.
+- Wording corrections in docs/01 (status line, the targeted cache-control non-goal), docs/03 (a note on what its flows do not cover), the runbook (8.9 step 1 agrees with 7.8 about `caddy validate`) and docs/benchmarks.md (a "Current results" section). No requirement, default or signature changed.
 - Documents: threat model rows T-46 to T-51 for the experiment dimensions (signing keys, header aliases, `Set-Cookie` isolation, the assignment cookie on the forward, cookie tossing, exposure floods), with residual risks R-9 and R-10 and runbook advice to use `{env.NAME}` key placeholders and a `__Host-` cookie name. No behavior change.
 
 ## v1.0.0 (2026-10-12)

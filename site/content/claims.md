@@ -1,0 +1,65 @@
+# Claims register
+
+Not published. Every measured figure and every statement about another project that appears in hand-written copy (site content, the home page, README) is listed here with its source. `scripts/check.mjs` fails when a figure in the copy is missing from this file, or when a figure whose source is a repository file is not in that file.
+
+Figures in pages rendered straight from repository documents (the benchmark tables, the threat table, the configuration table) are not listed: they cannot differ from their source.
+
+## Measured figures
+
+Machine for every `docs/benchmarks.md` row unless noted: Apple M4 Pro, 12 cores, Go 1.27.1, reference run of 2026-10-11.
+
+| Figure | Source | Checked | Where it comes from |
+|---|---|---|---|
+| `852 ns` | `docs/benchmarks.md` | 2026-10-12 | `BenchmarkServeHitSmall` after the rc.1 hardening, Go 1.27.2, machine not idle |
+| `852.2 ns` | `docs/benchmarks.md` | 2026-10-12 | same run, benchstat value |
+| `12 allocations` | `docs/benchmarks.md` | 2026-10-12 | allocs/op of the same benchmark |
+| `16 allocations` | `docs/01-technical-spec.md` | 2026-10-12 | NFR-5 budget |
+| `1.25 µs` | `docs/01-technical-spec.md` | 2026-10-12 | NFR-5 ceiling |
+| `10,000` | `docs/benchmarks.md` | 2026-10-12 | synchronized-expiry scenario, keys stored |
+| `1,485` | `docs/benchmarks.md` | 2026-10-12 | synchronized expiry, busiest second of origin calls |
+| `52,975` | `docs/benchmarks.md` | 2026-10-12 | origin brownout, stale responses |
+| `99,976` | `docs/benchmarks.md` | 2026-10-12 | busting flood, flood requests |
+| `36.9 µs` | `docs/benchmarks.md` | 2026-10-12 | busting flood, normal p99 alone |
+| `41.0 µs` | `docs/benchmarks.md` | 2026-10-12 | busting flood, normal p99 under flood |
+| `1.08 µs` | `docs/benchmarks.md` | 2026-10-12 | GC per request at 1M entries, reference machine |
+| `1.76 µs` | `docs/benchmarks.md` | 2026-10-12 | GC per request at 1M entries, 4-vCPU Linux container |
+| `0.014 µs` | `docs/benchmarks.md` | 2026-10-12 | GC per request, pointer-light prototype (M16-01) |
+| `2 µs` | `docs/benchmarks.md` | 2026-10-12 | the D36 gate |
+
+## Defaults quoted in copy
+
+| Figure | Source | Checked | Where it comes from |
+|---|---|---|---|
+| `1,024` | `docs/01-technical-spec.md` | 2026-10-12 | `Limiter.MaxQueue` |
+| `50 ms` | `docs/01-technical-spec.md` | 2026-10-12 | `Timeouts.Store` |
+
+## Illustrations, not measurements
+
+| Figure | Source | Checked | Where it comes from |
+|---|---|---|---|
+| `1,000` | none | 2026-10-12 | the made-up herd in the coalescing page's opening scenario |
+
+## Counts on the home page
+
+| Claim | Source | Checked |
+|---|---|---|
+| 284 of 365 cache-tests pass, 81 explained | `docs/cache-tests-expected-failures.md` | 2026-10-12 |
+| 45 threats | `docs/06-threat-model.md` (rows starting `| T-`) | 2026-10-12 |
+| 29 fuzz targets, 60 minutes each; failure-mode tests 100 times under `-race` | `docs/release.md` gate log, run 38259811052 | 2026-10-12 |
+| 0 third-party imports in the root module | `deps_test.go` | 2026-10-12 |
+| transcript on the home page and in the README | captured from `examples/weirproxy` at `v1.0.0`, Go 1.27.1, with `scripts/transcript.sh` | 2026-10-12 |
+
+## Statements about other projects (compare page)
+
+Each was read in the project's own documentation on 2026-10-12. Versions are the default branch or current page on that date; none of the pages showed a release number.
+
+| Project | Statement | Source |
+|---|---|---|
+| Varnish | coalesces requests for one object automatically; has grace and keep | https://github.com/varnishcache/varnish-cache/blob/master/doc/sphinx/users-guide/vcl-grace.rst |
+| nginx | `proxy_cache_lock`, its timeout and age (5 s defaults), `proxy_cache_use_stale updating`, `proxy_cache_background_update`, default `proxy_cache_key`, `proxy_cache_purge` commercial; page documents no lifetime randomization, breaker or global miss limit | https://nginx.org/en/docs/http/ngx_http_proxy_module.html |
+| Souin | self-description, RFC 7234, Cache-Status, RFC 9213, surrogate keys, ESI, request coalescing, storage list, integrations; README does not mention jitter, a breaker, an origin limit or key security | https://github.com/darkweak/souin |
+| Caddy cache-handler | based on Souin; cached body size "unlimited if omited"; API default paths | https://github.com/caddyserver/cache-handler |
+| Pingora | Rust framework; caching integration "should be considered experimental" | https://github.com/cloudflare/pingora |
+| singleflight | package overview; documentation silent on timeouts, panics and stored results (page showed x/sync v0.24.0) | https://pkg.go.dev/golang.org/x/sync/singleflight |
+| sturdyc | self-description; stampede protection, early refreshes, batching | https://github.com/viccon/sturdyc |
+| Fastly | definition of request collapsing; serial queue on uncacheable responses; hit-for-pass | https://www.fastly.com/documentation/guides/concepts/edge-state/cache/request-collapsing/ |

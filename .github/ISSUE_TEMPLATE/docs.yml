@@ -1,0 +1,18 @@
+name: Documentation or website
+description: Something on weir.ashwinsathian.com, in the README or in docs/ is wrong, unclear or missing
+labels: [documentation]
+body:
+  - type: input
+    id: where
+    attributes:
+      label: Page or file
+      placeholder: https://weir.ashwinsathian.com/docs/concepts/coalescing/
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What is wrong
+      description: Quote the sentence. If the page disagrees with the code or with another document, say which.
+    validations:
+      required: true

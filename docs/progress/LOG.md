@@ -1956,6 +1956,15 @@ Entry template:
 - Follow-ups: v1.1 list in STATUS; rc branches can be deleted.
 - Context: high
 
+## 2026-10-12 · surfaces-and-site · done
+- Branch / PR: site/launch / see STATUS
+- Done: the plan for user-facing surfaces, in one branch at Ashwin's request. README rewritten (128 lines: definition, real `curl` transcript, non-goals, comparison table; the settings table moved to the site). New `site/`: Next.js static export, 28 pages, dark by default, content in Markdown that includes sections of docs/01, 06, runbook, benchmarks, cache-tests and CHANGELOG at build time, Cache-Status and error tables read from `cachestatus.go` and `errors.go`. `site.yml` workflow, `make site-check` and `make site-deploy`. CONTRIBUTING, CODE_OF_CONDUCT, issue templates, release-notes categories, dependabot for `/site`, `examples/weirproxy/README.md`. Deployed to Cloudflare Pages project `weir-site`.
+- Tests: no Go code changed except the xcaddy line in the `caddy/doc.go` comment. `make check` and `make site-check` results are in the PR body. Site checks: style lint, claims register against source files, README program compiles, internal links and anchors, no horizontal overflow at 360 px on any page.
+- Deviations: wording-only edits to normative documents, listed in the PR: docs/01 status line and §1.2 (targeted cache-control is implemented), PLAN testing-strategy line (D24 as amended), docs/03 "Updated since" note and date, runbook 8.9 step 1 (agrees with 7.8) and a contents line, docs/README split by reader and T-45, benchmarks "Current results" section, cache-tests "Last verified", CHANGELOG (an Unreleased entry for the README and the site; the v1.0.0 section is untouched, as corrected on `main` by PRs 115 and 116).
+- Incident: this session created `site/launch` with `git checkout -b` in the shared checkout while the release session was mid-procedure there (see the release-v1.0.0 entry). Site or doc sessions that run beside another session should use a separate worktree.
+- Follow-ups: the custom domain and the post-launch list (plan record §10.3); Ashwin edits the About page; Lighthouse and axe not in CI; outside tester for the quickstart.
+- Context: high
+
 ## 2026-10-12 · threat-rows-experiments · done
 - Branch / PR: claude/threat-rows-experiments / see the PR list
 - Done: ported the six threat rows of the closed PR 99 (T-46 to T-51) into docs/06 after checking each against v1.0.0 as shipped, with real test names; T-35's test column names its tests. Two claims of PR 99 did not hold and are residual risks instead: signing keys are not redacted anywhere (R-9), and a `__Host-` cookie name is accepted but never recommended (R-10). Runbook 7.9 gains both pieces of advice.
