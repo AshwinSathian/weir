@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/AshwinSathian/weir/internal/httpcc"
 	"github.com/AshwinSathian/weir/internal/keys"
 	"github.com/AshwinSathian/weir/internal/limiter"
 	"github.com/AshwinSathian/weir/store"
@@ -46,6 +47,13 @@ func (e *Engine) setNegative(ctx context.Context, sp *fetchSpec, res *fetchResul
 	st := healthStatus(ctx, res)
 	if st == 0 {
 		return
+	}
+	if res.err == nil {
+		// FR-NEG-1: the origin said this answer is for this client only
+		// (a 503 that throttles one caller), so it is not everyone's.
+		if cc := httpcc.ParseResponse(res.resp.Header); cc.NoStore || cc.Private {
+			return
+		}
 	}
 	now := time.Now()
 	neg := &store.Entry{Kind: store.KindNegative, Status: st, StoredAt: now, Expires: now.Add(e.cfg.Negative.TTL)}

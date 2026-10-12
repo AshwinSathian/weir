@@ -63,12 +63,12 @@ func serveTimed(t *testing.T, e *weir.Engine, req *weir.Request, o weir.Origin) 
 	return ch
 }
 
-// isShed reports whether err is ErrShed in a *RetryError carrying the
-// MaxQueueWait hint (FR-LIM-5).
+// isShed reports whether err is ErrShed in a *RetryError carrying a hint of
+// one to one and a half MaxQueueWait, rounded up to a second (FR-LIM-5).
 func isShed(err error, wait time.Duration) bool {
 	re, ok := errors.AsType[*weir.RetryError](err)
 	after, hint := weir.RetryAfter(err)
-	return ok && errors.Is(re, weir.ErrShed) && hint && after == wait
+	return ok && errors.Is(re, weir.ErrShed) && hint && after >= wait && after <= wait+wait/2+time.Second
 }
 
 // FR-LIM-1, FR-LIM-2, FR-LIM-6, T6.3, INV-7: 5 000 cold keys on distinct

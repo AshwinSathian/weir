@@ -33,11 +33,20 @@ func withValidators(req *Request, prior *store.Entry) *Request {
 	return &r
 }
 
-// strongETagMismatch reports whether a 304 names a strong ETag other than
-// the stored one, which forbids updating the entry (RFC 9111 §4.3.4).
-func strongETagMismatch(h http.Header, stored string) bool {
+// etagMismatch reports whether a 304 names an entity-tag that does not match
+// the stored one, which forbids updating the entry with it (RFC 9111
+// §4.3.4): a 304 selects the stored response by its validator, and one that
+// selects nothing updates nothing. The comparison is the weak one, which is
+// what If-None-Match used (RFC 9110 §8.8.3.2), so W/"a" confirms "a". Tags
+// that are not quoted strings match only byte for byte. A 304 without an
+// ETag matches: the request named one stored response.
+func etagMismatch(h http.Header, stored string) bool {
 	tag := h.Get("Etag")
-	return tag != "" && !strings.HasPrefix(tag, "W/") && tag != stored
+	if tag == "" || tag == stored {
+		return false
+	}
+	a, b := opaqueTag(tag), opaqueTag(stored)
+	return a == "" || a != b
 }
 
 // freshened merges the fields of a 304 into prior's stored response

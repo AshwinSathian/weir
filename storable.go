@@ -3,6 +3,7 @@ package weir
 import (
 	"net/http"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/AshwinSathian/weir/internal/httpcc"
@@ -41,6 +42,16 @@ func storability(cfg *Config, c *keys.Classified, resp *Response, body []byte, r
 	h := resp.Header
 	var star bool
 	d.varyNames, star = keys.VaryNames(h["Vary"])
+	encoded, mismatch := contentCoding(h["Content-Encoding"], c.Forwarded.Header["Accept-Encoding"])
+	if encoded && !star && !slices.Contains(d.varyNames, "Accept-Encoding") {
+		// FR-STO-14: an encoded response depends on the coding that was asked
+		// for, whether or not the origin said so. Without the name, a gzip
+		// body stored under the URL would answer a client that asked for
+		// identity. The forwarded value is the bucket, so this is one variant
+		// per Key.AcceptEncoding coding.
+		d.varyNames = append(d.varyNames, "Accept-Encoding")
+		slices.Sort(d.varyNames)
+	}
 	statusOK := slices.Contains(cfg.Storable.Statuses, resp.StatusCode)
 	// CacheGroups.Ignore does not apply here: it switches off
 	// Cache-Group-Invalidation only, so an operator Purge by group still works.
@@ -70,6 +81,10 @@ func storability(cfg *Config, c *keys.Classified, resp *Response, body []byte, r
 		return fail("vary-sensitive", true)
 	case cfg.Key.Vary == VaryStrict && varyRefused(cfg, d.varyNames, true):
 		return fail("vary-strict", true)
+	case mismatch:
+		// FR-STO-14: stored, it would be served to clients that asked for
+		// this bucket's coding and cannot decode the one it has.
+		return fail("encoding", true)
 	case !hasFreshness(d, h, resp.StatusCode):
 		return fail("no-freshness", true) // T-6: never inferred from the path
 	case int64(len(body))+headerBytes(h) > cfg.Storable.MaxObjectBytes:
@@ -80,6 +95,35 @@ func storability(cfg *Config, c *keys.Classified, resp *Response, body []byte, r
 	}
 	d.ok = true
 	return d
+}
+
+// contentCoding reads a response's Content-Encoding against the coding the
+// fetch asked for (the forwarded Accept-Encoding, one bucket token, §5.2.3).
+// encoded reports a coding other than identity; mismatch reports one that is
+// not the coding asked for. x-gzip is gzip (RFC 9110 §8.4.1.3). The scan is
+// bytewise over origin bytes, with no split.
+func contentCoding(lines, asked []string) (encoded, mismatch bool) {
+	want := ""
+	if len(asked) == 1 {
+		want = asked[0]
+	}
+	for _, l := range lines {
+		for i := 0; i <= len(l); {
+			j := i
+			for j < len(l) && l[j] != ',' {
+				j++
+			}
+			if tok := strings.ToLower(strings.Trim(l[i:j], " \t")); tok != "" && tok != "identity" {
+				if tok == "x-gzip" {
+					tok = "gzip"
+				}
+				encoded = true
+				mismatch = mismatch || tok != want
+			}
+			i = j + 1
+		}
+	}
+	return encoded, mismatch
 }
 
 // groupList parses the lines of a Cache-Groups or Cache-Group-Invalidation

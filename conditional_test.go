@@ -171,14 +171,14 @@ func TestFreshenKeepsRepresentationMetadata(t *testing.T) {
 		e, st := newRecordingEngine(t)
 		defer closeEngine(t, e)
 
-		serve(t, e, getReq("/a"), o)
+		serve(t, e, withHeader(getReq("/a"), "Accept-Encoding", "gzip"), o)
 		time.Sleep(61 * time.Second)
 		o.Default(testorigin.Behavior{Func: func(*weir.Request) (*weir.Response, error) {
 			return respond(http.StatusNotModified, http.Header{
 				"Cache-Control": {"max-age=120"}, "Content-Type": {"text/html"}, "Content-Encoding": {"br"},
 			}, ""), nil
 		}})
-		resp, body := serve(t, e, getReq("/a"), o)
+		resp, body := serve(t, e, withHeader(getReq("/a"), "Accept-Encoding", "gzip"), o)
 		h := resp.Header
 		if body != "v1" || h.Get("Content-Type") != "text/plain" || h.Get("Content-Encoding") != "gzip" || h.Get("Cache-Control") != "max-age=120" {
 			t.Fatalf("served after 304: %q %v", body, h)

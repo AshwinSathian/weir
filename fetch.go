@@ -146,7 +146,7 @@ func (e *Engine) fetch(ctx context.Context, c *keys.Classified, origin Origin, c
 		return safeFetch(tctx, origin, r)
 	}
 	resp, err := send(fwd)
-	if err == nil && prior != nil && resp.StatusCode == http.StatusNotModified && strongETagMismatch(resp.Header, prior.ETag) {
+	if err == nil && prior != nil && resp.StatusCode == http.StatusNotModified && etagMismatch(resp.Header, prior.ETag) {
 		closeBody(resp)
 		prior = nil
 		resp, err = send(req)
@@ -299,7 +299,11 @@ func (e *Engine) shed(c *keys.Classified, class limiter.Class, err error) fetchR
 	if class == limiter.Background {
 		emit(e.cfg.Observer, Event{Kind: EvRefreshDropped, Time: now, Partition: c.Partition, Reason: "no-slot"})
 	}
-	return fetchResult{err: &RetryError{Err: ErrShed, After: e.cfg.Limiter.MaxQueueWait}, bgDropped: class == limiter.Background}
+	// FR-LIM-5: between one and one and a half queue waits, so the clients
+	// shed in one burst do not all come back in the same second.
+	after := e.cfg.Limiter.MaxQueueWait
+	after += time.Duration(float64(after/2) * e.cfg.Rand())
+	return fetchResult{err: &RetryError{Err: ErrShed, After: after}, bgDropped: class == limiter.Background}
 }
 
 // circuitOpen is the fetch result while the breaker refuses fetches

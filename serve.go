@@ -344,7 +344,8 @@ func (e *Engine) cacheable(ctx context.Context, c *keys.Classified, origin Origi
 	var prior *store.Entry  // the stale entry to validate
 	if lk.entry != nil {
 		st, staleness, _ := httpcc.Evaluate(lk.entry, lk.epoch, lk.epochOK, now)
-		if (st == httpcc.Fresh || st == httpcc.StaleSWR) && !c.ReqCC.OnlyIfCached && forcesValidation(&c.ReqCC) {
+		if (st == httpcc.Fresh || st == httpcc.StaleSWR) && !c.ReqCC.OnlyIfCached &&
+			forcesValidation(&c.ReqCC, httpcc.CurrentAge(lk.entry, now), -staleness) {
 			st, lk.fwd = httpcc.NeedsValidation, FwdRequest // RFC 9211 §2.2 fwd=request
 		}
 		switch st {
@@ -497,11 +498,24 @@ func (e *Engine) respond(c *keys.Classified, fr *flightResult) *Response {
 	return e.finish(resp, fr.ci)
 }
 
-// forcesValidation reports the request directives that turn a fresh entry
-// into one that needs validation. Classify clears them unless
-// Client.HonorRevalidation is set (FR-SRV-8, D5).
-func forcesValidation(cc *httpcc.RequestDirectives) bool {
-	return cc.NoCache || cc.MaxAge.Set && !cc.MaxAge.Invalid && cc.MaxAge.V == 0
+// forcesValidation reports the request directives that turn an entry of the
+// given age, with remaining freshness left (negative when stale), into one
+// that needs validation: no-cache, a max-age the entry is older than, and a
+// min-fresh it cannot meet (RFC 9111 §5.2.1). Classify clears them unless
+// Client.HonorRevalidation is set (FR-SRV-8, D5). An argument that is not
+// delta-seconds asks for nothing. max-stale is not honored: it loosens, and
+// a shared cache may ignore it.
+func forcesValidation(cc *httpcc.RequestDirectives, age, remaining time.Duration) bool {
+	switch {
+	case cc.NoCache:
+		return true
+	// max-age=0 forces validation of a response of age 0 too.
+	case cc.MaxAge.Set && !cc.MaxAge.Invalid && (cc.MaxAge.V == 0 || age > time.Duration(cc.MaxAge.V)*time.Second):
+		return true
+	case cc.MinFresh.Set && !cc.MinFresh.Invalid && remaining < time.Duration(cc.MinFresh.V)*time.Second:
+		return true
+	}
+	return false
 }
 
 // serverError reports the statuses that never create a hit-for-miss

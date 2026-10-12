@@ -1201,7 +1201,7 @@ type Event struct {
 | `EvStoreError` | guard saw `ErrUnavailable` | `get`, `set`, `epoch`, `set-epoch`, `scrub` |
 | `EvStoreBreaker` | store guard opened or closed | `open`, `closed` |
 | `EvKeyRejected` | validation failed | `RequestError.Reason` values |
-| `EvNotStored` | storability failed | `method` (defensive: cacheable forwards are always GET), `status`, `no-store`, `private`, `authorization`, `set-cookie`, `vary-star`, `vary-sensitive`, `vary-strict`, `vary-too-many`, `no-freshness`, `too-large`, `incomplete` (a buffered body that failed mid-read), `stream` (an event-stream response, FR-STR-1), `groups`. A buffered 5xx is `status` |
+| `EvNotStored` | storability failed | `method` (defensive: cacheable forwards are always GET), `status`, `no-store`, `private`, `authorization`, `set-cookie`, `vary-star`, `vary-sensitive`, `vary-strict`, `vary-too-many`, `no-freshness`, `encoding` (a `Content-Encoding` the fetch did not ask for, FR-STO-14), `too-large`, `incomplete` (a buffered body that failed mid-read), `stream` (an event-stream response, FR-STR-1), `groups`. A buffered 5xx is `status` |
 | `EvVaryOverflow` | variant cap reached | |
 | `EvNegativeServed` | negative entry used | |
 | `EvPurge` | `Purge` wrote at least one epoch, or a response to an unsafe method invalidated (emitted whether or not the store took the writes, whose errors that path ignores) | `soft`, `hard` (`Purge`); `invalid` (unsafe-method invalidation of URIs); `group` (`Cache-Group-Invalidation` soft-purged groups, `Status` is how many); `group-invalid` (that field was refused, no group epoch written). `Status` is also set on `hard` after an `Eager` purge: the number of records deleted |
