@@ -1964,3 +1964,11 @@ Entry template:
 - Incident: this session created `site/launch` with `git checkout -b` in the shared checkout while the release session was mid-procedure there (see the release-v1.0.0 entry). Site or doc sessions that run beside another session should use a separate worktree.
 - Follow-ups: the custom domain and the post-launch list (plan record §10.3); Ashwin edits the About page; Lighthouse and axe not in CI; outside tester for the quickstart.
 - Context: high
+
+## 2026-10-12 · threat-rows-experiments · done
+- Branch / PR: claude/threat-rows-experiments / see the PR list
+- Done: ported the six threat rows of the closed PR 99 (T-46 to T-51) into docs/06 after checking each against v1.0.0 as shipped, with real test names; T-35's test column names its tests. Two claims of PR 99 did not hold and are residual risks instead: signing keys are not redacted anywhere (R-9), and a `__Host-` cookie name is accepted but never recommended (R-10). Runbook 7.9 gains both pieces of advice.
+- Tests: `TestAssignCookieRepeatedMeansNone` (a repeated assignment cookie with different values is no assignment), one `TestConfigValidate` row (`__Host-` name accepted). `make check` passes.
+- Deviations: none in behavior. docs/07 gets no Phase 3 section: the threat table carries the test names, as it does for every other row.
+- Follow-ups: v1.1 candidates in STATUS (redacting formatter for `ExperimentsConfig`).
+- Context: high
