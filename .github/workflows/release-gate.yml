@@ -13,12 +13,24 @@ on:
       count:
         description: Consecutive runs of the engine-level tests (docs/07 §12 asks for 100)
         default: "100"
+      repeat:
+        description: Run the repeated-test groups (turn off to rerun only the fuzzing)
+        type: boolean
+        default: true
+      fuzz:
+        description: Run the fuzz jobs (turn off to rerun only the repeated tests, which take about 30 minutes)
+        type: boolean
+        default: true
+      pkgs:
+        description: Package groups for the repeated tests, a JSON array (default all four)
+        default: '[".", "./internal/...", "./store/...", "./weirhttp/..."]'
 
 permissions:
   contents: read
 
 jobs:
   repeat:
+    if: inputs.repeat
     runs-on: ubuntu-latest
     timeout-minutes: 240
     strategy:
@@ -26,7 +38,7 @@ jobs:
       matrix:
         # One job per group so none has to fit the whole suite: the root
         # package alone takes about 15 s per race run on a quiet 4-core box.
-        pkgs: [".", "./internal/...", "./store/...", "./weirhttp/..."]
+        pkgs: ${{ fromJSON(inputs.pkgs) }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -42,6 +54,7 @@ jobs:
         run: go test -race -shuffle=on -count="$COUNT" -timeout 230m $PKGS
 
   fuzz-targets:
+    if: inputs.fuzz
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.list.outputs.matrix }}
@@ -65,6 +78,7 @@ jobs:
           echo "matrix=$(cat matrix.json)" >> "$GITHUB_OUTPUT"
 
   fuzz:
+    if: inputs.fuzz
     needs: fuzz-targets
     runs-on: ubuntu-latest
     timeout-minutes: 350 # fuzztime up to about 5 h; GitHub-hosted jobs stop at 6 h

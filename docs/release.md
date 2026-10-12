@@ -59,3 +59,11 @@ Do not delete or move a tag that the proxy may have fetched. Release the next pa
 
 - Add an API compatibility check (`gorelease` or `apidiff`) for the root, `store` and `weirhttp` to CI, comparing against the latest tag.
 - Move `STATUS.md` to `ready` with no open card.
+
+## Gate log
+
+Results of `release-gate` runs, newest first. A rerun after a fix can be narrowed with the workflow inputs `fuzz`, `repeat` and `pkgs` (for example `fuzz=false`, `pkgs=["./store/..."]` reruns only the store group in about 15 minutes).
+
+| Date | Commit | Run | Result |
+|---|---|---|---|
+| 2026-10-12 | `ab5d7f7` (merge of PR 106) | [38202380943](https://github.com/AshwinSathian/weir/actions/runs/38202380943) | fuzz: 29 of 29 targets ran 60 minutes without a failure. repeat x100 under `-race`: root package, `internal/...` and `weirhttp` passed (root in 22 minutes). `budgets` passed. **`store/...` failed** in `TestSnapshotHardEpochSurvives`: the test compared a restored epoch time with a 1 µs tolerance, but the store keeps epoch times as monotonic offsets, and wall and monotonic readings differ by a few microseconds on a loaded runner. A test bug, reproduced locally at 1 in 3 000 runs; the tolerance is now 1 ms on wall time. |
