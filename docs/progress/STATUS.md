@@ -4,13 +4,13 @@ Updated: 2026-10-11
 Phase: release
 Current card: none
 Card state: ready
-Branch: claude/magical-carson-rwdd4q (release-gate fix)
+Branch: claude/magical-carson-rwdd4q (gate result)
 PR: see the PR list
 Next card: none (all cards done; M16-02 deferred)
 
 ## Waiting on Ashwin
 
-- Rerun `release-gate` after the store test fix, narrowed: `fuzz=false`, `pkgs=["./store/..."]` (docs/release.md, Gate log). Everything else in the first run passed.
+- `release-gate` is green on `92a1e56` (run 38213460051, all 35 jobs). Remaining before the real tag: `make vuln`, `make cache-tests` and `make check` on the Mac, the `v1.0.0-rc.1` rehearsal, and the behavior decisions below.
 - Decide whether to open a PR for the release-prep branch, then follow docs/release.md (release branch, rc rehearsal, tags in order: root, observe/prom and store/valkey, caddy).
 - Confirm the decisions taken for you: D24 amended, D43 added, README Stability promises, signing key caps, `servableStatus` miss.
 
