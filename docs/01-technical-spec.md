@@ -325,9 +325,9 @@ A response is stored only if all of the following hold. Each failed check increm
 ### 5.11 Circuit breaker (T6.6)
 
 - FR-CB-1. One breaker per `Engine`. It counts outcomes of all origin fetches over a rolling window of `Breaker.Window` (default 10 s, 10 buckets).
-- FR-CB-2. The breaker opens when the window holds at least `Breaker.MinRequests` (default 20) outcomes and the fraction of origin-health failures is at least `Breaker.FailureRatio` (default 0.5). Status 500 and 4xx never count as failures. `Breaker.CountStatus500` makes 500 count.
+- FR-CB-2. The breaker opens when the window holds at least `Breaker.MinRequests` (default 20) outcomes and the fraction of origin-health failures is at least `Breaker.FailureRatio` (default 0.5), and the failures come from at least `Breaker.MinPartitions` (default 2) distinct partitions unless no fetch in the window succeeded. One failing path, however many query strings it is asked with, therefore cannot open the breaker for every other path, and an origin that answers nothing still opens it from one URL (v1.1; `MinPartitions` 1 is the rule before it). The set of failing partitions is bounded: at most 8 per bucket, and a bucket that saw more counts as enough. Status 500 and 4xx never count as failures. `Breaker.CountStatus500` makes 500 count.
 - FR-CB-3. Open lasts `Breaker.OpenFor` (default 5 s) with ±20% jitter. Each consecutive reopen doubles the duration up to `Breaker.MaxOpenFor` (default 60 s, or `OpenFor` when that is longer); closing resets it. `New` rejects a `MaxOpenFor` below `OpenFor`, which would make a reopen shorter than the first open.
-- FR-CB-4. After the open period, up to `Breaker.HalfOpenProbes` (default 1) concurrent foreground fetches are admitted as probes. One success closes the breaker. One failure reopens it.
+- FR-CB-4. After the open period, up to `Breaker.HalfOpenProbes` (default 1) concurrent foreground fetches are admitted as probes. One success closes the breaker. One failure reopens it. A partition whose probe failed is not admitted as a probe during the first second of a later half-open period, until the breaker closes, so one failing path cannot take every probe (v1.1, off with `MinPartitions` 1); at most 8 such partitions are remembered.
 - FR-CB-5. While open, no fetch reaches the origin. Foreground requests get stale per FR-STL-2 (reason `circuit-open`) or `ErrCircuitOpen`. Background refreshes are dropped. Unsafe methods get `ErrCircuitOpen`.
 - FR-CB-6. Every state transition emits an event and a log line.
 
@@ -423,6 +423,7 @@ All fields are optional. The zero value of `Config` is valid and yields the defa
 | `Breaker.Window` / `MinRequests` / `FailureRatio` | 10 s / 20 / 0.5 | |
 | `Breaker.OpenFor` / `MaxOpenFor` / `HalfOpenProbes` | 5 s / 60 s / 1 | `MaxOpenFor` defaults to `OpenFor` when that is longer |
 | `Breaker.CountStatus500` | false | |
+| `Breaker.MinPartitions` | 2 | 1 turns the rule off (FR-CB-2) |
 | `Breaker.Disable` | false | |
 | `Negative.TTL` | 2 s | `Negative.Disable` turns it off |
 | `MissRate.Window` / `TopK` / `MinMisses` / `MinRatio` | 10 s / 64 / 500 / 0.9 | `MinRatio` above 1 is rejected: no partition could reach it |

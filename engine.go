@@ -116,7 +116,7 @@ func New(cfg Config) (*Engine, error) {
 		e.cb = breaker.New(breaker.Config{
 			Window: b.Window, MinRequests: b.MinRequests, FailureRatio: b.FailureRatio,
 			OpenFor: b.OpenFor, MaxOpenFor: b.MaxOpenFor, HalfOpenProbes: b.HalfOpenProbes,
-			CountStatus500: b.CountStatus500,
+			CountStatus500: b.CountStatus500, MinPartitions: b.MinPartitions,
 		}, c.Rand, e.breakerChanged)
 	}
 	if m := &c.MissRate; !m.Disable {

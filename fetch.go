@@ -65,7 +65,7 @@ type fetchResult struct {
 // A non-nil held is a slot the caller already acquired from limFor(c);
 // fetch releases it like its own.
 func (e *Engine) fetch(ctx context.Context, c *keys.Classified, origin Origin, class limiter.Class, buffered bool, prior *store.Entry, held *limiter.Permit) fetchResult {
-	probe, err := e.cb.Allow()
+	probe, err := e.cb.AllowFor(c.PartitionH)
 	if err == nil && class != limiter.Foreground && probe != (breaker.Probe{}) {
 		e.cb.Cancel(probe) // FR-CB-4: only foreground fetches probe
 		err = breaker.ErrCircuitOpen
@@ -141,7 +141,7 @@ func (e *Engine) fetch(ctx context.Context, c *keys.Classified, origin Origin, c
 			cancelProbe()
 		} else {
 			settled = true
-			e.cb.Record(probe, o)
+			e.cb.RecordFor(probe, c.PartitionH, o)
 		}
 	}
 	if err != nil {

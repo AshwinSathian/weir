@@ -178,6 +178,12 @@ type BreakerConfig struct {
 	HalfOpenProbes int           // 0: 1
 	CountStatus500 bool
 	Disable        bool
+	// MinPartitions is how many distinct partitions (origin plus path) must
+	// have failed in the window before the breaker may open, unless no fetch
+	// in the window succeeded. One failing path with many query strings then
+	// cannot open it for every other path (FR-CB-2). 0: 2; 1 turns the rule
+	// off, which is the behavior before v1.1.
+	MinPartitions int
 }
 
 // NegativeConfig tunes negative caching of origin errors (FR-NEG).
@@ -332,6 +338,7 @@ func (c *Config) applyDefaults() {
 	orDur(&b.OpenFor, 5*time.Second)
 	orDur(&b.MaxOpenFor, max(60*time.Second, b.OpenFor)) // FR-CB-3: never below the first open
 	orInt(&b.HalfOpenProbes, 1)
+	orInt(&b.MinPartitions, 2)
 
 	orDur(&c.Negative.TTL, 2*time.Second)
 
@@ -425,6 +432,7 @@ func (c *Config) validate() error {
 		{"Breaker.OpenFor", int64(c.Breaker.OpenFor)},
 		{"Breaker.MaxOpenFor", int64(c.Breaker.MaxOpenFor)},
 		{"Breaker.HalfOpenProbes", int64(c.Breaker.HalfOpenProbes)},
+		{"Breaker.MinPartitions", int64(c.Breaker.MinPartitions)},
 		{"Negative.TTL", int64(c.Negative.TTL)},
 		{"MissRate.Window", int64(c.MissRate.Window)},
 		{"MissRate.TopK", int64(c.MissRate.TopK)},
