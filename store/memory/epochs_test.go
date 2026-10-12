@@ -297,3 +297,48 @@ func TestSharedTagsSkipInvalidPlane(t *testing.T) {
 		t.Fatalf("closed store: err = %v, want ErrUnavailable", err)
 	}
 }
+
+// E-6, NFR-5: a lookup since a time after the newest hard epoch finds none
+// without the hard table's lock, so a hit on an entry older than some
+// invalidation does not wait on, or contend for, that lock. An entry older
+// than a hard epoch still takes it and finds the epoch.
+func TestEpochHitTakesNoHardLock(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		s := newStore(t, Config{})
+		ctx := t.Context()
+		purged, other := store.Tag{1}, store.Tag{2}
+		old := time.Now()
+		time.Sleep(time.Second)
+		if err := s.SetEpoch(ctx, purged, store.Epoch{At: time.Now(), Mode: store.EpochHard}); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(2 * time.Second)
+		fresh := time.Now() // an entry stored after the hard purge
+		time.Sleep(2 * time.Second)
+		// A later invalidation of another tag makes "newest" pass for both.
+		if err := s.SetEpoch(ctx, other, store.Epoch{At: time.Now(), Mode: store.EpochInvalid}); err != nil {
+			t.Fatal(err)
+		}
+
+		s.ep.mu.Lock() // a purge in progress
+		done := make(chan bool, 1)
+		go func() {
+			_, ok, _ := s.NewestEpoch(ctx, []store.Tag{purged}, fresh)
+			done <- ok
+		}()
+		synctest.Wait()
+		select {
+		case ok := <-done:
+			if ok {
+				t.Fatal("an entry stored after the hard purge reads as purged")
+			}
+		default:
+			t.Fatal("the lookup waited on the hard table's lock")
+		}
+		s.ep.mu.Unlock()
+
+		if ep, ok, _ := s.NewestEpoch(ctx, []store.Tag{purged}, old); !ok || ep.Mode != store.EpochHard {
+			t.Fatalf("an entry older than the hard purge: epoch %+v, ok %v; want the hard epoch", ep, ok)
+		}
+	})
+}

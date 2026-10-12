@@ -67,9 +67,14 @@ func RequestFrom(r *http.Request) *weir.Request {
 // its body.
 func WriteResponse(w http.ResponseWriter, resp *weir.Response) error {
 	defer resp.Body.Close()
-	// Clone: value slices are shared with the stored entry (P4). Misses and
-	// pass-through carry the origin's hop-by-hop fields (RFC 9110 §7.6.1).
-	h := resp.Header.Clone()
+	// A shallow copy: the map is this call's, the value slices are still the
+	// response's, and for a hit the stored entry's. That is safe because
+	// stored slices are clipped (04 §6.10), so a later Add on w.Header()
+	// allocates instead of writing into them, and Set and Del touch only the
+	// map. A deep copy cost one more allocation and a copy of every value on
+	// each response. Hop-by-hop fields the response still carries are
+	// dropped (RFC 9110 §7.6.1).
+	h := maps.Clone(resp.Header)
 	keys.DropHopByHop(h, resp.Header["Connection"])
 	maps.Copy(w.Header(), h)
 	w.WriteHeader(resp.StatusCode)

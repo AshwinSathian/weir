@@ -29,11 +29,18 @@ type epochs struct {
 	globalTag store.Tag
 	global    [3]atomic.Int64 // by mode-1, nanoseconds after base (E-5)
 	newest    atomic.Int64    // any mode, nanoseconds after base (E-10)
-	mu        sync.RWMutex
-	hard      map[store.Tag]time.Time // E-6
-	planes    [2][]atomic.Uint32      // soft, invalid; seconds after base, rounded up (E-7)
-	mask      uint64
-	seed      maphash.Seed // T-29: cells cannot be targeted offline
+	// newestHard is the latest hard epoch of any tag but the global one,
+	// nanoseconds after base. A lookup since a later time has no hard epoch
+	// to find and skips the table and its lock: hard epochs come from
+	// operator purges, and every hit on an entry older than the last
+	// invalidation of any kind would otherwise take that lock once per tag.
+	// Pruning never lowers it, which only costs the lock.
+	newestHard atomic.Int64
+	mu         sync.RWMutex
+	hard       map[store.Tag]time.Time // E-6
+	planes     [2][]atomic.Uint32      // soft, invalid; seconds after base, rounded up (E-7)
+	mask       uint64
+	seed       maphash.Seed // T-29: cells cannot be targeted offline
 }
 
 func newEpochs(slots, maxHard int, retention time.Duration) *epochs {
@@ -50,6 +57,7 @@ func newEpochs(slots, maxHard int, retention time.Duration) *epochs {
 		ep.global[i].Store(noEpoch)
 	}
 	ep.newest.Store(noEpoch)
+	ep.newestHard.Store(noEpoch)
 	for i := range ep.planes {
 		ep.planes[i] = make([]atomic.Uint32, slots)
 	}
@@ -133,6 +141,9 @@ func (ep *epochs) setHard(t store.Tag, at time.Time) error {
 	if !ok || at.After(cur) {
 		ep.hard[t] = at
 	}
+	// Under mu, before the caller raises newest: a reader that passes the
+	// newest check then sees this value or a later one.
+	raise(&ep.newestHard, ep.offset(at))
 	return nil
 }
 
@@ -194,6 +205,9 @@ func (ep *epochs) tagEpoch(t store.Tag, m store.EpochMode, s int64) int64 {
 func (ep *epochs) lookup(t store.Tag, m store.EpochMode, s int64) int64 {
 	var off int64
 	if m == store.EpochHard {
+		if ep.newestHard.Load() < s {
+			return noEpoch
+		}
 		ep.mu.RLock()
 		at, ok := ep.hard[t]
 		ep.mu.RUnlock()

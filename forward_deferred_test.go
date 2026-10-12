@@ -116,3 +116,30 @@ func TestServeHitAllocations(t *testing.T) {
 		t.Fatalf("a fresh hit allocates %v objects, want at most 8", n)
 	}
 }
+
+// NFR-5, RFC 9110 §9.3.2: a stored response has a Content-Length even when
+// the origin sent the body chunked, so a hit is written with its length and
+// a HEAD reports it. The origin's own value is kept, and a 204 gets none.
+func TestStoredResponseHasContentLength(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		o := testorigin.New()
+		o.Default(testorigin.Behavior{Header: http.Header{"Cache-Control": {"max-age=60"}}, Body: []byte("12345")})
+		o.Route("/declared", testorigin.Behavior{Header: http.Header{"Cache-Control": {"max-age=60"}, "Content-Length": {"5"}}, Body: []byte("12345")})
+		o.Route("/empty", testorigin.Behavior{Status: http.StatusNoContent, Header: http.Header{"Cache-Control": {"max-age=60"}}})
+		e := newEngine(t, cacheCfg)
+		defer closeEngine(t, e)
+
+		for path, want := range map[string][]string{"/chunked": {"5"}, "/declared": {"5"}, "/empty": nil} {
+			serve(t, e, getReq(path), o)
+			resp, _ := serve(t, e, getReq(path), o)
+			if !resp.Cache.Hit || !slices.Equal(resp.Header["Content-Length"], want) {
+				t.Errorf("%s: hit %v with Content-Length %v, want a hit with %v", path, resp.Cache.Hit, resp.Header["Content-Length"], want)
+			}
+		}
+		head := getReq("/chunked")
+		head.Method = http.MethodHead
+		if resp, body := serve(t, e, head, o); resp.Header.Get("Content-Length") != "5" || body != "" {
+			t.Errorf("HEAD: Content-Length %q, body %q; want 5 and no body", resp.Header.Get("Content-Length"), body)
+		}
+	})
+}

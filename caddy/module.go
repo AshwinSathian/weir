@@ -325,7 +325,7 @@ func serveError(w http.ResponseWriter, err error) error {
 // off (FR-FAIR-3): the per-host caps would be missing on a shared cache. Only
 // the first host is kept, so request input never grows a set.
 func (h *Handler) noteHost(host string) {
-	if h.MultiHost {
+	if h.MultiHost || h.warnedHosts.Load() { // nothing left to decide: every request passes here
 		return
 	}
 	if hp, _, err := net.SplitHostPort(host); err == nil {

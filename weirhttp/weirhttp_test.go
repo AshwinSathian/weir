@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -668,5 +670,30 @@ func TestRequestFromBodyOfGet(t *testing.T) {
 		if got := weirhttp.RequestFrom(tc.r).Body != nil; got != tc.want {
 			t.Errorf("%s: body handed to the engine = %v, want %v", tc.name, got, tc.want)
 		}
+	}
+}
+
+// P4, 04 §6.10: WriteResponse shares the response's value slices with the
+// ResponseWriter instead of copying them. A handler that then adds to or
+// replaces a field must not change the response, which for a hit is the
+// stored entry's header. The response's own map is left as it was.
+func TestWriteResponseSharesValuesSafely(t *testing.T) {
+	clip := func(v ...string) []string { return slices.Clip(v) } // as a stored entry holds them
+	h := http.Header{"Content-Type": clip("text/plain"), "Vary": clip("Accept"), "Connection": clip("X-Hop"), "X-Hop": clip("1"),
+		"Content-Length": clip("2")}
+	want := h.Clone()
+	w := httptest.NewRecorder()
+	if err := weirhttp.WriteResponse(w, &weir.Response{StatusCode: 200, Header: h, Body: io.NopCloser(strings.NewReader("ok"))}); err != nil {
+		t.Fatal(err)
+	}
+	got := w.Header()
+	if got.Get("Content-Type") != "text/plain" || len(got["Connection"]) != 0 || len(got["X-Hop"]) != 0 {
+		t.Fatalf("written header %v, want the end-to-end fields only", got)
+	}
+	got.Add("Vary", "Cookie")
+	got.Set("Content-Type", "text/html")
+	got.Del("Content-Length")
+	if !reflect.DeepEqual(h, want) {
+		t.Fatalf("the response's header changed:\n got %v\nwant %v", h, want)
 	}
 }
