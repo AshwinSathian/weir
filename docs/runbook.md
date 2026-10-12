@@ -262,6 +262,8 @@ Load rules, all fail closed:
 
 - Every key is 32 to 256 bytes and at most 4 keys are configured (rotation needs two, at most three). A shorter one, or an unset variable (it expands to an empty key), fails `caddy validate` and the reload with the variable named; the running config stays as it was (`TestExperimentsBadKeyReloadKeepsOldHandler`). `caddy validate` reads your shell's environment, not the service's, so export the same variables there first or it fails on the empty key.
 - At least one key is required once the block has experiments.
+- Keep keys as `{env.NAME}` placeholders: the Caddy configuration and the admin API then hold the placeholder and never the key (06 R-9).
+- If any other subdomain of the site's domain is not under your control, name the cookie with a `__Host-` prefix (`cookie __Host-weir_v`). A sibling subdomain can otherwise plant an assignment cookie for the parent domain (06 T-50). This needs https: browsers drop a `__Host-` cookie that lacks `Secure`, and Weir adds `Secure` only on https requests.
 
 To rotate:
 

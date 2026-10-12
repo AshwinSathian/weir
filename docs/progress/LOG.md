@@ -1955,3 +1955,11 @@ Entry template:
 - Incidents, all caught before a push: a pre-tag proxy probe cached a not-found for about 30 minutes; a failed pin hidden by `tail` in an `&&` chain made a local commit without `go.sum`; another session switched the shared checkout to `site/launch` mid-procedure, so one pin ran on that branch and was reverted there (only the four `go.mod`/`go.sum` files). docs/release.md steps 4 and 5 now cover each.
 - Follow-ups: v1.1 list in STATUS; rc branches can be deleted.
 - Context: high
+
+## 2026-10-12 · threat-rows-experiments · done
+- Branch / PR: claude/threat-rows-experiments / see the PR list
+- Done: ported the six threat rows of the closed PR 99 (T-46 to T-51) into docs/06 after checking each against v1.0.0 as shipped, with real test names; T-35's test column names its tests. Two claims of PR 99 did not hold and are residual risks instead: signing keys are not redacted anywhere (R-9), and a `__Host-` cookie name is accepted but never recommended (R-10). Runbook 7.9 gains both pieces of advice.
+- Tests: `TestAssignCookieRepeatedMeansNone` (a repeated assignment cookie with different values is no assignment), one `TestConfigValidate` row (`__Host-` name accepted). `make check` passes.
+- Deviations: none in behavior. docs/07 gets no Phase 3 section: the threat table carries the test names, as it does for every other row.
+- Follow-ups: v1.1 candidates in STATUS (redacting formatter for `ExperimentsConfig`).
+- Context: high
