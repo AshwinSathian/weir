@@ -1,10 +1,16 @@
 # Changelog
 
-Format: one section per release, newest first. Versions follow [semantic versioning](https://semver.org). The root module and the `observe/prom`, `store/valkey` and `caddy` modules carry the same version number.
+Format: one section per release, newest first. Changes land under "Unreleased" in the pull request that makes them. Versions follow [semantic versioning](https://semver.org). The root module and the `observe/prom`, `store/valkey` and `caddy` modules carry the same version number.
+
+## Unreleased
+
+Nothing yet.
 
 ## v1.0.0 (2026-10-12)
 
 First stable release. It supersedes the `v0.1.0` tag, which predates most of the engine and cannot be used with the sub-modules.
+
+The copy of this file inside the `v1.0.0` tag reads "v1.0.0 (unreleased)": the date was added on `main` after the tag. The content is the same.
 
 ### Engine (root module)
 
@@ -22,14 +28,14 @@ First stable release. It supersedes the `v0.1.0` tag, which predates most of the
 - `store/valkey`: shared store for several nodes (Valkey 7 or later, `volatile-lfu` or `noeviction`).
 - `caddy`: the `weir` handler, Caddyfile and JSON configuration, admin purge API, `experiments` block. Built against Caddy v2.11.7.
 
-### Changed since the last pre-release work
+### Fixed before the first release candidate
 
 - Experiment signing keys are limited to 4 keys and 256 bytes each.
 - A stored response or negative entry whose status cannot be written by an HTTP server is treated as a miss.
 - `TransportOrigin` no longer panics when `http.DefaultTransport` has been replaced, and returns an error for a missing `Target`.
 - An origin body whose `Read` panics is closed instead of leaked.
 
-### Changed after v1.0.0-rc.1
+### Changed between v1.0.0-rc.1 and v1.0.0
 
 - `Key.QuerySort` sorts by parameter name only and keeps the order of a repeated name's values (`ids=3&ids=1` is no longer rewritten to `ids=1&ids=3`).
 - An unkeyed `Cache-Control` or `Pragma` request field is forwarded only as a plain directive list (at most 8 lines and 256 bytes, letters, digits, `-`, `_`, `=`, `,` and space); anything else is dropped for that request.

@@ -30,7 +30,7 @@ Run `release-gate` on the release candidate commit, not on a branch that will st
 
 ## Order
 
-1. Merge everything. `main` is the release candidate; the gate above ran on it.
+1. Merge everything, including the pull request that turns the CHANGELOG's "Unreleased" heading into `v1.0.0 (date)` and adds a new empty "Unreleased" section above it, so the tag carries its own date (the `v1.0.0` tag was cut before that and says "(unreleased)" inside). A documents-only merge does not restart the gate. `main` is the release candidate; the gate above ran on its code.
 2. `git switch -c release/v1.0.0` from that commit.
 3. Rehearse with a release candidate tag before the real one. Module proxy entries are immutable, so run steps 4 to 7 and step 9 once with `v1.0.0-rc.N` for every module, fix what breaks (on `main`, then recut the release branch), and only then use `v1.0.0`. A bad `v1.0.0` can only be retracted, never replaced. Use one rc number for all four modules; if one module needs a new rc, all four get it. Delete the rc branch afterwards; the rc tags stay. Results are in the rehearsal log below.
 4. Do not ask the module proxy for the version before its tag is pushed (no `go list -m ...@v1.0.0`, no `curl` of its `.info` or `.mod`): the proxy caches the "unknown revision" answer per URL for about half an hour, and the pin in step 5 fails until it expires. Tag the root on the release branch: `git tag -a v1.0.0 -m "weir v1.0.0" && git push origin release/v1.0.0 v1.0.0`. Check from outside the repository: `GOWORK=off GOFLAGS=-mod=mod go list -m github.com/AshwinSathian/weir@v1.0.0`.
@@ -54,7 +54,7 @@ Run `release-gate` on the release candidate commit, not on a branch that will st
    - `go install github.com/AshwinSathian/weir/examples/weirproxy@v1.0.0`.
    - The README's xcaddy line, with both pins: `xcaddy build --with github.com/AshwinSathian/weir@v1.0.0 --with github.com/AshwinSathian/weir/caddy@v1.0.0`, then `./caddy list-modules --versions | grep weir` (two modules, both at the version) and the checklist in [runbook 7.8](runbook.md) against a scratch origin.
    - Open `https://pkg.go.dev/github.com/AshwinSathian/weir@v1.0.0` and the three sub-module pages. A page that answers 404 has not been fetched yet: its "Request" button, or `curl -X POST https://pkg.go.dev/fetch/<module>@v1.0.0`, fetches it. Each must show the Apache-2.0 license (the sub-module zips get the repository's `LICENSE` from the go command).
-10. Publish a GitHub release for `v1.0.0` from the CHANGELOG section. On `main`, replace "(unreleased)" in [CHANGELOG.md](../CHANGELOG.md) with the date and move the README Install block's version if it changed.
+10. Publish a GitHub release for `v1.0.0` from the CHANGELOG section (`gh release create v1.0.0 --verify-tag --notes-file ...`). On `main`, set `WEIR_VERSION` in the `caddy-published` job to the new version and move the README Install block's version if it changed.
 
 ## Keeping the modules in step
 
