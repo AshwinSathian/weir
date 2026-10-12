@@ -200,6 +200,8 @@ Scrub (M15): for each shard in turn, take the write lock, walk every node, unlin
 
 ### 5.4 Epoch table
 
+`newestHard` (v1.1) is the latest hard epoch of any tag but the global one, kept as an atomic offset and raised under the table's lock. A lookup since a later time returns "no hard epoch" without the lock. Hard epochs come only from operator purges, while `newest` (E-10) moves on every invalidation, so without it every hit on an entry older than the last invalidation of any kind took the lock once per tag. Pruning never lowers the value, which only costs the lock again.
+
 The global tag's three timestamps and the newest-epoch value are atomics. Hard epochs live in a `sync.RWMutex`-protected `map[store.Tag]time.Time`, pruned opportunistically inside `SetEpoch` when a new tag finds the table full (at most 64 expired tags per call, no background goroutine; expired hard epochs left in place only match records that have already expired). The soft and invalid sketch planes are `[]atomic.Uint32`; raising a cell is a compare-and-swap loop, reading is a plain atomic load, so neither takes a lock.
 
 ### 5.5 Snapshot file (M13)

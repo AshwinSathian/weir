@@ -1,0 +1,368 @@
+# Weir v1.1 hardening, 2026-10-13, Apple M4 Pro, 12 cores, Go 1.27.1 darwin/arm64
+# Three builds, eight interleaved runs each, -benchtime 1s. base: main at c070976 (v1.0.1). mid: branch at cd5df9e (cards HRD-01 to HRD-15). final: branch at the performance card (HRD-19).
+
+## base
+goos: darwin
+goarch: arm64
+cpu: Apple M4 Pro
+BenchmarkServeHitSmall-12         	 1234328	       965.9 ns/op	    1536 B/op	      12 allocs/op
+BenchmarkServeHitVary-12          	  861340	      1252 ns/op	    1552 B/op	      13 allocs/op
+BenchmarkServeMissCoalesced-12    	   29790	     36720 ns/op	         1.003 origin-calls/op	   23268 B/op	     195 allocs/op
+BenchmarkServeHitParallel/missrate-on-12         	 1322624	       990.0 ns/op	    1536 B/op	      12 allocs/op
+BenchmarkServeHitParallel/missrate-off-12        	 2972204	       403.8 ns/op	    1536 B/op	      12 allocs/op
+goos: darwin
+goarch: arm64
+cpu: Apple M4 Pro
+BenchmarkServeHitSmall-12         	 1256607	       968.2 ns/op	    1536 B/op	      12 allocs/op
+BenchmarkServeHitVary-12          	  917928	      1330 ns/op	    1552 B/op	      13 allocs/op
+BenchmarkServeMissCoalesced-12    	   28170	     40648 ns/op	         1.003 origin-calls/op	   23136 B/op	     195 allocs/op
+BenchmarkServeHitParallel/missrate-on-12         	 1000000	      1004 ns/op	    1536 B/op	      12 allocs/op
+BenchmarkServeHitParallel/missrate-off-12        	 3281686	       385.3 ns/op	    1536 B/op	      12 allocs/op
+goos: darwin
+goarch: arm64
+cpu: Apple M4 Pro
+BenchmarkServeHitSmall-12         	 1240843	       962.0 ns/op	    1536 B/op	      12 allocs/op
+BenchmarkServeHitVary-12          	  915331	      1315 ns/op	    1552 B/op	      13 allocs/op
+BenchmarkServeMissCoalesced-12    	   28251	     39186 ns/op	         1.003 origin-calls/op	   23148 B/op	     195 allocs/op
+BenchmarkServeHitParallel/missrate-on-12         	 1000000	      1000 ns/op	    1536 B/op	      12 allocs/op
+BenchmarkServeHitParallel/missrate-off-12        	 3091732	       397.7 ns/op	    1536 B/op	      12 allocs/op
+goos: darwin
+goarch: arm64
+cpu: Apple M4 Pro
+BenchmarkServeHitSmall-12         	 1218294	       988.4 ns/op	    1536 B/op	      12 allocs/op
+BenchmarkServeHitVary-12          	  896802	      1318 ns/op	    1552 B/op	      13 allocs/op
+BenchmarkServeMissCoalesced-12    	   30710	     39326 ns/op	         1.002 origin-calls/op	   23247 B/op	     195 allocs/op
+BenchmarkServeHitParallel/missrate-on-12         	 1000000	      1062 ns/op	    1536 B/op	      12 allocs/op
+BenchmarkServeHitParallel/missrate-off-12        	 3014608	       428.7 ns/op	    1536 B/op	      12 allocs/op
+goos: darwin
+goarch: arm64
+cpu: Apple M4 Pro
+BenchmarkServeHitSmall-12         	 1296721	       930.9 ns/op	    1536 B/op	      12 allocs/op
+BenchmarkServeHitVary-12          	  960486	      1283 ns/op	    1552 B/op	      13 allocs/op
+BenchmarkServeMissCoalesced-12    	   29083	     39087 ns/op	         1.002 origin-calls/op	   23211 B/op	     195 allocs/op
+BenchmarkServeHitParallel/missrate-on-12         	 1258176	      1005 ns/op	    1536 B/op	      12 allocs/op
+BenchmarkServeHitParallel/missrate-off-12        	 2747110	       386.4 ns/op	    1536 B/op	      12 allocs/op
+goos: darwin
+goarch: arm64
+cpu: Apple M4 Pro
+BenchmarkServeHitSmall-12         	 1208302	       982.9 ns/op	    1536 B/op	      12 allocs/op
+BenchmarkServeHitVary-12          	  924735	      1294 ns/op	    1552 B/op	      13 allocs/op
+BenchmarkServeMissCoalesced-12    	   31992	     36661 ns/op	         1.003 origin-calls/op	   23256 B/op	     195 allocs/op
+BenchmarkServeHitParallel/missrate-on-12         	 1000000	      1063 ns/op	    1536 B/op	      12 allocs/op
+BenchmarkServeHitParallel/missrate-off-12        	 2725712	       397.1 ns/op	    1536 B/op	      12 allocs/op
+goos: darwin
+goarch: arm64
+cpu: Apple M4 Pro
+BenchmarkServeHitSmall-12         	 1316637	       911.3 ns/op	    1536 B/op	      12 allocs/op
+BenchmarkServeHitVary-12          	  952496	      1327 ns/op	    1552 B/op	      13 allocs/op
+BenchmarkServeMissCoalesced-12    	   32821	     36445 ns/op	         1.002 origin-calls/op	   23245 B/op	     195 allocs/op
+BenchmarkServeHitParallel/missrate-on-12         	 1220877	       939.1 ns/op	    1536 B/op	      12 allocs/op
+BenchmarkServeHitParallel/missrate-off-12        	 3730033	       336.0 ns/op	    1536 B/op	      12 allocs/op
+goos: darwin
+goarch: arm64
+cpu: Apple M4 Pro
+BenchmarkServeHitSmall-12         	 1315504	       908.0 ns/op	    1536 B/op	      12 allocs/op
+BenchmarkServeHitVary-12          	  953480	      1238 ns/op	    1552 B/op	      13 allocs/op
+BenchmarkServeMissCoalesced-12    	   37868	     33832 ns/op	         1.003 origin-calls/op	   23217 B/op	     195 allocs/op
+BenchmarkServeHitParallel/missrate-on-12         	 1252868	      1025 ns/op	    1536 B/op	      12 allocs/op
+BenchmarkServeHitParallel/missrate-off-12        	 2965026	       382.3 ns/op	    1536 B/op	      12 allocs/op
+
+## mid
+goos: darwin
+goarch: arm64
+cpu: Apple M4 Pro
+BenchmarkServeHitSmall-12         	 1251664	       951.1 ns/op	    1536 B/op	      12 allocs/op
+BenchmarkServeHitVary-12          	  805647	      1353 ns/op	    1552 B/op	      13 allocs/op
+BenchmarkServeMissCoalesced-12    	   30432	     38302 ns/op	         1.002 origin-calls/op	   23302 B/op	     195 allocs/op
+BenchmarkServeHitParallel/missrate-on-12         	 3590054	       394.1 ns/op	    1536 B/op	      12 allocs/op
+BenchmarkServeHitParallel/missrate-off-12        	 2985042	       403.0 ns/op	    1536 B/op	      12 allocs/op
+goos: darwin
+goarch: arm64
+cpu: Apple M4 Pro
+BenchmarkServeHitSmall-12         	 1207588	       983.8 ns/op	    1536 B/op	      12 allocs/op
+BenchmarkServeHitVary-12          	  954792	      1338 ns/op	    1552 B/op	      13 allocs/op
+BenchmarkServeMissCoalesced-12    	   31449	     36075 ns/op	         1.002 origin-calls/op	   23309 B/op	     195 allocs/op
+BenchmarkServeHitParallel/missrate-on-12         	 3083289	       385.1 ns/op	    1536 B/op	      12 allocs/op
+BenchmarkServeHitParallel/missrate-off-12        	 2856711	       370.9 ns/op	    1536 B/op	      12 allocs/op
+goos: darwin
+goarch: arm64
+cpu: Apple M4 Pro
+BenchmarkServeHitSmall-12         	 1263988	       963.1 ns/op	    1536 B/op	      12 allocs/op
+BenchmarkServeHitVary-12          	  903920	      1282 ns/op	    1552 B/op	      13 allocs/op
+BenchmarkServeMissCoalesced-12    	   32257	     38826 ns/op	         1.003 origin-calls/op	   23272 B/op	     195 allocs/op
+BenchmarkServeHitParallel/missrate-on-12         	 3185880	       454.4 ns/op	    1536 B/op	      12 allocs/op
+BenchmarkServeHitParallel/missrate-off-12        	 3154093	       394.6 ns/op	    1536 B/op	      12 allocs/op
+goos: darwin
+goarch: arm64
+cpu: Apple M4 Pro
+BenchmarkServeHitSmall-12         	 1217799	       974.6 ns/op	    1536 B/op	      12 allocs/op
+BenchmarkServeHitVary-12          	  946838	      1284 ns/op	    1552 B/op	      13 allocs/op
+BenchmarkServeMissCoalesced-12    	   33352	     36862 ns/op	         1.003 origin-calls/op	   23263 B/op	     195 allocs/op
+BenchmarkServeHitParallel/missrate-on-12         	 3129180	       385.1 ns/op	    1536 B/op	      12 allocs/op
+BenchmarkServeHitParallel/missrate-off-12        	 3499616	       377.7 ns/op	    1536 B/op	      12 allocs/op
+goos: darwin
+goarch: arm64
+cpu: Apple M4 Pro
+BenchmarkServeHitSmall-12         	 1300946	       926.6 ns/op	    1536 B/op	      12 allocs/op
+BenchmarkServeHitVary-12          	  922795	      1283 ns/op	    1552 B/op	      13 allocs/op
+BenchmarkServeMissCoalesced-12    	   29784	     39983 ns/op	         1.003 origin-calls/op	   23274 B/op	     195 allocs/op
+BenchmarkServeHitParallel/missrate-on-12         	 2872432	       386.6 ns/op	    1536 B/op	      12 allocs/op
+BenchmarkServeHitParallel/missrate-off-12        	 3318094	       400.0 ns/op	    1536 B/op	      12 allocs/op
+goos: darwin
+goarch: arm64
+cpu: Apple M4 Pro
+BenchmarkServeHitSmall-12         	 1292091	       927.8 ns/op	    1536 B/op	      12 allocs/op
+BenchmarkServeHitVary-12          	  941114	      1265 ns/op	    1552 B/op	      13 allocs/op
+BenchmarkServeMissCoalesced-12    	   35650	     38786 ns/op	         1.003 origin-calls/op	   23249 B/op	     195 allocs/op
+BenchmarkServeHitParallel/missrate-on-12         	 3197557	       373.5 ns/op	    1536 B/op	      12 allocs/op
+BenchmarkServeHitParallel/missrate-off-12        	 3446815	       351.0 ns/op	    1536 B/op	      12 allocs/op
+goos: darwin
+goarch: arm64
+cpu: Apple M4 Pro
+BenchmarkServeHitSmall-12         	 1331836	       906.3 ns/op	    1536 B/op	      12 allocs/op
+BenchmarkServeHitVary-12          	  871045	      1247 ns/op	    1552 B/op	      13 allocs/op
+BenchmarkServeMissCoalesced-12    	   35397	     34953 ns/op	         1.002 origin-calls/op	   23265 B/op	     195 allocs/op
+BenchmarkServeHitParallel/missrate-on-12         	 3156222	       386.7 ns/op	    1536 B/op	      12 allocs/op
+BenchmarkServeHitParallel/missrate-off-12        	 3731990	       405.4 ns/op	    1536 B/op	      12 allocs/op
+goos: darwin
+goarch: arm64
+cpu: Apple M4 Pro
+BenchmarkServeHitSmall-12         	 1336429	       897.9 ns/op	    1536 B/op	      12 allocs/op
+BenchmarkServeHitVary-12          	  912680	      1300 ns/op	    1552 B/op	      13 allocs/op
+BenchmarkServeMissCoalesced-12    	   31735	     34508 ns/op	         1.003 origin-calls/op	   23308 B/op	     195 allocs/op
+BenchmarkServeHitParallel/missrate-on-12         	 3227988	       389.0 ns/op	    1536 B/op	      12 allocs/op
+BenchmarkServeHitParallel/missrate-off-12        	 3677236	       351.1 ns/op	    1536 B/op	      12 allocs/op
+
+## final
+goos: darwin
+goarch: arm64
+cpu: Apple M4 Pro
+BenchmarkServeHitSmall-12         	 1768185	       699.0 ns/op	     608 B/op	       8 allocs/op
+BenchmarkServeHitVary-12          	  979204	      1214 ns/op	    1040 B/op	      12 allocs/op
+BenchmarkServeMissCoalesced-12    	   27872	     40832 ns/op	         1.000 origin-calls/op	   22922 B/op	     193 allocs/op
+BenchmarkServeHitParallel/missrate-on-12         	 5219719	       249.2 ns/op	     608 B/op	       8 allocs/op
+BenchmarkServeHitParallel/missrate-off-12        	 5434136	       223.9 ns/op	     608 B/op	       8 allocs/op
+goos: darwin
+goarch: arm64
+cpu: Apple M4 Pro
+BenchmarkServeHitSmall-12         	 1806082	       658.8 ns/op	     608 B/op	       8 allocs/op
+BenchmarkServeHitVary-12          	 1000000	      1194 ns/op	    1040 B/op	      12 allocs/op
+BenchmarkServeMissCoalesced-12    	   30938	     38511 ns/op	         1.000 origin-calls/op	   23036 B/op	     193 allocs/op
+BenchmarkServeHitParallel/missrate-on-12         	 5753011	       229.3 ns/op	     608 B/op	       8 allocs/op
+BenchmarkServeHitParallel/missrate-off-12        	 5757304	       209.6 ns/op	     608 B/op	       8 allocs/op
+goos: darwin
+goarch: arm64
+cpu: Apple M4 Pro
+BenchmarkServeHitSmall-12         	 1807126	       662.9 ns/op	     608 B/op	       8 allocs/op
+BenchmarkServeHitVary-12          	 1000000	      1203 ns/op	    1040 B/op	      12 allocs/op
+BenchmarkServeMissCoalesced-12    	   32749	     39594 ns/op	         1.000 origin-calls/op	   22982 B/op	     193 allocs/op
+BenchmarkServeHitParallel/missrate-on-12         	 5653275	       247.0 ns/op	     608 B/op	       8 allocs/op
+BenchmarkServeHitParallel/missrate-off-12        	 4999432	       230.4 ns/op	     608 B/op	       8 allocs/op
+goos: darwin
+goarch: arm64
+cpu: Apple M4 Pro
+BenchmarkServeHitSmall-12         	 1769378	       675.1 ns/op	     608 B/op	       8 allocs/op
+BenchmarkServeHitVary-12          	  933966	      1225 ns/op	    1040 B/op	      12 allocs/op
+BenchmarkServeMissCoalesced-12    	   25297	     45108 ns/op	         1.000 origin-calls/op	   22844 B/op	     193 allocs/op
+BenchmarkServeHitParallel/missrate-on-12         	 5549557	       248.7 ns/op	     608 B/op	       8 allocs/op
+BenchmarkServeHitParallel/missrate-off-12        	 6244976	       217.2 ns/op	     608 B/op	       8 allocs/op
+goos: darwin
+goarch: arm64
+cpu: Apple M4 Pro
+BenchmarkServeHitSmall-12         	 1796522	       670.0 ns/op	     608 B/op	       8 allocs/op
+BenchmarkServeHitVary-12          	 1000000	      1225 ns/op	    1040 B/op	      12 allocs/op
+BenchmarkServeMissCoalesced-12    	   27565	     43303 ns/op	         1.000 origin-calls/op	   22820 B/op	     193 allocs/op
+BenchmarkServeHitParallel/missrate-on-12         	 5643355	       214.5 ns/op	     608 B/op	       8 allocs/op
+BenchmarkServeHitParallel/missrate-off-12        	 6300823	       203.0 ns/op	     608 B/op	       8 allocs/op
+goos: darwin
+goarch: arm64
+cpu: Apple M4 Pro
+BenchmarkServeHitSmall-12         	 1834992	       656.8 ns/op	     608 B/op	       8 allocs/op
+BenchmarkServeHitVary-12          	  997146	      1205 ns/op	    1040 B/op	      12 allocs/op
+BenchmarkServeMissCoalesced-12    	   28780	     38606 ns/op	         1.000 origin-calls/op	   22938 B/op	     193 allocs/op
+BenchmarkServeHitParallel/missrate-on-12         	 5469267	       219.7 ns/op	     608 B/op	       8 allocs/op
+BenchmarkServeHitParallel/missrate-off-12        	 6371980	       208.5 ns/op	     608 B/op	       8 allocs/op
+goos: darwin
+goarch: arm64
+cpu: Apple M4 Pro
+BenchmarkServeHitSmall-12         	 1767733	       675.2 ns/op	     608 B/op	       8 allocs/op
+BenchmarkServeHitVary-12          	  984267	      1180 ns/op	    1040 B/op	      12 allocs/op
+BenchmarkServeMissCoalesced-12    	   33392	     36510 ns/op	         1.000 origin-calls/op	   23039 B/op	     194 allocs/op
+BenchmarkServeHitParallel/missrate-on-12         	 6012724	       206.4 ns/op	     608 B/op	       8 allocs/op
+BenchmarkServeHitParallel/missrate-off-12        	 5616013	       188.5 ns/op	     608 B/op	       8 allocs/op
+goos: darwin
+goarch: arm64
+cpu: Apple M4 Pro
+BenchmarkServeHitSmall-12         	 1784031	       668.1 ns/op	     608 B/op	       8 allocs/op
+BenchmarkServeHitVary-12          	  984291	      1200 ns/op	    1040 B/op	      12 allocs/op
+BenchmarkServeMissCoalesced-12    	   29694	     40926 ns/op	         1.000 origin-calls/op	   23008 B/op	     193 allocs/op
+BenchmarkServeHitParallel/missrate-on-12         	 5101544	       208.6 ns/op	     608 B/op	       8 allocs/op
+BenchmarkServeHitParallel/missrate-off-12        	 6728622	       173.7 ns/op	     608 B/op	       8 allocs/op
+
+## make load, mid (cards HRD-01 to HRD-16)
+    gc_test.go:213: 
+        gc at scale (scale 1, 12 CPU, go1.27.1)
+          entries (small / large)            10000 / 1000000
+          heap in use / live after fill      31 / 25 MiB / 2429 / 2099 MiB
+          hit ratio (paced)                  1.0000 / 1.0000
+          GC CPU per forced cycle            12.81 ms (6 cycles, every 5s) / 1195.11 ms (6 cycles, every 5s)
+          paced 20000/s p50                  3.84µs / 3.584µs
+          paced p99 with forced cycles       20.48µs / 20.48µs
+          paced max                          1.382709ms / 8.180333ms
+          saturated requests                 165136094 / 137709819
+          saturated alloc per request        1728.10 B / 1735.92 B
+          saturated non-GC CPU per request   4.09 µs / 4.65 µs
+          saturated natural cycles in window 6073 / 81
+          saturated GC share, runtime-reported 4.93% / 10.49%
+          saturated GC µs per request        0.84 µs / 0.94 µs
+          saturated GC share, projected      16.98% / 16.84%
+        
+--- PASS: TestGCAt1MEntries (183.18s)
+    scenarios_test.go:88: 
+        steady hits (scale 1, 12 CPU, go1.27.1)
+          requests                           78472236
+          paced target (50% of saturated)    1394562
+          achieved rate                      1307857
+          hit ratio                          1.0000
+          p50                                1.408µs
+          p99 per window                     [7.68µs 6.656µs 5.632µs 5.632µs 5.632µs 5.632µs]
+          p99 median window                  5.632µs
+          p99 overall                        6.144µs
+          max                                28.529583ms
+          origin calls after warm            0
+        
+--- PASS: TestSteadyHits (75.26s)
+    scenarios_test.go:139: 
+        synchronized expiry (scale 1, 12 CPU, go1.27.1)
+          keys                               10000
+          max-age                            1m0s
+          storing phase                      1.72s
+          elapsed                            1m20s
+          origin peak in-flight              32
+          origin peak calls/s                1410
+          limit calls/s (20%)                2000
+          refetched after storing            10000
+          client errors                      0
+          peak queue                         0
+        
+--- PASS: TestSynchronizedExpiry (81.93s)
+    scenarios_test.go:210: 
+        busting flood plus normal traffic (scale 1, 12 CPU, go1.27.1)
+          normal p99 alone                   40.96µs
+          normal p99 under flood             28.672µs
+          normal p50 alone / flood           9.216µs / 5.12µs
+          normal hit ratio under flood       1.0000
+          flood requests / shed errors       99976 / 70833
+          flood client drops                 0
+          normal offered (target ~500/s)     499/s, drops 0
+          flood peak in-flight               8
+          MaxPerPartition                    8
+        
+--- PASS: TestBustingFloodWithNormalTraffic (41.60s)
+    scenarios_test.go:275: 
+        origin brownout (x20 latency) (scale 1, 12 CPU, go1.27.1)
+          2xx / total before                 12039 / 12039
+          2xx / total during                 58144 / 58144
+          2xx / total after                  20037 / 20037
+          stale served during                53843
+          client errors during               0
+          breaker open events                17
+          breaker state at end               closed
+          peak goroutines                    44
+          origin shed events                 0
+        
+--- PASS: TestOriginBrownout (47.46s)
+    scenarios_test.go:385: 
+        store flap (50% failing) (scale 1, 12 CPU, go1.27.1)
+          requests                           11022888
+          client errors                      0
+          slowest request                    50.545208ms
+          bound                              208.810841ms
+          store breaker open / closed        23 / 16
+          store errors                       986
+        
+--- PASS: TestStoreFlap (43.21s)
+
+## make load, final
+    gc_test.go:213: 
+        gc at scale (scale 1, 12 CPU, go1.27.1)
+          entries (small / large)            10000 / 1000000
+          heap in use / live after fill      32 / 25 MiB / 2467 / 2128 MiB
+          hit ratio (paced)                  1.0000 / 1.0000
+          GC CPU per forced cycle            6.76 ms (5 cycles, every 5s) / 1974.22 ms (6 cycles, every 5s)
+          paced 20000/s p50                  1.664µs / 2.816µs
+          paced p99 with forced cycles       11.264µs / 22.528µs
+          paced max                          1.051333ms / 13.186875ms
+          saturated requests                 198620221 / 88338483
+          saturated alloc per request        800.05 B / 807.92 B
+          saturated non-GC CPU per request   3.38 µs / 7.46 µs
+          saturated natural cycles in window 2948 / 25
+          saturated GC share, runtime-reported 4.23% / 6.52%
+          saturated GC µs per request        0.20 µs / 0.71 µs
+          saturated GC share, projected      5.63% / 8.74%
+        
+--- PASS: TestGCAt1MEntries (184.42s)
+    scenarios_test.go:88: 
+        steady hits (scale 1, 12 CPU, go1.27.1)
+          requests                           79837860
+          paced target (50% of saturated)    1512612
+          achieved rate                      1330599
+          hit ratio                          1.0000
+          p50                                1.28µs
+          p99 per window                     [7.68µs 7.68µs 9.216µs 9.216µs 9.216µs 8.192µs]
+          p99 median window                  9.216µs
+          p99 overall                        8.192µs
+          max                                28.811959ms
+          origin calls after warm            0
+        
+--- PASS: TestSteadyHits (76.69s)
+    scenarios_test.go:139: 
+        synchronized expiry (scale 1, 12 CPU, go1.27.1)
+          keys                               10000
+          max-age                            1m0s
+          storing phase                      1.73s
+          elapsed                            1m20s
+          origin peak in-flight              32
+          origin peak calls/s                1464
+          limit calls/s (20%)                2000
+          refetched after storing            10000
+          client errors                      0
+          peak queue                         0
+        
+--- PASS: TestSynchronizedExpiry (81.95s)
+    scenarios_test.go:210: 
+        busting flood plus normal traffic (scale 1, 12 CPU, go1.27.1)
+          normal p99 alone                   45.056µs
+          normal p99 under flood             32.768µs
+          normal p50 alone / flood           10.24µs / 5.632µs
+          normal hit ratio under flood       1.0000
+          flood requests / shed errors       99976 / 71150
+          flood client drops                 0
+          normal offered (target ~500/s)     499/s, drops 0
+          flood peak in-flight               8
+          MaxPerPartition                    8
+        
+--- PASS: TestBustingFloodWithNormalTraffic (41.71s)
+    scenarios_test.go:275: 
+        origin brownout (x20 latency) (scale 1, 12 CPU, go1.27.1)
+          2xx / total before                 12058 / 12058
+          2xx / total during                 58140 / 58140
+          2xx / total after                  20040 / 20040
+          stale served during                54155
+          client errors during               0
+          breaker open events                17
+          breaker state at end               closed
+          peak goroutines                    44
+          origin shed events                 0
+        
+--- PASS: TestOriginBrownout (47.54s)
+    scenarios_test.go:385: 
+        store flap (50% failing) (scale 1, 12 CPU, go1.27.1)
+          requests                           15400533
+          client errors                      0
+          slowest request                    65.967834ms
+          bound                              209.651938ms
+          store breaker open / closed        32 / 28
+          store errors                       1692
+        
+--- PASS: TestStoreFlap (43.21s)

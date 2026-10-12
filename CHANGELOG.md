@@ -40,7 +40,14 @@ Read these before upgrading. Each has a way back where one makes sense.
 
 ### Performance
 
-- The miss-rate tracker no longer takes one mutex per cacheable request: a hit takes a read lock and never replaces a counter (FR-MR-1). The limiter's release walk stops once no slot is free. Numbers are in [docs/benchmarks.md](docs/benchmarks.md).
+Measured on the reference machine against `v1.0.1`, eight interleaved runs ([docs/benchmarks.md](docs/benchmarks.md)): a hit takes 669 ns instead of 964 and allocates 608 B in 8 objects instead of 1 536 B in 12; hits from 12 goroutines take 225 ns each instead of 1 005; `make load` serves 1 331 k steady hits a second where it served 578 k.
+
+- The miss-rate tracker no longer takes one mutex per cacheable request: a hit takes a read lock and never replaces a counter (FR-MR-1).
+- A hit keeps its request state on the stack and does not build the forwarded header, which only a miss, a pass-through or a vary lookup reads (NFR-5).
+- A request that creates a flight looks at the store once more before it fetches, so a lookup that just missed the previous flight's response no longer costs a second fetch (FR-COA-1).
+- Hard-epoch lookups are skipped when no hard epoch is newer than the entry. The limiter's release walk stops once no slot is free.
+- `observe/prom` keeps the request counter of each outcome once resolved: one request event costs about 30 ns instead of 95 across 12 goroutines.
+- A stored response gets a `Content-Length` when the origin sent none, so a hit is written with its length (FR-STO-11). `weirhttp.WriteResponse` no longer deep-copies the header.
 
 ### Known limits, unchanged
 

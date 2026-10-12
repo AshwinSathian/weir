@@ -345,6 +345,8 @@ TagGroup(o, name) = sha256("weir/tag/v1\x03" + len-prefixed(o) + len-prefixed(na
 
 ### 3.1 Classification
 
+Deferred forward (v1.1). `Serve` calls `keys.ClassifyDeferred`, which leaves `Forwarded.Header` and `Unkeyed` unbuilt (`fwdPending`) for a cacheable request when the configuration keys no header, no cookie and no experiment. The primary key is then method, scheme, host, path and query, all set at classification, so the key does not depend on the header and INV-1 holds by construction; with anything keyed the key is read from the forward itself and the forward is built at once, as `Classify` does. `(*Classified).Forward` builds it with the same `forwardHeader` and the `Config` the value was classified with. Three places call it, all on the request's goroutine before the value is shared: `shared` (below, §6.2), the vary branch of `lookup`, and `AsRangePass`. `Classify` itself stays eager and is what `Warm`, `Purge` and invalidation use. `TestDeferredForwardEqualsClassify` and `FuzzDeferredForward` assert that deferring and then building equals classifying eagerly; `TestCacheableFetchAlwaysHasForward` fails if an origin-bound path skips the build.
+
 ```go
 type Class uint8 // ClassCacheable, ClassPass
 
@@ -641,6 +643,10 @@ type Engine struct {
 Engine goroutines start only through `goBackground(f)`, which checks `closed` and calls `wg.Go` while holding `mu`. `Close` sets `closed` under `mu`, so once it starts waiting no `wg.Add` can follow; without the lock, a `goBackground` racing `Close` could panic the WaitGroup (Add concurrent with Wait) or start a goroutine after `Close` returned. `mu` is never held across a wait (P8). A second `Close` waits on `closeDone` or its own context.
 
 ### 6.2 Serve
+
+Where the request's state lives (v1.1). `Serve` holds its `keys.Classified` in a local variable and the hit path only reads it, so the compiler keeps it on the stack. Every path that hands the request to the origin or to another goroutine (`pass`, `miss`, which is the part of `cacheable` after the lookup found nothing servable, and `background`) first calls `shared(c)`, which builds the forward and returns a heap copy; the address of `Serve`'s own value is never stored. The copy shares the maps and slices, which nothing writes after classification. A hit thereby allocates 608 B in 8 objects instead of 1 536 B in 12.
+
+`fetchCoalesced` calls `storedMeanwhile` when it has created a flight: one more `lookup`, for in-process stores, not for a request that forced validation, and only when the record is still under the same key and is not the one the first lookup found. A fresh entry is published as the flight's result with `fromStore` set, and every waiter serves it as a hit (FR-COA-1).
 
 ```
 func (e *Engine) Serve(ctx, req, origin):
