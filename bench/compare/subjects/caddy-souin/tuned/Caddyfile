@@ -1,0 +1,14 @@
+# Tuned tier: the Otter storage, because cache-handler logs that its default
+# storage is "not optimized and for development purpose" (Souin storages
+# docs), and stale serving for 5 minutes ("stale" in the Souin Caddy docs).
+{
+	auto_https off
+	cache {
+		otter
+		stale 5m
+	}
+}
+:8080 {
+	cache
+	reverse_proxy origin:9000
+}

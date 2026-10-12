@@ -1,0 +1,10 @@
+# Default tier: the smallest config that caches (docs/08 §2: only name is required).
+{
+	auto_https off
+}
+:8080 {
+	weir {
+		name bench
+	}
+	reverse_proxy origin:9000
+}

@@ -1,0 +1,15 @@
+# Tuned tier: stale serving on, which is off by default (D6). The limiter
+# stays at its defaults (64 concurrent, 16 per path, 1024 queued, 2 s wait).
+{
+	auto_https off
+}
+:8080 {
+	weir {
+		name bench
+		stale {
+			while_revalidate 60s
+			if_error 5m
+		}
+	}
+	reverse_proxy origin:9000
+}

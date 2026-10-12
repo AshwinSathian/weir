@@ -11,6 +11,7 @@ Pick the section that matches why you are here. The website at [weir.ashwinsathi
 - [01 §6](01-technical-spec.md): every configuration field and default.
 - [08-caddy-adapter-spec](08-caddy-adapter-spec.md): the Caddyfile and JSON surface.
 - [10-experiments-spec](10-experiments-spec.md): A/B dimensions in the key.
+- [11-comparison-spec](11-comparison-spec.md): how Weir is measured against Varnish, nginx and Souin.
 
 ## Operate Weir
 
@@ -36,6 +37,7 @@ Read in this order the first time. After that, go straight to the one you need.
 | 08 | [caddy-adapter-spec](08-caddy-adapter-spec.md) | Phase 2 adapter | normative (v1.0) |
 | 09 | [research-notes](09-research-notes.md) | sources, verified facts, seed errata | living |
 | 10 | [experiments-spec](10-experiments-spec.md) | Phase 3 experiment dimensions: locked decisions E1–E9 | v1.0 |
+| 11 | [comparison-spec](11-comparison-spec.md) | head-to-head benchmark against other caches: subjects, tiers, scenarios; normative for `bench/compare/` only | v0.1 draft |
 
 ## Contribute
 
