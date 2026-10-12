@@ -39,7 +39,7 @@ The first variant listed is the control. `signing_keys` takes 1 to 4 keys of 32 
 
 With a `consent` rule, a visitor without the named consent signal gets the control variant, no cookie and no exposure record. Without a rule, Weir buckets everyone and logs one warning at start. Whether you need consent for a first-party assignment cookie depends on your jurisdiction and your lawyers, not on this page.
 
-The cookie is `HttpOnly`, `SameSite=Lax`, `Secure` on https, and lasts 90 days. Weir does no fingerprinting.
+The cookie is `HttpOnly`, `SameSite=Lax`, `Secure` on https, and lasts 90 days. On a domain with subdomains you do not control, give it a `__Host-` name (see Limits). Weir does no fingerprinting.
 
 ## Caches in front of Weir
 
@@ -48,4 +48,4 @@ A CDN in front of Weir does not know about variants. So on experiment-matched re
 ## Limits
 
 > [!LIMITS]
-> Matchers are host and path only. Experiment changes arrive by config reload. A visitor's assignments can be dropped, and re-drawn, if the cookie would exceed 512 bytes. `Engine.Warm` stores only the control variant (or the winner). Weir does not defend against cookie tossing: a sibling subdomain that can set cookies for the parent domain can replace or duplicate the assignment cookie. A replacement still needs a valid signature, so what an attacker can do is hand a visitor another visitor's assignment or force a re-draw; the threat model has no row for this yet.
+> Matchers are host and path only. Experiment changes arrive by config reload. A visitor's assignments can be dropped, and re-drawn, if the cookie would exceed 512 bytes. `Engine.Warm` stores only the control variant (or the winner). Cookie tossing is only partly covered (T-50, R-10). A cookie that appears twice with different values counts as no assignment, so a planted second copy forces a re-draw and nothing more. But a visitor who has no cookie yet accepts a validly signed one that a sibling subdomain planted, which lets the attacker pick that visitor's variant. If any subdomain of your domain is outside your control, name the cookie with a `__Host-` prefix (`cookie __Host-weir_v`); that needs https. Signing keys are plain bytes in the config, so keep them as `{env.NAME}` placeholders and do not log the config (R-9).

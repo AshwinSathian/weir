@@ -78,4 +78,4 @@ They are not alternatives so much as layers. A CDN in front and Weir at the orig
 - It has no head-to-head benchmark against any project above.
 - 81 of the 365 cache-tests fail, most by design; read [the reasons](/conformance/) before deciding they suit you.
 - Two store implementations, two adapters, no scripting.
-- The residual risks R-1 to R-8 on the [security page](/security/#residual-risks-in-plain-language) are real.
+- The residual risks listed on the [security page](/security/#residual-risks-in-plain-language) are real.

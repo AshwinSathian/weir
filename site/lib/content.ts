@@ -5,7 +5,7 @@ import type { Metadata } from 'next'
 import { render, type Rendered } from './md'
 import { generatedTables } from './tables'
 import { demote, fenced, goExample, repoFile, section } from './repo'
-import { CADDY_VERSION, GO_DEPLOY, GO_MIN, RC_VERSION, RELEASED, SHOWN_VERSION, SITE } from '@/data/release'
+import { CADDY_VERSION, GO_DEPLOY, GO_MIN, SHOWN_VERSION, SITE } from '@/data/release'
 
 const CONTENT = path.join(process.cwd(), 'content')
 
@@ -27,9 +27,13 @@ function rebase(md: string, file: string): string {
   return md.replace(/\]\((?!https?:|mailto:|\/|#)([^)\s]+)\)/g, (_, href) => `](${dir}/${href})`)
 }
 
+/** Variables only, for titles and descriptions. */
+export const fill = (s: string) => s.replace(/\{\{(\w+)\}\}/g, (m, k) => vars[k] ?? generatedTables()[k] ?? m)
+
 function expand(md: string): string {
-  // Install lines in repo documents name the release; before the tags exist the site shows the rc.
-  const pin = (s: string) => (RELEASED ? s : s.replaceAll('@v1.0.0', '@' + RC_VERSION))
+  // Install lines in included repo text always show the site's version (data/release.ts), so a
+  // document bumped for the next tag cannot put an unpublished version on the site.
+  const pin = (s: string) => s.replace(/(AshwinSathian\/weir[\w/]*)@v\d+\.\d+\.\d+(?:-rc\.\d+)?/g, `$1@${SHOWN_VERSION}`)
   return md
     .replace(/^\{\{include (\S+) "(.+?)"(?: demote=(-?\d))?( heading)?\}\}$/gm, (_, f, h, d, keep) =>
       pin(rebase(demote(section(f, h, { keepHeading: Boolean(keep) }), Number(d ?? 0)), f)),
@@ -51,7 +55,7 @@ export async function loadContent(rel: string, opts: { base?: string; idRows?: b
   const { data, content } = matter(raw)
   if (!data.title || !data.description) throw new Error(`site: ${source} needs title and description`)
   const out = await render(expand(content), { base: opts.base ?? data.base ?? '', idRows: opts.idRows ?? Boolean(data.idRows) })
-  return { ...out, title: data.title, description: data.description, source, slug: rel.split('/') }
+  return { ...out, title: fill(data.title), description: fill(data.description), source, slug: rel.split('/') }
 }
 
 export function docSlugs(): string[][] {
@@ -73,7 +77,7 @@ export function docFile(slug: string[]): string {
 
 export function docMeta(slug: string[]): { title: string; description: string } {
   const { data } = matter(fs.readFileSync(path.join(CONTENT, docFile(slug) + '.md'), 'utf8'))
-  return { title: data.title, description: data.description }
+  return { title: fill(data.title), description: fill(data.description) }
 }
 
 export function meta(title: string, description: string, pathname: string): Metadata {

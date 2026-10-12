@@ -32,7 +32,7 @@ What changes:
 - A stored value larger than `Config.MaxObjectBytes` (64 MiB) is never read whole and counts as a miss, so a value planted on a shared server cannot be used to exhaust a node's memory.
 - Every node sharing a prefix needs the same forwarding, key and stale settings and clocks within the configured skew. The [runbook section](https://github.com/AshwinSathian/weir/blob/main/docs/runbook.md#8-deploying-on-caddy-several-nodes-one-valkey) is the checklist.
 
-CI runs the store's tests against Valkey 8.1.
+The store is written for Valkey 7 or later. The only version it is tested against is Valkey 8.1, in CI. Other versions are untested, so run the store's integration tests (`make test-valkey`) against yours before relying on it.
 
 ## Writing your own
 

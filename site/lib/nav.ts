@@ -58,7 +58,7 @@ export const topNav: NavItem[] = [
 export const topPages: (NavItem & { description: string })[] = [
   { title: 'Weir', href: '/', description: 'A Go library for shared HTTP caching in front of an origin that has to stay up.' },
   { title: 'Security', href: '/security/', description: 'Threat families, invariants, residual risks and how to report a vulnerability.' },
-  { title: 'Threat table', href: '/security/threats/', description: 'All 45 threats with the answer, requirement and test for each.' },
+  { title: 'Threat table', href: '/security/threats/', description: 'Every threat in the model with the answer, requirement and test for each.' },
   { title: 'Conformance', href: '/conformance/', description: 'cache-tests results: 284 of 365 pass, and the reason for each of the 81 that do not.' },
   { title: 'Benchmarks', href: '/benchmarks/', description: 'Hit-path cost, five load scenarios and GC cost, with machine, command and limits.' },
   { title: 'Compare', href: '/compare/', description: 'Where Varnish, nginx, Souin, Pingora, singleflight or a CDN is the better choice.' },

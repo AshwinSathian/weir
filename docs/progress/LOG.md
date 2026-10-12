@@ -1979,3 +1979,11 @@ Entry template:
 - Deviations: none in behavior. docs/07 gets no Phase 3 section: the threat table carries the test names, as it does for every other row.
 - Follow-ups: v1.1 candidates in STATUS (redacting formatter for `ExperimentsConfig`).
 - Context: high
+
+## 2026-10-12 · v1.0.1-prep · done
+- Branch / PR: site/repo-link-fix / 119 (merge after 118)
+- Done: PR 118's branch merged in, so the site builds against T-46 to T-51 and R-9, R-10. Threat, risk and invariant counts on the site are now read from docs/06 at build time; the security page has plain-language rows for R-9 and R-10; the experiments guide cites T-50, R-10 and the `__Host-` advice instead of "no row yet". README says 51 threats, 7 invariants, 10 residual risks; docs/README says T-1 to T-51. The Valkey claim says what is tested (8.1, CI only) in the CHANGELOG and on the stores page. CHANGELOG: "Unreleased" became `v1.0.1 (2026-10-12)` with a new empty "Unreleased". Install lines in README, runbook 7.0, docs/08, `caddy/doc.go` and the weirproxy README name `v1.0.1`. New checks in `site/scripts/check.mjs`: `counts` (numbers in the copy equal docs/06 and the cache-tests baseline, every residual risk has a row on the security page) and `versions` (every install line in the documents names one version). Included repository text on the site always shows the site's own version, so a document bumped before its tag cannot put an unpublished version on the site.
+- Tests: `make check`, `pnpm check`, `pnpm typecheck`, `pnpm build`; results in the PR. The `counts` check was seen to fail on a wrong number.
+- Deviations: none. docs/06, docs/10 and the runbook's 7.9 text are PR 118's; this branch only changed the runbook's install line.
+- Follow-ups: the tags and the post-release branch `claude/v1.0.1-post-release` (STATUS). If the tag is not cut on 2026-10-12, change the date in the CHANGELOG heading first.
+- Context: high

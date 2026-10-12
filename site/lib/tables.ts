@@ -53,11 +53,24 @@ const status: Record<string, string> = {
   ErrEagerUnsupported: 'not a request error: returned by `Purge` with `Eager` on a store that cannot scrub',
 }
 
+/** Counts read from the threat model, so no page states a number by hand. */
+export function modelCounts(): { threats: number; risks: number; invariants: number } {
+  const tm = repoFile('docs/06-threat-model.md')
+  const n = (re: RegExp) => new Set([...tm.matchAll(re)].map((m) => m[1])).size
+  const c = { threats: n(/^\| (T-\d+) \|/gm), risks: n(/^- (R-\d+)\./gm), invariants: n(/^- (INV-\d+) /gm) }
+  if (!c.threats || !c.risks || !c.invariants) throw new Error('site: could not count threats, risks or invariants in docs/06')
+  return c
+}
+
 export function generatedTables(): Record<string, string> {
+  const counts = modelCounts()
   const cs = repoFile('cachestatus.go')
   const errs = [...repoFile('errors.go').matchAll(/^\t(Err\w+) = errors\.New\("([^"]+)"\)/gm)]
   if (errs.length === 0) throw new Error('site: errors.go has no sentinels')
   return {
+    threat_count: String(counts.threats),
+    risk_count: String(counts.risks),
+    invariant_count: String(counts.invariants),
     fwd_table: table(['Value', 'The origin was asked because'], explain('fwd', goStrings(cs, 'fwdNames'), fwd)),
     stale_table: table(['Value', 'Stale content was served because'], explain('detail', goStrings(cs, 'staleDetails'), stale)),
     errors_table: table(

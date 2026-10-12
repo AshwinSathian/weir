@@ -44,7 +44,7 @@ Machine for every `docs/benchmarks.md` row unless noted: Apple M4 Pro, 12 cores,
 | Claim | Source | Checked |
 |---|---|---|
 | 284 of 365 cache-tests pass, 81 explained | `docs/cache-tests-expected-failures.md` | 2026-10-12 |
-| 45 threats | `docs/06-threat-model.md` (rows starting `| T-`) | 2026-10-12 |
+| threat, risk and invariant counts | counted from `docs/06-threat-model.md` at build time (`lib/tables.ts`); the README's numbers are checked by `scripts/check.mjs counts` | 2026-10-12 |
 | 29 fuzz targets, 60 minutes each; failure-mode tests 100 times under `-race` | `docs/release.md` gate log, run 38259811052 | 2026-10-12 |
 | 0 third-party imports in the root module | `deps_test.go` | 2026-10-12 |
 | transcript on the home page and in the README | captured from `examples/weirproxy` at `v1.0.0`, Go 1.27.1, with `scripts/transcript.sh` | 2026-10-12 |

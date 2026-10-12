@@ -41,7 +41,7 @@ func main() {
 `examples/weirproxy` is this program with flags. Run it in front of an origin that answers `Cache-Control: max-age=60` and ask twice:
 
 ```console
-$ go run github.com/AshwinSathian/weir/examples/weirproxy@v1.0.0 -listen :8080 -origin http://localhost:9000
+$ go run github.com/AshwinSathian/weir/examples/weirproxy@v1.0.1 -listen :8080 -origin http://localhost:9000
 $ curl -si localhost:8080/ | grep -i -e '^age' -e cache-status
 Cache-Status: Weir; fwd=uri-miss; fwd-status=200; stored
 $ curl -si localhost:8080/ | grep -i -e '^age' -e cache-status
@@ -67,10 +67,10 @@ A CDN, a WAF, a per-client rate limiter, a private (browser) cache, or a cache f
 ## Install
 
 ```sh
-go get github.com/AshwinSathian/weir@v1.0.0                    # the engine, weirhttp, the memory store
-go get github.com/AshwinSathian/weir/observe/prom@v1.0.0       # Prometheus metrics
-go get github.com/AshwinSathian/weir/store/valkey@v1.0.0       # shared store for several nodes
-xcaddy build --with github.com/AshwinSathian/weir@v1.0.0 --with github.com/AshwinSathian/weir/caddy@v1.0.0   # Caddy with the weir handler
+go get github.com/AshwinSathian/weir@v1.0.1                    # the engine, weirhttp, the memory store
+go get github.com/AshwinSathian/weir/observe/prom@v1.0.1       # Prometheus metrics
+go get github.com/AshwinSathian/weir/store/valkey@v1.0.1       # shared store for several nodes
+xcaddy build --with github.com/AshwinSathian/weir@v1.0.1 --with github.com/AshwinSathian/weir/caddy@v1.0.1   # Caddy with the weir handler
 ```
 
 The four modules are tagged together and share a version number, so use the same one for all of them. The Caddy module has the import path `github.com/AshwinSathian/weir/caddy` and the Go package name `weircaddy`; it is tested only against the root module at its own version, which is why xcaddy gets both pinned.
@@ -93,7 +93,7 @@ From `v1.0.0` the exported Go API of the root module, `store`, `store/memory`, `
 
 ## Security
 
-Weir decides what a shared cache stores and serves, so a bug can hand one user's response to another. The [threat model](docs/06-threat-model.md) lists 45 threats with the requirement and test that answer each, seven invariants and eight residual risks; the [security page](https://weir.ashwinsathian.com/security/) puts the residual risks in plain language. Report a vulnerability privately through the repository's Security tab ([SECURITY.md](SECURITY.md)).
+Weir decides what a shared cache stores and serves, so a bug can hand one user's response to another. The [threat model](docs/06-threat-model.md) lists 51 threats with the answer and the test for each, 7 invariants and 10 residual risks; the [security page](https://weir.ashwinsathian.com/security/) puts the residual risks in plain language. Report a vulnerability privately through the repository's Security tab ([SECURITY.md](SECURITY.md)).
 
 ## Performance
 

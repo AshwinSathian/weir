@@ -4,6 +4,9 @@
 //   numbers   every measured figure in hand-written copy is in content/claims.md,
 //             and every claims row whose source is a repo file appears in that file
 //   data      data/benchmarks.json figures appear in docs/benchmarks.md
+//   counts    threat, risk and invariant numbers in the copy equal docs/06; every residual risk has a
+//             plain-language row on the security page; cache-tests numbers equal their source
+//   versions  every install line in the repository's documents names one version
 //   snippet   the README program compiles against this tree
 //   release   with RELEASED=true, all four modules resolve at VERSION from the Go proxy
 import { execFileSync } from 'node:child_process'
@@ -80,6 +83,45 @@ function data() {
   }
 }
 
+function counts() {
+  const tm = read(path.join(ROOT, 'docs/06-threat-model.md'))
+  const ids = (re) => [...new Set([...tm.matchAll(re)].map((m) => m[1]))]
+  const risks = ids(/^- (R-\d+)\./gm)
+  const actual = { threats: ids(/^\| (T-\d+) \|/gm).length, 'residual risks': risks.length, invariants: ids(/^- (INV-\d+) /gm).length }
+  for (const f of prose) {
+    const text = read(f)
+    for (const [word, n] of Object.entries(actual)) {
+      for (const m of text.matchAll(new RegExp(`\\b(\\d+) ${word}\\b`, 'g'))) {
+        if (Number(m[1]) !== n) fail(`${rel(f)}: says "${m[0]}", docs/06 has ${n}`)
+      }
+    }
+  }
+  const page = read(path.join(SITE, 'content/pages/security/index.md'))
+  for (const r of risks) if (!page.includes(`| ${r} |`)) fail(`site/content/pages/security/index.md: no plain-language row for ${r}`)
+  const ct = /(\d+) tests, (\d+) pass, (\d+) fail/.exec(read(path.join(ROOT, 'docs/cache-tests-expected-failures.md')))
+  if (!ct) return fail('docs/cache-tests-expected-failures.md: no "N tests, N pass, N fail" line')
+  for (const f of prose) {
+    const text = read(f)
+    for (const m of text.matchAll(/\b(\d+) of (?:the )?(\d+) (?:cache-tests|tests)\b/g)) {
+      if (m[2] !== ct[1] || (m[1] !== ct[2] && m[1] !== ct[3])) fail(`${rel(f)}: says "${m[0]}", the baseline is ${ct[1]} tests, ${ct[2]} pass, ${ct[3]} fail`)
+    }
+  }
+}
+
+function versions() {
+  const files = ['README.md', 'docs/runbook.md', 'docs/08-caddy-adapter-spec.md', 'caddy/doc.go', 'examples/weirproxy/README.md']
+  const seen = new Map()
+  for (const f of files) {
+    for (const m of read(path.join(ROOT, f)).matchAll(/AshwinSathian\/weir[\w/]*@(v\d+\.\d+\.\d+(?:-rc\.\d+)?)/g)) {
+      seen.set(m[1], [...(seen.get(m[1]) ?? []), f])
+    }
+  }
+  if (seen.size !== 1) return fail(`install lines name ${seen.size} versions: ${[...seen].map(([v, fs]) => `${v} in ${[...new Set(fs)].join(', ')}`).join('; ')}`)
+  const docs = [...seen.keys()][0]
+  const site = /VERSION = '([^']+)'/.exec(read(path.join(SITE, 'data/release.ts')))[1]
+  if (site !== docs) console.log(`note versions: documents say ${docs}, the site shows ${site} until site/data/release.ts is bumped after the tags exist`)
+}
+
 function snippet() {
   const m = /```go\n([\s\S]*?)\n```/.exec(read(path.join(ROOT, 'README.md')))
   if (!m) return fail('README.md: no go block')
@@ -112,7 +154,7 @@ function release() {
 }
 
 const only = process.argv[2]
-const checks = only === 'release' ? { release } : { style, numbers, data, snippet }
+const checks = only === 'release' ? { release } : { style, numbers, counts, versions, data, snippet }
 for (const [name, fn] of Object.entries(checks)) {
   const before = errors.length
   fn()

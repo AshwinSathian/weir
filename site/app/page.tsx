@@ -5,6 +5,7 @@ import { MODULE, REPO, SHOWN_VERSION } from '@/data/release'
 import { transcript } from '@/data/transcript'
 import { render } from '@/lib/md'
 import { readmeMain } from '@/lib/repo'
+import { modelCounts } from '@/lib/tables'
 
 const GATE = `${REPO}/actions/runs/38259811052`
 
@@ -160,7 +161,7 @@ export default async function Home() {
               <span className="what">cache-tests pass. Each of the other 81 has a written reason.</span>
             </Link>
             <Link href="/security/threats/">
-              <span className="fig">45</span>
+              <span className="fig">{modelCounts().threats}</span>
               <span className="what">threats in the model, each with an answer and a test.</span>
             </Link>
             <a href={GATE}>
