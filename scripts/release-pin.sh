@@ -31,4 +31,4 @@ done
 # Resolve against the proxy: this is what an importer does.
 GOWORK=off GOFLAGS=-mod=mod go mod tidy
 GOWORK=off go vet ./...
-echo "pinned $dir to $version"
+echo "pinned $dir to $version; commit both $dir/go.mod and $dir/go.sum"

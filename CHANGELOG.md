@@ -38,5 +38,6 @@ First stable release. It supersedes the `v0.1.0` tag, which predates most of the
 - Pointer-light memory layout deferred (M16-02, D36): GC cost at 1M entries is 1.76 µs per request on the measured machine, inside the 2 µs gate.
 - The `caddy` module imports the root module's `internal/keys`, so the four modules must be used at the same version (with xcaddy, pin the root module and `caddy` to it explicitly).
 - `Engine.Close` waits for origin goroutines; an `Origin` that ignores its context can delay it.
+- The root module does not build for `js/wasm` or `wasip1/wasm` (the snapshot loader needs `O_NONBLOCK`).
 
 Install: see the README.

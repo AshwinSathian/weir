@@ -34,13 +34,14 @@ modules:
 	  (cd $$m && GOWORK=off go vet ./... && GOWORK=off $(GOLANGCI) run && GOWORK=off go test -race -shuffle=on -count=1 ./...) || exit 1; \
 	done
 
-## release-check: no sub-module may keep a replace or a v0.0.0 pin on the release commit (replace is ignored by importers)
+## release-check: no sub-module may keep a replace or a v0.0.0 pin on the release commit (replace is ignored by importers), and each resolves alone from committed go.mod and go.sum
 release-check:
 	@fail=0; for m in $(SUBMODULES); do \
 	  if grep -nE '^replace |github.com/AshwinSathian/weir[^ ]* v0\.0\.0' $$m/go.mod; then echo "$$m/go.mod: unpublished pin"; fail=1; fi; \
 	done; \
 	for m in $(SUBMODULES); do \
-	  (cd $$m && GOWORK=off go list -m all >/dev/null) || { echo "$$m does not resolve alone"; fail=1; }; \
+	  (cd $$m && GOWORK=off go list -m all >/dev/null) || { echo "$$m does not resolve alone (is its go.sum committed?)"; fail=1; }; \
+	  if [ -n "$$(git status --porcelain -- $$m/go.mod $$m/go.sum)" ]; then echo "$$m: go.mod or go.sum differs from the commit; a tag would not carry it"; fail=1; fi; \
 	done; exit $$fail
 
 ## test-valkey: integration tests (store/valkey, and the two-node Caddy test in caddy/) against a real server (WEIR_VALKEY_ADDR, default 127.0.0.1:6379; start Valkey with --maxmemory-policy volatile-lfu; WEIR_VALKEY_STORM_ADDR, a throwaway server with --maxmemory 16mb, enables the eviction storm)

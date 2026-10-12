@@ -39,9 +39,8 @@ jobs:
   # required gate (v2.11.7, the version docs/08 §7 and §11 were verified
   # against). The `latest` entry reports drift without blocking unrelated PRs
   # when Caddy ships a release: it is allowed to fail.
-  # The root `replace` (`=.`) stays because the v0.1.0 root tag predates the
-  # APIs caddy/ uses; flip to the tag once a newer one exists, so the job
-  # also tests the path real users take.
+  # The `=path` overrides stay: this job tests the working tree. The
+  # published tags are built by `caddy-published` below.
   caddy-build:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -111,6 +110,29 @@ jobs:
           echo "caddy did not serve the minimal Caddyfile" >&2
           cat caddy.log >&2
           exit 1
+
+  # docs/release.md step 8: the path users take, the published tags with no
+  # =path overrides. Not in the `check` aggregate: a pull request cannot fix
+  # a published tag, so a failure here means a new release, not a blocked PR.
+  caddy-published:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      WEIR_VERSION: v1.0.0-rc.1
+    steps:
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.27"
+          cache: false
+      - name: xcaddy build from the module proxy
+        run: |
+          go install github.com/caddyserver/xcaddy/cmd/xcaddy@v0.4.5
+          xcaddy build v2.11.7 \
+            --with github.com/AshwinSathian/weir@$WEIR_VERSION \
+            --with github.com/AshwinSathian/weir/caddy@$WEIR_VERSION \
+            --output ./caddy-weir
+          ./caddy-weir list-modules --versions | tee modules.txt
+          test "$(grep -c "weir $WEIR_VERSION" modules.txt)" = 2
 
   # P25-02: the Valkey store against a real server. Not multiplied by the Go
   # version matrix. The policy is the one 05 §7 requires; the store refuses
