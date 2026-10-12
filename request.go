@@ -15,6 +15,14 @@ type Request struct {
 	RawQuery string        // query without the leading '?', as received
 	Header   http.Header   // never mutated by Weir
 	Body     io.ReadCloser // nil for GET and HEAD; passed through for other methods
+	// Client names who sent the request, for Limiter.MaxPerClient: any
+	// string that is equal for one client and different for another, usually
+	// the remote address. Weir never keys on it, never puts it in an event,
+	// and never sends it to the origin with a cacheable fetch, whose response
+	// other clients share. A request that is passed through (unsafe methods,
+	// bypass) carries it in the Request the Origin receives, so an Origin can
+	// tell the origin server who asked. Empty: the request is never capped.
+	Client string
 }
 
 // Response is a response from an Origin or from Serve. The receiver of a

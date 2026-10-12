@@ -165,7 +165,16 @@ type LimiterConfig struct {
 	// MaxConcurrent.
 	ReserveForeground int
 	MaxPerHost        int // 0: off (FR-FAIR-1); caps in-flight fetches per normalized host, in each pool
-	MaxUpload         int // 0: MaxConcurrent/4, at least 1; requests with a body use this separate pool (D25)
+	// MaxPerClient caps how many requests of one client (Request.Client) may
+	// be at the origin, or waiting for it, at once (FR-FAIR-4). Every other
+	// cap is keyed on the URL, which the client chooses: a flood of distinct
+	// paths has no partition to be capped in. A request over the cap waits
+	// up to MaxQueueWait for one of its client's requests to finish and is
+	// then shed. Hits are never counted. 0: off, because behind a load
+	// balancer every client has one address; set Request.Client from a
+	// trusted source before turning it on. An IPv6 client is its /64.
+	MaxPerClient int
+	MaxUpload    int // 0: MaxConcurrent/4, at least 1; requests with a body use this separate pool (D25)
 }
 
 // BreakerConfig tunes the origin circuit breaker (FR-BRK).
@@ -429,6 +438,7 @@ func (c *Config) validate() error {
 		{"Limiter.MaxPerPartition", int64(c.Limiter.MaxPerPartition)},
 		{"Limiter.ReserveForeground", int64(c.Limiter.ReserveForeground)},
 		{"Limiter.MaxPerHost", int64(c.Limiter.MaxPerHost)},
+		{"Limiter.MaxPerClient", int64(c.Limiter.MaxPerClient)},
 		{"Limiter.MaxUpload", int64(c.Limiter.MaxUpload)},
 		{"Breaker.Window", int64(c.Breaker.Window)},
 		{"Breaker.MinRequests", int64(c.Breaker.MinRequests)},

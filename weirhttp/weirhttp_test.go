@@ -620,3 +620,20 @@ func TestWriteResponseNoDeadlineOnStoredBody(t *testing.T) {
 		t.Fatalf("deadlines set on a stored body: %v", w.deadlines)
 	}
 }
+
+// FR-FAIR-4: RequestFrom names the client by the peer address without its
+// port, and by the raw value when it is not host:port.
+func TestRequestFromSetsClient(t *testing.T) {
+	for addr, want := range map[string]string{
+		"203.0.113.9:4711":   "203.0.113.9",
+		"[2001:db8::1]:4711": "2001:db8::1",
+		"@":                  "@", // a unix socket peer
+		"":                   "",
+	} {
+		r := httptest.NewRequest(http.MethodGet, "http://example.com/a", nil)
+		r.RemoteAddr = addr
+		if got := weirhttp.RequestFrom(r).Client; got != want {
+			t.Errorf("RemoteAddr %q: Client = %q, want %q", addr, got, want)
+		}
+	}
+}

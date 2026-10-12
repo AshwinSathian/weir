@@ -134,6 +134,9 @@ type LimiterConfig struct {
 	MaxQueue        int            `json:"max_queue,omitempty"`
 	MaxQueueWait    caddy.Duration `json:"max_queue_wait,omitempty"`
 	MaxPerPartition int            `json:"max_per_partition,omitempty"`
+	// MaxPerClient caps one client's requests at the origin (FR-FAIR-4). The
+	// client is Caddy's client_ip, which honors trusted_proxies. 0: off.
+	MaxPerClient int `json:"max_per_client,omitempty"`
 }
 
 // StaleConfig sets the operator defaults for stale serving (D6): off unless
@@ -312,6 +315,7 @@ func (h *Handler) weirConfig() weir.Config {
 			MaxConcurrent: h.Limiter.MaxConcurrent, MaxQueue: h.Limiter.MaxQueue,
 			MaxQueueWait:    time.Duration(h.Limiter.MaxQueueWait),
 			MaxPerPartition: h.Limiter.MaxPerPartition,
+			MaxPerClient:    h.Limiter.MaxPerClient,
 		},
 		Freshness: weir.FreshnessConfig{
 			DefaultStaleWhileRevalidate: time.Duration(h.Stale.WhileRevalidate),

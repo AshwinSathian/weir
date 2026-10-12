@@ -285,6 +285,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 // rewrite is detected by comparing against it.
 func requestFor(r *http.Request) *weir.Request {
 	req := weirhttp.RequestFrom(r)
+	// FR-FAIR-4: Caddy's client_ip is the address trusted_proxies resolves,
+	// so a site behind a load balancer still tells its clients apart.
+	if ip, ok := caddyhttp.GetVar(r.Context(), caddyhttp.ClientIPVarKey).(string); ok && ip != "" {
+		req.Client = ip
+	}
 	if orig, ok := r.Context().Value(caddyhttp.OriginalRequestCtxKey).(http.Request); ok && orig.URL != nil &&
 		(orig.URL.Path != r.URL.Path || orig.URL.RawPath != r.URL.RawPath || orig.URL.RawQuery != r.URL.RawQuery) {
 		req.Path, req.RawQuery = r.URL.EscapedPath(), r.URL.RawQuery

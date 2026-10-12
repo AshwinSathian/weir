@@ -1,7 +1,7 @@
 # Weir Caddy adapter specification
 
 Status: v1.0. Phase 2. Finalized by P2-00 against the Caddy release current at the start of Phase 2; every Caddy API named here is checked with file and line in §11.
-Date: 2026-10-11
+Date: 2026-10-13
 Depends on: [01-technical-spec.md](01-technical-spec.md), [04-lld.md §10](04-lld.md)
 Seed name: `04-caddy-adapter-spec.md` (renumbered, see [docs/README.md](README.md))
 Verified against: Caddy v2.11.7 (released 2026-10-03, `go 1.26.0` in its `go.mod`). Weir requires Go 1.27, so `xcaddy` builds that include it need a Go 1.27 toolchain; Go's toolchain directive downloads it automatically when `GOTOOLCHAIN=auto`.
@@ -64,7 +64,7 @@ Keys the cards implement (a card that needs another key adds it here in the same
 | `key` | `query_drop`, `query_keep`, `query_sort`, `normalize_path`, `headers`, `cookies`, `accept_encoding` (as `weir.KeyConfig`) |
 | `forward` | `allow`; the mode stays strict, `ForwardAll` has no JSON form (D4) |
 | `bypass` | `cookies`, `headers` |
-| `limiter` | `max_concurrent`, `max_queue`, `max_queue_wait`, `max_per_partition` |
+| `limiter` | `max_concurrent`, `max_queue`, `max_queue_wait`, `max_per_partition`, `max_per_client` (FR-FAIR-4; the client is Caddy's `client_ip`, so set `trusted_proxies` when a load balancer is in front) |
 | `stale` | `while_revalidate`, `if_error` (operator defaults, off unless set; D6) |
 
 `max_bytes` takes a number of bytes or a string such as `512MiB` (P2-01 parses it, up to 1 PiB; P2-02 applies it). `snapshot_dir` may not contain braces or NUL (placeholders are not expanded) and must be absolute, is created with mode 0700 when the store is built, and is refused when group or others can write it or when it belongs to another user (a planted snapshot would be decoded as trusted cache content; the owner check is unix only); `/data` and `/data/` are one store. `max_bytes` below 160 MiB is rejected by `Validate`: the largest cacheable object is 10% of a shard (05 §5.1) and the adapter has no key for `Storable.MaxObjectBytes`, so smaller stores cannot hold the default 1 MiB object. Unknown keys fail the load, because Caddy decodes module config strictly.

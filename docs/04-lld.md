@@ -98,6 +98,7 @@ type LimiterConfig struct {
 	MaxPerPartition   int           // 0: 16 (clamped to MaxConcurrent)
 	ReserveForeground int           // 0: MaxConcurrent/4 (at least 1 when MaxConcurrent >= 2)
 	MaxPerHost        int           // 0: off (M14)
+	MaxPerClient      int           // 0: off (FR-FAIR-4)
 	MaxUpload         int           // D25; 0: MaxConcurrent/4, at least 1
 }
 
@@ -1024,6 +1025,8 @@ func (f *Flight) CreatorGone() (published bool) // marks the creator gone; repor
 Shard selection by key byte is safe here (unlike the store) because flights are short-lived and bounded by the limiter; an attacker grinding keys into one shard only contends one mutex among at most `MaxConcurrent + MaxQueue` flights.
 
 ### 8.2 `internal/limiter`
+
+Per-client admission (FR-FAIR-4) is a second `Limiter`, `Engine.gate`, built only when `Limiter.MaxPerClient` is above 0: its partition is the client hash, its partition cap is `MaxPerClient`, and its global cap is unbounded, so only a client over its own cap ever queues there, and a full queue sheds nobody else. `admit` takes a place in `pass` and in `cacheable` after the lookup found nothing servable and before any flight is joined or created; the place is released when that call returns (at the headers of a stream, like a slot). A re-entering follower keeps the place it holds. `Classified.ClientHash` hashes `Request.Client` with the per-process seed on that path only, so a hit pays nothing for it, and maps an IPv6 address to its /64.
 
 ```go
 type Class uint8 // Foreground, Background, Warm

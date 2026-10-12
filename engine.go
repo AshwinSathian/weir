@@ -46,6 +46,7 @@ type Engine struct {
 	flights   coalesce.Table
 	lim       *limiter.Limiter
 	upl       *limiter.Limiter          // requests with a body (FR-LIM-7)
+	gate      *limiter.Limiter          // per-client admission, keyed by client; nil when MaxPerClient is 0 (FR-FAIR-4)
 	cb        *breaker.Breaker          // nil when Breaker.Disable
 	mode      atomic.Pointer[modeState] // nil: ModeNormal (FR-MODE-1)
 	cr        *cookieReport             // nil when disabled (FR-OBS-5)
@@ -119,6 +120,17 @@ func New(cfg Config) (*Engine, error) {
 		Max: l.MaxUpload, MaxQueue: l.MaxQueue, PerPartition: min(l.MaxPerPartition, max(1, l.MaxUpload/2)),
 		PerHost: l.MaxPerHost, MaxWait: l.MaxQueueWait,
 	})
+	if l.MaxPerClient > 0 {
+		// The limiter with the client as its partition and no global cap of
+		// its own: at most MaxPerClient of one client's requests pass, the
+		// rest queue behind them. Only clients over their cap ever queue, so
+		// they are the only ones a full queue sheds. Its global cap is the
+		// most requests that could hold a place at once, which the two pools
+		// and their queues bound.
+		e.gate = limiter.New(limiter.Config{
+			Max: math.MaxInt32, MaxQueue: l.MaxQueue, PerPartition: l.MaxPerClient, MaxWait: l.MaxQueueWait,
+		})
+	}
 	if b := &c.Breaker; !b.Disable {
 		e.cb = breaker.New(breaker.Config{
 			Window: b.Window, MinRequests: b.MinRequests, FailureRatio: b.FailureRatio,

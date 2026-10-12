@@ -138,8 +138,36 @@ func (e *Engine) rejected(err error) error {
 	return &RequestError{Reason: reason}
 }
 
+// admit takes the client's place for a request that is about to go to the
+// origin or wait for another request's fetch (FR-FAIR-4). It returns the
+// release to call when that ends, or the shed result when the client's
+// places stayed taken for MaxQueueWait. A request that named no client, and
+// every request with MaxPerClient off, is admitted at once.
+func (e *Engine) admit(ctx context.Context, c *keys.Classified) (release func(), shed *fetchResult) {
+	if e.gate == nil {
+		return noRelease, nil
+	}
+	ch := c.ClientHash()
+	if ch == 0 {
+		return noRelease, nil
+	}
+	p, err := e.gate.Acquire(ctx, limiter.Foreground, ch, 0)
+	if err != nil {
+		res := e.shed(c, limiter.Foreground, err)
+		return noRelease, &res
+	}
+	return p.Release, nil
+}
+
+func noRelease() {}
+
 // pass forwards a request that is never stored, streaming the response.
 func (e *Engine) pass(ctx context.Context, c *keys.Classified, origin Origin, fwd FwdReason) (*Response, error) {
+	release, shed := e.admit(ctx, c)
+	if shed != nil {
+		return nil, shed.err
+	}
+	defer release()
 	res := e.fetch(ctx, c, origin, limiter.Foreground, false, nil, nil)
 	if res.err != nil {
 		return nil, res.err
@@ -315,6 +343,19 @@ func (e *Engine) cacheable(ctx context.Context, c *keys.Classified, origin Origi
 		return e.rangeMiss(ctx, c, lk, origin)
 	}
 	sp := &fetchSpec{c: c, lk: lk, prior: prior, found: found, purged: purged, reentered: prevCK != nil}
+	if prevCK == nil { // a re-entering follower already holds its place
+		// FR-FAIR-4: before any flight is joined or created, so a client
+		// over its cap never leads a fetch that other clients wait on.
+		release, shed := e.admit(ctx, c)
+		if shed != nil {
+			fr := &flightResult{fetchResult: *shed}
+			if failed(ctx, fr) {
+				return e.onFetchError(sp, fr, false) // the stale entry, when stale-if-error permits it
+			}
+			return nil, fr.err
+		}
+		defer release()
+	}
 	// FR-COA-8, FR-STO-12. A no-store request's response is never shared,
 	// so leading a flight would only make its followers wait and refetch
 	// (T-31: one client must not disable coalescing for everyone).

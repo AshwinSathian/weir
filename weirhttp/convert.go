@@ -3,6 +3,7 @@ package weirhttp
 import (
 	"io"
 	"maps"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -16,12 +17,20 @@ import (
 // the raw request target, so the engine keys and forwards the bytes the
 // client sent (FR-FWD-1, INV-1). Absolute-form targets are cut after the
 // authority; other targets fall back to the parsed URL.
+//
+// Client is the host of r.RemoteAddr, for Limiter.MaxPerClient. Behind a load
+// balancer that is the balancer's address for every request: set Client from
+// the header your balancer writes before turning the cap on.
 func RequestFrom(r *http.Request) *weir.Request {
 	req := &weir.Request{
 		Method: r.Method,
 		Scheme: "http",
 		Host:   r.Host,
 		Header: r.Header,
+		Client: r.RemoteAddr,
+	}
+	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		req.Client = host
 	}
 	if r.TLS != nil {
 		req.Scheme = "https"

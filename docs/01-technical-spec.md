@@ -162,6 +162,7 @@ type Request struct {
 	RawQuery string      // query without the leading '?', as received
 	Header   http.Header // never mutated by Weir
 	Body     io.ReadCloser // nil for GET and HEAD; passed through for other methods
+	Client   string        // who sent it, for Limiter.MaxPerClient (FR-FAIR-4); never keyed; forwarded only on a pass-through
 }
 
 type Response struct {
@@ -436,6 +437,7 @@ All fields are optional. The zero value of `Config` is valid and yields the defa
 | `Timeouts.Origin` / `Background` / `Store` | 30 s / 30 s / 50 ms | |
 | `Warm.Concurrency` | 4 | a default is lowered to `MaxConcurrent − ReserveForeground` when that is smaller; an explicit value above it is rejected (FR-LCY-1) |
 | `Limiter.MaxPerHost` | 0 (off) | M14; the Caddy adapter sets 25% for multi-host sites |
+| `Limiter.MaxPerClient` | 0 (off) | FR-FAIR-4; needs `Request.Client` from a trusted source |
 | `Limiter.MaxUpload` | 25% of `MaxConcurrent` | D25, separate pool for requests with a body |
 | `Timeouts.StreamIdle` | 60 s | D26 |
 | `Bypass.ReportStrippedCookies` | 5 min | D31; a negative value disables |
@@ -599,6 +601,7 @@ Open: none.
 - FR-FAIR-1. `Limiter.MaxPerHost` caps in-flight origin fetches per normalized host, in addition to the partition cap. 0 (library default) disables it. Memory stays O(`MaxConcurrent`).
 - FR-FAIR-2. `store.Entry.Owner` is an opaque `Tag` the engine sets to the entry's origin tag. `memory.Config.MaxBytesPerOwner` (0 disables; library default 0) caps bytes per owner per shard. A `Set` that would push its owner over the cap first evicts that owner's own entries, scanning at most 64 nodes from the small-queue tail and then at most 64 from the main-queue tail for same-owner victims; if that frees too little, the `Set` is declined (S-4). A tenant can therefore turn over its own quota, but can never evict another tenant's entries (T-32). Declining outright was rejected: a legitimate tenant whose working set exceeds its quota would keep its oldest entries for up to `MaxRetention` while its new pages went uncached.
 - FR-FAIR-3. The Caddy adapter enables both at 25% (of `MaxConcurrent` and of shard bytes) when the site sets `multi_host` (one site serving more than one host, or using on-demand TLS; docs/08 §2 explains why the operator states it). Without it both stay at the library default, off.
+- FR-FAIR-4. `Limiter.MaxPerClient` (v1.1; 0, the default, turns it off) caps how many requests of one client may be at the origin, or waiting for another request's fetch, at once. The client is `Request.Client`, any string the adapter supplies (`weirhttp` uses the peer address, the Caddy adapter Caddy's `client_ip`); an IPv6 address counts as its /64, and a request with an empty `Client` is never capped. A request over the cap waits up to `Limiter.MaxQueueWait` for one of its client's requests to finish and is then shed like any other (stale when §5.8 permits). It takes its place before it joins or creates a flight, so a client over its cap never leads a fetch whose shed other waiters would share. Hits take no place. `Client` is never keyed, never part of an event, and never in the request an `Origin` receives for a cacheable fetch (INV-1); a pass-through request carries it, so an `Origin` can report the client to the origin server. Memory is bounded by `Limiter.MaxQueue` waiters and by the requests in progress. Off by default because behind a load balancer every client has the balancer's address.
 
 ### 13.5 Eager hard purge (M15, D18)
 

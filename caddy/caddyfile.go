@@ -43,7 +43,7 @@ func parseCaddyfile(h httpcaddyfile.Helper) (caddyhttp.MiddlewareHandler, error)
 //	    key { query_drop|query_keep|headers|cookies|accept_encoding <v>...; query_sort; normalize_path }
 //	    forward { allow <header>... }
 //	    bypass { cookies|headers <v>... }
-//	    limiter { max_concurrent|max_queue|max_per_partition <n>; max_queue_wait <duration> }
+//	    limiter { max_concurrent|max_queue|max_per_partition|max_per_client <n>; max_queue_wait <duration> }
 //	    stale { while_revalidate|if_error <duration> }
 //	    experiments {
 //	        cookie|header <name>; max_active <n>; signing_keys <key>...; downstream_keys_on_variant
@@ -138,6 +138,7 @@ func (h *Handler) blockKey(d *caddyfile.Dispenser, key string, seen map[string]b
 			"max_queue":         func() error { return intArg(d, &h.Limiter.MaxQueue) },
 			"max_queue_wait":    func() error { return durArg(d, &h.Limiter.MaxQueueWait) },
 			"max_per_partition": func() error { return intArg(d, &h.Limiter.MaxPerPartition) },
+			"max_per_client":    func() error { return intArg(d, &h.Limiter.MaxPerClient) },
 		})
 	case "experiments":
 		return experimentsBlock(d, h)

@@ -3,6 +3,7 @@ package keys
 import (
 	"hash/maphash"
 	"net/http"
+	"net/netip"
 	"slices"
 	"strings"
 	"time"
@@ -79,6 +80,24 @@ func (c *Classified) CanonicalHeader() http.Header {
 		return nil
 	}
 	return c.req.Header
+}
+
+// ClientHash is the hash of the client the request named (weir.Request.Client),
+// with the per-process seed, or 0 when it named none. An IPv6 address counts
+// as its /64: one subscriber holds that many addresses, so a cap per address
+// would cap nothing (FR-FAIR-4). It is computed on use: only a request that
+// goes to the origin needs it.
+func (c *Classified) ClientHash() uint64 {
+	if c.req == nil || c.req.Client == "" {
+		return 0
+	}
+	id := c.req.Client
+	if a, err := netip.ParseAddr(id); err == nil && a.Is6() && !a.Is4In6() {
+		if p, err := a.Prefix(64); err == nil {
+			id = p.String()
+		}
+	}
+	return maphash.String(partitionSeed, id)
 }
 
 // URITag is the tag of the request's URI (04 §3.1). It is computed on use,
@@ -240,8 +259,9 @@ func pass(out Classified, r *Request, host string) Classified {
 	if out.expCookie != "" {
 		stripCookie(h, out.expCookie) // the visitor id is for Weir, not the origin
 	}
+	// Nothing of a pass-through is stored, so the Origin may learn who asked.
 	out.Forwarded = Request{Method: r.Method, Scheme: r.Scheme, Host: host, Path: r.Path, RawQuery: r.RawQuery,
-		Header: h, Body: r.Body}
+		Header: h, Body: r.Body, Client: r.Client}
 	// net/http gives every bodyless request http.NoBody (FR-LIM-7: main pool).
 	out.HasBody = r.Body != nil && r.Body != http.NoBody && r.Header.Get("Content-Length") != "0"
 	return out
