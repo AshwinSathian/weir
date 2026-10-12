@@ -80,6 +80,9 @@ func WriteResponse(w http.ResponseWriter, resp *weir.Response) error {
 	flush := streamsToClient(h)
 	if !flush && idle <= 0 {
 		_, err := io.Copy(w, resp.Body)
+		if err == nil {
+			sendTrailers(w, resp.Body)
+		}
 		return err
 	}
 	// An event stream, or a body of unknown length, must reach the client as
@@ -107,10 +110,27 @@ func WriteResponse(w http.ResponseWriter, resp *weir.Response) error {
 		}
 		if rerr != nil {
 			if rerr == io.EOF {
+				sendTrailers(w, resp.Body)
 				return nil
 			}
 			return rerr
 		}
+	}
+}
+
+// sendTrailers copies the trailers of a streamed origin response to w, once
+// its body has ended. A body reports them through a Trailer method, as the
+// engine's stream bodies and both origins in this package do; a stored
+// response has none. net/http sends a field set with http.TrailerPrefix as a
+// trailer whether or not the Trailer header announced it, and drops them all
+// when the response has a Content-Length.
+func sendTrailers(w http.ResponseWriter, body io.ReadCloser) {
+	t, ok := body.(interface{ Trailer() http.Header })
+	if !ok {
+		return
+	}
+	for name, vals := range t.Trailer() {
+		w.Header()[http.TrailerPrefix+name] = vals
 	}
 }
 

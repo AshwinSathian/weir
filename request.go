@@ -30,7 +30,11 @@ type Request struct {
 type Response struct {
 	StatusCode int
 	Header     http.Header
-	Body       io.ReadCloser // never nil on responses returned by Serve
+	// Body is never nil on responses returned by Serve. An Origin's body may
+	// also implement Trailer() http.Header, valid once Read has returned
+	// io.EOF; the body of a streamed response from Serve then does too, and
+	// weirhttp.WriteResponse sends those trailers. Stored responses have none.
+	Body io.ReadCloser
 	// Cache describes how Serve produced the response. Serve sets it; an
 	// Origin's value is ignored.
 	Cache CacheInfo

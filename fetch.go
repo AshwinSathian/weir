@@ -358,6 +358,9 @@ type readCloser struct {
 	io.Closer
 }
 
+// Trailer forwards the trailers of the body being read (FR-FWD-8).
+func (r readCloser) Trailer() http.Header { return trailerOf(r.Closer) }
+
 // safeFetch calls origin.Fetch and turns misbehavior into errors: a panic,
 // (nil, nil), and a status net/http would reject or treat as interim (NFR-2).
 // A nil Header or Body on a valid response is filled in.
@@ -519,6 +522,18 @@ func (b *idleBody) Close() error {
 // it through this method to give its writes the same bound (FR-TMO-2).
 func (b *idleBody) StreamIdle() time.Duration { return b.idle }
 
+// Trailer returns the trailers of the origin response, complete once Read has
+// returned io.EOF (FR-FWD-8). Nil when the Origin's body reports none.
+func (b *idleBody) Trailer() http.Header { return trailerOf(b.ReadCloser) }
+
+// trailerOf asks an origin body, or a wrapper around one, for its trailers.
+func trailerOf(v any) http.Header {
+	if t, ok := v.(interface{ Trailer() http.Header }); ok {
+		return t.Trailer()
+	}
+	return nil
+}
+
 // cancelOnClose runs cancel after the body closes.
 type cancelOnClose struct {
 	io.ReadCloser
@@ -530,6 +545,9 @@ func (c *cancelOnClose) Close() error {
 	c.cancel()
 	return err
 }
+
+// Trailer forwards the wrapped stream's trailers (FR-FWD-8).
+func (c *cancelOnClose) Trailer() http.Header { return trailerOf(c.ReadCloser) }
 
 // StreamIdle forwards the wrapped stream's idle bound, 0 when it has none.
 func (c *cancelOnClose) StreamIdle() time.Duration {

@@ -161,8 +161,42 @@ func (e *Engine) admit(ctx context.Context, c *keys.Classified) (release func(),
 
 func noRelease() {}
 
+// maxForwards applies RFC 9110 §7.6.2 to a TRACE or OPTIONS request
+// (FR-FWD-9). With Max-Forwards 0 Weir is the final recipient and answers
+// itself: 204 for OPTIONS, and 405 for TRACE, whose answer would echo the
+// request's fields back and which a server may refuse. Above 0 the forward
+// carries the value less one. A field that is absent, repeated or not a
+// number is left alone, as the RFC allows. c's forwarded header is the
+// request's own copy (keys.pass), so the write stays in this request.
+func (e *Engine) maxForwards(c *keys.Classified) *Response {
+	m := c.Forwarded.Method
+	if m != http.MethodTrace && m != http.MethodOptions {
+		return nil
+	}
+	mf := c.Forwarded.Header["Max-Forwards"]
+	if len(mf) != 1 {
+		return nil
+	}
+	n, ok := digits(mf[0])
+	if !ok {
+		return nil
+	}
+	if n > 0 {
+		c.Forwarded.Header["Max-Forwards"] = []string{strconv.FormatInt(n-1, 10)}
+		return nil
+	}
+	status := http.StatusNoContent
+	if m == http.MethodTrace {
+		status = http.StatusMethodNotAllowed
+	}
+	return e.finish(&Response{StatusCode: status, Header: http.Header{"Allow": {"GET, HEAD, OPTIONS"}}, Body: http.NoBody}, CacheInfo{})
+}
+
 // pass forwards a request that is never stored, streaming the response.
 func (e *Engine) pass(ctx context.Context, c *keys.Classified, origin Origin, fwd FwdReason) (*Response, error) {
+	if resp := e.maxForwards(c); resp != nil {
+		return resp, nil
+	}
 	release, shed := e.admit(ctx, c)
 	if shed != nil {
 		return nil, shed.err

@@ -7,6 +7,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"reflect"
 	"runtime"
 	"strings"
 	"sync/atomic"
@@ -443,4 +445,120 @@ type closeTracker struct {
 func (c *closeTracker) Close() error {
 	c.closed = true
 	return nil
+}
+
+// forwardedSeen sends req through a TransportOrigin in mode to a test server
+// and returns the X-Forwarded-*, Forwarded and X-Real-Ip fields it received.
+func forwardedSeen(t *testing.T, mode weirhttp.XForwardedMode, req *weir.Request) http.Header {
+	t.Helper()
+	got := http.Header{}
+	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		for k, v := range r.Header {
+			if k == "Forwarded" || k == "X-Real-Ip" || strings.HasPrefix(k, "X-Forwarded-") {
+				got[k] = v
+			}
+		}
+	}))
+	defer srv.Close()
+	u, _ := url.Parse(srv.URL)
+	o := &weirhttp.TransportOrigin{Target: u, XForwarded: mode}
+	resp, err := o.Fetch(t.Context(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	return got
+}
+
+func spoofed(method, client string) *weir.Request {
+	return &weir.Request{Method: method, Scheme: "https", Host: "example.com", Path: "/a", Client: client,
+		Header: http.Header{"X-Forwarded-For": {"10.0.0.1"}, "X-Forwarded-Host": {"evil.example"},
+			"Forwarded": {"for=10.0.0.1"}, "X-Real-Ip": {"10.0.0.1"}, "X-Forwarded-Custom": {"x"}}}
+}
+
+// FR-FWD-8, T-4: by default no client-written forwarding field reaches the
+// origin. Before v1.1 a client named its own address on every request that
+// was passed through.
+func TestTransportOriginStripsForwarded(t *testing.T) {
+	if got := forwardedSeen(t, weirhttp.XForwardedStrip, spoofed(http.MethodPost, "203.0.113.9")); len(got) != 0 {
+		t.Fatalf("origin received %v, want no forwarding field", got)
+	}
+}
+
+// FR-FWD-8, INV-1: XForwardedSet replaces them with what Weir knows on a
+// pass-through request, and sets nothing on a cacheable fetch, which names
+// no client and whose response is shared.
+func TestTransportOriginSetsForwarded(t *testing.T) {
+	got := forwardedSeen(t, weirhttp.XForwardedSet, spoofed(http.MethodPost, "203.0.113.9"))
+	want := http.Header{"X-Forwarded-For": {"203.0.113.9"}, "X-Forwarded-Proto": {"https"}, "X-Forwarded-Host": {"example.com"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("pass-through: origin received %v, want %v", got, want)
+	}
+	if got := forwardedSeen(t, weirhttp.XForwardedSet, spoofed(http.MethodGet, "")); len(got) != 0 {
+		t.Fatalf("cacheable fetch: origin received %v, want none", got)
+	}
+}
+
+// FR-FWD-8: XForwardedKeep is the v1.0 behavior.
+func TestTransportOriginKeepsForwarded(t *testing.T) {
+	got := forwardedSeen(t, weirhttp.XForwardedKeep, spoofed(http.MethodPost, "203.0.113.9"))
+	if got.Get("X-Forwarded-For") != "10.0.0.1" || got.Get("X-Forwarded-Custom") != "x" || len(got) != 5 {
+		t.Fatalf("origin received %v, want the five fields as sent", got)
+	}
+}
+
+// FR-FWD-8: trailers of a streamed origin response reach the client, through
+// the transport, the engine and WriteResponse.
+func TestResponseTrailersReachClient(t *testing.T) {
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Trailer", "X-Checksum")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("body"))
+		w.Header().Set("X-Checksum", "abc")
+		w.Header().Set(http.TrailerPrefix+"X-Late", "1")
+	}))
+	defer origin.Close()
+	u, _ := url.Parse(origin.URL)
+	e, err := weir.New(weir.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Close(context.Background())
+	front := httptest.NewServer(weirhttp.Handler(e, &weirhttp.TransportOrigin{Target: u}))
+	defer front.Close()
+
+	resp, err := http.Post(front.URL+"/a", "text/plain", strings.NewReader("x")) // passed through, so streamed
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if string(body) != "body" || resp.Trailer.Get("X-Checksum") != "abc" || resp.Trailer.Get("X-Late") != "1" {
+		t.Fatalf("body %q trailers %v, want body and both trailers", body, resp.Trailer)
+	}
+}
+
+// FR-FWD-8: HandlerOrigin reports the trailers its handler set, announced or
+// with http.TrailerPrefix, once the body has ended.
+func TestHandlerOriginTrailers(t *testing.T) {
+	o := &weirhttp.HandlerOrigin{Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Trailer", "X-Checksum")
+		_, _ = w.Write([]byte("body"))
+		w.Header().Set("X-Checksum", "abc")
+		w.Header().Set(http.TrailerPrefix+"X-Late", "1")
+		w.Header().Set("X-Not-A-Trailer", "no")
+	})}
+	resp, err := o.Fetch(t.Context(), &weir.Request{Method: http.MethodGet, Scheme: "http", Host: "example.com", Path: "/a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if _, err := io.ReadAll(resp.Body); err != nil {
+		t.Fatal(err)
+	}
+	got := resp.Body.(interface{ Trailer() http.Header }).Trailer()
+	want := http.Header{"X-Checksum": {"abc"}, "X-Late": {"1"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("trailers = %v, want %v", got, want)
+	}
 }

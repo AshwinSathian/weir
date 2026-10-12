@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -29,9 +30,65 @@ type TransportOrigin struct {
 	// a forward proxy the URL.Opaque path goes out as an origin-form target.
 	Transport http.RoundTripper
 	// Rewrite, when set, edits each outgoing request (Via, origin auth).
-	// Headers it adds to cacheable requests are unkeyed input (T-4).
+	// Headers it adds to cacheable requests are unkeyed input (T-4). It runs
+	// after XForwarded.
 	Rewrite func(*http.Request)
+	// XForwarded says what happens to the fields that name a client to the
+	// origin: Forwarded, X-Real-Ip and everything that starts with
+	// X-Forwarded-. The zero value removes them, because on a request that is
+	// passed through they are whatever the client wrote.
+	XForwarded XForwardedMode
 }
+
+// XForwardedMode selects how TransportOrigin treats Forwarded, X-Real-Ip and
+// X-Forwarded-* request fields.
+type XForwardedMode uint8
+
+// XForwardedMode values.
+const (
+	// XForwardedStrip removes them from every request. A cacheable fetch
+	// only carries one when Forward.Allow or Key.Headers names it; use
+	// XForwardedKeep if you rely on that.
+	XForwardedStrip XForwardedMode = iota
+	// XForwardedKeep sends them as the engine forwarded them, which on a
+	// pass-through request is as the client sent them. Use it only behind a
+	// proxy that overwrites them. This is what v1.0 did.
+	XForwardedKeep
+	// XForwardedSet removes them and then, on a pass-through request that
+	// names its client (weir.Request.Client), sets X-Forwarded-For to that
+	// client, X-Forwarded-Proto to the scheme and X-Forwarded-Host to the
+	// host. A cacheable fetch gets none: its response is shared (INV-1).
+	XForwardedSet
+)
+
+// forwarded applies mode to the outgoing header h of req.
+func forwarded(h http.Header, req *weir.Request, mode XForwardedMode) {
+	if mode == XForwardedKeep {
+		return
+	}
+	for name := range h {
+		if name == "Forwarded" || name == "X-Real-Ip" || strings.HasPrefix(name, "X-Forwarded-") {
+			delete(h, name)
+		}
+	}
+	if mode == XForwardedSet && req.Client != "" {
+		h["X-Forwarded-For"] = []string{req.Client}
+		h["X-Forwarded-Proto"] = []string{req.Scheme}
+		h["X-Forwarded-Host"] = []string{req.Host}
+	}
+}
+
+// trailerBody is a transport response body that can report the response's
+// trailers once it has returned io.EOF. net/http fills, and for HTTP/2 may
+// replace, Response.Trailer while the body is read, so the field is read on
+// demand.
+type trailerBody struct {
+	io.ReadCloser
+	res *http.Response
+}
+
+// Trailer returns the trailers received so far; complete after io.EOF.
+func (b trailerBody) Trailer() http.Header { return b.res.Trailer }
 
 var defaultTransport = sync.OnceValue(func() http.RoundTripper {
 	return newTransport(http.DefaultTransport)
@@ -78,6 +135,7 @@ func (o *TransportOrigin) Fetch(ctx context.Context, req *weir.Request) (*weir.R
 	if _, ok := h["User-Agent"]; !ok {
 		h["User-Agent"] = []string{""} // an empty value stops net/http adding its own
 	}
+	forwarded(h, req, o.XForwarded)
 	hr := (&http.Request{
 		Method: req.Method,
 		URL:    u,
@@ -101,7 +159,7 @@ func (o *TransportOrigin) Fetch(ctx context.Context, req *weir.Request) (*weir.R
 	if err != nil {
 		return nil, err
 	}
-	return &weir.Response{StatusCode: resp.StatusCode, Header: resp.Header, Body: resp.Body}, nil
+	return &weir.Response{StatusCode: resp.StatusCode, Header: resp.Header, Body: trailerBody{resp.Body, resp}}, nil
 }
 
 // HandlerOrigin calls an in-process http.Handler, buffering nothing: the
@@ -171,6 +229,7 @@ func (o *HandlerOrigin) Fetch(ctx context.Context, req *weir.Request) (*weir.Res
 				pw.CloseWithError(io.ErrUnexpectedEOF)
 				return
 			}
+			w.collectTrailers() // before the close that lets the reader see EOF
 			_ = pw.Close()
 		}()
 		o.Handler.ServeHTTP(w, hr)
@@ -186,7 +245,7 @@ func (o *HandlerOrigin) Fetch(ctx context.Context, req *weir.Request) (*weir.Res
 		cancel()
 		return nil, w.err
 	}
-	return &weir.Response{StatusCode: w.status, Header: w.sent, Body: &pipeBody{pr, cancel}}, nil
+	return &weir.Response{StatusCode: w.status, Header: w.sent, Body: &pipeBody{pr, cancel, w}}, nil
 }
 
 // pipeWriter is the http.ResponseWriter a HandlerOrigin handler writes to.
@@ -203,6 +262,33 @@ type pipeWriter struct {
 	head   bool  // HEAD: the body is discarded, as net/http's server does
 	noBody bool  // 204 or 304: body writes fail with http.ErrBodyNotAllowed
 	remain int64 // bytes still owed to a declared Content-Length; -1 if none
+	// trailer holds the trailers the handler left when it returned; set
+	// before the pipe closes, read by the body's Trailer after io.EOF.
+	trailer http.Header
+}
+
+// collectTrailers gathers what net/http's server would send as trailers: the
+// fields the Trailer header announced at WriteHeader, and every field set
+// with http.TrailerPrefix. It runs on the handler goroutine once the handler
+// has returned.
+func (w *pipeWriter) collectTrailers() {
+	t := http.Header{}
+	for _, line := range w.sent["Trailer"] {
+		for name := range strings.SplitSeq(line, ",") {
+			name = http.CanonicalHeaderKey(strings.TrimSpace(name))
+			if v, ok := w.header[name]; ok && name != "" {
+				t[name] = slices.Clone(v)
+			}
+		}
+	}
+	for k, v := range w.header {
+		if name, ok := strings.CutPrefix(k, http.TrailerPrefix); ok {
+			t[name] = slices.Clone(v)
+		}
+	}
+	if len(t) > 0 {
+		w.trailer = t
+	}
 }
 
 func (w *pipeWriter) Header() http.Header { return w.header }
@@ -269,7 +355,11 @@ func (w *pipeWriter) Flush() { w.WriteHeader(http.StatusOK) }
 type pipeBody struct {
 	*io.PipeReader
 	cancel context.CancelFunc
+	w      *pipeWriter
 }
+
+// Trailer returns the handler's trailers; valid after Read returned io.EOF.
+func (b *pipeBody) Trailer() http.Header { return b.w.trailer }
 
 func (b *pipeBody) Close() error {
 	b.cancel()

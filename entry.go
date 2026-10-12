@@ -105,7 +105,9 @@ func storedHeader(h http.Header, stripSetCookie bool) http.Header {
 		out = http.Header{}
 	}
 	keys.DropHopByHop(out, h["Connection"])
-	for _, name := range [...]string{"Proxy-Authenticate", "Proxy-Authentication-Info", "Age"} {
+	// Trailer announces fields that follow a streamed body. A stored body
+	// has none, so the announcement would promise what is never sent.
+	for _, name := range [...]string{"Proxy-Authenticate", "Proxy-Authentication-Info", "Age", "Trailer"} {
 		delete(out, name)
 	}
 	if stripSetCookie {

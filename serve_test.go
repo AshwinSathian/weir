@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1158,6 +1159,51 @@ func TestForwardedResponseGetsDate(t *testing.T) {
 		resp, _ := serve(t, e, getReq("/a"), o)
 		if !resp.Cache.Hit || resp.Header.Get("Date") != want {
 			t.Fatalf("hit = %v Date = %q, want the miss's %q", resp.Cache.Hit, resp.Header.Get("Date"), want)
+		}
+	})
+}
+
+// FR-FWD-9, RFC 9110 §7.6.2: a TRACE or OPTIONS request with Max-Forwards 0
+// is answered by Weir, and with a higher value goes forward with one less.
+func TestMaxForwards(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var seen []string
+		o := weir.OriginFunc(func(_ context.Context, r *weir.Request) (*weir.Response, error) {
+			seen = append(seen, r.Method+" "+r.Header.Get("Max-Forwards"))
+			return &weir.Response{StatusCode: 200, Header: http.Header{}, Body: http.NoBody}, nil
+		})
+		e := newEngine(t, cacheCfg)
+		defer closeEngine(t, e)
+		req := func(method, mf string) *weir.Request {
+			r := getReq("/a")
+			r.Method = method
+			if mf != "" {
+				r.Header.Set("Max-Forwards", mf)
+			}
+			return r
+		}
+
+		if resp, _ := serve(t, e, req(http.MethodOptions, "0"), o); resp.StatusCode != http.StatusNoContent || resp.Header.Get("Allow") == "" {
+			t.Fatalf("OPTIONS with Max-Forwards 0: %d %v, want 204 with Allow", resp.StatusCode, resp.Header)
+		}
+		if resp, _ := serve(t, e, req(http.MethodTrace, "0"), o); resp.StatusCode != http.StatusMethodNotAllowed {
+			t.Fatalf("TRACE with Max-Forwards 0: %d, want 405", resp.StatusCode)
+		}
+		if len(seen) != 0 {
+			t.Fatalf("the origin saw %v, want nothing forwarded at 0", seen)
+		}
+		client := req(http.MethodOptions, "3")
+		serve(t, e, client, o)
+		serve(t, e, req(http.MethodTrace, "1"), o)
+		serve(t, e, req(http.MethodOptions, ""), o)
+		serve(t, e, req(http.MethodOptions, "soon"), o)
+		serve(t, e, req(http.MethodPost, "0"), o) // only TRACE and OPTIONS have the field
+		want := []string{"OPTIONS 2", "TRACE 0", "OPTIONS ", "OPTIONS soon", "POST 0"}
+		if !slices.Equal(seen, want) {
+			t.Fatalf("forwarded %v, want %v", seen, want)
+		}
+		if client.Header.Get("Max-Forwards") != "3" {
+			t.Fatal("the client's request header was modified")
 		}
 	})
 }

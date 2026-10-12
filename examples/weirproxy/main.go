@@ -44,8 +44,11 @@ func run(listen, origin string, allow []string) error {
 		return err
 	}
 	srv := &http.Server{
-		Addr:              listen,
-		Handler:           weirhttp.Handler(e, &weirhttp.TransportOrigin{Target: target}),
+		Addr: listen,
+		// XForwardedSet: this proxy faces the clients itself, so it tells the
+		// origin who sent each request that is passed through, and drops
+		// whatever the client claimed.
+		Handler:           weirhttp.Handler(e, &weirhttp.TransportOrigin{Target: target, XForwarded: weirhttp.XForwardedSet}),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
