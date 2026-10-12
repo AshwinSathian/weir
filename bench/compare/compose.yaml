@@ -1,0 +1,64 @@
+# Subjects of docs/11 §2. Every cache listens on 8080 under its service name
+# and fetches from origin:9000. run.sh starts one subject at a time; TIER
+# picks its config directory. Limits that are plumbing, not cache policy
+# (file descriptors, listen backlog), are raised the same way for everyone.
+x-plumbing: &plumbing
+  ulimits:
+    nofile: { soft: 65536, hard: 65536 }
+  sysctls:
+    net.core.somaxconn: 65535
+
+services:
+  origin:
+    build: { context: ., dockerfile: docker/tools.Dockerfile }
+    command: ["origin", "-listen", ":9000", "-control", ":9001"]
+    <<: *plumbing
+
+  run:
+    build: { context: ., dockerfile: docker/tools.Dockerfile }
+    profiles: ["tools"]
+    volumes: ["./results:/results"]
+    <<: *plumbing
+
+  caddy-nocache:
+    image: caddy:2.11.7
+    volumes: ["./subjects/caddy-nocache/default/Caddyfile:/etc/caddy/Caddyfile:ro"]
+    <<: *plumbing
+
+  weirproxy:
+    build:
+      context: .
+      dockerfile: docker/weirproxy.Dockerfile
+      args: { WEIR_VERSION: "${WEIR_VERSION:-v1.0.1}" }
+    command: ["-listen", ":8080", "-origin", "http://origin:9000"]
+    <<: *plumbing
+
+  caddy-weir:
+    build:
+      context: .
+      dockerfile: docker/caddy.Dockerfile
+      args:
+        WITH: "--with github.com/AshwinSathian/weir@${WEIR_VERSION:-v1.0.1} --with github.com/AshwinSathian/weir/caddy@${WEIR_VERSION:-v1.0.1}"
+    volumes: ["./subjects/caddy-weir/${TIER:-default}/Caddyfile:/etc/caddy/Caddyfile:ro"]
+    <<: *plumbing
+
+  caddy-souin:
+    build:
+      context: .
+      dockerfile: docker/caddy.Dockerfile
+      args:
+        WITH: "--with github.com/caddyserver/cache-handler@v0.17.0 --with github.com/darkweak/storages/otter/caddy@v0.0.20"
+    volumes: ["./subjects/caddy-souin/${TIER:-default}/Caddyfile:/etc/caddy/Caddyfile:ro"]
+    <<: *plumbing
+
+  varnish:
+    image: varnish:9.1.0
+    environment: { VARNISH_HTTP_PORT: "8080", VARNISH_SIZE: "512M" }
+    volumes: ["./subjects/varnish/${TIER:-default}/default.vcl:/etc/varnish/default.vcl:ro"]
+    tmpfs: ["/var/lib/varnish/varnishd:exec"]
+    <<: *plumbing
+
+  nginx:
+    image: nginx:1.30.5
+    volumes: ["./subjects/nginx/${TIER:-default}/nginx.conf:/etc/nginx/nginx.conf:ro"]
+    <<: *plumbing
