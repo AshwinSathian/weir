@@ -198,6 +198,10 @@ Per-owner quota (M14): each shard keeps `map[store.Tag]int64` of bytes per owner
 
 Scrub (M15): for each shard in turn, take the write lock, walk every node, unlink response records whose `Tags` intersect the given tags, release. Worst case O(entries) total, but never more than one shard's worth of work under one lock. Matching is by exact tag, not the epoch sketch, and only response records are removed (vary specs, markers and negative records carry no tags). The context is checked between shards: on cancellation Scrub returns the count so far with `ErrUnavailable`. Scrub does not compare request times with the epoch, so it can also delete a response stored fresh after the purge, and it cannot stop a flight from storing one afterwards; the epoch, not the scan, is what makes entries unreachable.
 
+### 5.3a Fetches in progress (`store.FetchTracker`)
+
+An optional capability of an in-process store (v1.1): `FetchBegin(k)`, `FetchEnd(k)` and `FetchInProgress(k)` keep a count per key of the fetches that may still store a record under it. The engine calls the first before it sends a request that may be stored and the second once what it stored is in the store, and asks the third when an unsafe request finds no record for its URI (01 FR-INV-1). The memory store keeps the count in the key's shard under a lock of its own, so it never waits on the shard's readers; only keys with a count above 0 are held. A remote store must not implement it, because a fetch another node runs is not counted. A wrapper that embeds only `Store` hides it, and the engine then writes every invalidation epoch.
+
 ### 5.4 Epoch table
 
 `newestHard` (v1.1) is the latest hard epoch of any tag but the global one, kept as an atomic offset and raised under the table's lock. A lookup since a later time returns "no hard epoch" without the lock. Hard epochs come only from operator purges, while `newest` (E-10) moves on every invalidation, so without it every hit on an entry older than the last invalidation of any kind took the lock once per tag. Pruning never lowers the value, which only costs the lock again.

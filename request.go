@@ -26,6 +26,12 @@ type Request struct {
 	// bypass) carries it in the Request the Origin receives, so an Origin can
 	// tell the origin server who asked. Empty: the request is never capped.
 	Client string
+	// PassThrough is set by Weir, on the Request an Origin receives, when the
+	// request is passed through: an unsafe method, a bypass, a request with
+	// a body, a Range miss. Nothing of its response is stored, and its
+	// header is the client's own minus hop-by-hop fields, where a cacheable
+	// fetch carries only keyed and allowed fields. Serve ignores it on input.
+	PassThrough bool
 }
 
 // Response is a response from an Origin or from Serve. The receiver of a

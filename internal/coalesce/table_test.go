@@ -205,26 +205,3 @@ func TestStreamClosedWhenCreatorLeavesDuringPublish(t *testing.T) {
 		}
 	})
 }
-
-// FR-INV-1: Busy is true exactly while an Enter is not yet matched by a
-// Leave, and the count leaves no key behind (P5).
-func TestBusyCountsEnters(t *testing.T) {
-	var tb Table
-	k := store.Key{1}
-	if tb.Busy(k) {
-		t.Fatal("busy before any Enter")
-	}
-	tb.Enter(k)
-	tb.Enter(k)
-	tb.Leave(k)
-	if !tb.Busy(k) {
-		t.Fatal("not busy with one Enter open")
-	}
-	tb.Leave(k)
-	if tb.Busy(k) {
-		t.Fatal("busy after every Leave")
-	}
-	if n := len(tb.shards[k[0]&63].busy); n != 0 {
-		t.Fatalf("%d keys left in the busy map, want 0", n)
-	}
-}

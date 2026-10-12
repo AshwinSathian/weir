@@ -33,38 +33,37 @@ type TransportOrigin struct {
 	// Headers it adds to cacheable requests are unkeyed input (T-4). It runs
 	// after XForwarded.
 	Rewrite func(*http.Request)
-	// XForwarded says what happens to the fields that name a client to the
-	// origin: Forwarded, X-Real-Ip and everything that starts with
-	// X-Forwarded-. The zero value removes them, because on a request that is
-	// passed through they are whatever the client wrote.
+	// XForwarded says what happens, on a request that is passed through, to
+	// the fields that name a client to the origin: Forwarded, X-Real-Ip and
+	// everything that starts with X-Forwarded-. The zero value removes them,
+	// because there they are whatever the client wrote. A cacheable fetch is
+	// never touched: it carries such a field only when Forward.Allow or
+	// Key.Headers names it, which is the operator's decision.
 	XForwarded XForwardedMode
 }
 
-// XForwardedMode selects how TransportOrigin treats Forwarded, X-Real-Ip and
-// X-Forwarded-* request fields.
+// XForwardedMode selects how TransportOrigin treats the Forwarded, X-Real-Ip
+// and X-Forwarded-* fields of a request that is passed through
+// (weir.Request.PassThrough).
 type XForwardedMode uint8
 
 // XForwardedMode values.
 const (
-	// XForwardedStrip removes them from every request. A cacheable fetch
-	// only carries one when Forward.Allow or Key.Headers names it; use
-	// XForwardedKeep if you rely on that.
+	// XForwardedStrip removes them.
 	XForwardedStrip XForwardedMode = iota
-	// XForwardedKeep sends them as the engine forwarded them, which on a
-	// pass-through request is as the client sent them. Use it only behind a
-	// proxy that overwrites them. This is what v1.0 did.
+	// XForwardedKeep sends them as the client sent them. Use it only behind
+	// a proxy that overwrites them. This is what v1.0 did.
 	XForwardedKeep
-	// XForwardedSet removes them and then, on a pass-through request that
-	// names its client (weir.Request.Client), sets X-Forwarded-For to that
-	// client, X-Forwarded-Proto to the scheme and X-Forwarded-Host to the
-	// host. A cacheable fetch gets none: its response is shared (INV-1).
+	// XForwardedSet removes them and then, when the request names its client
+	// (weir.Request.Client), sets X-Forwarded-For to that client,
+	// X-Forwarded-Proto to the scheme and X-Forwarded-Host to the host.
 	XForwardedSet
 )
 
 // forwarded applies mode to the outgoing header h of req.
 func forwarded(h http.Header, req *weir.Request, mode XForwardedMode) {
-	if mode == XForwardedKeep {
-		return
+	if mode == XForwardedKeep || !req.PassThrough {
+		return // INV-1: a cacheable fetch goes out exactly as the engine built it
 	}
 	for name := range h {
 		if name == "Forwarded" || name == "X-Real-Ip" || strings.HasPrefix(name, "X-Forwarded-") {

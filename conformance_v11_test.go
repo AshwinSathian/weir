@@ -171,14 +171,15 @@ func TestNegativeHonorsNoStore(t *testing.T) {
 	}
 }
 
-// FR-LIM-5: the Retry-After of a shed request is one to one and a half queue
-// waits, drawn from Config.Rand, so clients shed together do not return
-// together.
+// FR-LIM-5: the Retry-After of a shed request is the queue wait plus a whole
+// number of seconds drawn from Config.Rand, so clients shed together do not
+// return together. At the defaults that is 2 or 3 seconds, half each: a
+// fraction of a second would round every draw up to one value.
 func TestShedRetryAfterJitter(t *testing.T) {
 	for _, tc := range []struct {
 		rand float64
 		want time.Duration
-	}{{0, 2 * time.Second}, {0.5, 3 * time.Second}, {0.999, 3 * time.Second}} { // 2.5 s and 3 s round up to 3
+	}{{0, 2 * time.Second}, {0.4, 2 * time.Second}, {0.6, 3 * time.Second}, {0.999, 3 * time.Second}} { // whole seconds: both values occur
 		synctest.Test(t, func(t *testing.T) {
 			gate := make(chan struct{})
 			defer close(gate)

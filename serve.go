@@ -329,7 +329,19 @@ func (e *Engine) lookup(ctx context.Context, c *keys.Classified, now time.Time) 
 		// the origin sees (FR-KEY-7, INV-1).
 		c.Forward()
 		lk.ck = keys.VariantKey(c.Primary, rec.VaryNames, c.Forwarded.Header)
+		spec := rec
 		if rec, err = e.sg.get(ctx, lk.ck); err != nil || rec.Expires.Before(now) {
+			lk.fwd = FwdVaryMiss
+			return lk
+		}
+		// FR-INV-1: a response under a variant key counts only while the spec
+		// lists it. One left there by a spec that has since gone (evicted, or
+		// replaced by another) is unreachable, so the primary key leads to
+		// every servable response of the URI, which is what lets an
+		// invalidation ask the primary key alone whether anything is stored.
+		// Markers and negative entries are written without a reference and
+		// carry nothing an invalidation must reach.
+		if rec.Kind == store.KindResponse && !lists(spec, lk.ck) {
 			lk.fwd = FwdVaryMiss
 			return lk
 		}
@@ -347,6 +359,17 @@ func (e *Engine) lookup(ctx context.Context, c *keys.Classified, now time.Time) 
 		lk.neg = rec
 	}
 	return lk
+}
+
+// lists reports whether the vary spec has a reference to the variant key k.
+// At most Key.MaxVariants references are compared.
+func lists(spec *store.Entry, k store.Key) bool {
+	for i := range spec.Variants {
+		if spec.Variants[i].Key == k {
+			return true
+		}
+	}
+	return false
 }
 
 // cacheable serves a GET or HEAD from the store or through a coalesced
@@ -432,9 +455,12 @@ func (e *Engine) fetchStored(ctx context.Context, sp *fetchSpec, origin Origin) 
 	c, prior := sp.c, sp.prior
 	// FR-INV-1: counted from before the request is sent until anything it
 	// stores is in the store, so an unsafe request that arrives in between
-	// knows the URI has a response on its way (invalidate).
-	e.flights.Enter(c.Primary)
-	defer e.flights.Leave(c.Primary)
+	// knows the URI has a response on its way (invalidate). The count is the
+	// store's, so engines that share the store see each other's fetches.
+	if ft := e.sg.fetches; ft != nil {
+		ft.FetchBegin(c.Primary)
+		defer ft.FetchEnd(c.Primary)
+	}
 	// FR-STO-12, T-18: a marker for an over-size object says the body will
 	// not fit, so the fetch behind it streams instead of holding
 	// MaxObjectBytes that nothing will keep. The next attempt to store comes
@@ -483,8 +509,11 @@ func (e *Engine) fetchStored(ctx context.Context, sp *fetchSpec, origin Origin) 
 		// for a flight to read MaxObjectBytes and then fetch again. T-31: the
 		// response's size is the response's own, unless an unkeyed input
 		// could have chosen it.
-		if !c.Authorized && !c.ReqCC.NoStore && !c.Unkeyed {
-			e.setMarker(context.WithoutCancel(ctx), sp, sp.found, res.respTime, true)
+		// A 5xx is the origin failing, not the object being large: no
+		// marker, and the negative entry setNegative may have written stays.
+		// Any other error status leaves the response the request found.
+		if status := res.resp.StatusCode; !serverError(status) && !c.Authorized && !c.ReqCC.NoStore && !c.Unkeyed {
+			e.setMarker(context.WithoutCancel(ctx), sp, supersedes(sp, status, false), res.respTime, true)
 		}
 	case serverError(res.resp.StatusCode):
 		// Before Publish, so before the creator's respond writes to resp.
@@ -504,7 +533,7 @@ func (e *Engine) respond(c *keys.Classified, fr *flightResult) *Response {
 	resp := fr.resp
 	// FR-SRV-2: a response built from the entry just stored is judged
 	// against the client's own preconditions, like a hit. fr.entry is the
-	// final entry, never the discarded 304 of a strong-ETag mismatch.
+	// final entry, never the discarded 304 of an entity-tag mismatch.
 	// FR-STO-6: the creator's own response keeps a Set-Cookie the stored
 	// entry dropped, so that response is not replaced by the stored 304.
 	if fr.entry != nil && len(resp.Header["Set-Cookie"]) == 0 && clientNotModified(&c.ClientCond, fr.entry) {
@@ -569,11 +598,7 @@ func (e *Engine) storeResponse(ctx context.Context, c *keys.Classified, res *fet
 			// §4.3.3), and this one says the URI is no longer storable. A 304
 			// only confirmed the stored body, so it leaves the response in
 			// place: revalidating it costs the origin less than a 200.
-			replace := sp.found
-			if res.notMod {
-				replace = sp.purged
-			}
-			e.setMarker(ctx, sp, replace, res.respTime, false)
+			e.setMarker(ctx, sp, supersedes(sp, recv.StatusCode, res.notMod), res.respTime, false)
 		}
 		return nil, false
 	}
@@ -720,6 +745,21 @@ func newer(a, b *store.Entry) bool {
 		return a.Date.After(b.Date)
 	}
 	return a.ResponseTime.After(b.ResponseTime)
+}
+
+// supersedes returns the stored response that a marker for an unstorable
+// answer of the given status may replace (FR-STO-12). A successful or
+// redirecting full response is a new representation and supersedes the
+// response the request found. A 304 only confirmed that response, and an
+// error status (a 429, a 507, any 4xx or 5xx the configuration does not
+// store) says nothing about it: both leave it in place, where it can still
+// be revalidated or served under stale-if-error, and the marker may replace
+// only a hard-purged one.
+func supersedes(sp *fetchSpec, status int, notModified bool) *store.Entry {
+	if notModified || status >= 400 {
+		return sp.purged
+	}
+	return sp.found
 }
 
 // markerOversize is the Status of a hit-for-miss marker written because the

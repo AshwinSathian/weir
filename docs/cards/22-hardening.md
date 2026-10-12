@@ -23,7 +23,7 @@ Each one changes a requirement, a default or the exported API, so each is listed
 | D-H9 | With an in-process store, no keyed header, no keyed cookie and no experiment, an unsafe request writes its invalidation epoch only when the URI has a record or a fetch in progress | A URI with neither has nothing to invalidate, and its epoch only loads the sketch that every other entry shares. Remote stores keep the unconditional write: another node's fetch is invisible |
 | D-H10 | New `Request.Client` and `Limiter.MaxPerClient` (0: off). `weirhttp` fills `Client` from `RemoteAddr`; the Caddy adapter from Caddy's `client_ip` and a new `max_per_client` key | Every existing cap is keyed on the URL, which the client chooses. Off by default because behind a load balancer every client has one address |
 | D-H11 | `Close` returns after its grace period plus 5 s even when an engine goroutine has not stopped, with an error that says so | An origin that ignores its context made `Close` hang forever. FR-LCY-2 changes from a guarantee to a guarantee for origins that honor their context |
-| D-H12 | `weirhttp.TransportOrigin` removes client-supplied `Forwarded`, `X-Forwarded-*` and `X-Real-Ip` from pass-through requests by default. New field `XForwarded`: `XForwardedStrip` (zero), `XForwardedKeep`, `XForwardedSet` (set from `Request.Client`, scheme and host) | A client could name its own address to the origin on every `POST`. Cacheable fetches never carried these fields, so an origin that reads them was already inconsistent. This changes a default in a minor release; `XForwardedKeep` restores `v1.0` |
+| D-H12 | `weirhttp.TransportOrigin` removes client-supplied `Forwarded`, `X-Forwarded-*` and `X-Real-Ip` from pass-through requests by default. New field `XForwarded`: `XForwardedStrip` (zero), `XForwardedKeep`, `XForwardedSet` (set from `Request.Client`, scheme and host). New `Request.PassThrough`, set by the engine, tells an `Origin` which requests those are | A client could name its own address to the origin on every `POST`. First built to strip from every request, which the branch review showed removes a field that `Key.Headers` or `Forward.Allow` names from cacheable fetches too (a site keying on `X-Forwarded-Proto` would cache the origin's redirect); a cacheable fetch is now never touched. `XForwardedKeep` restores `v1.0` |
 | D-H13 | Response trailers of a streamed response reach the client. A response body may implement `Trailer() http.Header`; `TransportOrigin` and `HandlerOrigin` bodies do, the engine's stream bodies forward it and `WriteResponse` sends it. Stored responses carry no trailers | Pass-through dropped them. A method on the body, not a `Response.Trailer` field as first planned: net/http replaces its trailer map while an HTTP/2 body is read, so a field copied at the headers would be the wrong map. Not a claim of gRPC support: request trailers and h2c upstreams are out of scope |
 | D-H14 | The Caddy adapter gives every forwarded request its own replacer, bound to the forwarded request | Placeholders after `weir` read the first client's headers, cookies and URI. `RemoteAddr` stays the first client's: masking it would make every cacheable fetch look like one client to an origin that rate-limits by address |
 | D-H15 | New `Config.KeyGeneration()`: a digest of the settings that change what an unchanged key means. The memory store's snapshot documentation says to put it in the file name | Library users had no equivalent of the Caddy adapter's key-generation purge |
@@ -117,7 +117,7 @@ High findings first, then Medium, then Low, then documents, review and release. 
 - Finding: bodyless `POST`s to distinct URIs sent 4% of untouched entries back to the origin after 60 000, 35% after 190 000 more, 76% after 500 000 more
 - Read: 01 FR-INV-1 to FR-INV-3, FR-PRG-7; 05 E-7, E-8; 06 T-29
 - Touch: purge.go, internal/coalesce/table.go, internal/coalesce/table_test.go, flight.go, warm.go, purge_test.go, docs/01, docs/05, docs/06
-- Tests: `TestInvalidationSkipsAbsentURI`, `TestInvalidationCoversFetchInProgress`, `TestInvalidationCoversDirectFetch`, `TestInvalidationUnconditionalWithKeyedInputs`, `TestInvalidationUnconditionalOnRemoteStore`, `TestInvalidationFloodLeavesCacheIntact`
+- Tests: `TestInvalidationSkipsAbsentURI`, `TestInvalidationSkipsAbsentLocation`, `TestInvalidationCoversFetchInProgress` (on a flight, fetched directly), `TestInvalidationCoversWarm`, `TestInvalidationReachesOrphanVariant`, `TestInvalidationSeesOtherEnginesFetch`, `TestInvalidationUnconditionalWithKeyedInputs`, `TestInvalidationUnconditionalOnRemoteStore`, `TestInvalidationFloodLeavesCacheIntact`
 - AC: D-H9 holds; 1 000 000 unsafe requests to URIs with no record send 0 of 2 000 stored entries back to the origin; a `GET` sent before an unsafe request and stored after it is invalid at its next lookup, whether it ran on a flight, directly or under `Warm`; a store error on the existence check writes the epoch
 - Notes: proof of the skip. The engine reads the clock (the epoch time), then asks whether a fetch for the key is counted, then reads the key. A fetch sent before the epoch time was counted before it was sent. If it is no longer counted it has finished, and anything it stored is visible to the read. A fetch sent after the epoch time is not covered by the epoch at all (FR-PRG-7)
 
@@ -126,7 +126,7 @@ High findings first, then Medium, then Low, then documents, review and release. 
 - Finding: 1 100 connections to distinct slow paths: a legitimate miss is shed at once
 - Read: 01 FR-LIM-3, FR-FAIR-1, FR-FAIR-3; 04 §8.2; 08 §2; 06 T-11
 - Touch: request.go, config.go, internal/keys/classify.go, internal/keys/request.go, internal/limiter/limiter.go, internal/limiter/limiter_test.go, fetch.go, engine.go, weirhttp/convert.go, caddy/config.go, caddy/caddyfile.go, caddy/module.go, limit_test.go, docs/01, docs/04, docs/06, docs/08
-- Tests: `TestLimiterPerClientCap`, `TestLimiterPerClientQueueCap`, `TestClientFloodLeavesOthersServed`, `TestRequestFromSetsClient`, Caddyfile and module tests for `max_per_client`
+- Tests: `TestClientFloodLeavesOthersServed`, `TestClientFloodWithoutCap`, `TestClientCapCountsOnlyOriginWork`, `TestClientOverCapNeverLeadsFlight`, `TestClientIPv6CountsPerPrefix`, `TestClientNotForwardedOnCacheableFetch`, `TestClientCapServesStale`, `TestRequestFromSetsClient`, `TestRequestForClient`, Caddyfile and module tests for `max_per_client` (the gate reuses the limiter, so `internal/limiter` gains no test)
 - AC: D-H10 holds; with `MaxPerClient` 8, 1 100 requests from one client to distinct slow paths leave a miss from another client served; an empty `Client` is never capped; limiter memory stays O(`Max + MaxQueue`); `Client` never reaches the key, the forwarded request or an event
 - Out of scope: X-Forwarded policy (HRD-10)
 - Notes: over the M file count because one field crosses the library and both adapters; the Caddy half may split to HRD-07b
@@ -157,7 +157,7 @@ High findings first, then Medium, then Low, then documents, review and release. 
 - Plan: v1.1 · Size: M · Depends on: HRD-07
 - Read: 08 §4, §6; 06 T-4, T-45
 - Touch: caddy/origin.go, caddy/serve_test.go, caddy/warn.go, docs/08, docs/06
-- Tests: `TestPlaceholdersReadForwardedRequest`, `TestPlaceholderCannotSeeUnkeyedHeader`
+- Tests: `TestPlaceholdersReadForwardedRequest`, `TestForwardedReplacerLeavesClientAlone`, `TestPlaceholderHeaderWarning`
 - AC: D-H14 holds; `{http.request.header.X}` after `weir` is empty for a header that is not forwarded, and `{http.request.uri}` is the rewritten URI; operator variables set before `weir` are still visible; the warning list keeps only what is still true
 - Notes: check the pinned Caddy source for `PrepareRequest` before relying on it
 
@@ -172,14 +172,14 @@ High findings first, then Medium, then Low, then documents, review and release. 
 - Plan: v1.1 · Size: S · Depends on: none
 - Read: 05 E-6, §5.1, §5.3
 - Touch: store/memory/store.go, store/memory/epochs.go, store/memory/store_test.go, engine.go, loadtest or bench file, docs/05
-- Tests: `BenchmarkEvictionPauseLargeShard`, `TestDefaultHardEpochs`
+- Tests: `BenchmarkEvictionPauseLargeShard`, `TestShards`, `TestNewEpochConfig`
 - AC: D-H23 holds, with the benchmark result recorded in docs/benchmarks.md whichever way it decides
 
 ### [ ] HRD-14 Requests with a body, hosts with an underscore
 - Plan: v1.1 · Size: S · Depends on: HRD-03
 - Read: 01 FR-FWD-4, FR-VAL-1; 06 T-5, T-6
 - Touch: internal/keys/classify.go, internal/keys/host.go, internal/keys/classify_test.go, internal/keys/validate_test.go, weirhttp/convert.go, serve_test.go, testdata/fuzz seeds, docs/01, docs/06
-- Tests: `TestGetWithBodyPassesThrough`, `TestHostUnderscore`, fuzz seeds for both
+- Tests: `TestGetWithBodyPassesThrough`, `TestGetWithBodyIsPass`, `TestRequestFromBodyOfGet`, `TestNormalizeHost`, a fuzz seed for the host
 - AC: D-H16 and D-H17 hold; nothing from a request with a body is stored or served from the store; docs/06 §6 checklist answered in the commit
 - Notes: security-sensitive (internal/keys)
 

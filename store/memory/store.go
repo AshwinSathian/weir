@@ -82,7 +82,8 @@ const defaultMaxHardEpochs = 100_000
 // exhausting memory (NFR-2).
 const MaxShards = 1 << 16
 
-// Store is the in-process store. It implements store.Store, store.Sizer and store.SharedTagEpochs.
+// Store is the in-process store. It implements store.Store, store.Sizer,
+// store.SharedTagEpochs, store.VarySetter and store.FetchTracker.
 type Store struct {
 	shards  []shard
 	mask    uint64
@@ -103,7 +104,40 @@ var (
 	_ store.Store           = (*Store)(nil)
 	_ store.Sizer           = (*Store)(nil)
 	_ store.SharedTagEpochs = (*Store)(nil)
+	_ store.FetchTracker    = (*Store)(nil)
 )
+
+// FetchBegin counts one fetch in progress that may store under k
+// (store.FetchTracker). The count has its own lock in k's shard, so it never
+// waits on, or delays, the shard's readers. Only keys with a count above 0
+// are held, so its size is bounded by the fetches in progress (P5).
+func (s *Store) FetchBegin(k store.Key) {
+	sh := &s.shards[s.shardIndex(k)]
+	sh.busyMu.Lock()
+	if sh.busy == nil {
+		sh.busy = map[store.Key]int{}
+	}
+	sh.busy[k]++
+	sh.busyMu.Unlock()
+}
+
+// FetchEnd ends one FetchBegin(k).
+func (s *Store) FetchEnd(k store.Key) {
+	sh := &s.shards[s.shardIndex(k)]
+	sh.busyMu.Lock()
+	if sh.busy[k]--; sh.busy[k] <= 0 {
+		delete(sh.busy, k)
+	}
+	sh.busyMu.Unlock()
+}
+
+// FetchInProgress reports whether a fetch that may store under k is counted.
+func (s *Store) FetchInProgress(k store.Key) bool {
+	sh := &s.shards[s.shardIndex(k)]
+	sh.busyMu.Lock()
+	defer sh.busyMu.Unlock()
+	return sh.busy[k] > 0
+}
 
 // New returns an empty Store sized by cfg, or an error for a negative
 // setting or a shard or slot count that is not a power of two within its bound.

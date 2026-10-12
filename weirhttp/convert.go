@@ -64,7 +64,10 @@ func RequestFrom(r *http.Request) *weir.Request {
 }
 
 // WriteResponse writes resp to w, without hop-by-hop fields, and closes
-// its body.
+// its body. While it writes a body that still streams from the origin it
+// sets a write deadline of Timeouts.StreamIdle before each write and clears
+// the deadline when it returns, which replaces the server's own write timeout
+// for that response (FR-TMO-2).
 func WriteResponse(w http.ResponseWriter, resp *weir.Response) error {
 	defer resp.Body.Close()
 	// A shallow copy: the map is this call's, the value slices are still the

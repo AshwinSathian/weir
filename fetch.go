@@ -61,7 +61,7 @@ type fetchResult struct {
 // StreamIdle fails it (FR-TMO-2).
 //
 // A non-nil prior, which must have validators, makes the fetch conditional
-// (FR-SRV-3). A 304 whose strong ETag differs from prior's is discarded and
+// (FR-SRV-3). A 304 whose entity-tag does not weakly match prior's is discarded and
 // the request repeated without conditionals under the same timeout and
 // limiter slot. A 304 to that retry is an origin misbehaving; it passes
 // through unstored like any other 304.
@@ -299,10 +299,13 @@ func (e *Engine) shed(c *keys.Classified, class limiter.Class, err error) fetchR
 	if class == limiter.Background {
 		emit(e.cfg.Observer, Event{Kind: EvRefreshDropped, Time: now, Partition: c.Partition, Reason: "no-slot"})
 	}
-	// FR-LIM-5: between one and one and a half queue waits, so the clients
-	// shed in one burst do not all come back in the same second.
+	// FR-LIM-5: the queue wait plus a whole number of seconds, up to half
+	// the wait again, so the clients shed in one burst do not all come back
+	// in the same second. Whole seconds, because Retry-After has no finer
+	// unit: a fraction would round every draw up to the same value.
 	after := e.cfg.Limiter.MaxQueueWait
-	after += time.Duration(float64(after/2) * e.cfg.Rand())
+	spread := after/2 + time.Second
+	after += (time.Duration(float64(spread)*e.cfg.Rand()) / time.Second) * time.Second
 	return fetchResult{err: &RetryError{Err: ErrShed, After: after}, bgDropped: class == limiter.Background}
 }
 

@@ -61,7 +61,10 @@ func (o nextOrigin) Fetch(ctx context.Context, fwd *weir.Request) (*weir.Respons
 func (o nextOrigin) serve(w http.ResponseWriter, hr *http.Request) {
 	ctx := hr.Context()
 	if o.vars != nil {
-		ctx = context.WithValue(ctx, caddyhttp.VarsCtxKey, o.vars)
+		// A copy per fetch: two fetches of one request can overlap (a Range
+		// pass-through still streaming while its background fill starts),
+		// and each writes its own start_time into the table.
+		ctx = context.WithValue(ctx, caddyhttp.VarsCtxKey, maps.Clone(o.vars))
 	}
 	if !o.clientPlaceholders {
 		// T-45: {http.request.orig_uri} must not show the handlers behind

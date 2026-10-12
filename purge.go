@@ -88,7 +88,7 @@ func (e *Engine) invalidate(ctx context.Context, c *keys.Classified, resp *Respo
 // epoch time is not covered by the epoch at all (FR-PRG-7). Any answer but
 // "no record" writes the epoch, a store error included.
 func (e *Engine) needsEpoch(ctx context.Context, primary store.Key) bool {
-	if !e.exactInvalidation || e.flights.Busy(primary) {
+	if !e.exactInvalidation || e.sg.fetches.FetchInProgress(primary) {
 		return true
 	}
 	_, err := e.sg.get(ctx, primary)

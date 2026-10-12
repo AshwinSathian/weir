@@ -279,6 +279,7 @@ func (c *Classified) AsRangePass() *Classified {
 	c.Forward()
 	out := *c
 	out.Class, out.FwdReason = ClassPass, FwdNone
+	out.Forwarded.PassThrough = true
 	out.Forwarded.Header = c.Forwarded.Header.Clone()
 	out.Forwarded.Header["Range"] = slices.Clone(c.rangeHdr)
 	if len(c.ifRange) > 0 {
@@ -315,7 +316,7 @@ func pass(out Classified, r *Request, host string) Classified {
 	}
 	// Nothing of a pass-through is stored, so the Origin may learn who asked.
 	out.Forwarded = Request{Method: r.Method, Scheme: r.Scheme, Host: host, Path: r.Path, RawQuery: r.RawQuery,
-		Header: h, Body: r.Body, Client: r.Client}
+		Header: h, Body: r.Body, Client: r.Client, PassThrough: true}
 	out.HasBody = hasBody(r)
 	return out
 }

@@ -472,6 +472,7 @@ func forwardedSeen(t *testing.T, mode weirhttp.XForwardedMode, req *weir.Request
 
 func spoofed(method, client string) *weir.Request {
 	return &weir.Request{Method: method, Scheme: "https", Host: "example.com", Path: "/a", Client: client,
+		PassThrough: method != http.MethodGet, // as the engine marks a request it passes through
 		Header: http.Header{"X-Forwarded-For": {"10.0.0.1"}, "X-Forwarded-Host": {"evil.example"},
 			"Forwarded": {"for=10.0.0.1"}, "X-Real-Ip": {"10.0.0.1"}, "X-Forwarded-Custom": {"x"}}}
 }
@@ -494,8 +495,14 @@ func TestTransportOriginSetsForwarded(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("pass-through: origin received %v, want %v", got, want)
 	}
-	if got := forwardedSeen(t, weirhttp.XForwardedSet, spoofed(http.MethodGet, "")); len(got) != 0 {
-		t.Fatalf("cacheable fetch: origin received %v, want none", got)
+	// A cacheable fetch carries such a field only because Forward.Allow or
+	// Key.Headers names it, so every mode leaves it exactly as the engine
+	// built it (INV-1): stripping a keyed field would split the cache on a
+	// value the origin never sees.
+	for _, mode := range []weirhttp.XForwardedMode{weirhttp.XForwardedStrip, weirhttp.XForwardedSet, weirhttp.XForwardedKeep} {
+		if got := forwardedSeen(t, mode, spoofed(http.MethodGet, "203.0.113.9")); len(got) != 5 || got.Get("X-Forwarded-For") != "10.0.0.1" {
+			t.Fatalf("mode %d, cacheable fetch: origin received %v, want the engine's five fields untouched", mode, got)
+		}
 	}
 }
 

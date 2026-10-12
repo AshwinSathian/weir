@@ -73,7 +73,12 @@ func (e *Engine) storedMeanwhile(ctx context.Context, sp *fetchSpec) (ent *store
 		return nil, 0, false
 	}
 	st, staleness, _ := httpcc.Evaluate(lk.entry, lk.epoch, lk.epochOK, now)
-	return lk.entry, -staleness, st == httpcc.Fresh
+	// FR-SRV-8: the first lookup found nothing, so nothing has judged the
+	// client's own no-cache, max-age or min-fresh against this entry yet.
+	if st != httpcc.Fresh || forcesValidation(&sp.c.ReqCC, httpcc.CurrentAge(lk.entry, now), -staleness) {
+		return nil, 0, false
+	}
+	return lk.entry, -staleness, true
 }
 
 // live reports whether resp.Body still streams from the origin, so exactly

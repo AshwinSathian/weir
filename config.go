@@ -191,7 +191,10 @@ type BreakerConfig struct {
 	// have failed in the window before the breaker may open, unless no fetch
 	// in the window succeeded. One failing path with many query strings then
 	// cannot open it for every other path (FR-CB-2). 0: 2; 1 turns the rule
-	// off, which is the behavior before v1.1.
+	// off, which is the behavior before v1.1. Set 1 for an origin whose
+	// traffic is one path (a single API endpoint): there a total failure is
+	// one failing path, and any success elsewhere, a 404 included, would
+	// keep the breaker shut.
 	MinPartitions int
 }
 

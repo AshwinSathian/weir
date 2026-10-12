@@ -52,10 +52,12 @@ type Engine struct {
 	cr        *cookieReport             // nil when disabled (FR-OBS-5)
 	mr        *missrate.Tracker         // nil when MissRate.Disable
 	badGroup  sync.Once                 // one warning for invalid Cache-Group-Invalidation (FR-OBS-3)
-	// exactInvalidation: one primary key covers every stored response of a
-	// URI (no keyed header, keyed cookie or experiment) and the store is in
-	// this process, so no other node fetches for it. Set once by New
-	// (needsEpoch, FR-INV-1).
+	// exactInvalidation: one primary key leads to every stored response of a
+	// URI (no keyed header, keyed cookie or experiment), and the store is in
+	// this process and counts the fetches in progress for every engine that
+	// shares it (store.FetchTracker). Set once by New (needsEpoch, FR-INV-1).
+	// Engines that share a store are assumed to share these key settings, as
+	// the Caddy adapter's pool arranges outside the seconds of a reload.
 	exactInvalidation bool
 
 	mu        sync.RWMutex // orders setting closed (write) against wg.Add in goBackground (read)
@@ -107,7 +109,7 @@ func New(cfg Config) (*Engine, error) {
 	e := &Engine{cfg: c, kcfg: keysConfig(&c), sg: newStoreGuard(c.Store, c.Timeouts.Store, c.Observer), ownStore: own, cr: newCookieReport(&c), closeDone: make(chan struct{})}
 	e.kcfgWarm, e.kcfgPurge = e.kcfg, e.kcfg
 	e.experimentsKeys()
-	e.exactInvalidation = !e.sg.remote && len(c.Key.Headers) == 0 && len(c.Key.Cookies) == 0 && e.kcfg.Assign == nil
+	e.exactInvalidation = e.sg.fetches != nil && !e.sg.remote && len(c.Key.Headers) == 0 && len(c.Key.Cookies) == 0 && e.kcfg.Assign == nil
 	l := &c.Limiter
 	e.lim = limiter.New(limiter.Config{
 		Max: l.MaxConcurrent, MaxQueue: l.MaxQueue, PerPartition: l.MaxPerPartition, PerHost: l.MaxPerHost,
@@ -124,9 +126,10 @@ func New(cfg Config) (*Engine, error) {
 		// The limiter with the client as its partition and no global cap of
 		// its own: at most MaxPerClient of one client's requests pass, the
 		// rest queue behind them. Only clients over their cap ever queue, so
-		// they are the only ones a full queue sheds. Its global cap is the
-		// most requests that could hold a place at once, which the two pools
-		// and their queues bound.
+		// they are the only ones a full queue sheds. It has no global cap:
+		// a place is held by a request in Serve (at the origin, or waiting on
+		// another request's flight), so the places held are bounded by the
+		// caller's concurrent Serve calls and the queue by MaxQueue (P5).
 		e.gate = limiter.New(limiter.Config{
 			Max: math.MaxInt32, MaxQueue: l.MaxQueue, PerPartition: l.MaxPerClient, MaxWait: l.MaxQueueWait,
 		})

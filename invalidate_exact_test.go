@@ -18,9 +18,9 @@ import (
 // epochCounter counts SetEpoch calls. remote makes the engine treat the store
 // as one other nodes share.
 type epochCounter struct {
-	store.Store
-	remote bool
-	n      atomic.Int64
+	*memory.Store // embedded whole, so the store's optional capabilities stay visible
+	remote        bool
+	n             atomic.Int64
 }
 
 func (s *epochCounter) SetEpoch(ctx context.Context, t store.Tag, ep store.Epoch) error {

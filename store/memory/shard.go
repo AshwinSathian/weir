@@ -21,6 +21,11 @@ type shard struct {
 	cap      int64
 	smallCap int64
 
+	// busy counts the fetches in progress per key (store.FetchTracker), under
+	// its own lock.
+	busyMu sync.Mutex
+	busy   map[store.Key]int
+
 	// Per-owner quota (FR-FAIR-2). owners is nil when maxOwner is 0; else it
 	// holds only owners with bytes in this shard, so len <= len(m).
 	maxOwner int64
