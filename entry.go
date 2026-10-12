@@ -51,8 +51,8 @@ func buildEntry(cfg *Config, c *keys.Classified, resp *Response, body []byte, re
 		// every entry of an origin shares would turn one false positive of
 		// the store's epoch sketch into a revalidation of them all (T-29,
 		// 05 E-8). The origin tag is the Owner only (FR-FAIR-2).
-		Tags:  []store.Tag{store.TagGlobal(), c.URITag},
-		Owner: c.OriginTag,
+		Tags:  []store.Tag{store.TagGlobal(), c.URITag()},
+		Owner: c.OriginTag(),
 	}
 	for _, g := range d.groups { // at most Limits.MaxGroups (FR-STO-10)
 		e.Tags = append(e.Tags, keys.TagGroup(c.Origin, g)) // FR-PRG-6, T-25: scoped to the origin

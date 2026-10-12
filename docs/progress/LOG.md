@@ -1865,3 +1865,35 @@ Entry template:
 - Deviations: FR-KEY-4 (`%2E` stays escaped); T-1 and docs/08 wording; docs/07 §11.3 wording. Reviewer findings that match documented decisions were left alone (HEAD+Range pass-through FR-FWD-4, exposure in bypass mode docs/10 §4, Surrogate-Control not rewritten E7, Valkey password placeholders).
 - Follow-ups for Ashwin (not done, they change a requirement, default or public contract): If-Match and If-Unmodified-Since are ignored on hits (RFC 9110 §13.1); unkeyed Pragma, Cache-Control and X-Request-Id responses are stored under the shared key (T-1/D29); QuerySort reorders values of repeated names (FR-KEY-5); Entry.Size undercounts real memory up to 16x for many tiny header values (04 §2, 05); Valkey Get decodes up to 512 MiB per record (needs a MaxObjectBytes setting); the key-generation purge precedes old-engine shutdown on reload (docs/08 §3); follower timeout fans out to uncoalesced fetches (FR-COA-4); cookie tossing on the experiment cookie (`__Host-` name). Also: apply a mode for `__Host-`, `apidiff` job, `Event.Count`.
 - Context: high
+
+## 2026-10-11 · reference-run · done
+- Branch / PR: claude/magical-carson-rwdd4q (restarted from main after PR 105 merged) / https://github.com/AshwinSathian/weir/pull/106
+- Done: recorded Ashwin's reference machine run (M4 Pro, Go 1.27.1): `make check` clean, `make load` all five scenarios and the GC test pass (GC 1.08 µs per request at 1M entries, gate 2 µs), `BenchmarkServeHitSmall` median 1 286 ns/op, 14 allocs/op. docs/benchmarks.md section and raw file added; NFR-5 ceiling set to 1.9 µs (1.5 times the median); D36 notes the 1.08 µs.
+- Tests: none (docs only).
+- Deviations: docs/01 NFR-5 and D36 text, as NFR-5 itself prescribes.
+- Follow-ups: +52% against the M1 row (847 ns/op, same machine class) exceeds the 20% rule; a back-to-back M1/M10/HEAD run with benchstat on the M4 Pro is needed. A Linux A/B shows M10 to HEAD is only +6%. Still to come from Ashwin: release-gate results, cache-tests rerun if different, tag and smoke test results.
+- Context: low
+
+## 2026-10-11 · reference-run · review-fixes
+- Branch / PR: claude/magical-carson-rwdd4q / https://github.com/AshwinSathian/weir/pull/106
+- Done: Ashwin's back-to-back `benchstat` (M1 926 ns, M10 1 150 ns, release candidate 1 223 ns, 10 runs each). The earlier +52% compared against a stale M1 row; the real growth since M1 is +32% (+24% by M10, +6% since). The +160 B/op is `keys.Classified` growing from 408 to 528 bytes, which crosses an allocator size class (allocs stay 14). Recorded in docs/benchmarks.md with the raw output; decision to accept for v1 proposed, baseline for the 20% rule is the reference run.
+- Tests: none (docs only).
+- Deviations: docs/01 NFR-5 wording.
+- Follow-ups: trimming `Classified` below 512 bytes is a v1.1 candidate; Ashwin to confirm the accept decision.
+- Context: low
+
+## 2026-10-11 · hit-path · done
+- Branch / PR: claude/magical-carson-rwdd4q / https://github.com/AshwinSathian/weir/pull/106
+- Done: one attempt to recover the +32% in `BenchmarkServeHitSmall`. Profiled the hit path and trimmed it: `forwardHeader` skips deletes a strict forward cannot need, URI and origin tags are computed on use (`Classified` under 512 bytes), one clock read per request, fewer map reads, one canonical-key scan, one allocation for origin and partition, one for the stored body, early exit in the Accept-Encoding parser. Linux box: 3.02 µs to 2.11 µs (-30%), 14 to 12 allocs/op; `BenchmarkKeyBuild` -31%.
+- Tests: `FuzzForwardHeaderMatchesReference`, `FuzzAcceptEncodingMatchesReference`, `FuzzIsCanonicalKey` (each keeps the old implementation in a test file and holds the new one equal); `make check` passes; keys fuzz sweep and a 0.1-scale load smoke run clean.
+- Deviations: none in the docs' requirements; `Classified.URITag` and `OriginTag` became methods (internal package).
+- Follow-ups: Ashwin to rerun the three-commit benchstat on the M4 Pro with the branch tip, then I update the baseline in docs/benchmarks.md; remaining cost is mostly inherent (header map clone for P4, Cache-Status string, the forwarded map).
+- Context: high
+
+## 2026-10-12 · hit-path · done
+- Branch / PR: claude/magical-carson-rwdd4q / https://github.com/AshwinSathian/weir/pull/106
+- Done: Ashwin's M4 Pro reruns (machine idle, `benchstat` of M1, M10 and the optimized tip, 10 runs each, twice): M1 870 / 854 ns, M10 1 087 / 1 070 ns (+25%), optimized 833 / 821 ns (-4% against M1, p<0.01), 12 allocs/op against 14. The +32% is gone. An earlier run taken with several sessions and Chrome video open (±38%) is discarded. Baseline for the 20% rule is now this run (about 0.83 µs); NFR-5 ceiling set to 1.25 µs, replacing the 1.9 µs derived from the first, noisier run.
+- Tests: none (docs only).
+- Deviations: docs/01 NFR-5 value; supersedes the "accept +32%" proposal in docs/benchmarks.md.
+- Follow-ups: still waiting on Ashwin for the release-gate workflow results and the tag procedure.
+- Context: low

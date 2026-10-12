@@ -52,9 +52,9 @@ type Classified struct {
 	Unkeyed    bool      // the forward carries an unkeyed Forward.Allow field, Cache-Control or Pragma, or ForwardAll (FR-STO-12, T-31)
 	Forwarded  Request   // the request the origin sees on a miss
 	Primary    store.Key // zero for ClassPass
-	URITag     store.Tag
-	OriginTag  store.Tag
-	Origin     string // scheme://host[:port]
+	Origin     string    // scheme://host[:port]
+	TagPath    string    // path and query the URI tag covers: the rewritten ones, also for ClassPass
+	TagQuery   string
 	Partition  string // Origin + path, truncated to maxPartitionBytes
 	PartitionH uint64 // maphash of Partition, per-process seed
 	HostH      uint64 // maphash of the normalized host, per-process seed (FR-FAIR-1)
@@ -71,6 +71,23 @@ type Classified struct {
 	ifRange    []string // the client's If-Range lines, for AsRangePass
 	req        *Request // the client request, for AsBypass; never modified
 }
+
+// CanonicalHeader is the client's header with canonical keys, the one every
+// decision in Classify read. Nil when the request was refused.
+func (c *Classified) CanonicalHeader() http.Header {
+	if c.req == nil {
+		return nil
+	}
+	return c.req.Header
+}
+
+// URITag is the tag of the request's URI (04 §3.1). It is computed on use,
+// not in Classify: a hit reads the tags the entry carries, so only stores,
+// purges and invalidations pay for the SHA-256.
+func (c *Classified) URITag() store.Tag { return TagURI(c.Origin, c.TagPath, c.TagQuery) }
+
+// OriginTag is the tag of the request's origin; it is also the entry owner.
+func (c *Classified) OriginTag() store.Tag { return TagOrigin(c.Origin) }
 
 const maxPartitionBytes = 512
 
@@ -97,24 +114,28 @@ func Classify(r *Request, c *Config) (Classified, error) {
 		path = normalizePath(path)
 	}
 	query := rewriteQuery(r.RawQuery, c)
-	origin := r.Scheme + "://" + host
+	// One allocation for both strings: Origin is the front of Partition.
+	partition := r.Scheme + "://" + host + path
+	origin := partition[:len(r.Scheme)+len("://")+len(host)]
 
+	// One map read per field: this runs on every request, hits included.
+	rng, ifRange, inm := h["Range"], h["If-Range"], h["If-None-Match"]
 	out := Classified{
 		Head:       r.Method == http.MethodHead,
 		req:        r,
-		Range:      len(h["Range"]) > 0,
-		rangeHdr:   h["Range"],
-		RangeValue: single(h["Range"]),
-		HasIfRange: len(h["If-Range"]) > 0,
-		IfRange:    single(h["If-Range"]),
-		ifRange:    h["If-Range"],
+		Range:      len(rng) > 0,
+		rangeHdr:   rng,
+		RangeValue: single(rng),
+		HasIfRange: len(ifRange) > 0,
+		IfRange:    single(ifRange),
+		ifRange:    ifRange,
 		Authorized: len(h["Authorization"]) > 0,
 		expHeader:  c.ExpHeader,
 		expCookie:  c.ExpCookie,
-		URITag:     TagURI(origin, path, query),
-		OriginTag:  TagOrigin(origin),
 		Origin:     origin,
-		Partition:  origin + path,
+		TagPath:    path,
+		TagQuery:   query,
+		Partition:  partition,
 		ReqCC:      httpcc.ParseRequest(h),
 	}
 	if len(out.Partition) > maxPartitionBytes {
@@ -159,10 +180,10 @@ func Classify(r *Request, c *Config) (Classified, error) {
 	out.Variants = dims
 	out.Primary = PrimaryKey(&KeyInput{Method: http.MethodGet, Scheme: r.Scheme, Host: host, Path: path, Query: query,
 		Headers: keyedHeaders(fh, c), CookieNames: c.Cookies, Cookies: cookies, Variants: dims})
-	out.ClientCond = ClientConditionals{IfNoneMatch: parseIfNoneMatch(h["If-None-Match"], c)}
+	out.ClientCond = ClientConditionals{IfNoneMatch: parseIfNoneMatch(inm, c)}
 	// RFC 9110 §13.1.3: If-Modified-Since is ignored whenever If-None-Match
 	// is present, even when that field is malformed or over the limit.
-	if ims := h["If-Modified-Since"]; len(ims) == 1 && h["If-None-Match"] == nil {
+	if ims := h["If-Modified-Since"]; len(ims) == 1 && inm == nil {
 		if t, err := http.ParseTime(ims[0]); err == nil {
 			out.ClientCond.IfModifiedSince = t
 		}

@@ -30,9 +30,8 @@ func classifiedGET(path string, authorized bool) *keys.Classified {
 	return &keys.Classified{
 		Forwarded:  keys.Request{Method: http.MethodGet, Scheme: "https", Host: "example.com", Path: path},
 		Authorized: authorized,
-		URITag:     keys.TagURI(origin, path, ""),
-		OriginTag:  keys.TagOrigin(origin),
 		Origin:     origin,
+		TagPath:    path,
 	}
 }
 
@@ -366,7 +365,7 @@ func TestBuildEntry(t *testing.T) {
 				t.Errorf("times: stored %v request %v fetch %v", e.StoredAt, e.RequestTime, e.FetchDuration)
 			}
 			// 05 E-8: no purge names an origin, so the origin tag is the owner only.
-			if !slices.Equal(e.Tags, []store.Tag{store.TagGlobal(), c.URITag}) || e.Owner != c.OriginTag {
+			if !slices.Equal(e.Tags, []store.Tag{store.TagGlobal(), c.URITag()}) || e.Owner != c.OriginTag() {
 				t.Error("tags or owner wrong")
 			}
 			if e.Flags != tc.flags {
@@ -567,7 +566,7 @@ func TestCacheGroupsStorability(t *testing.T) {
 			}
 			// 05 E-12, T-29: storeGuard.newestEpoch splits Entry.Tags after
 			// the second tag, so this order is load-bearing.
-			want := []store.Tag{store.TagGlobal(), c.URITag}
+			want := []store.Tag{store.TagGlobal(), c.URITag()}
 			for _, g := range tc.groups {
 				want = append(want, keys.TagGroup(c.Origin, g))
 			}

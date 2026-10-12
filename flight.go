@@ -150,7 +150,7 @@ func (e *Engine) reenter(ctx context.Context, sp *fetchSpec, origin Origin) (*Re
 		return e.fetchDirect(ctx, sp, origin)
 	}
 	ck := sp.lk.ck
-	return e.cacheable(ctx, sp.c, origin, &ck)
+	return e.cacheable(ctx, sp.c, origin, &ck, time.Now())
 }
 
 // published reports whether f's result is ready without waiting.

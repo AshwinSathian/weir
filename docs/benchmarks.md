@@ -1,6 +1,6 @@
 # Weir benchmarks
 
-Updated: 2026-10-09
+Updated: 2026-10-11
 
 Benchmark results per milestone, so each milestone review can compare against the previous one with `benchstat` ([07 §10](07-testing-strategy.md)). NFR-5 budgets apply from M10; until then these numbers are a baseline, not a gate.
 
@@ -83,7 +83,7 @@ Benchmarks added after M1 (M10 only, same box):
 
 ### NFR-5
 
-`BenchmarkServeHitSmall` is 2.7 µs/op and 14 allocs/op here, inside the budget of 4 µs and 16 allocs, but this box is not the reference machine and the M1 baseline on the M4 Pro is 0.85 µs, so the absolute budget has 4.7x slack there and cannot gate anything. The 20% regression rule is the gate that works, and the +18% above sits at its edge on this box. NFR-5 is left as written ("provisional"); finalizing it needs the reference-machine rerun and Ashwin's approval of any wording change. Pending that rerun, treat the M1 to M10 growth as a finding to explain, not a pass. Decided 2026-10-08: the 16 allocs/op bound and the 20% rule apply now; the 4 µs ceiling ends its provisional state when six or more runs on an Apple M-series machine at the M10 head are recorded here with `benchstat` against `benchmarks/m1.txt`, the growth is explained, and the ceiling is set to 1.5 times the median. If that growth is over 20%, a perf card comes first.
+`BenchmarkServeHitSmall` is 2.7 µs/op and 14 allocs/op here, inside the budget of 4 µs and 16 allocs, but this box is not the reference machine and the M1 baseline on the M4 Pro is 0.85 µs, so the absolute budget has 4.7x slack there and cannot gate anything. The 20% regression rule is the gate that works, and the +18% above sits at its edge on this box. NFR-5 was left as written ("provisional") at the time; the ceiling was set from the reference run of 2026-10-11, below; finalizing it needs the reference-machine rerun and Ashwin's approval of any wording change. Pending that rerun, treat the M1 to M10 growth as a finding to explain, not a pass. Decided 2026-10-08: the 16 allocs/op bound and the 20% rule apply now; the 4 µs ceiling ends its provisional state when six or more runs on an Apple M-series machine at the M10 head are recorded here with `benchstat` against `benchmarks/m1.txt`, the growth is explained, and the ceiling is set to 1.5 times the median. If that growth is over 20%, a perf card comes first.
 
 ### Parallel hits and the miss-rate tracker
 
@@ -146,3 +146,100 @@ What it says:
 - The share depends on its denominator. At 1.76 µs of GC per request, a server whose hit costs 12.6 µs (this harness) sees 12.3%, one whose hit costs 30 µs (net/http, TLS) about 5.5%. GC µs per request does not move with that, so it is the better gate.
 
 Recommendation, adopted 2026-10-09 (Ashwin delegated the decision; D36 in 01 now says this, M16-02 moved to the deferred cards in 20-later.md, `TestGCAt1MEntries` reports GC µs per request against the 2 µs gate): keep the heap layout and do not start M16-02 now. Replace the 10% share line with a gate on GC µs per request (a cost per harness hit, about 1.7 KiB allocated per request, with `GOMEMLIMIT` unset: a server that allocates more per request pays proportionally more) at 1M entries and 1 KiB bodies, at most 2 µs with default `GOGC` (now 1.76; the margin is thin and the baseline drifted 15.4% to 12.3% between two runs on this box, so re-base the number on the reference-machine rerun), and document `GOGC=200` as the operator lever. Revisit M16-02 if a deployment measures above the gate or needs more than 1M entries, and if so scope it as a design change first (a serve-from-encoded-bytes path), since the layout alone fails NFR-5. Reference-machine rerun still pending for both this and the M10 table.
+
+## Reference machine run (2026-10-11)
+
+First run on the reference machine, at `138d4ff` (the merge of PR 105, the v1.0.0 release candidate). Apple M4 Pro, 12 cores, macOS, Go 1.27.1 darwin/arm64. `make check` passed in all four modules (0 lint issues, trace 146/146). Raw output: [benchmarks/reference-2026-10-11.txt](benchmarks/reference-2026-10-11.txt).
+
+### Load scenarios (`make load`, scale 1, 473 s)
+
+| Scenario | Measured | Threshold | Result |
+|---|---|---|---|
+| steady hits | 26.3 M requests, 438 k/s achieved (target 442 k/s, 50% of saturated), hit ratio 1.0000, p50 2.0 µs, p99 18.4 to 22.5 µs in each of six windows, 0 origin calls after warm | ratio > 99%, median-window p99 < 200 µs | pass |
+| synchronized expiry | 10 000 keys stored in 1.7 s, `max-age=60`, all 10 000 refetched, origin peak in-flight 32, busiest second 1 485 origin calls, 0 client errors | refetch ≥ 90%, in-flight ≤ 32, ≤ 2 000 calls/s | pass |
+| busting flood plus normal | 99 976 flood requests (71 151 shed), flood in-flight peak 8 (`MaxPerPartition` 8), normal offered 499/s with 0 drops, normal p99 36.9 µs alone and 41.0 µs under flood (+11%) | in-flight ≤ 8, p99 within 20% (50 µs floor) | pass |
+| origin brownout (×20) | 18 breaker open events, ended closed, 52 975 stale responses, every request 2xx before, during and after, peak 48 goroutines | breaker per config, stale served, no goroutine growth | pass |
+| store flap (50%) | 10.8 M requests, 0 client errors, slowest request 47.1 ms (bound 208.8 ms), store breaker 14 open / 8 closed | bounded latency, breaker cycles | pass |
+
+All five passed, and `TestGCAt1MEntries` passed as well.
+
+### GC cost at 1M entries (D36)
+
+| | 10 000 entries | 1 000 000 entries |
+|---|---:|---:|
+| GC CPU per forced cycle | 9.6 ms | 1 299 ms |
+| paced p50 / p99 (forced cycle every 5 s) | 4.6 µs / 36.9 µs | 3.8 µs / 36.9 µs |
+| paced slowest request | 2.0 ms | 11.9 ms |
+| saturated requests in 60 s | 61.4 M | 43.4 M |
+| allocation per request | 1 816 B | 1 824 B |
+| non-GC CPU per request (generator included) | 11.0 µs | 14.7 µs |
+| natural cycles in the window | 4 127 | 36 |
+| GC share of busy CPU, runtime-reported | 3.1% | 6.2% |
+| GC share of busy CPU, projected | 5.7% | 6.8% |
+| **GC µs per request** | 0.66 | **1.08** |
+
+The D36 gate (at most 2 µs of GC per request at 1M entries) holds with 1.08 µs, against 1.76 µs on the 4-core Xeon. The share of busy CPU is 6.2% to 6.8%, under the 10% line that PLAN M10.5b set. The pointer-light layout (M16-02) stays deferred.
+
+### `BenchmarkServeHitSmall` (NFR-5)
+
+| Run | ns/op | B/op | allocs/op |
+|---|---:|---:|---:|
+| 1 | 1 856 | 1 640 | 14 |
+| 2 | 1 247 | 1 640 | 14 |
+| 3 | 1 304 | 1 640 | 14 |
+| 4 | 1 268 | 1 640 | 14 |
+| 5 | 1 267 | 1 640 | 14 |
+| 6 | 1 545 | 1 640 | 14 |
+| median of 6 | 1 286 | 1 640 | 14 |
+
+The median is 1.29 µs and the allocation count is 14, inside the bound of 16. NFR-5 first set the ns/op ceiling at 1.5 times this median, 1.9 µs; the optimized hit path below supersedes it with 1.25 µs. Runs 1 and 6 are noisy; the four quiet runs sit within 1 247 to 1 304.
+
+**Growth since M1, measured back to back.** The M1 row above (847 ns/op) was taken on another day and is not comparable with this run: `73e4d2e`, `b909550` (M10) and `138d4ff` rerun on the same machine in one session with `-count 10` and compared with `benchstat` (raw: [benchmarks/reference-2026-10-11-benchstat.txt](benchmarks/reference-2026-10-11-benchstat.txt)):
+
+| Commit | ns/op | vs M1 | B/op | allocs/op |
+|---|---:|---:|---:|---:|
+| M1 `73e4d2e` | 926 ± 1% | | 1 480 | 14 |
+| M10 `b909550` | 1 150 ± 1% | +24% (p<0.001) | 1 480 | 14 |
+| release candidate `138d4ff` | 1 223 ± 3% | +32% (p<0.001) | 1 640 | 14 |
+
+So the +52% in the first table was a comparison with a stale number; the real growth since M1 is +32%, still over the 20% line in NFR-5. It has two parts:
+
+- M1 to M10, +24%: the miss-rate tracker, the breaker and the event plumbing, which arrived after M1. The M10 review already measured +18% on the Linux box, called it the edge of the rule and accepted it (section above). Allocations and bytes are unchanged.
+- M10 to the release candidate, +6% (the same +6% as on the Linux box): `keys.Classified`, which `Serve` allocates once per request, grew from 408 to 528 bytes as range, experiment and conditional fields were added. That moves it up an allocator size class, which accounts for all of the +160 B/op (an allocation profile shows the whole difference in `(*Engine).Serve`, and the count of 14 allocations did not change); the extra bytes to zero and copy account for the time.
+
+Resolved by the hit path optimization at the end of this file: on the M4 Pro the optimized branch is 4% faster than M1, so the growth is gone. The decision to accept it, proposed here first, is superseded.
+
+## Hit path optimization (2026-10-11)
+
+After the reference run showed +32% against M1, the hit path was profiled and trimmed. Measured on the 4-core Linux box (not the reference machine), `-count 10`, `benchstat`, base `138d4ff`; raw output: [benchmarks/hit-path-opt-linux4.txt](benchmarks/hit-path-opt-linux4.txt).
+
+| Benchmark | base | now | change | allocs/op |
+|---|---:|---:|---|---:|
+| `BenchmarkServeHitSmall` | 3.02 µs | 2.11 µs | -30% (p<0.001) | 14 → 12 |
+| `BenchmarkKeyBuild` | 2.58 µs | 1.77 µs | -31% | 9 → 9 |
+| `BenchmarkAcceptEncoding` | 356 ns | 293 ns | -18% | 0 → 0 |
+
+B/op fell from 1 640 to 1 536. What changed, in order of gain:
+
+- `forwardHeader` no longer deletes about thirty names a strict forward cannot hold (with no `Allow` and no `Key.Headers` the map only ever holds the default-forward fields); a Connection option still removes what it names.
+- The URI and origin tags are computed on use. A hit reads the tags stored on the entry, so `Classify` no longer hashes two SHA-256 tags per request, and `Classified` drops under 512 bytes, one allocator size class.
+- One `time.Now` per request instead of three, and not under the miss-rate mutex.
+- Fewer map reads (Range, If-Range, If-None-Match, Cache-Control read once; `IsUpgrade` indexes instead of canonicalizing constant keys), one canonical-key scan per request, one allocation for origin and partition, one for the stored body, and an early exit in the Accept-Encoding parser.
+
+Every change to `internal/keys` is held to the old behavior by a differential fuzz target that keeps the previous implementation in the test files (`FuzzForwardHeaderMatchesReference`, `FuzzAcceptEncodingMatchesReference`, `FuzzIsCanonicalKey`) next to `FuzzForwardEqualsKey`.
+
+### On the reference machine
+
+Two back-to-back runs on the M4 Pro, machine otherwise idle, three builds interleaved by `benchstat` (`-count 10` each; raw: [benchmarks/hit-path-opt-m4pro.txt](benchmarks/hit-path-opt-m4pro.txt)). An earlier run with several Claude Code sessions and a Chrome video stream open had a ±38% spread and is discarded.
+
+| Build | Run 1 ns/op | Run 2 ns/op | vs M1 (run 1 / run 2) | B/op | allocs/op |
+|---|---:|---:|---|---:|---:|
+| M1 `73e4d2e` | 870.5 ± 1% | 854.1 ± 2% | | 1 480 | 14 |
+| M10 `b909550` | 1 087 ± 3% | 1 070.5 ± 1% | +24.9% / +25.3% | 1 480 | 14 |
+| optimized branch | 833.5 ± 3% | 821.4 ± 4% | **-4.3% / -3.8%** (p<0.01) | 1 536 | 12 |
+
+The optimized hit path is about 4% faster than M1 and 23% faster than M10 on the M4 Pro, with two fewer allocations. The +32% growth since M1 that the first reference run exposed is gone. Bytes per op are 56 above M1 (1 536 against 1 480), not the 160 above M1 of the release candidate, and the allocation count is lower.
+
+The gain is smaller on the M4 Pro than on the Xeon (-30% there against M10-to-branch -23% here, relative to the release candidate), as expected: SHA-256 is cheaper with the ARM instructions, so the two tags no longer hashed per hit saved less.
+
+**New baseline.** The 20% regression rule is measured from this run, a median of about 0.83 µs. NFR-5 sets the ns/op ceiling at 1.5 times that, 1.25 µs (docs/01), replacing the 1.9 µs derived from the first, noisier reference run. The first reference run above stays as the record of the release candidate.

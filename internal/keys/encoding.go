@@ -15,18 +15,32 @@ func aeBucket(lines []string, c *Config) string {
 	if len(lines) == 0 || combinedLen(lines) > c.MaxKeyedHeaderBytes {
 		return "identity"
 	}
+	// Every line is checked before any is read, so the early exit below can
+	// never skip a line that would have forced identity.
+	for _, line := range lines {
+		if !printableASCII(line) {
+			return "identity"
+		}
+	}
 	// q holds thousandths per supported coding, -1 when not listed.
 	var small [8]int
 	q := small[:0]
 	for range c.AcceptEncoding {
 		q = append(q, -1)
 	}
+	left := len(q) // codings not seen yet
 	star := -1
 	for _, line := range lines {
-		if !printableASCII(line) {
-			return "identity"
+		if left == 0 {
+			break // star only fills codings that were not listed
 		}
-		for member := range strings.SplitSeq(line, ",") {
+		for more := true; more && left > 0; {
+			member := line
+			if i := strings.IndexByte(line, ','); i >= 0 {
+				member, line = line[:i], line[i+1:]
+			} else {
+				more = false
+			}
 			coding, params, hasParams := strings.Cut(member, ";")
 			coding = strings.Trim(coding, " \t")
 			w := 1000
@@ -46,6 +60,7 @@ func aeBucket(lines []string, c *Config) string {
 			for i, s := range c.AcceptEncoding {
 				if q[i] < 0 && strings.EqualFold(coding, s) {
 					q[i] = w // first occurrence wins
+					left--
 				}
 			}
 		}

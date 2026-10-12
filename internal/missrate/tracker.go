@@ -73,12 +73,17 @@ func New(cfg Config, emit func(end time.Time, found []Anomaly)) *Tracker {
 // anomalies and counts this request in the new window. There is no timer:
 // an idle tracker reports its last window on the next request.
 func (t *Tracker) Observe(h uint64, sample string, miss bool) {
+	t.ObserveAt(time.Now(), h, sample, miss)
+}
+
+// ObserveAt is Observe with the time the caller already read, so a request
+// reads the clock once for everything it times (and not under the lock).
+func (t *Tracker) ObserveAt(now time.Time, h uint64, sample string, miss bool) {
 	if t == nil {
 		return
 	}
 	t.mu.Lock()
 	var found []Anomaly
-	now := time.Now()
 	end := t.start.Add(t.cfg.Window)
 	closed := !now.Before(end)
 	if closed {

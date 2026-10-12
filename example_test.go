@@ -8,15 +8,16 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/AshwinSathian/weir"
 )
 
 // newExampleOrigin counts calls and returns a response cacheable for a minute.
-func newExampleOrigin(calls *int) weir.Origin {
+func newExampleOrigin(calls *atomic.Int64) weir.Origin {
 	return weir.OriginFunc(func(_ context.Context, req *weir.Request) (*weir.Response, error) {
-		*calls++
+		calls.Add(1) // Warm and background refreshes call the origin concurrently
 		return &weir.Response{
 			StatusCode: http.StatusOK,
 			Header:     http.Header{"Cache-Control": {"max-age=60"}},
@@ -56,7 +57,7 @@ func ExampleEngine_Serve() {
 	}
 	defer exampleClose(e)
 
-	calls := 0
+	var calls atomic.Int64
 	origin := newExampleOrigin(&calls)
 	for range 2 {
 		resp, err := e.Serve(context.Background(), exampleGet("/page"), origin)
@@ -68,7 +69,7 @@ func ExampleEngine_Serve() {
 		resp.Body.Close()
 		fmt.Printf("%d %q hit=%v\n", resp.StatusCode, body, resp.Cache.Hit)
 	}
-	fmt.Println("origin calls:", calls)
+	fmt.Println("origin calls:", calls.Load())
 	// Output:
 	// 200 "hello /page" hit=false
 	// 200 "hello /page" hit=true
@@ -85,9 +86,9 @@ func ExampleEngine_Close() {
 	defer cancel()
 	fmt.Println("close:", e.Close(ctx))
 
-	calls := 0
+	var calls atomic.Int64
 	_, err = e.Serve(ctx, exampleGet("/"), newExampleOrigin(&calls))
-	fmt.Println("serve after close:", errors.Is(err, weir.ErrClosed), "origin calls:", calls)
+	fmt.Println("serve after close:", errors.Is(err, weir.ErrClosed), "origin calls:", calls.Load())
 	// Output:
 	// close: <nil>
 	// serve after close: true origin calls: 0
@@ -101,7 +102,7 @@ func ExampleEngine_Purge() {
 	}
 	defer exampleClose(e)
 
-	calls := 0
+	var calls atomic.Int64
 	origin := newExampleOrigin(&calls)
 	fetch := func() {
 		resp, err := e.Serve(context.Background(), exampleGet("/page"), origin)
@@ -114,7 +115,7 @@ func ExampleEngine_Purge() {
 	}
 	fetch()
 	fetch()
-	fmt.Println("calls before purge:", calls)
+	fmt.Println("calls before purge:", calls.Load())
 
 	err = e.Purge(context.Background(), weir.Purge{
 		Mode: weir.PurgeHard,
@@ -125,7 +126,7 @@ func ExampleEngine_Purge() {
 		return
 	}
 	fetch()
-	fmt.Println("calls after purge:", calls)
+	fmt.Println("calls after purge:", calls.Load())
 	// Output:
 	// calls before purge: 1
 	// calls after purge: 2
@@ -139,7 +140,7 @@ func ExampleEngine_Warm() {
 	}
 	defer exampleClose(e)
 
-	calls := 0
+	var calls atomic.Int64
 	origin := newExampleOrigin(&calls)
 	reqs := slices.Values([]*weir.Request{exampleGet("/a"), exampleGet("/b")})
 
@@ -162,7 +163,7 @@ func ExampleTrackingParams() {
 	}
 	defer exampleClose(e)
 
-	calls := 0
+	var calls atomic.Int64
 	origin := newExampleOrigin(&calls)
 	for _, q := range []string{"utm_source=a", "utm_source=b", "fbclid=xyz"} {
 		req := exampleGet("/page")
@@ -175,7 +176,7 @@ func ExampleTrackingParams() {
 		_, _ = io.Copy(io.Discard, resp.Body)
 		resp.Body.Close()
 	}
-	fmt.Println("origin calls:", calls)
+	fmt.Println("origin calls:", calls.Load())
 	// Output: origin calls: 1
 }
 

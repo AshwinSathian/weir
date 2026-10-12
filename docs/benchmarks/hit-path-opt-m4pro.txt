@@ -1,0 +1,31 @@
+# BenchmarkServeHitSmall on the reference machine after the hit path optimization, 2026-10-11/12.
+# Apple M4 Pro, 12 cores, Go 1.27.1 darwin/arm64, -count 10 per commit, machine otherwise idle (second pair of runs).
+#   73e4d2e  M1        b909550  M10        claude/magical-carson-rwdd4q  tip of the optimization branch (0e71b26)
+# Two runs, same procedure. An earlier run on a loaded machine (several Claude Code sessions, Chrome streaming video)
+# gave 972.6 / 1381 / 1344 ± 38% and was discarded.
+
+## Run 1
+                 │ /tmp/bench-73e4d2e.txt │        /tmp/bench-b909550.txt        │ /tmp/bench-claude_magical-carson-rwdd4q.txt │
+                 │         sec/op         │    sec/op     vs base                │        sec/op         vs base               │
+ServeHitSmall-12              870.5n ± 1%   1087.0n ± 3%  +24.88% (p=0.000 n=10)            833.5n ± 3%  -4.25% (p=0.003 n=10)
+
+                 │ /tmp/bench-73e4d2e.txt │      /tmp/bench-b909550.txt      │ /tmp/bench-claude_magical-carson-rwdd4q.txt │
+                 │          B/op          │     B/op      vs base            │         B/op          vs base               │
+ServeHitSmall-12             1.445Ki ± 0%   1.445Ki ± 0%  ~ (p=1.000 n=10) ¹           1.500Ki ± 0%  +3.78% (p=0.000 n=10)
+
+                 │ /tmp/bench-73e4d2e.txt │     /tmp/bench-b909550.txt     │ /tmp/bench-claude_magical-carson-rwdd4q.txt │
+                 │       allocs/op        │ allocs/op   vs base            │      allocs/op       vs base                │
+ServeHitSmall-12               14.00 ± 0%   14.00 ± 0%  ~ (p=1.000 n=10) ¹            12.00 ± 0%  -14.29% (p=0.000 n=10)
+
+## Run 2
+                 │ /tmp/bench-73e4d2e.txt │        /tmp/bench-b909550.txt        │ /tmp/bench-claude_magical-carson-rwdd4q.txt │
+                 │         sec/op         │    sec/op     vs base                │        sec/op         vs base               │
+ServeHitSmall-12              854.1n ± 2%   1070.5n ± 1%  +25.34% (p=0.000 n=10)            821.4n ± 4%  -3.82% (p=0.005 n=10)
+
+                 │ /tmp/bench-73e4d2e.txt │      /tmp/bench-b909550.txt      │ /tmp/bench-claude_magical-carson-rwdd4q.txt │
+                 │          B/op          │     B/op      vs base            │         B/op          vs base               │
+ServeHitSmall-12             1.445Ki ± 0%   1.445Ki ± 0%  ~ (p=1.000 n=10) ¹           1.500Ki ± 0%  +3.78% (p=0.000 n=10)
+
+                 │ /tmp/bench-73e4d2e.txt │     /tmp/bench-b909550.txt     │ /tmp/bench-claude_magical-carson-rwdd4q.txt │
+                 │       allocs/op        │ allocs/op   vs base            │      allocs/op       vs base                │
+ServeHitSmall-12               14.00 ± 0%   14.00 ± 0%  ~ (p=1.000 n=10) ¹            12.00 ± 0%  -14.29% (p=0.000 n=10)

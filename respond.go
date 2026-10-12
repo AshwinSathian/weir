@@ -49,10 +49,19 @@ func (e *Engine) fromEntry(c *keys.Classified, ent *store.Entry, now time.Time, 
 	}
 	var body io.ReadCloser = http.NoBody
 	if !c.Head && len(data) > 0 {
-		body = io.NopCloser(bytes.NewReader(data))
+		bb := &storedBody{}
+		bb.Reset(data)
+		body = bb
 	}
 	return e.finish(&Response{StatusCode: status, Header: h, Body: body}, ci)
 }
+
+// storedBody serves a stored body: a bytes.Reader that closes as a no-op, in
+// one allocation where io.NopCloser(bytes.NewReader(b)) takes two. The
+// embedded Reader keeps WriteTo, so io.Copy does not stage the bytes.
+type storedBody struct{ bytes.Reader }
+
+func (*storedBody) Close() error { return nil }
 
 // finish sets ci and appends the Cache-Status member after any the origin
 // sent (FR-SRV-9). Header value slices may be shared with a stored entry,
