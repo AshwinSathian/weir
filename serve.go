@@ -228,13 +228,15 @@ func digits(s string) (int64, bool) {
 
 // lookupResult is what the store holds for a request (04 §6.3).
 type lookupResult struct {
-	ck      store.Key    // the key the records below live under: Primary, or the variant key under a vary spec
-	entry   *store.Entry // a response record, not yet evaluated
-	marker  bool         // a hit-for-miss marker
-	neg     *store.Entry // a negative entry (FR-NEG-3)
-	epoch   store.Epoch
-	epochOK bool
-	fwd     FwdReason // reason to report if the request goes forward
+	ck     store.Key    // the key the records below live under: Primary, or the variant key under a vary spec
+	entry  *store.Entry // a response record, not yet evaluated
+	marker bool         // a hit-for-miss marker
+	// oversize: the marker was written for an object over MaxObjectBytes.
+	oversize bool
+	neg      *store.Entry // a negative entry (FR-NEG-3)
+	epoch    store.Epoch
+	epochOK  bool
+	fwd      FwdReason // reason to report if the request goes forward
 }
 
 // lookup reads the primary key and, under a vary spec, the variant key
@@ -262,7 +264,7 @@ func (e *Engine) lookup(ctx context.Context, c *keys.Classified, now time.Time) 
 		lk.epoch, lk.epochOK, err = e.sg.newestEpoch(ctx, rec.Tags, rec.RequestTime)
 		lk.epochOK = lk.epochOK && err == nil
 	case store.KindHitForMiss:
-		lk.marker = true
+		lk.marker, lk.oversize = true, rec.Status == markerOversize
 	case store.KindNegative:
 		lk.neg = rec
 	}
@@ -329,7 +331,12 @@ func (e *Engine) cacheable(ctx context.Context, c *keys.Classified, origin Origi
 // (fetchDirect).
 func (e *Engine) fetchStored(ctx context.Context, sp *fetchSpec, origin Origin) *flightResult {
 	c, prior := sp.c, sp.prior
-	fr := &flightResult{fetchResult: e.fetch(ctx, c, origin, sp.class, true, prior, sp.permit)}
+	// FR-STO-12, T-18: a marker for an over-size object says the body will
+	// not fit, so the fetch behind it streams instead of holding
+	// MaxObjectBytes that nothing will keep. The next attempt to store comes
+	// when the marker has expired. Behind any other marker the fetch is
+	// buffered, and a response that has become storable is stored.
+	fr := &flightResult{fetchResult: e.fetch(ctx, c, origin, sp.class, !sp.lk.oversize, prior, sp.permit)}
 	if fr.notMod && e.hardPurgedSince(ctx, prior) {
 		// FR-PRG-3, FR-PRG-7: a hard purge after prior was stored makes it
 		// unreachable, and it landed while this request waited for a slot,
@@ -364,14 +371,16 @@ func (e *Engine) fetchStored(ctx context.Context, sp *fetchSpec, origin Origin) 
 	switch {
 	case res.stream: // FR-STR-1
 		emit(e.cfg.Observer, Event{Kind: EvNotStored, Time: res.respTime, Partition: c.Partition, Reason: "stream"})
+	case res.unbuffered: // fetched behind an over-size marker: nothing to store
+		emit(e.cfg.Observer, Event{Kind: EvNotStored, Time: res.respTime, Partition: c.Partition, Reason: "too-large"})
 	case res.over:
 		emit(e.cfg.Observer, Event{Kind: EvNotStored, Time: res.respTime, Partition: c.Partition, Reason: "too-large"})
-		if sp.rangeFill {
-			// T-37: the 206 total promised a storable object. Without a marker
-			// every later Range request would repeat this MaxObjectBytes read.
-			now := res.respTime
-			e.setUnlessResponse(ctx, sp.lk.ck, sp.purged,
-				&store.Entry{Kind: store.KindHitForMiss, StoredAt: now, Expires: now.Add(e.cfg.Coalesce.HitForMissTTL)})
+		// FR-STO-12, T-37: without a marker every later request would wait
+		// for a flight to read MaxObjectBytes and then fetch again. T-31: the
+		// response's size is the response's own, unless an unkeyed input
+		// could have chosen it.
+		if !c.Authorized && !c.ReqCC.NoStore && !c.Unkeyed {
+			e.setMarker(context.WithoutCancel(ctx), sp, sp.found, res.respTime, true)
 		}
 	case serverError(res.resp.StatusCode):
 		// Before Publish, so before the creator's respond writes to resp.
@@ -439,9 +448,15 @@ func (e *Engine) storeResponse(ctx context.Context, c *keys.Classified, res *fet
 	if !d.ok {
 		emit(e.cfg.Observer, Event{Kind: EvNotStored, Time: res.respTime, Partition: c.Partition, Reason: d.reason})
 		if d.responseDriven {
-			now := res.respTime
-			e.setUnlessResponse(ctx, sp.lk.ck, sp.purged,
-				&store.Entry{Kind: store.KindHitForMiss, StoredAt: now, Expires: now.Add(e.cfg.Coalesce.HitForMissTTL)})
+			// A full response replaces what the request found (RFC 9111
+			// §4.3.3), and this one says the URI is no longer storable. A 304
+			// only confirmed the stored body, so it leaves the response in
+			// place: revalidating it costs the origin less than a 200.
+			replace := sp.found
+			if res.notMod {
+				replace = sp.purged
+			}
+			e.setMarker(ctx, sp, replace, res.respTime, false)
 		}
 		return nil, false
 	}
@@ -590,17 +605,34 @@ func newer(a, b *store.Entry) bool {
 	return a.ResponseTime.After(b.ResponseTime)
 }
 
+// markerOversize is the Status of a hit-for-miss marker written because the
+// object exceeded MaxObjectBytes. A marker has no status of its own, and an
+// engine that does not know this one reads the marker as any other.
+const markerOversize = http.StatusRequestEntityTooLarge
+
+// setMarker writes a hit-for-miss marker under sp's coalescing key at now
+// (FR-STO-12), unless the key holds a response other than replace.
+func (e *Engine) setMarker(ctx context.Context, sp *fetchSpec, replace *store.Entry, now time.Time, oversize bool) {
+	m := &store.Entry{Kind: store.KindHitForMiss, StoredAt: now, Expires: now.Add(e.cfg.Coalesce.HitForMissTTL)}
+	if oversize {
+		m.Status = markerOversize
+	}
+	e.setUnlessResponse(ctx, sp.lk.ck, replace, m)
+}
+
 // setUnlessResponse writes a hit-for-miss marker or negative entry unless
 // the key holds a response, which a concurrent fetch may just have stored
 // (04 §6.7) and which may still be revalidated (FR-NEG-1), or a vary spec,
-// whose variants a record at the primary key would hide. purged, the
-// hard-purged response this request found, may be replaced: it can never be
-// served or revalidated (FR-STO-12). Stores that decode a fresh copy per Get
-// never match it, which only costs the record. A record past its Expires
-// that a store still returns lazily is a miss to lookup, so it is replaced
-// too, or a lazy store would never get a negative entry (T6.10).
-func (e *Engine) setUnlessResponse(ctx context.Context, k store.Key, purged, rec *store.Entry) {
-	if cur, err := e.sg.get(ctx, k); err == nil && (cur.Kind == store.KindResponse && cur != purged || cur.Kind == store.KindVarySpec) &&
+// whose variants a record at the primary key would hide. replace is the one
+// response that may go: the hard-purged response this request found, which
+// can never be served or revalidated, or for a marker the response the
+// request found and a full response has now superseded (FR-STO-12). It is
+// matched by its request and response times, so a store that decodes a fresh
+// copy per Get matches too. A record past its Expires that a store still
+// returns lazily is a miss to lookup, so it is replaced too, or a lazy store
+// would never get a negative entry (T6.10).
+func (e *Engine) setUnlessResponse(ctx context.Context, k store.Key, replace, rec *store.Entry) {
+	if cur, err := e.sg.get(ctx, k); err == nil && (cur.Kind == store.KindResponse && !sameRecord(cur, replace) || cur.Kind == store.KindVarySpec) &&
 		!cur.Expires.Before(time.Now()) {
 		return
 	}

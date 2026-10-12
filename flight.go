@@ -54,7 +54,7 @@ type flightResult struct {
 
 // live reports whether resp.Body still streams from the origin, so exactly
 // one party must close it.
-func (r *flightResult) live() bool { return r.err == nil && (r.over || r.stream) }
+func (r *flightResult) live() bool { return r.err == nil && (r.over || r.stream || r.unbuffered) }
 
 // fetchCoalesced runs the fetch for sp on a flight shared by every request
 // with the same coalescing key (FR-COA-1). The caller waits at most

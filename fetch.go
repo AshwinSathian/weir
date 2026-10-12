@@ -28,15 +28,18 @@ var (
 // fetchResult is what fetch produced: a response the caller owns, or an
 // error. A buffered fetch also returns the body it read.
 type fetchResult struct {
-	resp     *Response
-	recv     http.Header // resp.Header as received, when it had Connection; storability reads it (FR-FWD-7, T-8)
-	body     []byte      // buffered fetches: the whole body; nil when over
-	notMod   bool        // resp is a 304 validating the prior entry (FR-SRV-3)
-	over     bool        // buffered fetches: the body exceeded MaxObjectBytes and resp.Body streams it all
-	stream   bool        // an event-stream response; resp.Body streams it, never stored (FR-STR-1)
-	reqTime  time.Time
-	respTime time.Time // when the buffered body ended, or the headers arrived
-	err      error
+	resp   *Response
+	recv   http.Header // resp.Header as received, when it had Connection; storability reads it (FR-FWD-7, T-8)
+	body   []byte      // buffered fetches: the whole body; nil when over
+	notMod bool        // resp is a 304 validating the prior entry (FR-SRV-3)
+	over   bool        // buffered fetches: the body exceeded MaxObjectBytes and resp.Body streams it all
+	stream bool        // an event-stream response; resp.Body streams it, never stored (FR-STR-1)
+	// unbuffered: a fetch-and-store that ran behind an over-size marker, so
+	// resp.Body streams the response and nothing is stored (FR-STO-12).
+	unbuffered bool
+	reqTime    time.Time
+	respTime   time.Time // when the buffered body ended, or the headers arrived
+	err        error
 	// bgDropped: a background fetch found no limiter slot, or a warm
 	// fetch's caller left. Foreground requests that joined its flight fetch
 	// again rather than fail (04 §6.8).
@@ -125,7 +128,7 @@ func (e *Engine) fetch(ctx context.Context, c *keys.Classified, origin Origin, c
 	// headers arriving, or the error; its Status is 0 for an error.
 	// ponytail: with no Observer the end event still costs one clock read
 	// per fetch; guard it if a profile ever shows it next to an origin call.
-	reason := fetchReason(class, buffered)
+	reason := fetchReason(class, c.Class == keys.ClassPass)
 	var reqTime time.Time
 	send := func(r *Request) (resp *Response, err error) {
 		reqTime = time.Now()
@@ -194,6 +197,7 @@ func (e *Engine) fetch(ctx context.Context, c *keys.Classified, origin Origin, c
 		res.respTime = time.Now()
 		stampDate(resp.Header, res.respTime)
 		res.stream = buffered
+		res.unbuffered = !buffered
 		if resp.Body == http.NoBody {
 			cancel() // nothing left to bound; keeps NoBody visible to adapters
 		} else {
@@ -203,6 +207,17 @@ func (e *Engine) fetch(ctx context.Context, c *keys.Classified, origin Origin, c
 		return res
 	}
 	limit := e.cfg.Storable.MaxObjectBytes
+	if declaredLength(resp.Header) > limit {
+		// The length already says it cannot be stored: stream it without
+		// holding MaxObjectBytes of it in memory first (T-18).
+		record(outcome(resp))
+		res.respTime = time.Now()
+		stampDate(resp.Header, res.respTime)
+		deadline.Stop()
+		resp.Body = newIdleBody(tctx, resp.Body, cancelCause, e.cfg.Timeouts.StreamIdle)
+		res.over = true
+		return res
+	}
 	body, rerr := readBounded(resp.Body, limit+1)
 	res.respTime = time.Now()
 	stampDate(resp.Header, res.respTime)
@@ -230,15 +245,28 @@ func (e *Engine) fetch(ctx context.Context, c *keys.Classified, origin Origin, c
 	return res
 }
 
-// fetchReason is the EvFetchStart and EvFetchEnd reason (04 §9.2). Only a
-// pass-through fetch is unbuffered.
-func fetchReason(class limiter.Class, buffered bool) string {
+// declaredLength returns a response's Content-Length when it has exactly one
+// line of digits, else -1: a length Weir cannot read decides nothing.
+func declaredLength(h http.Header) int64 {
+	cl := h["Content-Length"]
+	if len(cl) != 1 {
+		return -1
+	}
+	n, ok := digits(cl[0])
+	if !ok {
+		return -1
+	}
+	return n
+}
+
+// fetchReason is the EvFetchStart and EvFetchEnd reason (04 §9.2).
+func fetchReason(class limiter.Class, pass bool) string {
 	switch {
 	case class == limiter.Background:
 		return "background"
 	case class == limiter.Warm:
 		return "warm"
-	case !buffered:
+	case pass:
 		return "pass"
 	}
 	return "foreground"

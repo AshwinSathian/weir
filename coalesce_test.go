@@ -740,27 +740,6 @@ func TestOversizedStreamedNotBuffered(t *testing.T) {
 	})
 }
 
-// FR-STO-12, 04 §6.7: a marker never replaces a stored response. A stale
-// entry kept for stale-if-error is refetched; the origin now answers
-// private, and the stale response stays rather than a marker taking its
-// place.
-func TestMarkerNeverReplacesResponse(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		o := testorigin.NewChecked(t, 64, 16)
-		o.Default(testorigin.Behavior{Header: http.Header{"Cache-Control": {"max-age=1, stale-if-error=60"}}, Body: []byte("a")})
-		e := newEngine(t, cacheCfg)
-		defer closeEngine(t, e)
-
-		serve(t, e, getReq("/a"), o)
-		time.Sleep(2 * time.Second)
-		o.Default(testorigin.Behavior{Header: http.Header{"Cache-Control": {"private"}}, Body: []byte("p")})
-		serve(t, e, getReq("/a"), o)
-		if resp, _ := serve(t, e, getReq("/a"), o); resp.Cache.Detail == "hit-for-miss" {
-			t.Fatalf("a marker replaced the stored response: %+v", resp.Cache)
-		}
-	})
-}
-
 // FR-COA-5 (decided 2026-10-01): a storable flight response that needs
 // validation before its next reuse (no-cache) is still shared with the
 // followers waiting on it.

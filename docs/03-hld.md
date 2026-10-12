@@ -110,7 +110,7 @@ Jitter (applied at store time) spreads expiry across keys written together. Earl
 
 ### 2.6 Uncacheable resources (hit-for-miss)
 
-When a flight's response is not storable, the fetch goroutine writes a marker under the coalescing key (the variant key when a vary spec exists, otherwise the primary key) with `HitForMissTTL`. The next request for that key sees the marker and fetches directly, without creating a flight, so private or per-user responses are never serialized behind each other. Each such fetch still takes a limiter slot. If a later response is storable, it replaces the marker.
+When a flight's response is not storable, the fetch goroutine writes a marker under the coalescing key (the variant key when a vary spec exists, otherwise the primary key) with `HitForMissTTL`. The next request for that key sees the marker and fetches directly, without creating a flight, so private or per-user responses are never serialized behind each other. Each such fetch still takes a limiter slot. If a later response is storable, it replaces the marker. An object over `MaxObjectBytes` leaves a marker too; behind that one the response is streamed and the next attempt to store comes when the marker expires (FR-STO-12).
 
 ### 2.7 Stuck leader
 
