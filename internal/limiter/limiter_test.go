@@ -802,3 +802,38 @@ func TestHostFloodFillsSharedQueue(t *testing.T) {
 		synctest.Wait()
 	})
 }
+
+// BenchmarkLimiterReleaseFullQueue measures one Release on a saturated
+// limiter with MaxQueue waiters of distinct partitions: the slot goes to the
+// first waiter and the walk stops there (04 §8.2).
+func BenchmarkLimiterReleaseFullQueue(b *testing.B) {
+	const slots, queued = 64, 1024
+	l := New(Config{Max: slots, MaxQueue: queued, PerPartition: 16, MaxWait: time.Hour})
+	held := make([]*Permit, 0, slots)
+	for i := range slots {
+		p, err := l.Acquire(b.Context(), Foreground, uint64(i), 0)
+		if err != nil {
+			b.Fatal(err)
+		}
+		held = append(held, p)
+	}
+	next := uint64(slots)
+	enqueue := func() {
+		l.queue = append(l.queue, &waiter{part: next, class: Foreground, ready: make(chan struct{})})
+		l.queuedBy[next]++
+		next++
+	}
+	for range queued {
+		enqueue()
+	}
+	b.ReportAllocs()
+	for b.Loop() {
+		head := l.queue[0]
+		held[0].Release() // grants head
+		if !head.granted {
+			b.Fatal("the first waiter was not granted the freed slot")
+		}
+		held = append(held[1:], &Permit{l: l, part: head.part})
+		enqueue()
+	}
+}

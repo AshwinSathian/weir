@@ -1,6 +1,6 @@
 # Weir benchmarks
 
-Updated: 2026-10-12
+Updated: 2026-10-13
 
 Benchmark and load-test results. The first section is the current state. Everything from "Earlier runs" on is the record of how the numbers got there, kept so each run can be compared with the one before it using `benchstat` ([07 §10](07-testing-strategy.md)). Every absolute number names its machine. The rendered version, with what the numbers do not show, is at [weir.ashwinsathian.com/benchmarks](https://weir.ashwinsathian.com/benchmarks/).
 
@@ -23,6 +23,19 @@ make load
 ```
 
 Store the raw output next to the table when a run adds a row, so `benchstat old.txt new.txt` works without rerunning the old commit.
+
+### v1.1 hardening (2026-10-13, Apple M4 Pro, 12 procs, Go 1.27.1)
+
+Not the reference machine, so these compare one commit with the next on one laptop and say nothing about absolute cost. Three runs of 2 s each, before (`504380a`) and after the lock changes of card HRD-09.
+
+| Benchmark | Before | After |
+|---|---|---|
+| `BenchmarkServeHitParallel/missrate-on` | 737 to 1 560 ns/op | 301 to 325 ns/op |
+| `BenchmarkServeHitParallel/missrate-off` | 288 to 307 ns/op | 285 to 306 ns/op |
+| `BenchmarkServeHitSmall` | 2 038 to 2 049 ns/op | 856 to 881 ns/op |
+| `BenchmarkLimiterReleaseFullQueue` (new) | 1 750 to 1 792 ns/op | 222 to 228 ns/op |
+
+Allocations are unchanged (12 per hit). The tracker took one mutex per cacheable request and, for a partition without a counter, scanned all 64 counters under it; a hit now takes a read lock and adds to a counter only when its partition already has one. With the tracker on, parallel hits cost what they cost with it off. The limiter's release walk stops once no slot is free.
 
 ## What each benchmark measures
 

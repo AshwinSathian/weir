@@ -58,8 +58,8 @@ type Engine struct {
 	// (needsEpoch, FR-INV-1).
 	exactInvalidation bool
 
-	mu        sync.Mutex  // orders setting closed against wg.Add in goBackground
-	closed    atomic.Bool // written under mu; read without it on the Serve path
+	mu        sync.RWMutex // orders setting closed (write) against wg.Add in goBackground (read)
+	closed    atomic.Bool  // written under mu; read without it on the Serve path
 	closeDone chan struct{}
 	bgCtx     context.Context // canceled after Close's grace period
 	bgCancel  context.CancelFunc
@@ -193,8 +193,10 @@ func warnForwarding(c Config) {
 // context, which Close cancels after its grace period. It reports false,
 // without running f, once the engine is closed.
 func (e *Engine) goBackground(f func(context.Context)) bool {
-	e.mu.Lock()
-	defer e.mu.Unlock()
+	// A read lock: flights starting at once do not queue behind each other,
+	// and Close's write lock still excludes every one of them.
+	e.mu.RLock()
+	defer e.mu.RUnlock()
 	if e.closed.Load() {
 		return false
 	}

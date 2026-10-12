@@ -284,10 +284,18 @@ func (p *Permit) Release() {
 // grant gives a slot, in FIFO order, to every waiter that can now run.
 // Caller holds l.mu.
 func (l *Limiter) grant() {
-	// ponytail: O(queue) walk per release, at most MaxQueue (1024) waiters;
-	// per-partition queues if BenchmarkLimiterAcquireRelease says it matters.
+	// ponytail: the walk passes every waiter whose partition is full before
+	// it finds one that can run, at most MaxQueue (1024) of them;
+	// per-partition queues if BenchmarkLimiterReleaseFullQueue says it matters.
 	kept := l.queue[:0]
-	for _, w := range l.queue {
+	for i, w := range l.queue {
+		if l.inflight >= l.limit() {
+			// No slot is left for any class, so nobody behind w can run
+			// either. The usual Release frees one slot and ends here after
+			// the first waiter that takes it, not after the whole queue.
+			kept = append(kept, l.queue[i:]...)
+			break
+		}
 		if l.canRun(w.class, w.part, w.host) {
 			l.hold(w.part, w.host)
 			w.granted = true
