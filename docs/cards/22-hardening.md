@@ -64,7 +64,7 @@ Read against the code before any card started. What it changed:
 
 High findings first, then Medium, then Low, then documents, review and release. Every card ends with its package tests green; `make check` runs after each card and once more at the end.
 
-### [ ] HRD-01 Followers outwait a healthy flight
+### [x] HRD-01 Followers outwait a healthy flight
 - Plan: v1.1 · Size: M · Depends on: none
 - Finding: 100 clients, one key, origin answers in 15 s: 16 answers (at 15 to 25 s), 84 responses 503 at 12 s, 16 origin calls
 - Read: 01 FR-COA-3, FR-COA-4, FR-COA-5; 04 §6.4, §6.5; 06 T-19
@@ -74,7 +74,7 @@ High findings first, then Medium, then Low, then documents, review and release. 
 - Out of scope: hedging a second shared flight
 - Notes: D-H1. `EvCoalesceTimeout{direct}` now means the later deadline
 
-### [ ] HRD-02 Breaker needs more than one failing partition
+### [x] HRD-02 Breaker needs more than one failing partition
 - Plan: v1.1 · Size: M · Depends on: none
 - Finding: 20 responses 504 on one path with distinct query strings opened the breaker for every path; one request a second on that path took every half-open probe for 120 s
 - Read: 01 FR-CB-1 to FR-CB-6; 02 ADR-7; 04 §8.3
@@ -84,7 +84,7 @@ High findings first, then Medium, then Low, then documents, review and release. 
 - Out of scope: a breaker per host
 - Notes: the breaker stays one mutex; the set is a fixed array per bucket
 
-### [ ] HRD-03 A stalled upload is not an origin failure
+### [x] HRD-03 A stalled upload is not an origin failure
 - Plan: v1.1 · Size: M · Depends on: none
 - Finding: 16 requests whose bodies never arrive, 4 normal misses: breaker open after `Timeouts.Origin`
 - Read: 01 FR-LIM-7, FR-TMO-1, FR-CB-1; 04 §1.3, §6.7; 06 T-39
@@ -94,7 +94,7 @@ High findings first, then Medium, then Low, then documents, review and release. 
 - Out of scope: per-client caps (HRD-07)
 - Notes: the body wrapper records "a Read is blocked" and "a Read failed"; the timer callback samples the first before it cancels
 
-### [ ] HRD-04 Markers for responses that stopped being storable
+### [x] HRD-04 Markers for responses that stopped being storable
 - Plan: v1.1 · Size: M · Depends on: none
 - Finding: an object over `MaxObjectBytes` and a URI that turned `private` both made every wave wait for a flight and then fetch again, with no marker ever written
 - Read: 01 FR-STO-12, FR-COA-5, FR-STR-1; 04 §6.7; 06 T-31, T-37
@@ -103,7 +103,7 @@ High findings first, then Medium, then Low, then documents, review and release. 
 - AC: D-H6 and D-H7 hold; the marker rules of T-31 (no marker under `Authorization`, request `no-store` or unkeyed input) apply to the new markers; a 5xx or a 304 never replaces a stored response with a marker; a store that returns a fresh copy per `Get` still has its found entry replaced (compared by request and response time)
 - Out of scope: the consumer idle bound (HRD-05)
 
-### [ ] HRD-05 A stream nobody reads ends
+### [x] HRD-05 A stream nobody reads ends
 - Plan: v1.1 · Size: S · Depends on: HRD-04
 - Finding: a reader that stops reading held an origin connection, and for an over-size object `MaxObjectBytes` of heap, with no limit; docs/06 T-18 said the origin timeout bounds it, FR-TMO-2 and the code said nothing does
 - Read: 01 FR-TMO-2, FR-LIM-1; 06 T-18
@@ -112,7 +112,7 @@ High findings first, then Medium, then Low, then documents, review and release. 
 - AC: D-H8 holds; an event stream that sends one event a minute to a reading client is not cut at defaults (the origin read is in progress, and each write completes); T-18 and FR-TMO-2 say the same thing
 - Notes: `WriteResponse` finds the idle time through an unexported-type method, so no exported signature changes
 
-### [ ] HRD-06 Invalidate only what exists
+### [x] HRD-06 Invalidate only what exists
 - Plan: v1.1 · Size: M · Depends on: none
 - Finding: bodyless `POST`s to distinct URIs sent 4% of untouched entries back to the origin after 60 000, 35% after 190 000 more, 76% after 500 000 more
 - Read: 01 FR-INV-1 to FR-INV-3, FR-PRG-7; 05 E-7, E-8; 06 T-29
@@ -121,7 +121,7 @@ High findings first, then Medium, then Low, then documents, review and release. 
 - AC: D-H9 holds; 1 000 000 unsafe requests to URIs with no record send 0 of 2 000 stored entries back to the origin; a `GET` sent before an unsafe request and stored after it is invalid at its next lookup, whether it ran on a flight, directly or under `Warm`; a store error on the existence check writes the epoch
 - Notes: proof of the skip. The engine reads the clock (the epoch time), then asks whether a fetch for the key is counted, then reads the key. A fetch sent before the epoch time was counted before it was sent. If it is no longer counted it has finished, and anything it stored is visible to the read. A fetch sent after the epoch time is not covered by the epoch at all (FR-PRG-7)
 
-### [ ] HRD-07 A cap per client
+### [x] HRD-07 A cap per client
 - Plan: v1.1 · Size: M · Depends on: HRD-03
 - Finding: 1 100 connections to distinct slow paths: a legitimate miss is shed at once
 - Read: 01 FR-LIM-3, FR-FAIR-1, FR-FAIR-3; 04 §8.2; 08 §2; 06 T-11
@@ -131,14 +131,14 @@ High findings first, then Medium, then Low, then documents, review and release. 
 - Out of scope: X-Forwarded policy (HRD-10)
 - Notes: over the M file count because one field crosses the library and both adapters; the Caddy half may split to HRD-07b
 
-### [ ] HRD-08 Close returns
+### [x] HRD-08 Close returns
 - Plan: v1.1 · Size: S · Depends on: none
 - Read: 01 FR-LCY-2; 04 §12
 - Touch: engine.go, engine_test.go, docs/01, docs/04
 - Tests: `TestCloseReturnsWhenOriginIgnoresContext`
 - AC: D-H11 holds; the error wraps the context's error and names the goroutines still running; an origin that honors its context sees no change
 
-### [ ] HRD-09 Fewer shared locks on the hit path
+### [x] HRD-09 Fewer shared locks on the hit path
 - Plan: v1.1 · Size: M · Depends on: HRD-07
 - Read: 01 FR-MR-1, FR-MR-2, NFR-5; 04 §8.2, §8.4
 - Touch: internal/missrate/tracker.go, internal/missrate/tracker_test.go, internal/limiter/limiter.go, internal/limiter/limiter_test.go, engine.go, bench_test.go
@@ -146,14 +146,14 @@ High findings first, then Medium, then Low, then documents, review and release. 
 - AC: a hit takes the tracker's read lock only and never replaces a counter; a release with a full queue walks to the first waiter that can run and stops once no slot is free; `goBackground` takes a read lock; the hit path stays within the NFR-5 allocation budget; benchmark numbers before and after are in the pull request
 - Notes: an anomaly needs misses, so a partition that only hits needs no counter
 
-### [ ] HRD-10 Forwarded fields, trailers and Max-Forwards
+### [x] HRD-10 Forwarded fields, trailers and Max-Forwards
 - Plan: v1.1 · Size: M · Depends on: HRD-07
 - Read: 01 FR-FWD-3; 03 §5; 06 T-4
 - Touch: weirhttp/origin.go, weirhttp/convert.go, request.go, internal/keys/classify.go, serve.go, weirhttp/handler_origin_test.go, weirhttp/weirhttp_test.go, examples/weirproxy/main.go, docs/01, docs/06
 - Tests: `TestTransportOriginStripsForwarded`, `TestTransportOriginSetsForwarded`, `TestTransportOriginKeepsForwarded`, `TestResponseTrailersReachClient`, `TestHandlerOriginTrailers`, `TestMaxForwards`
 - AC: D-H12, D-H13 and D-H24 hold; a cacheable fetch never carries an `X-Forwarded-*` field in any mode (INV-1); a stored response has no trailer; `weirproxy` uses `XForwardedSet`
 
-### [ ] HRD-11 Caddy placeholders read the forwarded request
+### [x] HRD-11 Caddy placeholders read the forwarded request
 - Plan: v1.1 · Size: M · Depends on: HRD-07
 - Read: 08 §4, §6; 06 T-4, T-45
 - Touch: caddy/origin.go, caddy/serve_test.go, caddy/warn.go, docs/08, docs/06
@@ -161,21 +161,21 @@ High findings first, then Medium, then Low, then documents, review and release. 
 - AC: D-H14 holds; `{http.request.header.X}` after `weir` is empty for a header that is not forwarded, and `{http.request.uri}` is the rewritten URI; operator variables set before `weir` are still visible; the warning list keeps only what is still true
 - Notes: check the pinned Caddy source for `PrepareRequest` before relying on it
 
-### [ ] HRD-12 Key generation for library snapshots
+### [x] HRD-12 Key generation for library snapshots
 - Plan: v1.1 · Size: S · Depends on: none
 - Read: 08 §3; 01 FR-SNP-1, FR-SNP-2; 06 R-3
 - Touch: config.go or keygen.go (new), config_test.go, caddy/keygen.go, store/memory/store.go (comment), docs/01, docs/runbook.md
 - Tests: `TestKeyGenerationChangesWithForwarding`, `TestKeyGenerationStableAcrossKeyOnlySettings`, the Caddy key-generation tests unchanged (the digest must not change, or every shared cache is purged on upgrade)
 - AC: D-H15 holds; the Caddy adapter's hash is byte-for-byte what it was
 
-### [ ] HRD-13 Memory store limits
+### [x] HRD-13 Memory store limits
 - Plan: v1.1 · Size: S · Depends on: none
 - Read: 05 E-6, §5.1, §5.3
 - Touch: store/memory/store.go, store/memory/epochs.go, store/memory/store_test.go, engine.go, loadtest or bench file, docs/05
 - Tests: `BenchmarkEvictionPauseLargeShard`, `TestShards`, `TestNewEpochConfig`
 - AC: D-H23 holds, with the benchmark result recorded in docs/benchmarks.md whichever way it decides
 
-### [ ] HRD-14 Requests with a body, hosts with an underscore
+### [x] HRD-14 Requests with a body, hosts with an underscore
 - Plan: v1.1 · Size: S · Depends on: HRD-03
 - Read: 01 FR-FWD-4, FR-VAL-1; 06 T-5, T-6
 - Touch: internal/keys/classify.go, internal/keys/host.go, internal/keys/classify_test.go, internal/keys/validate_test.go, weirhttp/convert.go, serve_test.go, testdata/fuzz seeds, docs/01, docs/06
@@ -183,19 +183,19 @@ High findings first, then Medium, then Low, then documents, review and release. 
 - AC: D-H16 and D-H17 hold; nothing from a request with a body is stored or served from the store; docs/06 §6 checklist answered in the commit
 - Notes: security-sensitive (internal/keys)
 
-### [ ] HRD-15 Conformance and small behaviors
+### [x] HRD-15 Conformance and small behaviors
 - Plan: v1.1 · Size: M · Depends on: HRD-04
 - Read: 01 FR-SRV-3, FR-SRV-8, FR-STO-1 to FR-STO-10, FR-NEG-1, FR-LIM-5; RFC 9111 §4.3.4, §5.2.1
 - Touch: conditional.go, fetch.go, serve.go, storable.go, negative.go, conditional_test.go, storable_test.go, negative_test.go, limit_test.go, docs/01, docs/04
 - Tests: `TestNotModifiedWeakTagMismatchRefetches`, `TestRequestMaxAgeAndMinFresh`, `TestEncodingMismatchNotStored`, `TestNegativeHonorsNoStore`, `TestShedRetryAfterJitter`
 - AC: D-H18 to D-H22 hold; docs/06 §6 checklist answered for the storability change
 
-### [ ] HRD-16 Documents for what is not fixed in code
+### [x] HRD-16 Documents for what is not fixed in code
 - Plan: v1.1 · Size: S · Depends on: HRD-01 to HRD-15
 - Touch: docs/06, docs/runbook.md, README.md, CHANGELOG.md, site content that restates any changed default
 - AC: every "not changed in code" item above has a threat model row or residual and a runbook line; CHANGELOG lists every decision D-H1 to D-H24 under Added, Changed or Fixed
 
-### [ ] HRD-19 Performance pass
+### [x] HRD-19 Performance pass
 - Plan: v1.1 · Size: M, in parts a to f · Depends on: HRD-16
 - Why: Ashwin asked for a performance review of the branch, a plan, the fixes and the numbers, in this pull request. Measured first, on the reference machine (M4 Pro), `main` against the branch after HRD-01 to HRD-16, six interleaved runs: `ServeHitSmall` 922 against 927 ns (no change), `ServeHitParallel/missrate-on` 931 against 367 ns, 12 allocations and 1 536 B per hit on both. `make load`: steady hits 578 k/s before, 1 308 k/s after; every scenario passes; GC is 0.94 µs per request, which is now 17% of the CPU a saturated hit costs, so allocation is the next cost to cut. `make cache-tests`: baseline unchanged.
 - Review, with prejudice. What a memory profile of one hit says: the `keys.Classified` value escapes to the heap on every request (33% of the bytes), the forwarded header is built for every request although only a miss, a pass-through or a vary lookup reads it (27%), and the served header map is cloned from the entry (26%). Elsewhere: after any invalidation, every hit on an older entry takes the epoch table's lock once per tag to look for a hard epoch that almost never exists; the Prometheus observer resolves its counter by label on every request; `weirhttp.WriteResponse` deep-copies the header and, for a stored response the origin sent chunked, has no length to send, so every hit is written in flushed chunks; the Caddy adapter splits the host on every request to decide a warning it has usually already given.
@@ -211,7 +211,7 @@ High findings first, then Medium, then Low, then documents, review and release. 
 - AC: parts a to f hold; `benchstat` of `main`, the branch before this card and after it is in docs/benchmarks.md; `make load` and `make cache-tests` are rerun and recorded
 - Review of this plan: pooling `Classified` instead of part a was rejected, because a recycled value that a background fetch still holds would hand one request's key to another. Part b first deferred the forward for every configuration; with a keyed header the key is computed from the forward itself (INV-1), so those configurations build it at once as before. Cutting the header clone (the third cost) was rejected: a served header map must be the caller's own (P4)
 
-### [ ] HRD-17 Adversarial review of the branch
+### [x] HRD-17 Adversarial review of the branch
 - Plan: v1.1 · Size: M · Depends on: HRD-16
 - AC: every probe from the 2026-10-13 review is rerun against the branch and its result recorded in the pull request; the card-reviewer agent has read the whole diff; every must-fix finding is fixed with a test; `make check`, `make vuln` and `make fuzz-short` pass
 

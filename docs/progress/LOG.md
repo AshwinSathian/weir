@@ -1996,3 +1996,11 @@ Entry template:
 - Incident: `release-smoke` ran seconds after the `caddy` tag push and the proxy cached a not-found for 30 minutes. No bad commit or tag.
 - Follow-ups: redeploy the site after the merge; PR 120; v1.1 list in STATUS.
 - Context: high
+
+## 2026-10-13 · HRD-01 to HRD-17, HRD-19 · done
+- Branch / PR: card/HRD-01-hardening / PR_URL
+- Done: an adversarial review of v1.0.1 (8 high findings confirmed by probe tests, 10 medium, 5 low), a plan as cards (docs/cards/22-hardening.md, 24 decisions), and the fixes: followers outwait a slow flight, the breaker needs two failing paths, stalled uploads are not origin failures, markers for over-size and turned-uncacheable URIs, an idle bound on unread streams, invalidation only where a record or a fetch exists (`store.FetchTracker`), `Limiter.MaxPerClient`, bounded `Close`, the tracker's lock off the hit path, `TransportOrigin.XForwarded`, trailers, a replacer per forwarded request in Caddy, `Config.KeyGeneration`, `memory.Shards`. Then a performance pass (HRD-19): a hit is 669 ns, 608 B and 8 allocations where v1.0.1 measured 964 ns, 1 536 B and 12; `make load` steady hits 1 331 k/s against 578 k/s; cache-tests baseline unchanged.
+- Tests: about 70 new tests, one fuzz target; `make check` passes in all four modules, `make fuzz-short`, `make site-check`, `make vuln` on Go 1.27.2. The card-reviewer agent found three must-fix defects in the branch (invalidation skip under Vary, the per-engine fetch count, error statuses replacing a stored response); all fixed with tests that fail without the fix. Two regressions of the branch's own were caught by existing suites: every GET uncached behind Caddy (`TestE2EPurgeHerd`), and a `Content-Encoding` rule that failed cache-tests.
+- Deviations: 18 cards in one session, one branch and one pull request, at Ashwin's request, with context compaction; requirement, default and API changes were decided in the plan and listed for Ashwin instead of asked one by one. docs/01, 03, 04, 05, 06, 07, 08, runbook, benchmarks, CHANGELOG, README and the site changed with the code.
+- Follow-ups: HRD-18 (release v1.1.0) after the merge; HRD-20 deferred; rebase `card/CMP-01-compare-harness`.
+- Context: far over one card's budget by design; the cards themselves were sized S or M and each fit.
