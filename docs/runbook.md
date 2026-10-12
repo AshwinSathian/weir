@@ -1,6 +1,6 @@
 # Runbook
 
-Updated: 2026-10-12
+Updated: 2026-10-13
 
 For the person running Weir in front of an origin. It covers first deployment, the signals to watch and what to do when each one fires. Setting names are in [01 §6](01-technical-spec.md); the reasoning behind the defaults is in [06](06-threat-model.md). This is not a design document: when it disagrees with 01 to 07, they win.
 
@@ -49,9 +49,11 @@ Labelled series appear on their first event, so alert on `absent()` as well as `
 
 ### 4.1 The origin is down or slow
 
-The breaker counts origin-health failures over a 10 s window (500 and 4xx are not failures unless `Breaker.CountStatus500`), opens at a 50% failure ratio of at least 20 outcomes, and stays open 5 s (±20%), doubling to 60 s on each consecutive reopen. Meanwhile entries inside their stale-if-error window are served with `detail=stale-if-error` or `circuit-open`; everything else gets 503.
+The breaker counts origin-health failures over a 10 s window (500 and 4xx are not failures unless `Breaker.CountStatus500`), opens at a 50% failure ratio of at least 20 outcomes when the failures come from at least 2 paths or nothing succeeded (`Breaker.MinPartitions`, v1.1: one broken path no longer opens it for the site), and stays open 5 s (±20%), doubling to 60 s on each consecutive reopen. Meanwhile entries inside their stale-if-error window are served with `detail=stale-if-error` or `circuit-open`; everything else gets 503.
 
 If entries have no stale-if-error window and you want to ride out the outage: `Engine.SetMode(weir.ModeStaleOnError, ttl)` serves any stored entry stale (up to 24 h past expiry, but see the retention note below), except hard-purged, invalidated and `must-revalidate`, `proxy-revalidate`, `no-cache` or `s-maxage` ones. `ttl` is required, at most 24 h, and the mode reverts by itself. Entries are kept only for their stale windows plus `Freshness.Keep` (5 min) after expiry, and only when they carry `ETag` or `Last-Modified`, so the practical reach is minutes unless you raised `Freshness.Keep` or `DefaultStaleIfError` before the incident. Modes are not persisted across restarts. Set it from an admin handler, not from request data.
+
+A slow origin that still answers costs one fetch per key: requests for a key wait for the fetch in progress up to `Timeouts.Origin` plus `Limiter.MaxQueueWait` (v1.1; before it they gave up at `Coalesce.FollowerMaxWait`, fetched for themselves and were mostly shed). If your clients give up sooner than that, lower `Timeouts.Origin`, or grant stale-if-error so they get the stale copy at `FollowerMaxWait`.
 
 ### 4.2 The cache itself is suspect
 
@@ -90,6 +92,14 @@ The log line `weir: miss-rate anomaly` and `weir_miss_rate_anomalies_total` mean
 ### 4.6 A remote store fails
 
 After 5 consecutive `ErrUnavailable` results the store breaker opens for 1 s, doubling to 30 s. While it is open, lookups are treated as misses and nothing is stored, so origin load rises to the uncached rate. The limiter and breaker still protect the origin. Epoch (purge) state may be lost with a store restart; run a hard purge of everything (`All: true`) after one if stale content matters (06 R-4).
+
+### 4.7 One client floods distinct URLs
+
+Every cap but one is keyed on the URL, which the client chooses, so a client that asks for thousands of distinct slow paths takes every origin slot and the queue, and other clients' misses are shed (hits are still served). `Limiter.MaxPerClient` (Caddy: `limiter { max_per_client N }`) caps how many of one client's requests may be at the origin or waiting for it; 16 to 32 leaves a browser's parallel requests alone. It is off by default because behind a load balancer every client has the balancer's address: in Caddy set `trusted_proxies` first, in a Go program set `Request.Client` from the header your balancer writes. An IPv6 client counts as its /64. A flood from many addresses needs a rate limiter in front.
+
+### 4.8 Defaults that shed
+
+The limiter queues a miss for at most `Limiter.MaxQueueWait` (2 s) and then answers 503, and nothing is served stale on an error unless the origin sends `stale-if-error` or you set `Freshness.DefaultStaleIfError`. After a cold start or a mass expiry, whatever the origin budget (`MaxConcurrent`, 64) cannot take within 2 s is shed. That is the intended order of protection: the origin first. To favor answers over latency, raise `MaxQueueWait` toward your clients' own timeout, raise `MaxConcurrent` to what the origin can serve, and set `DefaultStaleIfError` so shed requests for stored URLs get the stale copy.
 
 ## 5. Planned operations
 

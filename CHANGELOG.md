@@ -4,6 +4,52 @@ Format: one section per release, newest first. Changes land under "Unreleased" i
 
 ## Unreleased
 
+Hardening after an adversarial review of `v1.0.1` (cards HRD-01 to HRD-18, [docs/cards/22-hardening.md](docs/cards/22-hardening.md)). Several fixes add exported fields, so the next release is `v1.1.0`. Each entry names the requirement it changes.
+
+### Changed behavior
+
+Read these before upgrading. Each has a way back where one makes sense.
+
+- Coalescing: a follower whose `Coalesce.FollowerMaxWait` expires without a servable stale entry keeps waiting for its flight until `Timeouts.Origin + Limiter.MaxQueueWait` after it joined, and only then fetches for itself (FR-COA-4). Before, 100 requests for one key behind an origin that answered in 15 s made 16 fetches and 84 responses 503. `EvCoalesceTimeout{direct}` now means the later deadline.
+- Breaker: it opens only when the failures in the window come from at least `Breaker.MinPartitions` (new, default 2) partitions, or when nothing in the window succeeded (FR-CB-2). A path whose half-open probe failed leaves the next probe to another path for one second (FR-CB-4). Before, 20 responses 504 from one path opened it for every path. `MinPartitions: 1` is the old rule.
+- Markers: an object over `Storable.MaxObjectBytes` writes a hit-for-miss marker, and a full response that is not storable replaces the stale response the request found (FR-STO-12). Behind an over-size marker the response is streamed, and a response whose `Content-Length` exceeds the limit is streamed without the buffered read. Cost: a URI that turns `private` loses its stale-if-error copy at once.
+- Streams: `Timeouts.StreamIdle` also ends a stream that nobody reads for that long, and `weirhttp.WriteResponse` gives each write of a live stream a deadline of the same length (FR-TMO-2). A consumer that pauses longer than `StreamIdle` between reads of a streamed response is cut.
+- Invalidation: on an in-process store with no keyed header, keyed cookie or experiment, an unsafe request writes its invalidation epoch only when the URI has a record or a fetch in progress (FR-INV-1). Before, 500 000 unsafe requests to uncached URIs sent about half of all other entries back to the origin.
+- `weirhttp.TransportOrigin` removes `Forwarded`, `X-Real-Ip` and `X-Forwarded-*` from every outgoing request by default (FR-FWD-8). `XForwarded: weirhttp.XForwardedKeep` is the old behavior; `XForwardedSet` sets them from the request on a pass-through. A site that lists such a field in `Forward.Allow` or `Key.Headers` needs `XForwardedKeep`.
+- Caddy: every forwarded request has a replacer bound to itself, so `{http.request.header.X}`, `{http.request.cookie.X}` and `{http.request.uri}` behind `weir` read what the origin is sent (08 §6). Placeholders that a matcher or handler in front of `weir` defined (`{http.regexp.*}`, `{http.auth.*}`, `map` outputs) are empty behind it; `client_placeholders` restores the old binding.
+- A `GET` or `HEAD` that declares a body is passed through with it and never cached (FR-FWD-10). Before, the body was dropped and the answer cached.
+- A response in a `Content-Encoding` the fetch did not ask for is not stored, and an encoded response is stored as if `Vary` named `Accept-Encoding` (FR-STO-14).
+- A 304 whose entity-tag does not weakly match the stored one is discarded and the request repeated without conditionals (FR-SRV-3).
+- `Close` returns 5 s after it has cancelled the engine's goroutines even when an `Origin` ignores its context, with an error that says so (FR-LCY-2). Before, it did not return.
+- A stalled or failed request body ends in `ErrRequestBodyTimeout` (408) or `ErrRequestBody` (400) and is not a breaker outcome (FR-CB-1). One path holds at most half the upload pool (FR-LIM-7).
+- A 502, 503 or 504 marked `no-store` or `private` writes no negative entry (FR-NEG-1). The `Retry-After` of a shed request is one to one and a half queue waits (FR-LIM-5).
+- Memory store: `MaxHardEpochs` defaults to 100 000 (was 10 000). The engine's own store and the Caddy adapter use shards of about 16 MiB, so a store above 256 MiB has more than 16 shards and its largest object is 1.6 MiB unless `Storable.MaxObjectBytes` asks for more (05 §5.1).
+- Hosts may contain `_` (FR-VAL-1). `TRACE` and `OPTIONS` honor `Max-Forwards` (FR-FWD-9).
+
+### Added
+
+- `Request.Client` and `Limiter.MaxPerClient` (0: off): a cap on one client's requests at the origin, whatever URLs they name (FR-FAIR-4). `weirhttp.RequestFrom` fills `Client` from the peer address; the Caddy adapter uses `client_ip` and gains `limiter { max_per_client N }`.
+- `Breaker.MinPartitions`.
+- `ErrRequestBody`, `ErrRequestBodyTimeout`.
+- `weirhttp.XForwardedMode` and `TransportOrigin.XForwarded`.
+- Response trailers of a streamed response reach the client: a response body may implement `Trailer() http.Header`, and both `weirhttp` origins do (FR-FWD-8).
+- `Config.KeyGeneration()`: a digest of the settings that change what an unchanged key means, for snapshot file names and remote key prefixes (FR-SNP-4).
+- `memory.Shards(maxBytes, maxObject)`.
+- With `Client.HonorRevalidation`, request `max-age` and `min-fresh` are applied (FR-SRV-8).
+- `EvNotStored` reason `encoding`. Caddy key `client_placeholders`.
+
+### Performance
+
+- The miss-rate tracker no longer takes one mutex per cacheable request: a hit takes a read lock and never replaces a counter (FR-MR-1). The limiter's release walk stops once no slot is free. Numbers are in [docs/benchmarks.md](docs/benchmarks.md).
+
+### Known limits, unchanged
+
+- Coalescing is per process, and a remote store has no local tier in front of it (deferred card HRD-20).
+- With `Limiter.MaxPerClient` off, which is the default, a flood of distinct paths can still take every origin slot (T-11, R-2).
+- An unknown method still invalidates on 2xx or 3xx, as RFC 9111 §4.4 requires; `identity;q=0` still gets `identity`.
+
+Earlier entries under this heading:
+
 - The root module no longer ships the website: `site/` has its own `go.mod`, which keeps it out of the module zip (about 0.16 MB smaller than `v1.0.1`). No change to any Go package.
 - Repository: `main` and `release/*` are protected by GitHub rulesets (pull request and a green `check` for `main`; no force-push or deletion for both).
 
