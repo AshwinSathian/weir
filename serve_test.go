@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -288,21 +289,43 @@ func TestKettleUserAgent(t *testing.T) {
 	})
 }
 
-// T-5, FR-FWD-1: the body of a GET never reaches the origin.
-func TestFatGETBodyDropped(t *testing.T) {
+// FR-FWD-10, T-5: a GET that carries a body is passed through with it and
+// never touches the cache. Before v1.1 the body was dropped and the answer
+// cached, so a search API that reads its query from the body answered one
+// query with another's result.
+func TestGetWithBodyPassesThrough(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		o := testorigin.NewChecked(t, 64, 16)
-		o.Default(cacheable("x"))
+		o := testorigin.New()
+		o.Default(testorigin.Behavior{Func: func(r *weir.Request) (*weir.Response, error) {
+			var q []byte
+			if r.Body != nil {
+				q, _ = io.ReadAll(r.Body)
+			}
+			return &weir.Response{StatusCode: 200, Header: http.Header{"Cache-Control": {"max-age=60"}},
+				Body: io.NopCloser(strings.NewReader("result for " + string(q)))}, nil
+		}})
 		e := newEngine(t, cacheCfg)
 		defer closeEngine(t, e)
+		search := func(q string) (*weir.Response, string) {
+			r := getReq("/_search")
+			r.Body = io.NopCloser(strings.NewReader(q))
+			r.Header.Set("Content-Length", strconv.Itoa(len(q)))
+			return serve(t, e, r, o)
+		}
 
-		r := getReq("/a")
-		r.Body = io.NopCloser(strings.NewReader("poison"))
-		r.Header.Set("Content-Length", "6")
-		serve(t, e, r, o)
-		reqs := o.Requests()
-		if len(reqs) != 1 || reqs[0].Body != nil || len(reqs[0].Header["Content-Length"]) != 0 {
-			t.Fatalf("forwarded %+v", reqs)
+		for _, q := range []string{"cats", "dogs"} {
+			resp, body := search(q)
+			if body != "result for "+q || resp.Cache.Hit || resp.Cache.Stored || resp.Cache.Fwd != weir.FwdBypass {
+				t.Fatalf("query %q: body %q, cache %+v; want its own answer, passed through", q, body, resp.Cache)
+			}
+		}
+		// Nothing was stored under the URL: a plain GET is a miss, and what it
+		// stores is not what a GET with a body gets afterwards.
+		if resp, body := serve(t, e, getReq("/_search"), o); resp.Cache.Hit || body != "result for " {
+			t.Fatalf("plain GET: body %q, cache %+v; want a miss", body, resp.Cache)
+		}
+		if resp, body := search("birds"); body != "result for birds" || resp.Cache.Hit {
+			t.Fatalf("GET with a body after the URL was cached: body %q, cache %+v", body, resp.Cache)
 		}
 	})
 }

@@ -89,7 +89,7 @@ func TestClassifyCacheableForward(t *testing.T) {
 		"Te":               {"trailers"},
 	}
 	r := classifyReq("GET", h)
-	r.Body = io.NopCloser(strings.NewReader("fat"))
+	r.Body = http.NoBody // a bodyless request, as net/http hands it over
 	cfg := classifyCfg()
 	cfg.Allow = []string{"X-Tenant"}
 	c, err := Classify(r, cfg)
@@ -158,8 +158,8 @@ func TestBodylessForwardHasNoBodyFields(t *testing.T) {
 			cfg := classifyCfg()
 			cfg.ForwardAll = all
 			cfg.Allow = []string{"Content-Length", "Expect", "Trailer", "Host"}
+			// The fields claim a body the request does not have.
 			r := classifyReq("GET", h.Clone())
-			r.Body = io.NopCloser(strings.NewReader("hello"))
 			c, err := Classify(r, cfg)
 			if err != nil {
 				t.Fatal(err)
@@ -595,5 +595,30 @@ func TestControlBytesInUnkeyedFieldsDropped(t *testing.T) {
 	c, err := Classify(classifyReq("GET", http.Header{"Authorization": {"Bearer ok"}}), classifyCfg())
 	if err != nil || c.Forwarded.Header.Get("Authorization") != "Bearer ok" {
 		t.Fatalf("a clean Authorization was lost: %v %v", c.Forwarded.Header, err)
+	}
+}
+
+// FR-FWD-10, T-5: a GET or HEAD that carries a body is a pass-through with
+// that body, never a cacheable request whose key ignores it.
+func TestGetWithBodyIsPass(t *testing.T) {
+	for _, method := range []string{"GET", "HEAD"} {
+		r := classifyReq(method, http.Header{"Content-Length": {"3"}})
+		r.Body = io.NopCloser(strings.NewReader("fat"))
+		c, err := Classify(r, classifyCfg())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if c.Class != ClassPass || c.FwdReason != FwdBypass || !c.HasBody || c.Forwarded.Body == nil ||
+			c.Forwarded.Method != method || c.Primary != ([32]byte{}) {
+			t.Errorf("%s with a body: class %v reason %v hasBody %v method %q, want a pass-through with the body and no key",
+				method, c.Class, c.FwdReason, c.HasBody, c.Forwarded.Method)
+		}
+		// No body after all: http.NoBody, or a declared length of 0.
+		for _, bodyless := range []*Request{classifyReq(method, nil), classifyReq(method, http.Header{"Content-Length": {"0"}})} {
+			bodyless.Body = http.NoBody
+			if c, err := Classify(bodyless, classifyCfg()); err != nil || c.Class != ClassCacheable {
+				t.Errorf("%s without a body: class %v, err %v; want cacheable", method, c.Class, err)
+			}
+		}
 	}
 }

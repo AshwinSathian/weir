@@ -183,7 +183,12 @@ func Classify(r *Request, c *Config) (Classified, error) {
 		out.Unsafe = true
 		return pass(out, r, host), nil
 	}
-	if bypassed(h, c) { // FR-BYP-1
+	// FR-BYP-1, and FR-FWD-10: a GET or HEAD that carries a body is passed
+	// through with it. T-5: the body is not in the key, so nothing about such
+	// a request is stored or served from the store; dropping the body and
+	// caching the answer would serve one body's result for another (search
+	// APIs that take their query in a GET body).
+	if hasBody(r) || bypassed(h, c) {
 		out = pass(out, r, host)
 		out.FwdReason = FwdBypass
 		return out, nil
@@ -262,9 +267,15 @@ func pass(out Classified, r *Request, host string) Classified {
 	// Nothing of a pass-through is stored, so the Origin may learn who asked.
 	out.Forwarded = Request{Method: r.Method, Scheme: r.Scheme, Host: host, Path: r.Path, RawQuery: r.RawQuery,
 		Header: h, Body: r.Body, Client: r.Client}
-	// net/http gives every bodyless request http.NoBody (FR-LIM-7: main pool).
-	out.HasBody = r.Body != nil && r.Body != http.NoBody && r.Header.Get("Content-Length") != "0"
+	out.HasBody = hasBody(r)
 	return out
+}
+
+// hasBody reports a request that carries a body or may carry one. net/http
+// gives every bodyless request http.NoBody, and a declared length of 0 is no
+// body either (FR-LIM-7: those use the main pool).
+func hasBody(r *Request) bool {
+	return r.Body != nil && r.Body != http.NoBody && r.Header.Get("Content-Length") != "0"
 }
 
 // parseIfNoneMatch returns the entity-tags of the If-None-Match lines

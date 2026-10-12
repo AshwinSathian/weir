@@ -8,13 +8,16 @@ import (
 
 // Request is one client request as the adapter received it (01 §4).
 type Request struct {
-	Method   string        // exactly as received; methods are case-sensitive
-	Scheme   string        // "http" or "https"
-	Host     string        // authority (host[:port]) the client addressed
-	Path     string        // origin-form path, still percent-encoded, as received
-	RawQuery string        // query without the leading '?', as received
-	Header   http.Header   // never mutated by Weir
-	Body     io.ReadCloser // nil for GET and HEAD; passed through for other methods
+	Method   string      // exactly as received; methods are case-sensitive
+	Scheme   string      // "http" or "https"
+	Host     string      // authority (host[:port]) the client addressed
+	Path     string      // origin-form path, still percent-encoded, as received
+	RawQuery string      // query without the leading '?', as received
+	Header   http.Header // never mutated by Weir
+	// Body is nil or http.NoBody for a request without one. A request with a
+	// body is passed through with it, whatever its method: a GET or HEAD that
+	// carries one is never served from or stored in the cache (FR-FWD-10).
+	Body io.ReadCloser
 	// Client names who sent the request, for Limiter.MaxPerClient: any
 	// string that is equal for one client and different for another, usually
 	// the remote address. Weir never keys on it, never puts it in an event,

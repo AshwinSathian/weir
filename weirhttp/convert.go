@@ -52,9 +52,10 @@ func RequestFrom(r *http.Request) *weir.Request {
 	} else {
 		req.Path, req.RawQuery = r.URL.EscapedPath(), r.URL.RawQuery
 	}
-	if r.Method != http.MethodGet && r.Method != http.MethodHead {
-		req.Body = r.Body
-	}
+	// The body goes along for every method. A GET or HEAD without one has
+	// http.NoBody, which the engine reads as no body; one that does carry a
+	// body is passed through with it and never cached (FR-FWD-10).
+	req.Body = r.Body
 	return req
 }
 
