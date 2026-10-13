@@ -1,0 +1,1 @@
+POST http://caddy-weir:2019/weir/bench/purge {"all":true}

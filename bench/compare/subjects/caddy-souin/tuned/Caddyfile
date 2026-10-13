@@ -1,9 +1,14 @@
 # Tuned tier: the Otter storage, because cache-handler logs that its default
 # storage is "not optimized and for development purpose" (Souin storages
 # docs), and stale serving for 5 minutes ("stale" in the Souin Caddy docs).
+# The API block and the admin endpoint are as in the default tier.
 {
 	auto_https off
+	admin :2019
 	cache {
+		api {
+			souin
+		}
 		otter
 		stale 5m
 	}

@@ -3,36 +3,49 @@
 # prints the report. Needs a running Docker daemon.
 #
 #   ./run.sh                          every subject, both tiers, 3 repetitions
+#   SUBJECTS=varnish TIERS=tuned ./run.sh -reps 3
 #   SUBJECTS="varnish nginx" ./run.sh -reps 1 -scenario cold-herd
 #
 # Arguments are passed to `compare run`. Results go to results/, which is not
-# committed: numbers are private until Ashwin decides to publish (docs/11 §9).
+# committed (docs/11 §9). SUBJECTS may also name weirproxy-next and
+# caddy-weir-next, Weir built from the working tree (docs/11 §2).
 set -euo pipefail
 cd "$(dirname "$0")"
+. ./lib.sh
 
-SUBJECTS="${SUBJECTS:-origin caddy-nocache weirproxy weirproxy-next caddy-weir caddy-weir-next caddy-souin varnish nginx}"
+SUBJECTS="${SUBJECTS:-origin caddy-nocache weirproxy caddy-weir caddy-souin varnish nginx}"
 TIERS="${TIERS:-default tuned}"
-name="$(date -u +%Y%m%dT%H%M%SZ).jsonl"
+stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+name="$stamp.jsonl"
 mkdir -p results
-trap 'docker compose --profile tools down --remove-orphans >/dev/null 2>&1 || true' EXIT
+watcher=""
+cleanup() {
+  [ -z "$watcher" ] || kill "$watcher" 2>/dev/null || true
+  rm -f results/restart.request results/restart.done
+  docker compose --profile tools down --remove-orphans >/dev/null 2>&1 || true
+}
+trap cleanup EXIT
 
-# The "-next" subjects run Weir from the working tree: two Linux binaries,
-# built here because the Docker build context is this directory only.
-case " $SUBJECTS " in *-next*)
-  root="$(cd ../.. && pwd)"
-  mkdir -p results/bin
-  (cd "$root" && GOOS=linux CGO_ENABLED=0 go build -o bench/compare/results/bin/weirproxy ./examples/weirproxy)
-  (cd "${TMPDIR:-/tmp}" && GOWORK=off GOOS=linux CGO_ENABLED=0 xcaddy build v2.11.7 \
-    --with "github.com/AshwinSathian/weir=$root" --with "github.com/AshwinSathian/weir/caddy=$root/caddy" \
-    --with "github.com/AshwinSathian/weir/observe/prom=$root/observe/prom" \
-    --with "github.com/AshwinSathian/weir/store/valkey=$root/store/valkey" \
-    --output "$root/bench/compare/results/bin/caddy" >/dev/null 2>&1)
-  git -C "$root" rev-parse HEAD > "results/${name%.jsonl}.next.txt"
-esac
-
+build_next "$stamp"
 docker compose --profile tools build
 docker compose up -d origin
-{ docker compose version; docker compose --profile tools images; } > "results/${name%.jsonl}.env.txt"
+record_env "$stamp"
+
+# The runner is a container and cannot restart another one. For the restart
+# scenario it writes results/restart.request and this loop does it: a
+# graceful stop (SIGTERM, up to 30 s) and a start of the same container, so
+# what the cache keeps on its own disk is still there. The origin control is
+# not restarted: it would forget its profiles, and it keeps nothing anyway.
+restart_watch() {
+  while :; do
+    if [ -e results/restart.request ]; then
+      [ "$1" = origin ] || TIER="$2" docker compose restart -t 30 "$1" >/dev/null 2>&1 || echo "!! restart of $1 failed" >&2
+      rm -f results/restart.request
+      : > results/restart.done
+    fi
+    sleep 0.2
+  done
+}
 
 for tier in $TIERS; do
   for s in $SUBJECTS; do
@@ -41,15 +54,25 @@ for tier in $TIERS; do
     if [ "$tier" != default ] && [ ! -d "subjects/${s%-next}/$tier" ]; then continue; fi
     port=8080
     if [ "$s" = origin ]; then port=9000; else TIER="$tier" docker compose up -d --force-recreate "$s"; fi
+    # How this subject is purged, if it can be (one line: METHOD URL [BODY]).
+    purge=""
+    if [ -f "subjects/${s%-next}/purge" ]; then purge="$(sed "s/${s%-next}:/$s:/" "subjects/${s%-next}/purge")"; fi
     echo "== $s ($tier)" >&2
+    restart_watch "$s" "$tier" &
+    watcher=$!
     docker compose --profile tools run --rm -T run run \
       -target "http://$s:$port" -control http://origin:9001 \
-      -subject "$s" -tier "$tier" -out "/results/$name" "$@" || echo "!! $s ($tier) failed" >&2
+      -subject "$s" -tier "$tier" -purge "$purge" -restart-dir /results -out "/results/$name" "$@" || echo "!! $s ($tier) failed" >&2
+    kill "$watcher" 2>/dev/null || true
+    wait "$watcher" 2>/dev/null || true
+    watcher=""
     if [ "$s" != origin ]; then
-      docker compose logs --no-color "$s" > "results/${name%.jsonl}.$s.$tier.log" 2>&1 || true
-      docker compose rm -sf "$s" >/dev/null
+      docker compose logs --no-color "$s" > "results/$stamp.$s.$tier.log" 2>&1 || true
+      # -v: the anonymous volumes too, so the next tier starts with no
+      # snapshot or cache file left by this one.
+      docker compose rm -sfv "$s" >/dev/null
     fi
   done
 done
 
-docker compose --profile tools run --rm -T run report "/results/$name" | tee "results/${name%.jsonl}.md"
+docker compose --profile tools run --rm -T run report "/results/$name" | tee "results/$stamp.md"

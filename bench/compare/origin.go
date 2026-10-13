@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -21,6 +23,10 @@ type profile struct {
 	// application server at its worker limit does. Refused requests are
 	// counted apart from calls.
 	Capacity int `json:"capacity"`
+	// Pool, when set, names another profile whose Capacity and in-flight
+	// count this one shares: two kinds of traffic then compete for one
+	// origin's workers while their calls are still counted apart.
+	Pool string `json:"pool,omitempty"`
 }
 
 // counters is what a scenario reads back: how many requests reached the
@@ -49,6 +55,7 @@ type origin struct {
 	// move to per-profile atomics if the origin shows up in a profile.
 	mu    sync.Mutex
 	slots map[string]*slot // at most maxProfiles
+	seq   atomic.Int64
 }
 
 func newOrigin() *origin {
@@ -62,7 +69,16 @@ func (o *origin) data() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/o/{profile}/{key...}", o.serve)
 	mux.HandleFunc("/p/{probe}/{key...}", probeOrigin) // the unsafe routes of the security probes
-	return mux
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// The path probe needs an origin that does not normalize, and the
+		// mux redirects any path it would clean. That route is served
+		// before the mux sees it.
+		if strings.HasPrefix(r.URL.Path, "/p/pathnorm/") {
+			probeOrigin(w, r)
+			return
+		}
+		mux.ServeHTTP(w, r)
+	})
 }
 
 func (o *origin) serve(w http.ResponseWriter, r *http.Request) {
@@ -73,7 +89,11 @@ func (o *origin) serve(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	if s.p.Capacity > 0 && s.inflight >= s.p.Capacity {
+	pool := s
+	if ps := o.slots[s.p.Pool]; ps != nil {
+		pool = ps
+	}
+	if pool.p.Capacity > 0 && pool.inflight >= pool.p.Capacity {
 		s.c.Refused++
 		o.mu.Unlock()
 		w.Header().Set("Cache-Control", "no-store")
@@ -82,13 +102,13 @@ func (o *origin) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	s.c.Calls++
 	call := s.c.Calls
-	s.inflight++
-	s.c.Peak = max(s.c.Peak, s.inflight)
+	pool.inflight++
+	s.c.Peak = max(s.c.Peak, pool.inflight)
 	p, body := s.p, s.body
 	o.mu.Unlock()
 	defer func() {
 		o.mu.Lock()
-		s.inflight--
+		pool.inflight--
 		o.mu.Unlock()
 	}()
 
@@ -110,6 +130,9 @@ func (o *origin) serve(w http.ResponseWriter, r *http.Request) {
 	// Which origin call produced this response: lets a probe tell a cached
 	// copy from a fresh one.
 	h.Set("X-Origin-Call", strconv.FormatInt(call, 10))
+	// The same, but never reset: a scenario that zeroes the counters midway
+	// can still tell a response made before that point from one made after.
+	h.Set("X-Origin-Seq", strconv.FormatInt(o.seq.Add(1), 10))
 	w.WriteHeader(p.Status)
 	if r.Method != http.MethodHead {
 		_, _ = w.Write(body)
@@ -144,13 +167,17 @@ func (o *origin) putProfile(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "too many profiles", http.StatusInsufficientStorage)
 		return
 	}
-	// A profile that is replaced keeps its counters: a scenario may change
-	// the origin's behavior midway and still read one total.
-	ns := &slot{p: p, body: bytes.Repeat([]byte{'x'}, p.BodyBytes)}
-	if old := o.slots[name]; old != nil {
-		ns.c = old.c
+	// A profile that is replaced keeps its counters and its in-flight
+	// count: a scenario may change the origin's behavior midway and still
+	// read one total, and requests that began under the old profile still
+	// occupy the capacity until they finish. So the slot is changed in
+	// place, never swapped.
+	s := o.slots[name]
+	if s == nil {
+		s = &slot{}
+		o.slots[name] = s
 	}
-	o.slots[name] = ns
+	s.p, s.body = p, bytes.Repeat([]byte{'x'}, p.BodyBytes)
 	w.WriteHeader(http.StatusNoContent)
 }
 

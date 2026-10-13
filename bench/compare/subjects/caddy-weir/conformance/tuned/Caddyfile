@@ -1,0 +1,18 @@
+# Conformance run of the tuned tier (docs/11 §5.4): tuned/Caddyfile plus the
+# suite's request headers, as in conformance/default.
+{
+	auto_https off
+}
+:8080 {
+	weir {
+		name bench
+		forward {
+			allow Req-Num Test-ID Test-Name Foo Bar Baz Abc
+		}
+		stale {
+			while_revalidate 60s
+			if_error 5m
+		}
+	}
+	reverse_proxy origin:9000
+}

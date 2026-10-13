@@ -1,6 +1,10 @@
 # Default tier: the smallest config that caches (docs/08 §2: only name is required).
+# The admin endpoint listens on the Compose network so the runner can send
+# the purge of purge-herd (docs/08 §7); Weir has no purge route on a site
+# listener. It changes nothing about caching.
 {
 	auto_https off
+	admin :2019
 }
 :8080 {
 	weir {
