@@ -1,19 +1,19 @@
 # Status
 
 Updated: 2026-10-13
-Phase: v1.1.0 in review (released: v1.0.1, 2026-10-12)
-Current card: none
+Phase: v1.1.0 not released yet (released: v1.0.1, 2026-10-12)
+Current card: HRD-21 (findings of the comparison round)
 Card state: awaiting-merge
-Branch: card/HRD-01-hardening
-PR: https://github.com/AshwinSathian/weir/pull/122
-Next card: HRD-18 (release v1.1.0), after the pull request is merged
+Branch: card/CMP-F1-limiter-breaker
+PR: PRLINK
+Next card: HRD-18 (release v1.1.0), after HRD-21 and the comparison pull request are merged
 
 ## Waiting on Ashwin
 
-- Review and merge the v1.1 hardening pull request (cards HRD-01 to HRD-17 and HRD-19 in docs/cards/22-hardening.md). It changes requirements, defaults and the exported API without the per-change question CLAUDE.md asks for, at your request to do the whole review in one pass. The 24 decisions are the table at the top of the cards file and in the pull request body: accept or reverse each before merging. The ones most likely to matter to an existing deployment: D-H1 (followers wait for a slow flight), D-H2 (`Breaker.MinPartitions` 2), D-H6 (a marker replaces a stale response), D-H12 (`TransportOrigin` strips forwarded fields on pass-through), D-H14 (Caddy placeholders), D-H16 (a `GET` with a body is passed through).
-- After the merge, say so and HRD-18 runs the release: the `release-gate` workflow on the merged commit (fuzz 60 minutes a target, x100 under `-race`), `release/v1.1.0`, the `v1.1.0-rc.1` rehearsal, the four tags, the GitHub release, then the pull request that moves the site, the README install lines and the `caddy-published` job to `v1.1.0`, and `make site-deploy BRANCH=main`. Nothing was tagged in this session: tags go on a branch cut from the merged `main`, and module proxy entries cannot be replaced.
-- `card/CMP-01-compare-harness` (comparison spec and harness) is still local in the main checkout, blocked on Docker Desktop. It carries its own STATUS and LOG entries and will conflict with this branch in `docs/progress/`; rebase it after this merges. Its early signal (Weir's default tier answers 503 to about 70% of clients in `sync-expiry`) is now runbook 4.8 and R-14.
-- A pull request in `../ashwin-portfolio` updates the Weir write-up with the v1.1 numbers; it says "v1.1 (in review)" until the tag exists.
+- Review and merge the HRD-21 pull request. It changes defaults and behavior at your request (decisions D-H25 to D-H28 in docs/cards/22-hardening.md): `Limiter.MaxQueue` 8192 and `MaxQueueWait` 5 s; fetches under a hit-for-miss marker may pass the partition cap while the reserve and `PartitionHeadroom` slots stay free; requests wait for the half-open probe; Caddy gets `max_object_bytes`. The default object limit stays 1 MiB (D-H28): say so if you want it raised anyway.
+- Then the comparison pull request (card/CMP-01-compare-harness), rebased on this one with the tables rerun.
+- After both: say so and HRD-18 runs the release (docs/release.md from step 1).
+- A pull request in `../ashwin-portfolio` updates the Weir write-up; it says "v1.1 (in review)" until the tag exists. Hold it until the tag, then it gets the released wording.
 
 ## Notes for the next session
 
