@@ -5,7 +5,7 @@ Phase: v1.1.0 release in progress (released: v1.0.1, 2026-10-12)
 Current card: HRD-18 (release v1.1.0)
 Card state: in-progress
 Branch: docs/v1.1.0-changelog
-PR: PRLINK
+PR: https://github.com/AshwinSathian/weir/pull/126
 Next card: none
 
 ## Waiting on Ashwin
