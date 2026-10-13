@@ -238,7 +238,7 @@ Decision: partition cap (`MaxPerPartition`) inside the global cap; background wo
 
 Alternatives: weighted fair queuing across partitions (more code, and partitions are attacker-controlled so weights mean little); adaptive concurrency (OQ-3).
 
-Consequences: a flood on one path is limited to `MaxPerPartition` concurrent origin fetches. Since v1.1 the repeats of one URL under a hit-for-miss marker may use free slots past that cap while `PartitionHeadroom` slots stay free (FR-LIM-3); a busting flood has no marker and stays capped. A flood across many distinct paths is not prevented by this, and is documented as T-12 and residual risk R-2 in the threat model; upstream rate limiting is the answer there.
+Consequences: a flood on one path is limited to `MaxPerPartition` concurrent origin fetches whenever other paths need the rest. Since v1.2 a client's fetch may use free slots past that cap while `PartitionHeadroom` slots stay free (FR-LIM-3), so a flooded path can hold 32 of 64 slots while the others are idle; v1.1 allowed that only to repeats of one URL under a hit-for-miss marker. A flood across many distinct paths is not prevented by this, and is documented as T-12 and residual risk R-2 in the threat model; upstream rate limiting is the answer there.
 
 ### ADR-9 Space-Saving for miss-rate anomalies
 

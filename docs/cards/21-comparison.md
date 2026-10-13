@@ -107,16 +107,19 @@ State after the second session of 2026-10-13, which ran CMP-03b and CMP-04b on o
 - Notes: `origin-down`, default tier: 10 s after the origin recovered, 1 of 200 simultaneous clients is served and 199 get 503, because half-open admits one probe. Requests after the probe succeed. Options: keep; let requests that arrive during a probe wait for its result, bounded by `MaxQueueWait`.
 
 ### [ ] CMP-F5 The per-path cap refuses a busy path while the origin has room
+- Partly resolved: card HRD-23 (22-hardening.md), D-H29: any client's fetch may borrow idle slots. Rerun: 8,260 of 10,000 flood clients still fail, because the global limit is the binding one. Open until the adaptive limit is built.
 - Plan: comparison finding · Size: M · Depends on: owner decision
 - Read: 01 FR-LIM-3; 04 limiter section; D-H26
 - Notes: `busting-flood`, both tiers: 8,520 of 10,000 clients of the flooded path fail, more clients in total (8,520 of 11,000) than any other subject, the no-cache control included (6,535), while the origin has about 50 of its 128 slots in use and Weir 14 of its own 64 free. Every bystander is served, which is what the cap is for. The cap cannot tell a flood from a search endpoint with many honest queries. Options: keep and say so on the tuning page; extend `PartitionHeadroom` (D-H26) to storable fetches, so a path may borrow slots that are idle, bounded and given back; queue longer for a partition whose misses are being stored. The last two change behavior under a real flood and need the busting-flood load test of 07 §9 to hold.
 
-### [ ] CMP-F6 After a soft purge most URLs keep their old content
+### [x] CMP-F6 After a soft purge most URLs keep their old content
+- Resolved: card HRD-23 (22-hardening.md), D-H30: owed refreshes wait for a slot. Rerun: 88 of 1,000 URLs still stale after 4 s, all refreshed by about 4.2 s.
 - Plan: comparison finding · Size: S · Depends on: owner decision
 - Read: 01 FR-PRG-2, FR-STL; 04 background refresh
 - Notes: `purge-herd`, tuned tier: 1,000 URLs purged softly, each then asked for three times in 4 s; 904 still served pre-purge content at the last read, and the origin was called 144 times. Background refreshes are capped at 48 at a time and the rest are dropped, not queued, so a URL is refreshed only when a later request finds a free slot. Varnish's `purge.soft()` had refreshed all 1,000. `sync-expiry` shows the same limit from the other side: 272 origin calls for 5,000 expired URLs asked for twice, so about 4,700 were still stale 4 s after they expired, inside the 60 s window. The concepts page says a soft-purged entry "is served stale while one background fetch renews it", which a reader takes to mean every entry. Options: correct the page and recommend a hard purge when content must change now; queue refreshes that a purge made due (bounded, FR-LIM); let a soft purge shorten the stale window.
 
-### [ ] CMP-F7 The breaker fails clients after the origin has recovered
+### [x] CMP-F7 The breaker fails clients after the origin has recovered
+- Resolved: card HRD-23 (22-hardening.md), D-H31 and D-H32: probes every second, no doubling, ramped close. Rerun: last failure at most 1.5 s after recovery, 104 to 382 requests of 8,000. Still a loss against caches with no breaker, which fail none.
 - Plan: comparison finding · Size: S · Depends on: owner decision
 - Read: 01 FR-CB-3, FR-CB-4; 04 breaker section
 - Notes: `brownout`, default tier (no stale serving): after two 10 s bursts of 503, requests keep failing once the origin is healthy, 120 in the median repetition and 1,980 in the worst on Caddy (last failure 9.6 s after recovery); on `weirproxy` 2,280 in the median and 3,980 in the worst (last failure 11.3 s and 14.8 s). No other subject fails a client after recovery. `OpenFor` doubles on each failed probe (5 s, 10 s, up to 60 s), so the wait after recovery depends on where the burst ended. With stale serving on nobody fails. Options: keep and document the worst case (`MaxOpenFor`) beside D6; a lower default `MaxOpenFor` (a default change, hard rule 12); probe on a fixed short period once open, and keep the backoff for the closing decision only.

@@ -94,7 +94,7 @@ client    engine                     flights/limiter          origin
   |         |                             |                      | 200 -> store new
 ```
 
-Background refresh never queues. If `tryAcquire(bg)` fails because the reserve is reached, the refresh is dropped and counted; the next request inside the window tries again. If the breaker is open the refresh is skipped.
+An early refresh never queues. If `tryAcquire(bg)` fails because the reserve is reached, it is dropped and counted; the next request inside the window tries again. The refresh a stale-while-revalidate hit starts is owed and waits for a slot outside the reserve, behind every waiting client, in a bounded backlog (FR-LIM-4). If the breaker is open the refresh is skipped.
 
 ### 2.4 Validation (stale outside SWR, `no-cache`, soft purge, invalidation)
 
@@ -218,7 +218,8 @@ The origin sees at most `MaxConcurrent` fetches, and duplicate keys are still co
    | probe success                                     timer done |
    |                                                              v
    +----------------------------------------------------------- HALF-OPEN
-                        probe failure: back to OPEN, OpenFor doubled (max 60 s)
+                        probe failure: back to OPEN for OpenFor (doubled only up to MaxOpenFor)
+                        probe success: twice as many probes; CLOSED at MaxConcurrent
 ```
 
 ### 3.3 Flight

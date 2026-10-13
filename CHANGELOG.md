@@ -4,7 +4,14 @@ Format: one section per release, newest first. Changes land under "Unreleased" i
 
 ## Unreleased
 
-Nothing yet.
+Fixes for the losses the second comparison round found (card HRD-23, findings CMP-F5 to CMP-F7 in [docs/cards/21-comparison.md](docs/cards/21-comparison.md)). Three defaults change.
+
+### Changed behavior
+
+- Stale serving: the refresh a stale-while-revalidate hit starts now waits for a slot when none is free outside the foreground reserve, where it was dropped (FR-LIM-4). After a soft purge or a mass expiry every entry is refreshed, at most `MaxConcurrent − ReserveForeground` at a time, and the origin is called once per entry; before, most entries stayed stale until asked for again. At most `Limiter.MaxQueue` refreshes wait, apart from the clients' queue. Early refreshes are still dropped.
+- Limiter: every client's fetch may start past `Limiter.MaxPerPartition` while more than `ReserveForeground` plus `PartitionHeadroom` slots are free, not only a fetch under a hit-for-miss marker (FR-LIM-3). One path with many distinct query strings can hold 32 of the 64 origin slots while the rest are idle, where it held 16. Way back: `PartitionHeadroom` at `MaxConcurrent`.
+- Breaker: `Breaker.OpenFor` defaults to 1 s (was 5 s) and `Breaker.MaxOpenFor` to `OpenFor` (was 60 s), so the breaker probes about once a second and no longer doubles the period per failed probe (FR-CB-3). Way back: `OpenFor: 5 * time.Second, MaxOpenFor: time.Minute`.
+- Breaker: closing is gradual. Each probe that succeeds doubles the fetches admitted at a time; the breaker closes when that reaches `MaxConcurrent` (FR-CB-4). `Stats().BreakerState` reads half-open during the ramp.
 
 ## v1.1.0 (2026-10-13)
 

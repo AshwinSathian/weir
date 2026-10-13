@@ -16,7 +16,7 @@ With defaults:
 - `Limiter.MaxConcurrent` is 64. That many fetches run at once.
 - A request that finds no free slot queues. The queue holds `MaxQueue` (8,192) waiters and each waits at most `MaxQueueWait` (5 seconds) (FR-LIM-2).
 - A request that cannot queue, or waits too long, is shed. It gets a stale entry if stale-if-error allows one, and otherwise a 503 with `Retry-After` (FR-LIM-5).
-- Background refreshes never queue and never use the last 25% of slots, so they cannot starve the requests people are waiting on (FR-LIM-4).
+- Background refreshes never use the last 25% of slots and are granted a slot only after every waiting client, so they cannot starve the requests people are waiting on (FR-LIM-4).
 - Requests with a body draw from a separate pool of `MaxUpload` slots (16), of which one path may hold half. A slow uploader can exhaust that pool and nothing else (FR-LIM-7), and a body that stalls or breaks is the client's failure, not the origin's: the breaker does not count it.
 
 So the origin sees at most `MaxConcurrent + MaxUpload` fetches at once, 80 by default, whatever happens in front: a full purge, a restart with a cold cache, a storage outage that turns every lookup into a miss. Set `MaxConcurrent` to what your origin can serve concurrently and still answer in reasonable time.
@@ -39,7 +39,7 @@ A limiter protects a healthy origin from too much work. A breaker protects a fai
 
 One breaker per engine watches all origin fetches over a 10-second window (FR-CB-1). When at least 20 have completed and half or more failed, it opens (FR-CB-2), provided the failures come from at least two paths or nothing succeeded at all. One broken endpoint, asked a thousand ways, does not open the breaker for the rest of the site (`Breaker.MinPartitions`). A failure here means the origin's health is in doubt: a timeout, a connection error, a 502, 503 or 504. A 500 or a 4xx is the origin answering, and does not count unless you set `Breaker.CountStatus500`.
 
-While open, nothing reaches the origin (FR-CB-5). Requests get a stale entry where allowed (`detail=circuit-open`) and a fast 503 otherwise. After 5 seconds, give or take 20%, one probe request is let through. Success closes the breaker; failure reopens it for twice as long, up to 60 seconds (FR-CB-3, FR-CB-4).
+While open, nothing reaches the origin (FR-CB-5). Requests get a stale entry where allowed (`detail=circuit-open`) and a fast 503 otherwise. After a second, give or take 20%, one probe request is let through. A failure reopens the breaker for another second. A success lets two requests through, then four, and the breaker closes when the whole budget is admitted, so an origin that has just come back is not met by everyone at once (FR-CB-3, FR-CB-4).
 
 The random 20% is there for the same reason as TTL jitter: several Weir instances that opened together should not all probe in the same instant.
 
