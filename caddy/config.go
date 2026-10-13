@@ -134,6 +134,8 @@ type LimiterConfig struct {
 	MaxQueue        int            `json:"max_queue,omitempty"`
 	MaxQueueWait    caddy.Duration `json:"max_queue_wait,omitempty"`
 	MaxPerPartition int            `json:"max_per_partition,omitempty"`
+	// PartitionHeadroom is weir.LimiterConfig.PartitionHeadroom (FR-LIM-3).
+	PartitionHeadroom int `json:"partition_headroom,omitempty"`
 	// MaxPerClient caps one client's requests at the origin (FR-FAIR-4). The
 	// client is Caddy's client_ip, which honors trusted_proxies. 0: off.
 	MaxPerClient int `json:"max_per_client,omitempty"`
@@ -304,6 +306,7 @@ func validateName(name string) error {
 // Logger and Store have no JSON form; the caller sets them.
 func (h *Handler) weirConfig() weir.Config {
 	cfg := weir.Config{
+		Storable: weir.StorableConfig{MaxObjectBytes: int64(h.MaxObjectBytes)},
 		Key: weir.KeyConfig{
 			QueryDrop: h.Key.QueryDrop, QueryKeep: h.Key.QueryKeep, QuerySort: h.Key.QuerySort,
 			NormalizePath: h.Key.NormalizePath, Headers: h.Key.Headers, Cookies: h.Key.Cookies,
@@ -314,8 +317,8 @@ func (h *Handler) weirConfig() weir.Config {
 		Limiter: weir.LimiterConfig{
 			MaxConcurrent: h.Limiter.MaxConcurrent, MaxQueue: h.Limiter.MaxQueue,
 			MaxQueueWait:    time.Duration(h.Limiter.MaxQueueWait),
-			MaxPerPartition: h.Limiter.MaxPerPartition,
-			MaxPerClient:    h.Limiter.MaxPerClient,
+			MaxPerPartition: h.Limiter.MaxPerPartition, PartitionHeadroom: h.Limiter.PartitionHeadroom,
+			MaxPerClient: h.Limiter.MaxPerClient,
 		},
 		Freshness: weir.FreshnessConfig{
 			DefaultStaleWhileRevalidate: time.Duration(h.Stale.WhileRevalidate),

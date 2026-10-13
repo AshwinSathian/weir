@@ -119,7 +119,7 @@ export function Budget() {
   const slots = (n: number, y: number, cls: (i: number) => string) =>
     Array.from({ length: n }, (_, i) => <rect key={i} className={cls(i)} x={16 + i * step} y={y} width={step - 1.6} height="22" rx="1.5" />)
   return (
-    <Svg id="budget" w={560} h={250} title="The origin concurrency budget at defaults" desc="64 main slots, of which background refreshes may use at most 48 and any one path at most 16. A separate pool of 16 slots serves requests with a body. At most 80 fetches reach the origin at once. A queue of 1,024 waits up to 2 seconds; beyond that requests are shed.">
+    <Svg id="budget" w={560} h={250} title="The origin concurrency budget at defaults" desc="64 main slots, of which background refreshes may use at most 48 and any one path at most 16. A separate pool of 16 slots serves requests with a body. At most 80 fetches reach the origin at once. A queue of 8,192 waits up to 5 seconds; beyond that requests are shed.">
       <text className="ink big" x="16" y="20">MaxConcurrent = 64 slots</text>
       {slots(64, 30, (i) => (i < 48 ? 'f-acc' : 'f-box'))}
       <path className="s-mut" d={`M16 60 H${16 + 48 * step - 3}`} />
@@ -133,7 +133,7 @@ export function Budget() {
       <text className="mut" x={16 + 16 * step + 10} y="167">separate pool for requests with a body</text>
       <text className="mut" x="16" y="192">The origin sees at most 64 + 16 = 80 fetches at once.</text>
       <rect className="f-wrn" x="16" y="208" width="528" height="26" rx="3" />
-      <text className="wrn" x="26" y="225">queue: 1,024 waiters, 2 s each, then stale or 503 with Retry-After</text>
+      <text className="wrn" x="26" y="225">queue: 8,192 waiters, 5 s each, then stale or 503 with Retry-After</text>
     </Svg>
   )
 }

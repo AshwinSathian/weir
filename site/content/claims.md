@@ -37,7 +37,7 @@ Machine for every `docs/benchmarks.md` row unless noted: Apple M4 Pro, 12 cores,
 
 | Figure | Source | Checked | Where it comes from |
 |---|---|---|---|
-| `1,024` | `docs/01-technical-spec.md` | 2026-10-12 | `Limiter.MaxQueue` |
+| `8,192` | `docs/01-technical-spec.md` | 2026-10-13 | `Limiter.MaxQueue` |
 | `50 ms` | `docs/01-technical-spec.md` | 2026-10-12 | `Timeouts.Store` |
 
 ## Illustrations, not measurements

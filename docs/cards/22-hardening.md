@@ -220,6 +220,21 @@ High findings first, then Medium, then Low, then documents, review and release. 
 - AC: docs/release.md steps 1 to 10 for `v1.1.0`, all four modules; `release-gate` green on the merged commit; the site and the `caddy-published` job name `v1.1.0`; the site is deployed
 - Notes: cannot start before Ashwin merges the pull request (`main` is protected). Tags are immutable on the module proxy, so the rehearsal tag `v1.1.0-rc.1` comes first
 
+### [x] HRD-21 Findings of the comparison round
+- Plan: hardening · Size: M · Depends on: HRD-17
+- Read: 01 FR-LIM-2, FR-LIM-3, FR-CB-4, FR-STO-9; 04 §8.2, §8.3; 06 T-11, INV-7, R-14; docs/11 §8
+- Touch: internal/limiter/limiter.go, internal/breaker/breaker.go, fetch.go, serve.go, config.go, engine.go, caddy/{module,pool,config,caddyfile}.go
+- Tests: `TestDefaultQueueHoldsExpiryBurst`, `TestMarkedURLUsesFreeSlots`, `TestHeadroomLeavesSlotsForOtherPartitions`, `TestHeadroomStrictCases`, `TestBurstBehindProbe`, `TestStaleNotHeldBehindProbe`, `TestBreakerAllowOrWait`, `TestMaxObjectBytes`
+- Decisions, each a default or behavior change made at the owner's request to fix the four findings (CMP-F1 to CMP-F4 in 21-comparison.md):
+  - D-H25 (F1): `Limiter.MaxQueue` 1024 to 8192 and `MaxQueueWait` 2 s to 5 s. Origin concurrency is unchanged; clients wait longer before a 503. Stale serving stays off by default (D6).
+  - D-H26 (F2): new `Limiter.PartitionHeadroom` (0: `MaxPerPartition`). Only a fetch under a hit-for-miss marker may pass its partition's cap, and only while that many slots stay free. Rejected: letting every fetch borrow, which would have tripled what a cache-busting flood on one path takes from the origin (T-11, hard rule 12).
+  - D-H27 (F4): a foreground request without a stale response waits for the half-open probe, bounded by `MaxQueueWait`.
+  - D-H28 (F3): the default `Storable.MaxObjectBytes` stays 1 MiB. It is tied to the memory store's shard size (a tenth of a 16 MiB shard), and a larger default means fewer shards and more memory buffered per fetch for everyone. The Caddy adapter gets `max_object_bytes`, which it lacked. One fetch streamed to many waiting clients without storing it is not built: deferred as HRD-22.
+
+### [~] HRD-22 Share one over-size fetch among waiting clients
+- Plan: hardening · Size: L · Depends on: none
+- Notes: deferred. Clients of an object over `MaxObjectBytes` each fetch it (`oversize-herd` and `large-body-herd` in docs/benchmarks.md). Sharing needs a bounded broadcast buffer with a rule for slow readers and late joiners, or a store that streams. Needs a design first.
+
 ### [~] HRD-20 Coalescing across nodes and a local tier for remote stores
 - Plan: v1.2 · Size: design first
 - Notes: deferred. Needs its own spec section: a store-side lock with a fencing token and a bounded wait, and a small in-process tier that honors epochs. Trigger: a multi-node deployment reports origin load that scales with node count

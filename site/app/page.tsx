@@ -22,7 +22,7 @@ const failures: [string, string, React.ReactNode][] = [
   ['Hot-key stampede', 'One popular entry expires and every request waiting on it asks the origin.',
     <>Requests for one key share one fetch. Followers wait at most 10 s, and a leader slower than 10 s stops collecting new followers. <Link href="/docs/concepts/coalescing/">Coalescing</Link></>],
   ['Cross-key stampede', 'A purge, a restart or a cold start makes thousands of different keys miss together. Coalescing cannot help, because no two requests share a key.',
-    <>Every fetch holds one of 64 slots, at most 16 per path. 1,024 more wait up to 2 s; the rest get stale content or a 503 with <code>Retry-After</code>. <Link href="/docs/concepts/origin-protection/">Origin protection</Link></>],
+    <>Every fetch holds one of 64 slots, at most 16 per path. 8,192 more wait up to 5 s; the rest get stale content or a 503 with <code>Retry-After</code>. <Link href="/docs/concepts/origin-protection/">Origin protection</Link></>],
   ['Origin or storage outage', 'The origin slows down, and every request pays the full timeout before failing.',
     <>Stale-while-revalidate and stale-if-error serve what is stored, a circuit breaker stops calling a failing origin, and a 2 s negative entry answers repeats of a failure. <Link href="/docs/concepts/origin-protection/">Origin protection</Link></>],
   ['Poisoning and cache busting', 'A header the key ignores changes the stored response for everyone, or random query strings turn every request into a miss.',

@@ -424,7 +424,7 @@ func TestLimiterInvariants(t *testing.T) {
 				}
 				queued := map[uint64]int{}
 				for _, w := range l.queue {
-					if l.canRun(w.class, w.part, w.host) {
+					if l.canRun(w.class, false, w.part, w.host) {
 						t.Fatalf("seed %d: runnable waiter left in the queue", seed)
 					}
 					queued[w.part]++

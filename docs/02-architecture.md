@@ -1,7 +1,7 @@
 # Weir architecture
 
 Status: v1.0
-Date: 2026-10-09
+Date: 2026-10-13
 Depends on: [01-technical-spec.md](01-technical-spec.md)
 
 This document fixes the structure: what the parts are, which way dependencies point, who owns which state, and why each major choice was made. Request-level behavior is in [03-hld.md](03-hld.md). Exact types are in [04-lld.md](04-lld.md).
@@ -238,7 +238,7 @@ Decision: partition cap (`MaxPerPartition`) inside the global cap; background wo
 
 Alternatives: weighted fair queuing across partitions (more code, and partitions are attacker-controlled so weights mean little); adaptive concurrency (OQ-3).
 
-Consequences: a flood on one path is limited to `MaxPerPartition` concurrent origin fetches. A flood across many distinct paths is not prevented by this, and is documented as T-12 and residual risk R-2 in the threat model; upstream rate limiting is the answer there.
+Consequences: a flood on one path is limited to `MaxPerPartition` concurrent origin fetches. Since v1.1 the repeats of one URL under a hit-for-miss marker may use free slots past that cap while `PartitionHeadroom` slots stay free (FR-LIM-3); a busting flood has no marker and stays capped. A flood across many distinct paths is not prevented by this, and is documented as T-12 and residual risk R-2 in the threat model; upstream rate limiting is the answer there.
 
 ### ADR-9 Space-Saving for miss-rate anomalies
 

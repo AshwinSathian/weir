@@ -99,7 +99,7 @@ Every cap but one is keyed on the URL, which the client chooses, so a client tha
 
 ### 4.8 Defaults that shed
 
-The limiter queues a miss for at most `Limiter.MaxQueueWait` (2 s) and then answers 503, and nothing is served stale on an error unless the origin sends `stale-if-error` or you set `Freshness.DefaultStaleIfError`. After a cold start or a mass expiry, whatever the origin budget (`MaxConcurrent`, 64) cannot take within 2 s is shed. That is the intended order of protection: the origin first. To favor answers over latency, raise `MaxQueueWait` toward your clients' own timeout, raise `MaxConcurrent` to what the origin can serve, and set `DefaultStaleIfError` so shed requests for stored URLs get the stale copy.
+The limiter queues a miss for at most `Limiter.MaxQueueWait` (5 s) and then answers 503, and nothing is served stale on an error unless the origin sends `stale-if-error` or you set `Freshness.DefaultStaleIfError`. After a cold start or a mass expiry, whatever the origin budget (`MaxConcurrent`, 64) cannot take within 5 s is shed. A response over `Storable.MaxObjectBytes` (1 MiB; `max_object_bytes` in Caddy) is never stored, so every client of a 2 MiB script reaches the origin. If your site serves such objects, raise the limit and size the store so a tenth of a shard holds one (`memory.Shards` does the arithmetic). That is the intended order of protection: the origin first. To favor answers over latency, raise `MaxQueueWait` toward your clients' own timeout, raise `MaxConcurrent` to what the origin can serve, and set `DefaultStaleIfError` so shed requests for stored URLs get the stale copy.
 
 ## 5. Planned operations
 
@@ -315,7 +315,7 @@ example.com {
 ### 8.1 One Valkey and one prefix per cache
 
 - All nodes of a cache use the same `addrs` and the same `prefix`. Set `prefix` explicitly. It defaults to the site `name`, which keeps two sites on one server apart, but then `name` must be identical on every node or the nodes share nothing. Two caches that must not see each other's purges need two prefixes (or two servers).
-- A Valkey record is limited to 64 MiB (`valkey.Config.MaxObjectBytes`; the Caddyfile has no key for it, and the engine's object limit under Caddy is 1 MiB). A larger value at an entry key is treated as a miss and overwritten.
+- A Valkey record is limited to 64 MiB (`valkey.Config.MaxObjectBytes`; the Caddyfile has no key for it, and the engine's object limit under Caddy is `max_object_bytes`, 1 MiB when absent). A larger value at an entry key is treated as a miss and overwritten.
 - Every node that shares a `prefix` must also agree on `max_retention` and `max_clock_skew` (05 §7): the prune margin comes from the node that writes, so a node with a shorter retention prunes hard epochs that another node's entries still depend on.
 - Give the cache its own server. Epoch keys have no TTL, and `maxmemory` is server-wide, so another application that writes TTL-less keys to the same server fills it with keys the eviction policy cannot remove.
 

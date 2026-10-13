@@ -217,7 +217,7 @@ func (e *Engine) pass(ctx context.Context, rc *keys.Classified, origin Origin, f
 		return nil, shed.err
 	}
 	defer release()
-	res := e.fetch(ctx, c, origin, limiter.Foreground, false, nil, nil)
+	res := e.fetch(ctx, c, origin, limiter.Foreground, fetchOpts{patient: true}, nil, nil)
 	if res.err != nil {
 		return nil, res.err
 	}
@@ -466,7 +466,15 @@ func (e *Engine) fetchStored(ctx context.Context, sp *fetchSpec, origin Origin) 
 	// MaxObjectBytes that nothing will keep. The next attempt to store comes
 	// when the marker has expired. Behind any other marker the fetch is
 	// buffered, and a response that has become storable is stored.
-	fr := &flightResult{fetchResult: e.fetch(ctx, c, origin, sp.class, !sp.lk.oversize, prior, sp.permit)}
+	// FR-CB-4: a request with a stale response to fall back on takes it at
+	// once; any other waits for a half-open probe.
+	patient := sp.lk.entry == nil
+	if !patient {
+		_, stale := e.staleOK(sp, time.Now())
+		patient = !stale
+	}
+	fo := fetchOpts{buffered: !sp.lk.oversize, patient: patient, marked: sp.lk.marker}
+	fr := &flightResult{fetchResult: e.fetch(ctx, c, origin, sp.class, fo, prior, sp.permit)}
 	if fr.notMod && e.hardPurgedSince(ctx, prior) {
 		// FR-PRG-3, FR-PRG-7: a hard purge after prior was stored makes it
 		// unreachable, and it landed while this request waited for a slot,
@@ -474,7 +482,8 @@ func (e *Engine) fetchStored(ctx context.Context, sp *fetchSpec, origin Origin) 
 		// the purged body as fresh. Fetch again without conditionals.
 		closeBody(fr.resp)
 		prior = nil
-		fr = &flightResult{fetchResult: e.fetch(ctx, c, origin, sp.class, true, nil, nil)}
+		fo.buffered = true
+		fr = &flightResult{fetchResult: e.fetch(ctx, c, origin, sp.class, fo, nil, nil)}
 	}
 	res := &fr.fetchResult
 	e.setNegative(ctx, sp, res) // once per flight, before any waiter reads the store

@@ -53,7 +53,7 @@ No design removes every risk. These are the ones that remain after the defaults 
 | R-11 | Coalescing is per process. Several nodes on one Valkey each fetch a hot key when it expires, and every hit on a remote store costs its round trips | Size each node's limiter for its share of the origin. A shared lock and a local tier are planned, not built |
 | R-12 | One breaker serves the whole engine. One failing path cannot open it, but two or more with enough traffic can, for every path | Keep endpoints that fail by design off the cached routes, or raise `Breaker.MinPartitions` |
 | R-13 | The per-client cap is off by default and counts by the address the adapter supplies. With it off, or against a flood from many addresses, a flood of distinct paths takes the whole origin budget | Turn `Limiter.MaxPerClient` on once the client address is trustworthy, and keep a rate limiter in front |
-| R-14 | The defaults shed. A miss queues for 2 seconds and then gets a 503, and nothing is served stale on an error unless the origin or you allow it | Raise `Limiter.MaxQueueWait`, size `MaxConcurrent` to the origin, set `Freshness.DefaultStaleIfError` |
+| R-14 | The defaults shed. A miss queues for 5 seconds and then gets a 503, and nothing is served stale on an error unless the origin or you allow it | Raise `Limiter.MaxQueueWait`, size `MaxConcurrent` to the origin, set `Freshness.DefaultStaleIfError` |
 | R-15 | Any client can invalidate a cached URL with a `POST` or another unsafe method that the origin answers with 2xx or 3xx, as HTTP requires. It costs one refetch per request | Have the origin refuse unsafe methods on routes that should not accept them |
 
 ## Out of scope

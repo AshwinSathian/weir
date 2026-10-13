@@ -46,6 +46,18 @@ type fetchResult struct {
 	bgDropped bool
 }
 
+// fetchOpts are the per-call choices of fetch.
+type fetchOpts struct {
+	buffered bool // read the body up to MaxObjectBytes before returning
+	// patient: wait for a half-open breaker's probe instead of failing
+	// behind it (FR-CB-4). False when the caller has a stale response to
+	// serve.
+	patient bool
+	// marked: a hit-for-miss marker covers the URL, so the fetch may run past
+	// its partition's cap while the limiter has headroom (FR-LIM-3).
+	marked bool
+}
+
 // fetch is the only caller of Origin.Fetch (P3, 04 §6.7). It forwards
 // c.Forwarded holding a limiter slot of class for c's partition, from before
 // the request is sent until it returns: after the buffered body, or at the
@@ -68,15 +80,15 @@ type fetchResult struct {
 //
 // A non-nil held is a slot the caller already acquired from limFor(c);
 // fetch releases it like its own.
-func (e *Engine) fetch(ctx context.Context, c *keys.Classified, origin Origin, class limiter.Class, buffered bool, prior *store.Entry, held *limiter.Permit) fetchResult {
-	probe, err := e.cb.AllowFor(c.PartitionH)
-	if err == nil && class != limiter.Foreground && probe != (breaker.Probe{}) {
-		e.cb.Cancel(probe) // FR-CB-4: only foreground fetches probe
-		err = breaker.ErrCircuitOpen
-	}
+func (e *Engine) fetch(ctx context.Context, c *keys.Classified, origin Origin, class limiter.Class, fo fetchOpts, prior *store.Entry, held *limiter.Permit) fetchResult {
+	buffered := fo.buffered
+	probe, err := e.breakerAdmit(ctx, c, class, fo.patient && held == nil)
 	if err != nil {
 		if held != nil {
 			held.Release()
+		}
+		if !errors.Is(err, breaker.ErrCircuitOpen) {
+			return fetchResult{err: err} // the caller left while waiting
 		}
 		return e.circuitOpen(c, class)
 	}
@@ -93,7 +105,12 @@ func (e *Engine) fetch(ctx context.Context, c *keys.Classified, origin Origin, c
 	defer cancelProbe()
 	permit := held
 	if permit == nil {
-		if permit, err = e.limFor(c).Acquire(ctx, class, c.PartitionH, c.HostH); err != nil {
+		if fo.marked && class == limiter.Foreground {
+			permit, err = e.limFor(c).AcquireOver(ctx, c.PartitionH, c.HostH)
+		} else {
+			permit, err = e.limFor(c).Acquire(ctx, class, c.PartitionH, c.HostH)
+		}
+		if err != nil {
 			return e.shed(c, class, err)
 		}
 	}
@@ -270,6 +287,43 @@ func fetchReason(class limiter.Class, pass bool) string {
 		return "pass"
 	}
 	return "foreground"
+}
+
+// breakerAdmit asks the breaker for the fetch (FR-CB-4, FR-CB-5). Only
+// foreground fetches probe. A patient foreground fetch refused because the
+// half-open probe is in flight waits for its outcome, for at most
+// Limiter.MaxQueueWait, and then asks again: a burst that arrives with the
+// probe is served by the recovered origin instead of failing behind it. A
+// caller with a stale response to serve, or holding a limiter slot, is not
+// patient.
+func (e *Engine) breakerAdmit(ctx context.Context, c *keys.Classified, class limiter.Class, patient bool) (breaker.Probe, error) {
+	if class != limiter.Foreground || !patient {
+		probe, err := e.cb.AllowFor(c.PartitionH)
+		if err == nil && class != limiter.Foreground && probe != (breaker.Probe{}) {
+			e.cb.Cancel(probe)
+			err = breaker.ErrCircuitOpen
+		}
+		return probe, err
+	}
+	var expired <-chan time.Time
+	for {
+		probe, ended, err := e.cb.AllowOrWait(c.PartitionH)
+		if err == nil || ended == nil {
+			return probe, err
+		}
+		if expired == nil {
+			t := time.NewTimer(e.cfg.Limiter.MaxQueueWait)
+			defer t.Stop()
+			expired = t.C
+		}
+		select {
+		case <-ended:
+		case <-expired:
+			return breaker.Probe{}, breaker.ErrCircuitOpen
+		case <-ctx.Done():
+			return breaker.Probe{}, ctx.Err()
+		}
+	}
 }
 
 // limFor returns the pool c's fetch takes its slot from: the upload pool

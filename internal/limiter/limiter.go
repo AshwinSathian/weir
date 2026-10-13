@@ -36,12 +36,16 @@ const (
 
 // Config holds the limiter's bounds. The engine fills defaults (04 §5).
 type Config struct {
-	Max          int           // slots in flight at once (FR-LIM-1)
-	MaxQueue     int           // waiters at once (FR-LIM-2)
-	PerPartition int           // slots per partition (FR-LIM-3)
-	PerHost      int           // slots per host; 0 disables (FR-FAIR-1)
-	Reserve      int           // slots only Foreground may take (FR-LIM-4)
-	MaxWait      time.Duration // Foreground queue wait (FR-LIM-2)
+	Max          int // slots in flight at once (FR-LIM-1)
+	MaxQueue     int // waiters at once (FR-LIM-2)
+	PerPartition int // slots per partition (FR-LIM-3)
+	// Headroom lets a fetch taken with AcquireOver run although its
+	// partition is at PerPartition, while more than Headroom slots are free
+	// (FR-LIM-3). Zero makes PerPartition a strict cap for every fetch.
+	Headroom int
+	PerHost  int           // slots per host; 0 disables (FR-FAIR-1)
+	Reserve  int           // slots only Foreground may take (FR-LIM-4)
+	MaxWait  time.Duration // Foreground queue wait (FR-LIM-2)
 }
 
 // Limiter bounds concurrent origin fetches globally and per partition,
@@ -69,6 +73,7 @@ type waiter struct {
 	part    uint64
 	host    uint64
 	class   Class
+	over    bool          // taken with AcquireOver
 	ready   chan struct{} // closed when granted
 	granted bool
 }
@@ -164,7 +169,7 @@ func (l *Limiter) queueCap() int { return max(l.cfg.PerPartition, l.cfg.MaxQueue
 
 // canRun reports whether a fetch of class c for part and host may take a
 // slot now. Caller holds l.mu.
-func (l *Limiter) canRun(c Class, part, host uint64) bool {
+func (l *Limiter) canRun(c Class, over bool, part, host uint64) bool {
 	limit := l.limit()
 	if c != Foreground {
 		limit -= l.cfg.Reserve
@@ -172,7 +177,23 @@ func (l *Limiter) canRun(c Class, part, host uint64) bool {
 	if l.cfg.PerHost > 0 && l.byHost[host] >= l.cfg.PerHost {
 		return false // FR-FAIR-1: one host cannot take every slot
 	}
-	return l.inflight < limit && l.byPart[part] < l.capFor(part)
+	if l.inflight >= limit {
+		return false
+	}
+	if l.byPart[part] < l.capFor(part) {
+		return true
+	}
+	// FR-LIM-3: past its cap a partition runs only the fetches the caller
+	// vouches for, and only while Headroom slots stay free for the rest, so
+	// a fetch for any other partition still starts at once. A partition the
+	// miss-rate report throttles has no such allowance (FR-MR-3).
+	if !over || l.cfg.Headroom <= 0 {
+		return false
+	}
+	if _, thr := l.throttled[part]; thr {
+		return false
+	}
+	return l.inflight < l.limit()-l.cfg.Headroom
 }
 
 // take records a granted slot. Caller holds l.mu.
@@ -195,6 +216,19 @@ func (l *Limiter) hold(part, host uint64) {
 // an error wrapping ErrShed when no slot comes free in time, or ctx.Err()
 // when ctx ends first.
 func (l *Limiter) Acquire(ctx context.Context, c Class, part, host uint64) (*Permit, error) {
+	return l.acquire(ctx, c, false, part, host)
+}
+
+// AcquireOver is Acquire for a Foreground fetch that may run past its
+// partition's cap while Config.Headroom slots stay free (FR-LIM-3). The
+// engine uses it for a URL a marker says cannot be stored: every client of
+// such a URL needs a fetch of its own, and those are not the distinct keys
+// of a cache-busting flood the cap is there for (T-11).
+func (l *Limiter) AcquireOver(ctx context.Context, part, host uint64) (*Permit, error) {
+	return l.acquire(ctx, Foreground, true, part, host)
+}
+
+func (l *Limiter) acquire(ctx context.Context, c Class, over bool, part, host uint64) (*Permit, error) {
 	l.mu.Lock()
 	if l.expire() {
 		l.grant() // parked waiters of the freed partitions go first
@@ -202,7 +236,7 @@ func (l *Limiter) Acquire(ctx context.Context, c Class, part, host uint64) (*Per
 	// Release, Throttle and the lines above grant every runnable waiter
 	// before they unlock, so no queued waiter is runnable here and canRun
 	// alone keeps FIFO order among them.
-	if l.canRun(c, part, host) {
+	if l.canRun(c, over, part, host) {
 		p := l.take(part, host)
 		l.mu.Unlock()
 		return p, nil
@@ -220,7 +254,7 @@ func (l *Limiter) Acquire(ctx context.Context, c Class, part, host uint64) (*Per
 		l.mu.Unlock()
 		return nil, ErrQueueFull
 	}
-	w := &waiter{part: part, host: host, class: c, ready: make(chan struct{})}
+	w := &waiter{part: part, host: host, class: c, over: over, ready: make(chan struct{})}
 	l.queue = append(l.queue, w)
 	l.queuedBy[part]++
 	l.mu.Unlock()
@@ -285,7 +319,7 @@ func (p *Permit) Release() {
 // Caller holds l.mu.
 func (l *Limiter) grant() {
 	// ponytail: the walk passes every waiter whose partition is full before
-	// it finds one that can run, at most MaxQueue (1024) of them;
+	// it finds one that can run, at most MaxQueue (8192 by default) of them;
 	// per-partition queues if BenchmarkLimiterReleaseFullQueue says it matters.
 	kept := l.queue[:0]
 	for i, w := range l.queue {
@@ -296,7 +330,7 @@ func (l *Limiter) grant() {
 			kept = append(kept, l.queue[i:]...)
 			break
 		}
-		if l.canRun(w.class, w.part, w.host) {
+		if l.canRun(w.class, w.over, w.part, w.host) {
 			l.hold(w.part, w.host)
 			w.granted = true
 			close(w.ready)

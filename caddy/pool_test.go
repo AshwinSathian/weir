@@ -530,3 +530,25 @@ func TestMemoryDefaultsPinned(t *testing.T) {
 }
 
 func memoryObject(maxBytes int64) int64 { return maxBytes / defaultShards / 10 }
+
+// FR-STO-9, 05 §5.1: max_object_bytes raises the engine's object limit and
+// gives the memory store shards large enough to hold such an object. A value
+// a shard cannot hold is refused when the config loads.
+func TestMaxObjectBytes(t *testing.T) {
+	h, err := load(t, `{"name":"big","max_bytes":"512MiB","max_object_bytes":"4MiB"}`)
+	if err != nil {
+		t.Fatalf("4MiB objects in a 512MiB store: %v", err)
+	}
+	if got := h.weirConfig().Storable.MaxObjectBytes; got != 4<<20 {
+		t.Errorf("Storable.MaxObjectBytes = %d, want 4 MiB", got)
+	}
+	if got := h.memoryConfig(512<<20, nil).Shards; got != 8 {
+		t.Errorf("shards = %d, want 8: a tenth of a 64 MiB shard holds a 4 MiB object", got)
+	}
+	if a, b := h.storeSpec(), (&Handler{Name: "big", MaxBytes: 512 << 20}).storeSpec(); a == b {
+		t.Error("store identity ignores max_object_bytes, so a reload would keep the old shards")
+	}
+	if _, err := load(t, `{"name":"toobig","max_bytes":"512MiB","max_object_bytes":"64MiB"}`); err == nil {
+		t.Error("an object above a tenth of max_bytes was accepted")
+	}
+}

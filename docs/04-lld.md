@@ -93,9 +93,10 @@ type CoalesceConfig struct {
 
 type LimiterConfig struct {
 	MaxConcurrent     int           // 0: 64
-	MaxQueue          int           // 0: 1024
-	MaxQueueWait      time.Duration // 0: 2s
+	MaxQueue          int           // 0: 8192
+	MaxQueueWait      time.Duration // 0: 5s
 	MaxPerPartition   int           // 0: 16 (clamped to MaxConcurrent)
+	PartitionHeadroom int           // 0: MaxPerPartition; >= MaxConcurrent: strict cap (FR-LIM-3)
 	ReserveForeground int           // 0: MaxConcurrent/4 (at least 1 when MaxConcurrent >= 2)
 	MaxPerHost        int           // 0: off (M14)
 	MaxPerClient      int           // 0: off (FR-FAIR-4)
@@ -852,7 +853,7 @@ type fetchResult struct {
 
 ```
 func (e *Engine) fetch(ctx, s, origin) fetchResult:
-    probe, err := e.cb.Allow()              // ErrCircuitOpen when open
+    probe, err := e.breakerAdmit(...)       // ErrCircuitOpen when open; waits for a half-open probe, see §8.3
     if err: return errResult(ErrCircuitOpen)
     pool := e.lim; if s.hasBody: pool = e.upl   // FR-LIM-7, T-39
     permit, err := pool.Acquire(ctx, s.class, s.partition)
@@ -1073,7 +1074,7 @@ func (l *Limiter) Throttle(end, until time.Time, caps map[uint64]int) bool
 
 The engine fills `Config` from `LimiterConfig` and maps all three errors to its own `ErrShed`; the sentinel says which `EvShed` detail applies (`background`, `queue-full`, `queue-timeout`). The global cap is read only through `limit()` and the partition cap only through `capFor(part)` (D13).
 
-Admission check `canRun(class, part)`: `inflight < limit()`, and for `Background` and `Warm` `inflight < limit() - Reserve`, and `byPart[part] < capFor(part)`.
+Admission check `canRun(class, over, part)`: `inflight < limit()`, and for `Background` and `Warm` `inflight < limit() - Reserve`, and `byPart[part] < capFor(part)`. A waiter taken with `AcquireOver` (`over`, always `Foreground`) may also run with its partition at the cap when `Headroom > 0`, the partition is not throttled and `inflight < limit() - Headroom` (FR-LIM-3). The engine calls `AcquireOver` only for a fetch whose lookup found a hit-for-miss marker, and sets `Headroom` only on the main pool, so the upload pool and the client gate stay strict. Every change that can make such a waiter runnable is a `Release` or a throttle change, both of which run the grant walk, so the FIFO argument below still holds.
 
 `Acquire`:
 
@@ -1119,6 +1120,8 @@ func (b *Breaker) Cancel(p Probe)
 func (b *Breaker) State() State
 func (b *Breaker) Remaining() time.Duration // rest of the open period; 0 unless Open
 ```
+
+`AllowOrWait(part)` is `AllowFor` for a caller that can wait (FR-CB-4). When it refuses because every probe of the half-open period is in flight, it also returns a channel, created on first use and closed when a probe is recorded or cancelled or the period is replaced. `breakerAdmit` in fetch.go uses it for a foreground fetch that has no stale response to fall back on and holds no limiter slot: it waits on the channel, the request context and one timer of `Limiter.MaxQueueWait` for the whole loop, then asks again. The waiters are request goroutines that exist anyway, so the channel is the only state (P5). A success wakes them all into the limiter, which is what bounds the load on the recovered origin.
 
 `Remaining`, floored at 1 s (half-open has no end time, and a zero hint would send every refused client back at once), is the `After` of the `*RetryError` that wraps `ErrCircuitOpen` (§1.3). A buffered fetch is recorded after its body, so a body that fails after good headers counts as a `Failure` (FR-CB-1); streams are recorded at the headers. Only `Foreground` fetches probe (FR-CB-4): when `Allow` hands a `Background` or `Warm` fetch a probe, `fetch` cancels it and treats the breaker as open. A fetch whose caller left before the origin answered ends in `Cancel`, not `Record`, so disconnecting clients cannot trip the breaker.
 
