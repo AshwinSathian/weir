@@ -246,7 +246,7 @@ dialog.search::backdrop { background: rgb(0 0 0 / 0.45); }
 .dg .big { font-size: 13.5px; font-weight: 500; }
 
 /* Charts (components/charts.tsx). Weir is the accent, every other cache the muted ink; a filled
-   bar counts something lost, an outlined one something served or expected, a hatched one undercounts. */
+   bar counts something lost or not served, an outline something served, a dashed outline an expected failure, hatching an undercount. */
 .dg .sm { font-size: 10.5px; }
 .dg .caps { letter-spacing: 0.08em; text-transform: uppercase; }
 .dg .strong { font-weight: 600; }
@@ -255,16 +255,20 @@ dialog.search::backdrop { background: rgb(0 0 0 / 0.45); }
 .dg .b-other { fill: var(--muted); stroke: var(--muted); }
 .dg .o-weir { fill: var(--surface); stroke: var(--accent); stroke-width: 1.5; }
 .dg .o-other { fill: var(--surface); stroke: var(--muted); stroke-width: 1.5; }
-.dg .hatch { stroke: var(--ink); stroke-width: 1.5; }
+.dg .e-weir { fill: var(--surface); stroke: var(--accent); stroke-width: 1.5; stroke-dasharray: 3 2; }
+.dg .e-other { fill: var(--surface); stroke: var(--muted); stroke-width: 1.5; stroke-dasharray: 3 2; }
+.dg .hatch { stroke: var(--muted); stroke-width: 1.5; }
+.dg .under { stroke: var(--muted); }
 .chart { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: var(--s4); }
 .chart svg { display: block; width: 100%; height: auto; }
 .chart figcaption { font-size: 0.88rem; color: var(--muted); margin-top: var(--s4); padding-top: var(--s3); border-top: 1px solid var(--line); }
 .chart figcaption p { margin-bottom: var(--s2); }
 .chart figcaption p:last-child { margin-bottom: 0; }
 .chart figcaption strong { color: var(--ink); font-weight: 600; }
-.chart .unverified { color: var(--ink); border-left: 3px solid var(--warn); padding-left: var(--s3); }
+.chart .unverified { color: var(--ink); border-left: 3px solid var(--warn); padding-left: var(--s3); font-size: 0.88rem; }
+.chart > .unverified { margin-bottom: var(--s4); }
 .only-slim { display: none; }
-@media (max-width: 639px) { .only-slim { display: block; } .only-wide { display: none; } }
+@media (max-width: 759px) { .only-slim { display: block; } .only-wide { display: none; } }
 .toggle { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); margin-bottom: var(--s3); }
 .toggle .label { margin-right: var(--s2); }
 .toggle label { font: 500 0.82rem/1 var(--mono); padding: 7px 12px; border: 1px solid var(--line); border-radius: var(--radius); color: var(--muted); cursor: pointer; }
@@ -280,6 +284,7 @@ dialog.search::backdrop { background: rgb(0 0 0 / 0.45); }
 .prose ul.tiles { list-style: none; padding: 0; margin: 0 0 var(--s5); display: grid; gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
 @media (min-width: 640px) { .prose ul.tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .tiles li { margin: 0; background: var(--surface); display: flex; }
+.tiles li:last-child:nth-child(odd) { grid-column: 1 / -1; }
 .tiles a { display: block; padding: var(--s4) var(--s5); text-decoration: none; color: var(--ink); width: 100%; border-left: 3px solid var(--accent); }
 .tiles.behind a { border-left-color: var(--warn); }
 .tiles a:hover { background: var(--sunken); }

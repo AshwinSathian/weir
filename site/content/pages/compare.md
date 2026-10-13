@@ -140,7 +140,7 @@ One round on one machine on 2026-10-13: Varnish 9.1.0, nginx 1.30.5, the Caddy c
 
 ### Poisoning probes
 
-Does a victim get served what an attacker caused? The origin in these probes has deliberately unsafe routes, and each probe sends an attacker's request and then a victim's. Weir's result comes from its default of hiding unkeyed request headers, cookies and bodies from the origin on cacheable requests.
+Does a victim get served what an attacker caused? The origin in these probes has deliberately unsafe routes, and each probe sends an attacker's request and then a victim's. An unsafe verdict says what a cache does in front of a wrong origin. It is not a vulnerability in that cache. Weir's result comes from its default of hiding unkeyed request headers, cookies and bodies from the origin on cacheable requests.
 
 {{figure results-probes}}
 

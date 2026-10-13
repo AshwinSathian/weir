@@ -245,7 +245,18 @@ export function headlines(r: Results) {
   want(down.cells[W][0] === down.measures[0].of, "Weir's default fails every client while the origin is down")
   want(down.cells.Varnish[0] < down.cells[W][0], "Varnish's default fails fewer clients than Weir's during the outage")
 
+  // What the capped-origin tile must also say: Varnish's default wins one of the two, and its tuned tier is level.
+  want(capped[1].cells.Varnish.v === 0, "Varnish's default fails nobody in the second capped scenario")
+  want(capped.every((s) => s.cells['Varnish tuned'].v === 0), "Varnish's tuned tier fails nobody in either capped scenario")
+  const expiry = ['sync-expiry', 'sync-expiry-capped'].map((n) => row(r.calls, n))
+  want(expiry.every((s) => s.cells[W].v === s.clients && s.cells.Varnish.v < s.clients), "Weir's default makes one origin call per client on expiry and Varnish's makes fewer")
+  want(['sync-expiry', 'sync-expiry-capped'].every((n) => row(r.failed, n).cells.Varnish.v === 0), "Varnish's default fails nobody on expiry")
+  const after = rec(/1 s after recovery/)
+  want(after.cells[W][0] === 0 && others.every((o) => after.cells[o][0] === after.measures[0].of), "Weir's default serves nobody a second after recovery and the other defaults serve everyone")
+
   return {
+    expiry,
+    after,
     scenarios: r.failed.length,
     capped,
     cappedMin: cappedOthers[0],

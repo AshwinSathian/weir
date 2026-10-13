@@ -43,7 +43,7 @@ type Row = {
   what: string
   right?: string
   of?: number
-  mode: 'bar' | 'outline' | 'plain'
+  mode: 'bar' | 'served' | 'expected' | 'plain'
   get: (c: string) => Val
   group?: string
   note?: string
@@ -82,12 +82,18 @@ function Grid({ id, title, desc, cols, rows, lay, flags }: { id: string; title: 
       const ty = lay.narrow ? cellTop + 34 : cellTop + 5
       const len = r.of && v ? Math.max(2, Math.min(1, v / r.of) * tw) : 0
       const who = c.own ? 'weir' : 'other'
+      const rest = tw - len
+      const shape = { bar: 'b-', plain: 'b-', served: 'o-', expected: 'e-' }[r.mode] + who
       out.push(
         <g key={ri + c.key}>
           {lay.narrow && <text className={c.own ? 'acc sm' : 'mut sm'} x={cx} y={cellTop + 12}>{c.title}</text>}
           <text className={v || r.mode !== 'bar' ? 'ink' : 'mut'} data-n={r.n(c.key)} x={lay.narrow ? cx : cx + G.num} y={lay.narrow ? cellTop + 28 : cellTop + G.sm} textAnchor={lay.narrow ? 'start' : 'end'}>{fmt(v)}</text>
           {r.of ? <rect className="track" x={tx} y={ty} width={tw} height={G.bar} rx={2} /> : null}
-          {len ? <rect className={(r.mode === 'outline' ? 'o-' : 'b-') + who} fill={hatch ? 'url(#' + id + '-h)' : undefined} x={tx} y={ty} width={len} height={G.bar} rx={2} /> : null}
+          {len ? <rect className={shape} x={tx} y={ty} width={len} height={G.bar} rx={2} /> : null}
+          {/* A served row: what was not served is the filled part, so a zero is a full bar and not an empty track. */}
+          {r.mode === 'served' && rest ? <rect className={'b-' + who} x={tx + len} y={ty} width={rest} height={G.bar} rx={2} /> : null}
+          {/* An undercount: the real value lies somewhere in the hatched part. */}
+          {hatch && rest ? <rect className="under" style={{ fill: 'url(#' + id + '-h)' }} x={tx + len} y={ty} width={rest} height={G.bar} rx={2} /> : null}
           {flag && <text className="ink sm" x={lay.narrow ? tx : cx + 8} y={ty + G.bar + 13}>{flag}</text>}
         </g>,
       )
@@ -124,7 +130,7 @@ const TIERS: { tier: Tier; name: string; says: string }[] = [
 /** Both tiers are in the page. Two radio buttons and CSS show one; with no CSS, or on paper, both show. */
 function Tiered({ id, label, draw }: { id: string; label: number; draw: (tier: Tier, lay: Lay, id: string) => React.ReactNode }) {
   return (
-    <div className="tiers">
+    <div className="tiers" role="group" aria-label="Configuration tier">
       {TIERS.map((t, i) => <input key={t.tier} className="sr-only" type="radio" name={id} id={id + '-' + t.tier} defaultChecked={!i} />)}
       <div className="toggle">
         <span className="label">Configuration</span>
@@ -152,7 +158,12 @@ function Unverified() {
   )
 }
 
-const NoteA = () => <p>{R.noteA}</p>
+/** The same statement, short, above the chart: on a phone the caption is two screens below the first bar. */
+function Ours() {
+  return <p className="unverified">Our own runs on {R.date}, with configurations we wrote. Not verified by the owners of Varnish, nginx or cache-handler.</p>
+}
+
+const NoteA = () => <p>{R.noteA} The hatched part of a bar is where the real count lies.</p>
 
 // What each scenario is, in a few words. A scenario the tables gain must be described here, or the build fails.
 const HERD = 'One key, many clients'
@@ -186,7 +197,7 @@ function scenarioRows(kind: 'failed' | 'calls'): Row[] {
       right: fmt(s.clients) + ' clients',
       of: s.clients,
       group: meta.group,
-      mode: kind === 'failed' && meta.expected ? 'outline' : 'bar',
+      mode: kind === 'failed' && meta.expected ? 'expected' : 'bar',
       note: meta.expected ? EXPECTED : undefined,
       get: (c) => {
         const cell = s.cells[c]
@@ -202,6 +213,7 @@ function FailedChart() {
   const rows = scenarioRows('failed')
   return (
     <figure className="chart" data-others>
+      <Ours />
       <Tiered id="failed" label={224} draw={(tier, lay, id) => (
         <Grid id={id} lay={lay} cols={tierCols(tier)} rows={rows} flags title={'Clients that did not get a 2xx, ' + tier + ' tier'}
           desc="One row per scenario, one column per cache. Each cell is the count of clients that failed and a bar for its share of the scenario's clients. The full table follows the chart." />
@@ -210,7 +222,11 @@ function FailedChart() {
         <p>
           A bar is the share of that scenario’s clients that failed, and the number is the count. Any count above zero draws at least a sliver. Lower is
           better, with one exception: in <code>error-herd</code> the origin only sends errors, so every client failing is the correct result. Those
-          bars are outlined, not filled. A refusal that a cache sends to protect the origin counts as a failure, for Weir as for the others.
+          bars have a dashed outline and no fill. A refusal that a cache sends to protect the origin counts as a failure, for Weir as for the others.
+        </p>
+        <p>
+          Weir’s default has an origin limiter and the other defaults have none. Varnish’s tuned tier has its backend capped with Weir’s default
+          limiter numbers, so in the capped rows the tuned Weir and Varnish columns compare two configurations of one idea.
         </p>
         <NoteA />
         <Unverified />
@@ -223,14 +239,15 @@ function CallsChart() {
   const rows = scenarioRows('calls')
   return (
     <figure className="chart" data-others>
+      <Ours />
       <Tiered id="calls" label={224} draw={(tier, lay, id) => (
         <Grid id={id} lay={lay} cols={tierCols(tier)} rows={rows} flags title={'Requests that reached the origin, ' + tier + ' tier'}
           desc="One row per scenario, one column per cache. Each cell is the count of origin calls and a bar for its share of the scenario's clients, with a mark where clients failed in the same run. The full table follows the chart." />
       )} />
       <figcaption>
         <p>
-          A bar is origin calls as a share of that scenario’s clients, and it stops at one call per client. Fewer calls is better only when nobody
-          failed. A ✕ gives the clients that failed in the same run, so a short bar with a ✕ is an origin that refused, not a cache that saved work.
+          A bar is origin calls as a share of that scenario’s clients, and it stops at one call per client. Any count above zero draws at least a sliver.
+          Fewer calls is better only when nobody failed. A ✕ gives the clients that failed in the same run, so a short bar with a ✕ is an origin that refused, not a cache that saved work.
           Calls are read the moment a wave ends: a cache that answers from a stale copy has made only part of its background refreshes by then.
         </p>
         <NoteA />
@@ -247,7 +264,7 @@ const figureRows = (key: 'recovery' | 'changed', set: Figure[]): Row[] =>
       name: f.scenario,
       what: m.raw,
       of: m.of,
-      mode: m.served ? 'outline' : m.of ? 'bar' : 'plain',
+      mode: m.served ? 'served' : m.of ? 'bar' : 'plain',
       get: (c) => ({ v: f.cells[c][i] }),
     })),
   )
@@ -256,14 +273,21 @@ function RecoveryChart() {
   const rows = figureRows('recovery', R.recovery)
   return (
     <figure className="chart" data-others>
+      <Ours />
       <Tiered id="recovery" label={220} draw={(tier, lay, id) => (
         <Grid id={id} lay={lay} cols={tierCols(tier)} rows={rows} flags={false} title={'Failure and recovery scenarios, ' + tier + ' tier'}
           desc="One row per figure, one column per cache: bystanders failed beside a failing route, clients failed and origin calls during an origin outage, clients served after it, and stored entries lost to a flood. The full table follows the chart." />
       )} />
       <figcaption>
         <p>
-          Filled bars count clients that failed or entries that were lost: lower is better. Outlined bars count clients served after the origin came
-          back: higher is better. Origin calls while down has no fixed total, so it is a number with no bar.
+          Filled always means clients failed, entries lost or clients not served, so less fill is better in every row. In the two rows that count
+          clients served after the origin came back, the outlined part is the clients served and the filled part is the rest. Origin calls while
+          down has no fixed total, so it is a number with no bar, and a low number there is no win in a column where every client failed. Calls
+          are read the moment a wave ends, before a cache that serves stale has finished its background refreshes.
+        </p>
+        <p>
+          cache-handler’s tuned stale setting showed no effect here. The harness origin sends no stale directives of its own and we have not
+          checked whether that setting needs them, so its tuned outage cells may describe the origin profile more than the cache.
         </p>
         <Unverified />
       </figcaption>
@@ -284,9 +308,10 @@ function ChangedChart() {
       ))}
       <figcaption>
         <p>
-          Weir only. Filled bars count failures: lower is better. The outlined row counts clients served: higher is better. {late} of the{' '}
-          {R.changed.length} figures were still wrong on the hardening branch. This round found them and they were fixed after it, which is
-          the middle column. The scenarios were not changed to fit the fixes.
+          Weir only. Filled means failed, lost or not served, so less fill is better in every row; in the last row the outlined part is the
+          clients served. The middle column is the hardening branch as this round first ran it. {late} of the {R.changed.length} figures were
+          still wrong there: this round found them, and they were fixed before the last column was run. Weir’s zeros in the charts above exist
+          because of those fixes. The scenarios were not changed to fit them.
         </p>
         <p>One round on one machine, {R.date}.</p>
       </figcaption>
@@ -325,15 +350,19 @@ function ConformanceChart() {
   const bars = R.conformance.map((c): Bar => ({ n: ['conformance', c.label, 'Pass'].join('|'), label: bare(c.label), v: c.pass, tail: ' of ' + fmt(R.total) + ' pass', own: c.label.startsWith('Weir') }))
   return (
     <figure className="chart" data-others>
+      <Ours />
       {both(0, (lay, s) => (
-        <Bars id={'conf' + s} lay={lay} bars={bars} max={R.total} title="cache-tests passed, each cache in its default tier"
+        <Bars id={'conf' + s} lay={lay} bars={bars} max={R.total} title="cache-tests passed by each cache"
           desc={bars.map((b) => b.label + ': ' + fmt(b.v) + b.tail).join('. ')} />
       ))}
       <figcaption>
         <p>
           The bars start at zero and end at the whole suite. The suite mixes required and optional behavior, and a fail is every test that did not
-          pass, including tests whose setup failed. So a fail is not always a violation. Only Weir’s fails are analyzed, on
-          the <Link href="/conformance/">conformance page</Link>. The suite’s authors say its results should not be used to compare feature support.
+          pass, including tests whose setup failed. So a fail is not always a violation. Weir’s fails are explained on
+          the <Link href="/conformance/">conformance page</Link>. The other projects’ fails are not analyzed at all and may include setup failures.
+          Each cache ran its default tier, except that Weir forwards the suite’s own request headers (<code>forward allow</code>), as its baseline
+          run does. The suite’s authors say its results should not be used to compare feature support, so read the bars as four separate
+          results and not as a ranking.
         </p>
         <Unverified />
       </figcaption>
@@ -425,6 +454,7 @@ function ProbeChart() {
   for (const n of ['b', 'd']) if (![...R.probes, ...R.probeCounts].some((p) => p.note === n)) throw new Error('site: probe footnote (' + n + ') is gone from ' + DOC + '; the caption in components/charts.tsx explains it')
   return (
     <figure className="chart" data-others>
+      <Ours />
       {both(336, (lay, s) => <Probes id={'probes' + s} lay={lay} />)}
       <figcaption>
         <p>
@@ -433,10 +463,13 @@ function ProbeChart() {
           front of a wrong origin. It is not a vulnerability in that cache, and each of these projects documents how to key or strip the input.
         </p>
         <p>
-          A filled square is unsafe and an open circle is safe. Both tiers of every cache gave the same verdicts, and the tuned tier is stampede
+          A filled square is unsafe and an open circle is safe. The totals row is our count of the squares above it. Both tiers of every cache gave the same verdicts, and the tuned tier is stampede
           tuning, not a hardened configuration. (b) For Weir and cache-handler, which run inside Caddy, Caddy overwrites this header before the origin
-          sees it, so that safe is Caddy’s doing. (d) is a count, not a verdict: honoring a client’s <code>no-cache</code> is what the RFC describes,
+          sees it, so that safe is Caddy’s doing. (c) That probe sends its requests one after another and does not reach the concurrent case in which
+          cache-handler answers a success for an origin error. (d) is a count, not a verdict: honoring a client’s <code>no-cache</code> is what the RFC describes,
           cache-handler does it, and the other three ignore it in these configurations.
+          Not probed in this round: parameter cloaking, path normalization differences, a meta character in a header, and memory growth under
+          many variants.
         </p>
         <Unverified />
       </figcaption>
@@ -471,7 +504,6 @@ const BEHIND = '/benchmarks/#what-the-numbers-say-about-weir'
 function Ahead() {
   const [k, e] = H.capped
   const [lo, hi] = [H.cappedMin, H.cappedMax]
-  const last = R.hit[R.hit.length - 1]
   const tiles: Tile[] = [
     {
       href: FAILED,
@@ -482,7 +514,7 @@ function Ahead() {
       href: FAILED,
       others: true,
       fig: <><N k={['failed', k.label, W]} v={k.cells[W].v} /> and <N k={['failed', e.label, W]} v={e.cells[W].v} /></>,
-      what: <>clients failed by Weir’s default, of {fmt(k.clients)} and {fmt(e.clients)}, when the origin refuses overload. The Varnish, nginx and cache-handler defaults fail between {marked(lo)} and {marked(hi)} in at least one of the two. (a) marks a cell that undercounts.</>,
+      what: <>clients failed by Weir’s default, of {fmt(k.clients)} and {fmt(e.clients)}, when the origin refuses overload. The Varnish, nginx and cache-handler defaults fail between {marked(lo)} and {marked(hi)} in at least one of the two; (a) marks a cell that undercounts. Varnish’s default fails {fmt(e.cells.Varnish.v)} in the second, and its tuned tier fails none in either. Weir’s default has a limiter and the other defaults have none.</>,
     },
     {
       href: CALLS,
@@ -494,18 +526,13 @@ function Ahead() {
       href: '/compare/#poisoning-probes',
       others: true,
       fig: <>{fmt(H.unsafe[W])} of {R.probes.length}</>,
-      what: <>probes served a victim what an attacker caused. Varnish {H.unsafe.Varnish}, nginx {H.unsafe.nginx}, cache-handler {H.unsafe.Souin}. The probe origin is broken on purpose, so these are not vulnerabilities.</>,
+      what: <>probes served a victim what an attacker caused. Varnish {H.unsafe.Varnish}, nginx {H.unsafe.nginx}, cache-handler {H.unsafe.Souin}. The probe origin is broken on purpose, so these are not vulnerabilities, and one of Weir’s safe verdicts is Caddy’s doing.</>,
     },
     {
       href: '/compare/#cache-tests',
       others: true,
       fig: <>{fmt(R.conformance[0].pass)} of {fmt(R.total)}</>,
-      what: <>cache-tests pass. {R.conformance.slice(1).map((c) => bare(c.label) + ' ' + fmt(c.pass)).join(', ')}. A fail is not always a violation.</>,
-    },
-    {
-      href: '/benchmarks/#one-cached-hit',
-      fig: <><N k={['hit', '`BenchmarkServeHitSmall`', last.build]} v={last.ns} /> ns</>,
-      what: <>and {last.allocs} allocations for one cached hit, against {fmt(R.hit[0].ns)} ns and {R.hit[0].allocs} for the release before it in the same run.</>,
+      what: <>cache-tests pass. {R.conformance.slice(1).map((c) => bare(c.label) + ' ' + fmt(c.pass)).join(', ')}. A fail is not always a violation, and the suite’s authors say not to rank caches by it.</>,
     },
   ]
   return <Tiles kind="ahead" tiles={tiles} />
@@ -514,6 +541,7 @@ function Ahead() {
 function Behind() {
   const [o, l] = H.big
   const d = H.down
+  const [x, xc] = H.expiry
   const tiles: Tile[] = [
     {
       href: CALLS,
@@ -525,12 +553,18 @@ function Behind() {
       href: OUTAGE,
       others: true,
       fig: <><N k={['recovery', d.label, W, 0]} v={d.cells[W][0]} /> of {fmt(d.measures[0].of ?? 0)}</>,
-      what: <>clients failed by Weir’s default while the origin is down, because stale serving is off by default. Varnish’s default fails {fmt(d.cells.Varnish[0])}.</>,
+      what: <>clients failed by Weir’s default while the origin is down, because stale serving is off by default. Varnish’s default fails {fmt(d.cells.Varnish[0])}. A second after the origin recovers, Weir’s default still serves {fmt(H.after.cells[W][0])} of {fmt(H.after.measures[0].of ?? 0)} and the others serve all.</>,
+    },
+    {
+      href: CALLS,
+      others: true,
+      fig: <N k={['calls', x.label, W]} v={x.cells[W].v} />,
+      what: <>origin calls from Weir’s default when {fmt(x.clients)} keys expire together: one per client, because nothing is served stale by default. Varnish’s default makes {fmt(x.cells.Varnish.v)}, and {fmt(xc.cells.Varnish.v)} against a capped origin, and fails nobody.</>,
     },
     {
       href: BEHIND,
       fig: <>about {R.cold.wait}</>,
-      what: <>of waiting for the last of {fmt(R.cold.clients)} clients on {fmt(R.cold.keys)} cold keys, queued through {R.cold.slots} slots. A cache with no limit answers in one origin round trip.</>,
+      what: <>by the source’s arithmetic, not a measured latency: the wait for the last of {fmt(R.cold.clients)} clients on {fmt(R.cold.keys)} cold keys, queued through {R.cold.slots} slots. A cache with no limit answers in one origin round trip.</>,
     },
     {
       href: '/benchmarks/#not-measured',

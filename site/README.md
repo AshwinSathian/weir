@@ -50,7 +50,7 @@ The charts and headline tiles on the benchmarks and compare pages are static inl
 - `components/charts.tsx` may not contain a digit in its copy. `pnpm check` enforces that, so a number cannot be typed beside a derived one.
 - After a build, `pnpm check charts` reads the tables a second time, without the parser, and compares every number drawn in `out/` with its cell. It also fails when a charted table has a row or column no chart draws, and when a figure that shows another project lacks the "not verified" statement. `pnpm build` runs it.
 - Each chart is drawn twice, for a wide and a narrow column, and CSS shows one. The default and tuned tiers are both in the page; two radio buttons and CSS show one, so nothing needs JavaScript.
-- Encoding: Weir is the accent color and every other cache the muted ink. A filled bar counts something lost, an outlined bar something served or expected, a hatched bar a cell the source marks as an undercount. Every bar starts at zero and is a share of its own row's total; there is no log scale.
+- Encoding: Weir is the accent color and every other cache the muted ink. Fill always counts something lost or not served, an outline counts something served, a dashed outline a failure that is the correct result, and hatching the part of a bar where an undercounted value lies. Every bar starts at zero and is a share of its own row's total; there is no log scale.
 
 ## Rules the checks enforce
 

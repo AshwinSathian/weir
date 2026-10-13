@@ -15,7 +15,7 @@ Where it is behind, and what was never measured:
 
 {{figure results-behind}}
 
-Each tile links to the chart it comes from. Tiles with an amber line name another project, and the figures in them are ours alone.
+Each tile links to the chart it comes from. A tile tagged "our runs" names another project, and the figures in it are ours alone. The cost of one cached hit, which is Weir measured against itself, is [further down](#one-cached-hit).
 
 ## The reference machine
 
@@ -91,8 +91,8 @@ The round started with `v1.0.1`, the published release, and a hardening branch. 
 - **Speed, memory and hit ratio against any other cache.** That part of the comparison has not been run. Nothing above is a throughput claim, and no latency from this round is published, because the runs were not made under the drift check the specification requires.
 - Four scenarios the specification lists: a cache-busting flood, a brownout, a purge under load and a restart.
 - Four of the probes, and differential fuzzing.
-- Any review by a maintainer of Varnish, nginx or cache-handler of the configuration used for their project.
-- A second machine. The tables are stitched from several invocations of the harness on one day on one Mac, three repetitions per scenario with the median reported.
+- Any review by a maintainer of Varnish, nginx or cache-handler of the configuration used for their project. We have already been wrong once: the Varnish tuned tier lacked the rule from its grace guide that abandons a failed background fetch. Without it Varnish failed 400 of 600 clients in `origin-down`, where it now fails none. That was found in our own review and fixed before publication.
+- A second machine. The tables are stitched from several invocations of the harness on one day on one Mac, three repetitions per scenario with the median reported, except `large-body-herd` and `post-flood`, which ran once.
 
 ```sh
 cd bench/compare && ./run.sh -reps 3 && ./probes.sh && ./conformance.sh
@@ -130,7 +130,7 @@ After the last hardening changes before v1.0.0 the same benchmark measured 852.2
 
 ## Five load scenarios
 
-`make load` runs each failure mode against a real engine for about eight minutes in total and checks a threshold. This is the idle reference run of 2026-10-11.
+`make load` runs each failure mode against a real engine for about eight minutes in total and checks a threshold. This is the idle reference run of 2026-10-11. The same scenarios on the `v1.1.0` code, on a machine that was not idle, are in the collapsed table under [one cached hit](#one-cached-hit).
 
 {{include docs/benchmarks.md "### Load scenarios (`make load`, scale 1, 473 s)"}}
 
@@ -152,7 +152,7 @@ At 1 million entries the collector costs 1.08 µs per request here, and 1.76 µs
 ## What this does not show
 
 - No speed comparison with any other cache. See [not measured](#not-measured).
-- No network, TLS or HTTP parsing. A request served through `net/http` over TLS costs many times the 852 ns measured here, and most of that is outside Weir.
+- No network, TLS or HTTP parsing. A request served through `net/http` over TLS costs many times the hit measured here, and most of that is outside Weir.
 - No real origin. The synthetic origin answers instantly or fails on cue.
 - One reference machine and one container. No ARM server, no NUMA box, no production trace.
 - The Valkey store is covered by correctness tests, not by these load scenarios.
