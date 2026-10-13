@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { docsNav, type NavItem } from '@/lib/nav'
 import type { Heading } from '@/lib/md'
 import { REPO } from '@/data/release'
+import { charts } from './charts'
 import { figures } from './diagrams'
 
 /** Rendered Markdown, with {{figure name}} markers replaced by diagrams. */
@@ -11,6 +12,9 @@ export function Prose({ html }: { html: string }) {
     <div className="prose">
       {parts.map((part, i) => {
         if (i % 2 === 0) return <div key={i} dangerouslySetInnerHTML={{ __html: part }} />
+        // A chart brings its own <figure>, with the caption and caveats that belong to it.
+        const Chart = charts[part]
+        if (Chart) return <Chart key={i} />
         const Fig = figures[part]
         if (!Fig) throw new Error(`site: unknown figure "${part}"`)
         return <figure key={i} className="hydro"><Fig /></figure>

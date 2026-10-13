@@ -2054,6 +2054,14 @@ Entry template:
 - Follow-ups: the cache-handler bug report, after Ashwin's review.
 - Context: continued session.
 
+## 2026-10-13 · site results presentation (no card) · done
+- Branch / PR: site/results-presentation / #129
+- Done: the benchmarks and compare pages lead with static inline SVG charts and headline tiles drawn at build time from `docs/benchmarks.md` (`site/lib/results.ts`, `site/components/charts.tsx`): failed clients, origin calls, outage and recovery, before and after for v1.0.1 against v1.1.0, the probe grid, cache-tests bars, the v1.1 hit path. Losses use the same tile style as wins. Full tables are collapsed under each chart. The compare page's project sections became "choose it when" cards.
+- Tests: `scripts/check.mjs` gained `results` (table shape, tile claims, no digit typed in chart copy) and `charts` (every drawn number against its source cell after a build, 654 cells). `make site-check` and `make check` pass in the worktree.
+- Deviations: none. No Go code, no number in `docs/benchmarks.md` and nothing in `bench/compare/` changed.
+- Follow-ups: an independent hostile review found no wrong number; its presentation findings are fixed or answered in the pull request. Not done: an automated contrast or axe run, a screen-reader pass. Another session switched the main checkout to `card/CMP-03b-compare-round-2` mid-work, so the first site commit is also on that local branch; this work moved to the worktree `../weir-site-results`.
+- Context: high; one session, no compaction.
+
 ## 2026-10-13 · CMP-03b and CMP-04b · done
 - Branch / PR: card/CMP-03b-compare-round-2 / #130 (two cards on one branch, authorised by the owner as an exception)
 - Done: `busting-flood`, `brownout`, `purge-herd` and `restart`; harness fixes (body length, `POST` statuses, reset after priming and a second wave, in-flight kept, sent against seen, `lib.sh` for `-next`); probes for cloaking, path normalization, meta character and `Vary` cardinality, the error probe made concurrent; a hardened tier for Varnish, nginx and cache-handler with a source on every line; conformance per tier with setup failures apart. Everything rerun at Weir v1.1.0: 22 scenario invocations, probes and conformance in three tiers. docs/benchmarks.md round 2, docs/11 v0.3, cards, claims register, two site pages.
@@ -2070,3 +2078,11 @@ Entry template:
 - Deviations: 01, 04, 05, 06, 07, 08, runbook, changelog and four site pages updated in the same branch. The card-reviewer found one blocker (Close worked off the whole refresh backlog against the origin) and eleven more; all but four small ones are fixed here, the four are in STATUS.
 - Follow-ups: rerun the published tables at a v1.2 release; the four notes in STATUS.
 - Context: high, with compaction; a continuation of the round 2 session in a separate worktree.
+
+## 2026-10-14 · site charts for round 2 (no card) · done
+- Branch / PR: site/results-round2 / #132; replaces #129, which is closed
+- Done: the chart work of pull request 129 merged onto `main` and reworked for the round 2 tables. `lib/results.ts` reads medians with ranges, "not available" cells, the new flood table, default and hardened probe columns, the Vary table and the per-tier conformance table; its headline checks are rewritten for what round 2 says (11 claims that no longer held are gone, 14 new ones are checked). New chart for flood, brownout, purge and restart; the probe grid switches between default and hardened; conformance bars per tier with assertion and setup failures; tiles for the four new losses and three new wins; a section on what the next release changes; "next release" notes on four doc pages that are ahead of v1.1.0.
+- Tests: `make site-check` passes; `check.mjs charts` compares every drawn cell with its table cell after the build. Looked at in a browser at 1280 and 390 px: three layout defects found and fixed (labels running under the first column in two charts, clipped conformance text, clipped group headings on a phone).
+- Deviations: docs/benchmarks.md, one cell: the first probe row carried the harness's internal name (`reflect-host`) instead of its label and footnote (b), a slip of the table generator in pull request 131 that the chart build caught.
+- Follow-ups: deploy after merge; remove the "next release" notes at a v1.2 release and rerun the comparison tables then.
+- Context: continued session.

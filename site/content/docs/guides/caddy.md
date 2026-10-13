@@ -27,13 +27,13 @@ Every key is optional except `name`. Unset keys take the engine default from the
 | `name` | Required. 1 to 64 characters of `A-Z a-z 0-9 . _ -`. Store identity across reloads, metrics label, admin URL segment, snapshot file name |
 | `max_bytes` | Memory store size, for example `512MiB`. At least 160 MiB when set. Unset: sized from `GOMEMLIMIT` |
 | `snapshot_dir` | Absolute directory for the snapshot file. Unset: every restart is a cold cache. Set: entries come back, and each is checked with the origin on first use |
-| `snapshot_keep_fresh` | With `snapshot_dir`: entries come back as fresh as they were, so a restart costs the origin nothing. A purge sent while Caddy was down is not applied to them; purge again after a restart if one may have been missed |
+| `snapshot_keep_fresh` | Next release, not in `{{version}}`. With `snapshot_dir`: entries come back as fresh as they were, so a restart costs the origin nothing. A purge sent while Caddy was down is not applied to them; purge again after a restart if one may have been missed |
 | `multi_host` | Set it when the site serves more than one host. Turns on the per-host limiter cap and store quota at 25% |
 | `store valkey { ... }` | Shared store for several nodes: `addrs`, `username`, `password`, `tls`, `cluster`, `prefix` |
 | `key { ... }` | `query_drop`, `query_keep`, `query_sort`, `normalize_path`, `headers`, `cookies`, `accept_encoding` |
 | `forward { allow ... }` | Headers the origin may see unkeyed. The mode is always strict: `ForwardAll` has no Caddy form |
 | `bypass { ... }` | `cookies`, `headers`: requests that skip the cache |
-| `limiter { ... }` | `max_concurrent`, `max_queue`, `max_queue_wait`, `max_per_partition`, `partition_headroom`, and `adaptive_max`: above `max_concurrent`, the limit may grow to it while requests wait and the origin answers well |
+| `limiter { ... }` | `max_concurrent`, `max_queue`, `max_queue_wait`, `max_per_partition`, `partition_headroom`, and, in the next release, `adaptive_max`: above `max_concurrent`, the limit may grow to it while requests wait and the origin answers well |
 | `stale { ... }` | `while_revalidate`, `if_error`: operator defaults, off unless set |
 | `experiments { ... }` | A/B bucketing; see the [experiments guide](/docs/guides/experiments/) |
 
