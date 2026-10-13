@@ -2053,3 +2053,11 @@ Entry template:
 - Deviations: none.
 - Follow-ups: the cache-handler bug report, after Ashwin's review.
 - Context: continued session.
+
+## 2026-10-13 · CMP-03b and CMP-04b · done
+- Branch / PR: card/CMP-03b-compare-round-2 / opened by this session (two cards on one branch, authorised by the owner as an exception)
+- Done: `busting-flood`, `brownout`, `purge-herd` and `restart`; harness fixes (body length, `POST` statuses, reset after priming and a second wave, in-flight kept, sent against seen, `lib.sh` for `-next`); probes for cloaking, path normalization, meta character and `Vary` cardinality, the error probe made concurrent; a hardened tier for Varnish, nginx and cache-handler with a source on every line; conformance per tier with setup failures apart. Everything rerun at Weir v1.1.0: 22 scenario invocations, probes and conformance in three tiers. docs/benchmarks.md round 2, docs/11 v0.3, cards, claims register, two site pages.
+- Tests: `TestRunCountsAgainstOriginDirect` (every scenario, synctest, sent equals seen), `TestScenarioFiguresAgainstOriginDirect`, `TestPurgeHerdSeesWhetherThePurgeWorked`, `TestEmptySuccessIsAFailure`, `TestOriginCapacity`, `TestOriginStatusChangeKeepsCountersAndInFlight`, `TestOriginHang`, `TestProbesSeparateOriginFromNaiveCache`, `TestErrorProbeCatchesEmptySuccessForWaiters`, `TestVaryProbeAcceptsAHiddenHeader`; vet, race tests and lint clean in bench/compare; `make check` and `make site-check` pass.
+- Deviations: docs/11 to v0.3. `brownout` bursts are 10 s, `restart` uses 2000 keys, `sync-expiry` has two waves, `-next` and v1.0.1 were not run (reasons in 11 §2, §5). Two artifacts against other subjects were found and fixed before publication: the `Vary` probe misjudged Weir, and cache-handler's tuned tier evicted at Otter's default size.
+- Follow-ups: CMP-F5 to CMP-F8 (four losses for Weir, owner decides); cache-handler's percent-encoded path keying is not reported upstream; pull request 129 (site charts) must follow the changed tables; CMP-06 is still the only pillar not run.
+- Context: high; two cards in one session, with compaction, as authorised. This session switched branches in the shared checkout, which put a site commit on its branch; it was rebased off before the push.

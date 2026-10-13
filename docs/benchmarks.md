@@ -341,82 +341,121 @@ The cost is the directive filter, two map reads on the forwarded header for ever
 
 `main` at `0e581b1`, the commit the `release-gate` run of the same day covers, on the reference machine, not idle, Go 1.27.1. `make load` (scale 1, 475 s): all six scenarios pass. Steady hits ran at 1 893 k requests a second (paced to half of the saturated rate) with a p99 of 5.1 µs and no origin call after warming; synchronized expiry refetched 10 000 of 10 000 keys with the origin peak at its configured 32 and no client error. `BenchmarkServeHitSmall`, six runs: 610 to 643 ns, 608 B and 8 allocations a hit, inside the NFR-5 budget and level with the 669 ns recorded for the hardening branch. `make check`, `make vuln` (Go 1.27.2) and `make cache-tests` pass on the same commit.
 
-## Comparison with other caches, round 1 (2026-10-13)
+## Comparison with other caches, round 2 (2026-10-13)
 
-Specification: [11-comparison-spec.md](11-comparison-spec.md). Harness and every subject's configuration: `bench/compare/`. Each subject ran as a container in Docker Desktop on the reference machine, behind the same origin, with a new container for each tier. Three repetitions per scenario and the median reported, except `large-body-herd` and `post-flood` (one repetition).
+Specification: [11-comparison-spec.md](11-comparison-spec.md). Harness and every subject's configuration: `bench/compare/`. Each subject ran as a container in Docker Desktop (12 CPUs, 8 GiB) on the reference machine, behind the same origin, with a new container for each tier. Three repetitions per scenario and the median reported, except `large-body-herd` and `post-flood` (one repetition). Where the three repetitions differ by more than a tenth, the cell gives the range after the median.
 
-Subjects: Varnish 9.1.0, nginx 1.30.5, Caddy 2.11.7 with cache-handler v0.17.0 (Souin), Caddy 2.11.7 with Weir, and Caddy 2.11.7 as a plain reverse proxy ("no cache"). "Weir v1.0.1" is the published module. "Weir v1.1" is the code released as `v1.1.0`, built from the working tree at `24d55db` shortly before the tag; the tag differs from that build in one comment, tests and documents. `default` is the smallest configuration that turns caching on; `tuned` is each project's documented stampede and stale settings (11 §3). `examples/weirproxy` on v1.0.1 matches the Caddy rows and is left out of the tables.
+This section replaces the tables of round 1, which ran earlier the same day. Round 2 reran every scenario with a corrected harness (it now counts a 2xx with the wrong body length as a failure, and `sync-expiry` has a second wave), added four scenarios, five probes and a hardened tier for the other caches, and measured Weir as the published `v1.1.0` module. Round 1's tables are in the history of this file; its `v1.0.1` figures survive below in "what the round changed in Weir".
 
-Every figure about Varnish, nginx and cache-handler below comes from our own runs with configurations we wrote, and has not been verified by the owners of those projects. Read these tables with four limits in mind.
+Subjects: Varnish 9.1.0, nginx 1.30.5, Caddy 2.11.7 with cache-handler v0.17.0 (Souin), Caddy 2.11.7 with Weir v1.1.0, and Caddy 2.11.7 as a plain reverse proxy ("no cache"). `default` is the smallest configuration that turns caching on; `tuned` is each project's documented stampede and stale settings (11 §3); `hardened`, for the probes, is the default plus that project's documented way to key or strip request input (11 §5.3). `examples/weirproxy` on v1.1.0 gives the same counts as the Caddy rows, except where a note says otherwise, and is left out of the tables.
 
-- No maintainer of Varnish, nginx or cache-handler has reviewed the configuration used for their project (11 R4). One mistake of ours was found in review and fixed before publication: the Varnish tuned tier lacked the rule from its grace guide that abandons a failed background fetch, and without it Varnish failed 400 of 600 clients in `origin-down` where it now fails none.
-- The data is stitched from several invocations of `run.sh` on the same day, not one: a main pass for every default tier and the cache-handler tuned tier, one each for nginx tuned and cache-handler's tuned `post-flood` row, and later passes for the two Weir v1.1 tiers and Varnish tuned after the fixes described below.
-- Not run in this round: the speed and memory pillar (11 §5.5), `busting-flood`, `brownout`, `purge-herd`, `restart`, four of the probes, and differential fuzzing. Nothing here is a throughput claim, and no latency is published: the runs were not made under the drift gate of 11 §6.
-- Origin calls are read the moment a wave ends. A cache that answers from a stale copy and refreshes in the background has made only part of its refreshes by then.
+Every figure about Varnish, nginx and cache-handler below comes from our own runs with configurations we wrote, and has not been verified by the owners of those projects. Read these tables with five limits in mind.
+
+- No maintainer of Varnish, nginx or cache-handler has reviewed the configuration used for their project (11 R4). We have been wrong three times so far, each time against the other project and each time found by our own review before publication. Round 1: nginx and the control answered 502 from port exhaustion in our containers, and the Varnish tuned tier lacked the rule from its grace guide that abandons a failed background fetch. Round 2: cache-handler's tuned tier ran the Otter storage at its default size of 10,000, which evicted stored URLs and showed up as 7,435 origin calls in `sync-expiry` where the same tier with room makes 5,000.
+- The data is stitched from 22 invocations of `run.sh`, one per subject, tier and half of the scenario list, all on 2026-10-13. Twenty ran at harness commit `df5819b`. The two for cache-handler's tuned tier ran at `0f96ea1`, which differs in that tier's Otter size and in one probe's verdict logic. The probes ran in four invocations of `probes.sh` at `0f96ea1`, and conformance in three of `conformance.sh` at `df5819b`, except cache-handler's tuned tier (`0f96ea1`). The result files record those two commits under the ids they had before the branch was rebased (`b161742`, `68bdf80`); `bench/compare` is byte for byte the same in each pair. The file names are in the pull request that added this section.
+- The `origin` control (the runner against the origin with nothing in between) ran every scenario too. In all 53 of its rows the origin counted exactly the requests the runner sent.
+- Not run: the speed and memory pillar (11 §5.5) and differential fuzzing. Nothing here is a throughput claim, and no latency is published: the runs were not made under the drift gate of 11 §6.
+- The hardened tiers were written after the default results, to the headers the round 1 probes use. They show that each project's documented mechanism closes those probes. They do not show that a deployment would have known which headers to list.
 
 ```sh
 cd bench/compare
-./run.sh -reps 3                                  # or one subject and tier: SUBJECTS=varnish TIERS=tuned ./run.sh -reps 3
+SUBJECTS=varnish TIERS=tuned ./run.sh -reps 3     # one subject and tier; no variables: every subject, both tiers
 ./probes.sh
 ./conformance.sh
 ```
 
 ### Comparison: origin calls
 
-| Scenario | clients | no cache | Weir v1.0.1 | Weir v1.1 | Weir v1.1 tuned | Varnish | Varnish tuned | nginx | nginx tuned | Souin | Souin tuned |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| `cold-herd` | 1000 | 1000 | 1 | 1 | 1 | 1 | 1 | 1000 | 1 | 1 | 1 |
-| `slow-origin-herd` | 100 | 100 | 16 | 1 | 1 | 1 | 1 | 100 | 100 | 1 | 1 |
-| `leader-abort` | 50 | 51 | 1 | 1 | 1 | 1 | 1 | 51 | 2 | 1 | 1 |
-| `cold-keys` | 2000 | 2000 | 640 | 1000 | 1000 | 1000 | 1000 | 2000 | 1000 | 1000 | 1000 |
-| `cold-keys-capped` | 2000 | 128 | 640 | 1000 | 1000 | 128 | 1000 | 128 | 256 | 128 | 128 |
-| `sync-expiry` | 5000 | 5000 | 1120 | 5000 | 135 | 1701 | 192 | 5000 | 4959 | 5000 | 5000 |
-| `sync-expiry-capped` | 5000 | 570 | 1136 | 5000 | 94 | 438 | 255 | 512 | 661 | 583 | 689 |
-| `uncacheable-herd` | 500 | 500 | 161 | 500 | 500 | 500 | 500 | 500 | 500 | 501 | 501 |
-| `turned-private` | 300 | 300 | 300 | 300 | 201 | 201 | 201 | 300 | 5 | 303 | 303 |
-| `error-herd` | 600 | 600 | 3 | 3 | 3 | 600 | 600 | 600 | 600 | 3 | 3 |
-| `oversize-herd` | 150 | 150 | 150 | 150 | 150 | 1 | 1 | 50 | 1 | 1 | 1 |
-| `large-body-herd` | 20 | 20 | 20 | 20 | 20 | 1 | 1 | 20 | 1 | 1 | 1 |
+| Scenario | clients | no cache | Weir v1.1.0 | Weir tuned | Varnish | Varnish tuned | nginx | nginx tuned | Souin | Souin tuned |
+| Scenario | clients | no cache | Weir | Weir tuned | Varnish | Varnish tuned | nginx | nginx tuned | Souin | Souin tuned |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| `cold-herd` | 1,000 | 1,000 | 1 | 1 | 1 | 1 | 1,000 | 1 | 1 | 1 |
+| `slow-origin-herd` | 100 | 100 | 1 | 1 | 1 | 1 | 100 | 100 | 1 | 1 |
+| `leader-abort` | 50 | 51 | 1 | 1 | 1 | 1 | 51 | 2 | 1 | 1 |
+| `cold-keys` | 2,000 | 2,000 | 1,000 | 1,000 | 1,000 | 1,000 | 2,000 | 1,000 | 1,000 | 1,000 |
+| `cold-keys-capped` | 2,000 | 128 | 1,000 | 1,000 | 128 | 1,000 | 128 | 205 (175 to 251) | 128 | 128 |
+| `sync-expiry` | 10,000 | 10,000 | 5,000 | 272 (242 to 281) | 4,550 (3,113 to 5,000) | 5,000 (2,886 to 5,000) | 5,000 | 5,000 | 5,000 | 5,000 |
+| `sync-expiry-capped` | 10,000 | 1,499 (1,324 to 1,740) | 5,000 | 273 (232 to 288) | 2,210 | 5,000 | 1,081 | 1,351 (1,105 to 1,594) | 1,758 (1,662 to 1,861) | 1,233 (1,058 to 1,433) |
+| `uncacheable-herd` | 500 | 500 | 500 | 500 | 500 | 500 | 500 | 500 | 501 | 501 |
+| `turned-private` | 300 | 300 | 300 | 201 | 201 | 201 | 300 | 4 | 303 | 303 |
+| `error-herd` | 600 | 600 | 3 | 3 | 600 | 600 | 600 | 600 | 3 | 3 |
+| `oversize-herd` | 150 | 150 | 150 | 150 | 1 | 1 | 50 | 1 | 1 | 1 |
+| `large-body-herd` | 20 | 20 | 20 | 20 | 1 | 1 | 20 | 1 | 1 | 1 |
 
-The origin's delay and body per scenario are in the table of 11 §5.1. The two `-capped` scenarios use an origin that refuses with 503 beyond 128 concurrent requests; a refused request is not counted as an origin call, so "128" for a subject without a limiter means the whole burst arrived and 128 were served.
+The origin's delay and body per scenario are in the table of 11 §5.1. The two `-capped` scenarios use an origin that refuses with 503 beyond 128 concurrent requests; a refused request is not counted as an origin call, so "128" for a subject without a limiter means the whole burst arrived and 128 were served. `sync-expiry` now sends two waves of 5,000, two seconds apart, and reads the counters two seconds after the second: a cache that answers the first wave from stale copies has made its background refreshes by then, which round 1 did not count.
 
 ### Comparison: clients that did not get a 2xx
 
-| Scenario | clients | no cache | Weir v1.0.1 | Weir v1.1 | Weir v1.1 tuned | Varnish | Varnish tuned | nginx | nginx tuned | Souin | Souin tuned |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| `cold-herd` | 1000 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
-| `slow-origin-herd` | 100 | 0 | 84 | 0 | 0 | 0 | 0 | 0 | 0 | 100 | 100 |
-| `leader-abort` | 50 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 50 | 50 |
-| `cold-keys` | 2000 | 0 | 720 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
-| `cold-keys-capped` | 2000 | 1872 | 720 | 0 | 0 | 1744 | 0 | 1872 | 1616 | 872 (a) | 875 (a) |
-| `sync-expiry` | 5000 | 0 | 3880 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
-| `sync-expiry-capped` | 5000 | 4430 | 3864 | 0 | 0 | 0 | 0 | 4488 | 0 | 4417 | 4311 |
-| `uncacheable-herd` | 500 | 0 | 339 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
-| `turned-private` | 300 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
-| `error-herd` | 600 | 600 | 600 | 600 | 600 | 600 | 600 | 600 | 600 | 3 (a) | 3 (a) |
-| `oversize-herd` | 150 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
-| `large-body-herd` | 20 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| Scenario | clients | no cache | Weir v1.1.0 | Weir tuned | Varnish | Varnish tuned | nginx | nginx tuned | Souin | Souin tuned |
+| Scenario | clients | no cache | Weir | Weir tuned | Varnish | Varnish tuned | nginx | nginx tuned | Souin | Souin tuned |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| `cold-herd` | 1,000 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| `slow-origin-herd` | 100 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 100 | 100 |
+| `leader-abort` | 50 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 50 | 50 |
+| `cold-keys` | 2,000 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| `cold-keys-capped` | 2,000 | 1,872 | 0 | 0 | 1,744 | 0 | 1,872 | 1,667 | 1,744 | 1,744 |
+| `sync-expiry` | 10,000 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| `sync-expiry-capped` | 10,000 | 8,501 | 0 | 0 | 2,565 | 0 | 8,350 | 0 | 7,282 | 8,095 |
+| `uncacheable-herd` | 500 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| `turned-private` | 300 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| `error-herd` | 600 | 600 | 600 | 600 | 600 | 600 | 600 | 600 | 600 | 600 |
+| `oversize-herd` | 150 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| `large-body-herd` | 20 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
 
-A 503 that a cache sends to protect the origin counts as a failure here (11 R5). Notes:
+A 503 that a cache sends to protect the origin counts as a failure here (11 R5), and so does a 2xx whose body is not the length the origin sends. Notes:
 
-- (a) cache-handler answers 200 with an empty body to clients that waited on another client's fetch when that fetch ended in a response it does not store. Reproduced by hand on v0.17.0: 12 simultaneous requests for a URL whose origin answers 500 gave one 500 and eleven empty 200s, with one origin call. The harness counts status codes only, so these cells undercount: in `error-herd` the origin sends nothing but 500, and in `cold-keys-capped` only 128 requests were served by the origin, so at most 256 of the 1,128 responses counted as 2xx can carry a body.
-- `slow-origin-herd`: the origin takes 15 s. cache-handler gave up at its 10 s timeout. Weir v1.0.1 let 16 fetches through and failed the 84 clients behind them, which v1.1 fixes (D-H1).
+- cache-handler answers 200 with an empty body to clients that waited on another client's fetch when that fetch ended in a response it does not store ([darkweak/souin#876](https://github.com/darkweak/souin/issues/876), reported from round 1, open with no reply on 2026-10-13). Round 1 counted status codes only and marked those cells as undercounts. Counted by body, every client of `error-herd` fails (3 see the 500, 597 get the empty 200), and 1,744 of 2,000 fail in `cold-keys-capped`, where the origin served 128 fetches and each had one waiter that got a body.
+- `slow-origin-herd`: the origin takes 15 s. cache-handler gave up at its 10 s timeout.
 - `leader-abort`: cache-handler answered 499 to the 50 followers of a client that disconnected.
 - Varnish's tuned tier has its backend capped with Weir's default limiter numbers (rule R2: 64 concurrent, 8192 queued, 5 s wait), so in `cold-keys` and the capped scenarios the Weir and Varnish tuned columns compare two configurations of one idea.
-- cache-handler's tuned `stale` setting showed no effect in `sync-expiry` or `origin-down`. The harness origin sends no stale directives of its own, and we have not checked whether that setting needs them, so those cells may describe the origin profile more than the cache.
+- cache-handler's tuned `stale` setting showed no effect in `sync-expiry`, `origin-down` or `brownout`. By hand, an origin that sends `stale-if-error=300` or `stale-while-revalidate=300` made no difference either: a 503 from the origin went to the client with the stored copy still in the cache. We do not know what the setting needs, so those cells describe our configuration.
 
 ### Comparison: failure and recovery scenarios
 
-| Figure | no cache | Weir v1.0.1 | Weir v1.1 | Weir v1.1 tuned | Varnish | Varnish tuned | nginx | nginx tuned | Souin | Souin tuned |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| `bad-route`: bystanders failed, of 200 | 0 | 200 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
-| `origin-down`: clients failed while down, of 600 | 600 | 600 | 600 | 0 | 400 | 0 | 600 | 0 | 600 | 600 |
-| `origin-down`: origin calls while down | 600 | 400 | 400 | 144 | 600 | 464 | 600 | 596 | 600 | 600 |
-| `origin-down`: 200s of 200, 1 s after recovery | 200 | 0 | 0 | 200 | 200 | 200 | 200 | 200 | 200 | 200 |
-| `origin-down`: 200s of 200, 10 s after recovery | 200 | 1 | 200 | 200 | 200 | 200 | 200 | 200 | 200 | 200 |
-| `post-flood`: stored entries lost, of 2000 | 2000 | 972 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| Figure | no cache | Weir v1.1.0 | Weir tuned | Varnish | Varnish tuned | nginx | nginx tuned | Souin | Souin tuned |
+| Figure | no cache | Weir | Weir tuned | Varnish | Varnish tuned | nginx | nginx tuned | Souin | Souin tuned |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| `bad-route`: bystanders failed, of 200 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| `origin-down`: clients failed while down, of 600 | 600 | 600 | 0 | 400 | 0 | 600 | 0 | 600 | 600 |
+| `origin-down`: origin calls while down | 600 | 400 | 144 (144 to 159) | 600 | 464 (445 to 502) | 600 | 548 (545 to 600) | 600 | 600 |
+| `origin-down`: 200s of 200, 1 s after recovery | 200 | 0 | 200 | 200 | 200 | 200 | 200 | 200 | 200 |
+| `origin-down`: 200s of 200, 10 s after recovery | 200 | 200 | 200 | 200 | 200 | 200 | 200 | 200 | 200 |
+| `post-flood`: stored entries lost, of 2,000 | 2,000 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| `post-flood`: `POST` requests answered 2xx, of 300,000 | 300,000 | 300,000 | 300,000 | 300,000 | 300,000 | 300,000 | 300,000 | 300,000 | 300,000 |
 
-`bad-route`: one path answers 504 to 60 requests with distinct queries, then 200 clients ask for healthy paths. `origin-down`: 200 keys with `max-age=2` are stored, the origin answers 503 for three waves of 200, then recovers. `post-flood`: 2,000 stored entries, then 300,000 `POST` requests to other paths, then the 2,000 keys are read again.
+`bad-route`: one path answers 504 to 60 requests with distinct queries, then 200 clients ask for healthy paths. `origin-down`: 200 keys with `max-age=2` are stored, the origin answers 503 for three waves of 200, then recovers. `post-flood`: 2,000 stored entries, then 300,000 `POST` requests to other paths, then the 2,000 keys are read again. The last row is new: it shows that no subject refused the flood, so a zero in the row above it means entries survived a flood that happened.
+
+### Comparison: flood, brownout, purge and restart
+
+New in round 2 (11 §5.1, §5.2).
+
+| Figure | no cache | Weir v1.1.0 | Weir tuned | Varnish | Varnish tuned | nginx | nginx tuned | Souin | Souin tuned |
+| Figure | no cache | Weir | Weir tuned | Varnish | Varnish tuned | nginx | nginx tuned | Souin | Souin tuned |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| `busting-flood`: bystanders failed, of 1,000 | 607 | 0 | 0 | 544 | 280 | 558 | 562 | 574 | 555 |
+| `busting-flood`: flood clients failed, of 10,000 | 5,936 | 8,520 | 8,528 | 5,395 | 2,849 | 5,670 | 5,684 | 5,742 | 5,847 |
+| `busting-flood`: all clients failed, of 11,000 | 6,535 | 8,520 | 8,528 | 5,939 | 3,125 | 6,225 | 6,269 | 6,334 | 6,397 |
+| `busting-flood`: origin calls, of 11,000 requests | 4,465 | 2,480 | 2,472 | 5,061 | 7,875 | 4,775 | 4,731 | 4,666 | 4,603 |
+| `busting-flood`: most origin requests at once (it serves 128) | 128 | 50 (41 to 53) | 55 | 128 | 65 | 128 | 128 | 128 | 128 |
+| `brownout`: clients failed during the bursts, of 4,000 | 4,000 | 3,646 | 0 | 3,415 | 0 | 3,680 | 0 | 3,640 | 3,759 |
+| `brownout`: clients failed outside the bursts, of 8,000 | 0 | 120 (100 to 1,980) | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| `brownout`: origin calls during the bursts | 4,000 | 721 | 555 (470 to 642) | 3,815 | 3,804 | 3,680 | 3,680 | 3,640 | 3,759 |
+| `brownout`: seconds from recovery to the last failure | 0 | 0.2 (0 to 9.6) | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| `purge-herd`: clients failed, of 2,000 | not available | 0 | 0 | 0 | 0 | not available | not available | 0 | 0 |
+| `purge-herd`: origin calls | not available | 1,000 | 144 | 1,000 | 1,000 | not available | not available | 1,000 | 1,000 |
+| `purge-herd`: most origin requests at once | not available | 64 | 48 | 1,000 | 64 | not available | not available | 1,000 | 1,000 |
+| `purge-herd`: answers from before the purge, first wave of 1,000 | not available | 0 | 1,000 | 0 | 1,000 | not available | not available | 0 | 0 |
+| `purge-herd`: answers from before the purge, second wave of 1,000 | not available | 0 | 952 | 0 | 724 | not available | not available | 0 | 0 |
+| `purge-herd`: URLs still not refreshed at the last read, of 1,000 | not available | 0 | 904 | 0 | 0 | not available | not available | 0 | 0 |
+| `restart`: origin calls on replay, of 2,000 (entries lost) | 2,000 | 2,000 | 2,000 | 2,000 | 2,000 | 0 | 0 | 2,000 | 2,000 |
+| `restart`: clients failed, of 2,000 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+
+What each one does, and what its numbers do not say:
+
+- `busting-flood`: the origin serves 128 requests at once and refuses the rest. For 5 s, each 100 ms brings 200 requests for one path with a query string nobody has used, and 20 requests for other paths nobody has asked for. The flood alone is more than the origin can serve. Weir holds one path to 16 fetches at a time, so every bystander is served, and it refuses 85% of the flood to do it: **by clients failed in total, Weir is the worst subject in this scenario** and Varnish's tuned tier, which queues everything behind one cap of 64, the best. Weir also left origin capacity unused: the origin had about 50 requests in hand at most, of the 128 it serves. Each of these caches can sort or strip query strings in configuration, and none of the tiers does, Weir's included: the scenario measures how the origin's capacity is shared, not key normalization. `weirproxy` differs from the Caddy row by 40 origin calls.
+- `brownout`: 200 URLs with a 2 s lifetime, 200 requests a second for 60 s; the origin answers 503 for 10 s twice, with 5 s between, and is then healthy for 30 s. With stale serving on, Weir, Varnish and nginx fail nobody. Weir's breaker cuts origin calls during the bursts to about a fifth. Without stale serving it also keeps refusing after the origin is back: 120 requests in the median repetition and 1,980 in the worst, the last of them 9.6 s after recovery. `weirproxy`, the same engine without Caddy, did worse in these three repetitions: 2,280 (200 to 3,980) and 11.3 s (0.6 to 14.8). The spread is the breaker's open period, which doubles each time a probe fails, meeting the end of the burst at a different point.
+- `purge-herd`: 1,000 stored URLs are read, purged, read again at once and 1 s later, and read a last time 3 s after that. Each subject is purged the way its configuration documents: Weir through Caddy's admin API (a soft purge of everything), Varnish default with `return (purge)` per URL, Varnish tuned with `purge.soft()` per URL, cache-handler with its flush API. Open source nginx has no purge (`proxy_cache_purge` is commercial), and the control has no cache: "not available". A purge that deletes turns the next wave into a cold start, 1,000 origin requests at once for Varnish's default and cache-handler; Weir's default refetches the same 1,000 through its 64 slots. A soft purge with stale serving keeps answering from the old copy while it refetches. Varnish's tuned tier had refetched every URL by the last read. Weir's tuned tier had refetched 96: it starts at most 48 background refreshes at a time and does not queue the rest, so a URL is refreshed only when a later request for it finds a free slot. 904 of 1,000 URLs still had their pre-purge content 4 s after the purge.
+- `restart`: 2,000 stored URLs, a graceful stop and start of the container, and the URLs read again. nginx keeps its cache on disk and makes no origin call. Weir's tuned tier has `snapshot_dir` set and does reload its entries, but as stale ones (D15): each is checked with the origin on first use, and this origin sends no validator, so every key is fetched again. The snapshot is worth a 304 instead of a body where the origin has validators, and a copy to serve if the origin is down; neither is measured here. Varnish's persistent storage is marked deprecated in its own documentation and is not used. cache-handler has disk storages (Badger, NutsDB); neither tier here uses one.
 
 ### Comparison: what the numbers say about Weir
 
@@ -424,19 +463,28 @@ Where Weir is ahead of or level with the best competitor:
 
 - One origin call for a herd on one key, including a 15 s origin and a leader that disconnects (Varnish matches it).
 - An error is fetched once per wave: 3 origin calls for 600 clients in `error-herd`, with every client told the truth.
-- No client fails in any herd, expiry or flood scenario, in either tier, and the origin never sees more than 64 requests at once. With an origin that refuses beyond 128 concurrent requests (`cold-keys-capped`, `sync-expiry-capped`), Weir's default serves everyone where the Varnish, nginx and cache-handler defaults fail between 872 and 4,488 clients in at least one of the two.
-- With stale serving on, an origin outage is invisible to clients and costs 144 origin calls: Weir starts at most 48 background refreshes at a time and leaves the other keys stale until they are asked for again. Varnish's tuned tier also fails no client (464 calls), and nginx's fails none with 596.
+- No client fails in any herd or expiry scenario, in either tier, and the origin never sees more than 64 requests at once. With an origin that refuses beyond 128 concurrent requests (`cold-keys-capped`, `sync-expiry-capped`), Weir's default serves everyone where the Varnish, nginx and cache-handler defaults fail between 1,744 and 8,350 clients in at least one of the two.
+- With stale serving on, an origin outage or a brownout is invisible to clients, as it is for Varnish's and nginx's tuned tiers, and costs the origin fewer calls: 144 against 464 and 548 in `origin-down`, 555 against 3,804 and 3,680 in `brownout`.
+- Traffic to other paths survives a flood of one path: no bystander fails in `busting-flood`, where every other subject fails between 280 and 607 of 1,000.
+- A purge never reaches the origin as a herd: at most 64 requests at once, where a purge that deletes sends 1,000.
 
 Where Weir is behind:
 
+- In `busting-flood` Weir fails more clients in total than any other subject, the no-cache control included, because it refuses the flooded path's clients while the origin still has room. A path with many distinct query strings that is busy for honest reasons is treated the same way.
+- After a soft purge with stale serving on, most URLs still serve the purged content seconds later (904 of 1,000 after 4 s). Varnish's soft purge had refreshed all of them.
+- Without stale serving, the breaker keeps failing clients after the origin has recovered from repeated bursts, for up to 9.6 s on Caddy and 14.8 s on `weirproxy` in these runs. No other subject fails a client after recovery.
+- A restart costs one origin call per stored URL even with a snapshot, where nginx's disk cache costs none.
 - Responses over 1 MiB are not stored by default, so `oversize-herd` and `large-body-herd` reach the origin once per client where Varnish and cache-handler fetch once. The limit is tied to the memory store's shard size; `Storable.MaxObjectBytes` (`max_object_bytes` in Caddy) raises it.
-- Stale serving is off by default (D6), so the default tier fails every client while the origin is down, as nginx's and cache-handler's defaults do; Varnish's default serves the first wave from grace. After the outage the breaker stays open for its period: 1 s after recovery Weir's default still refuses, and 10 s after it serves all 200.
+- Stale serving is off by default (D6), so the default tier fails every client while the origin is down, as nginx's and cache-handler's defaults do; Varnish's default serves the first wave from grace.
 - A cold start costs latency instead of origin load: 2,000 clients on 1,000 cold keys are all served, but through 64 slots, so the last ones wait about 3 s (1,000 fetches of 200 ms each) where a cache with no limit answers in one origin round trip.
-- v1.1 drops a stored response once the origin marks it uncacheable (D-H6), so `turned-private` with stale serving costs 201 origin calls where v1.0.1 kept serving the stale copy with 3. Varnish behaves like v1.1 here and nginx like v1.0.1.
+- v1.1 drops a stored response once the origin marks it uncacheable (D-H6), so `turned-private` with stale serving costs 201 origin calls. Varnish behaves the same; nginx keeps serving the stale copy with 4.
+- Turning stale serving on costs conformance: the tuned tier passes 246 of the 365 cache-tests where the default passes 284 (below).
+
+The first four of these are new in round 2. They are recorded as findings CMP-F5 to CMP-F8 in [cards/21-comparison.md](cards/21-comparison.md) and are not fixed here (11 §8).
 
 ### Comparison: what the round changed in Weir
 
-The first pass ran v1.0.1 and the hardening branch. It confirmed three v1.0.1 defects the hardening had already fixed, and found four more problems, fixed in card HRD-21 before this was published (11 §8). The last column is the rerun.
+Round 1 ran v1.0.1 and the hardening branch. It confirmed three v1.0.1 defects the hardening had already fixed, and found four more problems, fixed in card HRD-21 (11 §8). This table is round 1's data, measured with round 1's harness, and was not rerun: v1.0.1 is no longer a subject. The last column is the code released as v1.1.0, and round 2's tables above agree with it wherever the scenario is unchanged.
 
 | Figure | v1.0.1 | v1.1 before HRD-21 | v1.1 |
 |---|---:|---:|---:|
@@ -452,41 +500,64 @@ What HRD-21 changed: the queue holds 8,192 waiters for 5 s where it held 1,024 f
 
 ### Comparison: security probes
 
-The harness origin has deliberately unsafe routes: it reflects a header no cache keys, answers a `GET` according to its body, or marks a personal response cacheable. Each probe sends an attacker's request and then a victim's. "unsafe" means the victim was served what the attacker caused. An unsafe verdict describes what a cache does when the origin is wrong; it is not a vulnerability in that cache, and each of these projects documents how to key or strip the input. The tuned tier is the stampede tuning of 11 §3, not a hardened configuration.
+The harness origin has deliberately unsafe routes: it reflects a header no cache keys, answers a `GET` according to its body, marks a personal response cacheable, or routes on the path exactly as it was spelled. Each probe sends an attacker's request and then a victim's. "unsafe" means the victim was served what the attacker caused. An unsafe verdict describes what a cache does when the origin is wrong; it is not a vulnerability in that cache, and each of these projects documents how to key or strip the input. The hardened column is that documentation applied: `hash_data()` in `vcl_hash` for Varnish, `proxy_set_header` with an empty value plus `proxy_no_cache` and `proxy_cache_bypass` for nginx, `key.headers` and `default_cache_control` for cache-handler. Every line of those files cites the page it comes from (`bench/compare/subjects/*/hardened/`). Weir has one column because its default already hides unkeyed request input from the origin.
 
-| Probe | Weir v1.0.1 | Weir v1.1 | Varnish | nginx | Souin |
-|---|---|---|---|---|---|
-| origin reflects `X-Forwarded-Host` (b) | safe | safe | unsafe | unsafe | safe |
-| origin routes on `X-Original-URL` | safe | safe | unsafe | unsafe | unsafe |
-| `GET` with a body the origin reads | safe | safe | safe | unsafe | unsafe |
-| `X-HTTP-Method-Override` causes an error | safe | safe | safe | unsafe | unsafe |
-| oversized header causes an error | safe | safe | safe | safe | safe |
-| page personalized by `Cookie`, marked cacheable | safe | safe | safe | unsafe | unsafe |
-| page personalized by `Authorization`, marked cacheable | safe | safe | safe | unsafe | safe |
-| `Set-Cookie` on a cacheable response | safe | safe | safe | safe | unsafe |
-| account page with no caching headers at a `.css` path | safe | safe | safe | safe | unsafe |
-| partial response stored as a full one | safe | safe | safe | safe | safe |
-| `HEAD` response served to a `GET` | safe | safe | safe | safe | safe |
-| origin error stored and served as a success (c) | safe | safe | safe | safe | safe |
-| origin calls from 50 requests with `Cache-Control: no-cache` (d) | 0 | 0 | 0 | 0 | 50 |
+| Probe | Weir v1.1.0 | Varnish | Varnish hardened | nginx | nginx hardened | Souin | Souin hardened |
+| Probe | Weir | Varnish | Varnish hardened | nginx | nginx hardened | Souin | Souin hardened |
+|---|---|---|---|---|---|---|---|
+| origin reflects `X-Forwarded-Host` (b) | safe | unsafe | safe | unsafe | safe | safe | safe |
+| origin routes on `X-Original-URL` | safe | unsafe | safe | unsafe | safe | unsafe | safe |
+| `GET` with a body the origin reads | safe | safe | safe | unsafe | safe | unsafe | unsafe |
+| `X-HTTP-Method-Override` causes an error | safe | safe | safe | unsafe | safe | unsafe | safe |
+| oversized header causes an error | safe | safe | safe | safe | safe | safe | safe |
+| page personalized by `Cookie`, marked cacheable | safe | safe | safe | unsafe | safe | unsafe | safe |
+| page personalized by `Authorization`, marked cacheable | safe | safe | safe | unsafe | safe | safe | safe |
+| `Set-Cookie` on a cacheable response | safe | safe | safe | safe | safe | unsafe | unsafe |
+| account page with no caching headers at a `.css` path | safe | safe | safe | safe | safe | unsafe | safe |
+| partial response stored as a full one | safe | safe | safe | safe | safe | safe | safe |
+| `HEAD` response served to a `GET` | safe | safe | safe | safe | safe | safe | safe |
+| parameter cloaking: a second `q` after `&` or `;` | safe | safe | safe | safe | safe | safe | safe |
+| path spelled differently (`//`, `/./`, `/x/../`, `%70`) (e) | safe | safe | safe | safe | safe | unsafe | unsafe |
+| meta character in a header causes a cacheable error (f) | safe | safe | safe | unsafe | unsafe | safe | safe |
+| origin error served as a success, 60 concurrent clients (c) | safe | safe | safe | safe | safe | unsafe | unsafe |
+| wrong variant served after 20,000 values of a varied header | safe | safe | safe | safe | safe | safe | safe |
+| origin calls from 50 requests with `Cache-Control: no-cache` (d) | 0 | 0 | 0 | 0 | 0 | 50 | 50 |
 
-Both tiers of every subject gave the same verdicts.
+The tuned tier of every subject gave the same verdicts as its default. Both controls (the origin direct, and Caddy with no cache) were safe on every probe and sent all 50 `no-cache` requests to the origin, which is what a probe must report when nothing is cached.
 
 - (b) For the subjects that run inside Caddy (Weir and cache-handler), Caddy's `reverse_proxy` overwrites `X-Forwarded-Host` before the origin sees it, so "safe" is Caddy's doing. `weirproxy`, with no Caddy, is safe because Weir strips the header.
-- (c) This probe sends its requests one after another. It does not reach the concurrent case of note (a) above, where cache-handler does answer 200 for an origin error.
-- (d) Not a verdict. Honoring a request's `no-cache` is what RFC 9111 §5.2.1.4 describes, and cache-handler does it. The other four ignore it in these configurations (Weir by default, FR-SRV-8), which protects the origin from a client that asks for revalidation on every request.
+- (c) Three waves of 20 clients at once, for a URL whose origin only answers 500. cache-handler gave 57 of the 60 a 200 with an empty body (issue 876 above). Round 1 sent these one after another and called every subject safe.
+- (d) Not a verdict. Honoring a request's `no-cache` is what RFC 9111 §5.2.1.4 describes, and cache-handler does it. The other three ignore it in these configurations (Weir by default, FR-SRV-8), which protects the origin from a client that asks for revalidation on every request.
+- (e) cache-handler filed a request for `/%70age` under the key of `/page` and forwarded it as spelled, so the origin's answer to the odd spelling was served for the plain one. Reproduced by hand: its `Cache-Status` header names a key ending in `/page` on the request for `/%70age`. The key is built from the decoded path. We found no documented setting for this, so the hardened tier does not change it.
+- (f) nginx forwarded a header value containing the byte `0xFF` and stored the origin's `400` with `max-age=60` under the URL alone. Reproduced by hand. The header (`X-Meta`) is not one of the three the hardened tier strips, which is the point of the last limit above: a list covers the headers someone thought of. Adding it to the same `proxy_set_header` lines would close it. A value with a control byte (`0x07`) was stored by no subject; by hand, nginx forwarded it and the origin's own server refused it with no caching headers.
+- `GET` with a body, and `Set-Cookie`, stay unsafe in cache-handler's hardened tier: we found no documented key or strip option that covers them (`key.disable_body` removes the body from the key; nothing adds it for a `GET`).
+- nginx's hardened tier stops caching any request that carries a cookie, credentials or a body. That is the manual's own example made general, and it costs hit ratio on a site whose visitors all carry a cookie.
 
-Not probed in this round: parameter cloaking, path normalization differences, a meta character in a header, and memory growth under high `Vary` cardinality (11 §5.3).
+The last probe also counted what one client can make a cache hold for one URL: after 20,000 values of a header the origin varies on, the first and last 100 were asked for again.
+
+| | Weir v1.1.0 | Varnish | nginx | Souin | Souin tuned | no cache |
+|---|---:|---:|---:|---:|---:|---:|
+| of 200 sampled variants, still served from the cache | header not forwarded | 200 | 199 | 100 | 100 | 0 |
+| container memory before and after, MiB | 16 to 34 | 92 to 135 | 172 to 230 | 16 to 152 | 15 to 1,726 | 14 to 30 |
+
+Weir does not forward a header it does not key, so the origin saw no value, sent one response, and the URL has one entry; a deployment that keys the header gets at most 8 variants per URL (`Key.MaxVariants`). The other three stored what they were sent, inside the storage size their configuration gives them (Varnish 512 MiB, nginx 1 GiB on disk). The memory row is read from `docker stats` once before and once after, includes whatever the 20,000 requests cost a proxy with no cache at all (last column), and is approximate. cache-handler's tuned tier (Otter storage) is the outlier, and the cause is not `Vary`: by hand, 10,000 distinct URLs with no varying header grew the same container by 1.1 GiB. We have not looked into why, and it may be our configuration. Memory against other caches is otherwise unmeasured (11 §5.5).
 
 ### Comparison: conformance
 
-[http-tests/cache-tests](https://github.com/http-tests/cache-tests) at the revision `scripts/cache-tests.sh` pins, 365 tests, each subject in its default tier. Weir forwards the suite's own request headers (`forward allow`), as its baseline run does. The suite mixes required and optional behavior, and "fail" here is every test that did not pass, including tests whose setup failed before the assertion. A fail is therefore not always a violation: Weir's 81 are explained in [cache-tests-expected-failures.md](cache-tests-expected-failures.md), and the other projects' are not analyzed here.
+[http-tests/cache-tests](https://github.com/http-tests/cache-tests) at the revision `scripts/cache-tests.sh` pins, 365 tests, each subject in each tier. Weir forwards the suite's own request headers (`forward allow`), as its baseline run does. The suite mixes required and optional behavior. A test that did not pass is split by what the suite reports: "assertion" means the behavior under test was observed and was not what the test expects; "setup" means the test could not get that far (a request that should have been conditional was not, for example) and says nothing about the behavior. Neither is always a violation: Weir's 81 are explained in [cache-tests-expected-failures.md](cache-tests-expected-failures.md), and the other projects' are not analyzed here.
 
-| Subject | Pass | Fail |
-|---|---:|---:|
-| Weir v1.0.1 and v1.1 (Caddy and `weirproxy`) | 284 | 81 |
-| Caddy cache-handler (Souin) | 232 | 133 |
-| Varnish | 216 | 149 |
-| nginx | 195 | 170 |
+| Subject | Tier | Pass | Assertion failed | Setup failed |
+|---|---|---:|---:|---:|
+| Weir v1.1.0 (Caddy and `weirproxy`) | default | 284 | 67 | 14 |
+| Weir v1.1.0 (Caddy) | tuned | 246 | 106 | 13 |
+| Caddy cache-handler (Souin) | default | 231 | 99 | 35 |
+| Caddy cache-handler (Souin) | tuned | 232 | 99 | 34 |
+| Caddy cache-handler (Souin) | hardened | 209 | 121 | 35 |
+| Varnish | default | 216 | 127 | 22 |
+| Varnish | tuned | 216 | 127 | 22 |
+| Varnish | hardened | 216 | 127 | 22 |
+| nginx | default | 195 | 136 | 34 |
+| nginx | tuned | 193 | 156 | 16 |
+| nginx | hardened | 192 | 139 | 34 |
 
-Weir's row equals `testdata/cache-tests-baseline.json` test for test.
+Weir's default row equals `testdata/cache-tests-baseline.json` test for test, on Caddy and on `weirproxy`. Its tuned tier passes 38 fewer: `while_revalidate 60s` applies to every response, so the suite's second request is answered from the stale copy while the refresh runs, and tests that expect the refreshed response fail (33 of the 68 tests that changed are in the suite's freshness group, 15 in its 304 group). That is the cost of choosing stale serving for responses whose origin did not ask for it. cache-handler passed 232 in round 1's default tier and 231 here; one test differs between runs.

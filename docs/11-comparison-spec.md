@@ -1,7 +1,7 @@
 # Weir comparison benchmark specification
 
-Status: v0.2. Design approved by the project owner on 2026-10-13. The first round ran the same day; its results are in [benchmarks.md](benchmarks.md) and this version records what the round changed.
-Date: 2026-10-13 (v0.2)
+Status: v0.3. Design approved by the project owner on 2026-10-13. Two rounds ran the same day; the results of the second are in [benchmarks.md](benchmarks.md) and this version records what it added and changed (cards CMP-03b and CMP-04b).
+Date: 2026-10-13 (v0.3)
 Depends on: [07-testing-strategy.md §9](07-testing-strategy.md) (the in-process load scenarios this mirrors over HTTP), [06-threat-model.md](06-threat-model.md) (the threats the security probes exercise)
 
 ## 1. What this is for
@@ -16,16 +16,18 @@ This document does not change Weir's behavior. It is normative only for the harn
 
 | Subject | What it is | Version | Role |
 |---|---|---|---|
-| `caddy-weir` | Caddy with the Weir handler, memory store | Caddy 2.11.7, Weir v1.0.1 | under test |
-| `weirproxy` | `examples/weirproxy` on `net/http` | Weir v1.0.1 | under test; shows what Caddy adds |
-| `caddy-weir-next`, `weirproxy-next` | the same two, built from the working tree | the commit in the run's `.next.txt` | under test, unreleased |
+| `caddy-weir` | Caddy with the Weir handler, memory store | Caddy 2.11.7, Weir v1.1.0 | under test |
+| `weirproxy` | `examples/weirproxy` on `net/http` | Weir v1.1.0 | under test; shows what Caddy adds |
+| `caddy-weir-next`, `weirproxy-next` | the same two, built from the working tree | the commit in the run's `.next.txt` | under test, unreleased; not run in round 2 |
 | `varnish` | Varnish Cache, official image | 9.1.0 | incumbent |
 | `nginx` | nginx `proxy_cache`, official image | 1.30.5 (stable) | incumbent |
 | `caddy-souin` | Caddy with cache-handler (Souin) | Caddy 2.11.7, cache-handler v0.17.0, Otter storage v0.0.20 (tuned tier) | the same host as Weir |
 | `caddy-nocache` | Caddy `reverse_proxy` only | 2.11.7 | control |
 | `origin` | the harness origin, direct | | control |
 
-`caddy-weir` and `weirproxy` are built from Weir's published modules, the way a user gets them. A fix that is not released yet is measured by the labeled subjects `caddy-weir-next` and `weirproxy-next`: `run.sh` builds them from the working tree, records the commit beside the results, and they run the same configuration files as the published subjects. A result from a `-next` subject is always reported with its commit and never called a release.
+`caddy-weir` and `weirproxy` are built from Weir's published modules, the way a user gets them. A fix that is not released yet is measured by the labeled subjects `caddy-weir-next` and `weirproxy-next`: `run.sh` builds them from the working tree, records the commit beside the results, and they run the same configuration files as the published subjects. A result from a `-next` subject is always reported with its commit and never called a release. All three drivers build them through `lib.sh`, so no driver can use a binary another run left behind.
+
+Round 2 measured the published `v1.1.0` and did not run the `-next` subjects: `main` differed from the `v1.1.0` tag in one documentation comment (`caddy/doc.go`), so they would have measured the same code twice. `v1.0.1` is no longer a subject. Its round 1 figures stay in the before-and-after table of [benchmarks.md](benchmarks.md), where they show what the release fixed; a `v1.0.1` column in every table would describe a version nobody should install and would have had to be rerun with the corrected harness to sit beside the other columns.
 
 Out of the first round: Apache Traffic Server and a Valkey-against-Redis pairing (second round, only if the first is worth publishing), Squid, and Pingora. Pingora would need a proxy written by us in Rust, and the numbers would describe our code.
 
@@ -36,11 +38,13 @@ Every subject runs in two tiers.
 - `default`: the smallest configuration that turns caching on. It answers "what does someone who follows the quickstart get".
 - `tuned`: the project's own documented stampede and stale settings. Each line of a tuned config cites the documentation it comes from, in a comment.
 
+- `hardened`, for the probes and conformance only (§5.3): the default tier plus that project's own documented way to key or strip request input. Varnish, nginx and cache-handler have one. Weir does not, because its default already hides unkeyed request input from the origin.
+
 The controls and `weirproxy` have one configuration and run once.
 
 Rules:
 
-- R1. Limits that are plumbing, not cache policy, are raised the same way for every subject in both tiers: file descriptors, listen backlog, nginx `worker_connections`, the ephemeral port range (`ip_local_port_range` 1024 to 65535) and `tcp_tw_reuse`. The first run without the last two gave nginx and the no-cache control 502 responses from port exhaustion ("cannot assign requested address"), which would have been reported as their behavior.
+- R1. Limits that are plumbing, not cache policy, are raised the same way for every subject in both tiers: file descriptors, listen backlog, nginx `worker_connections`, the ephemeral port range (`ip_local_port_range` 1024 to 65535) and `tcp_tw_reuse`. The first run without the last two gave nginx and the no-cache control 502 responses from port exhaustion ("cannot assign requested address"), which would have been reported as their behavior. Room to store a scenario's keys is plumbing in the same sense: nginx gets `max_size=1g`, Varnish 512 MiB, and cache-handler's tuned tier an Otter size of 1,000,000, because at Otter's default of 10,000 the 5,000 keys of `sync-expiry` were already being evicted and the evictions were counted as origin calls (found in round 2 and reproduced by hand).
 - R2. Where a competitor documents an origin concurrency cap with a queue, the tuned tier sets it to Weir's default limiter numbers (64 concurrent, 8192 queued, 5 s wait since HRD-21; 1024 and 2 s in the first pass). Varnish has this since 7.6 (`.max_connections`, `.wait_limit`, `.wait_timeout`). Open source nginx has `max_conns` but no queue (`queue` is commercial), so a cap would turn overflow into 502 responses; its tuned tier leaves the cap off and the report says so.
 - R3. Weir's tuned tier turns on stale serving (`while_revalidate 60s`, `if_error 5m`), which is off by default (D6). Varnish gets `grace 60s` and `keep 5m`, nginx `proxy_cache_use_stale` with `background_update`, Souin `stale 5m`.
 - R3a. cache-handler logs that its default storage is "not optimized and for development purpose", so its tuned tier uses the Otter storage its documentation recommends. The default tier keeps the default storage, because that is what the quickstart gives.
@@ -58,10 +62,14 @@ Rules:
 - `run.sh` drives Docker Compose: one subject at a time, the origin shared, container logs kept beside the results.
 
 - A profile can carry a capacity: the origin refuses with 503 beyond that many concurrent requests and counts the refusals. Counters survive a profile replacement, so a scenario can change the origin's behavior midway.
+- A profile can name another as its pool and then shares that profile's capacity while its calls are counted apart (`busting-flood`). A replaced profile keeps its counters and its in-flight count.
 - Before each scenario the runner polls the `ready` profile through the subject until it answers 200. Without this gate a breaker opened by one scenario failed the first requests of the next.
+- A 2xx response whose body is not the profile's length is recorded as `bad-body:<code>` and counted as a failure. Round 1 counted status codes only, and cache-handler's empty 200s passed as successes.
+- A purge is one line per subject, `subjects/<name>/purge` (`METHOD URL [BODY]`, with `{path}` in the URL for one request per key). No file means the subject has no purge, and its row says `not available` with no figures.
+- The runner is a container and cannot restart another one. For `restart` it writes `restart.request` into the results directory and `run.sh` performs a graceful `docker compose restart` of the same container, so whatever the cache keeps on its own disk is still there.
 - `compare probe` runs the security probes of §5.3; `probes.sh` and `conformance.sh` drive it and the cache-tests suite across subjects.
 
-With no cache in between, the runner's request count and the origin's call count must be equal. `TestRunCountsAgainstOriginDirect` holds the harness to that, and the `origin` control row repeats the check in every real run.
+With no cache in between, the origin must count exactly the requests the runner sent. Every row records both numbers (`sent`, `seen`). `TestRunCountsAgainstOriginDirect` runs every scenario against the origin alone, in a synctest bubble over an in-memory transport, and holds each to that; the `origin` control row repeats the check in every real run, and `compare report` fails when one of its rows disagrees.
 
 Timing runs (pillar 5) use an established open-loop load generator, chosen and verified in CMP-06, so that latency numbers do not rest on a load tool we wrote.
 
@@ -77,7 +85,7 @@ Each wave sends its requests at one instant. Three repetitions; the median is re
 |---|---|---|---|---|
 | `cold-herd` | 200 ms, `max-age=60`, 1 KiB | 1 key, 1000 clients | origin calls (1 is ideal), p99 | CMP-01 |
 | `cold-keys` | 200 ms, `max-age=60`, 1 KiB | 1000 keys, 2 clients each | peak origin concurrency, failures | CMP-01 |
-| `sync-expiry` | 20 ms, `max-age=5`, 1 KiB | 5000 keys primed, 6 s wait, then 1 client each | peak origin concurrency, failures, stale served | CMP-01 |
+| `sync-expiry` | 20 ms, `max-age=5`, 1 KiB | 5000 keys primed, 6 s wait, counters zeroed, then two waves of 1 client each 2 s apart; counters read 2 s after the second | origin calls after each wave, peak origin concurrency, failures | CMP-01, CMP-03b |
 | `uncacheable-herd` | 200 ms, `private`, 1 KiB | 1 key, 500 clients | time to drain, failures (the hit-for-pass trap) | CMP-01 |
 | `error-herd` | 100 ms, status 500 | 1 key, 200 clients, 3 waves 1 s apart | origin calls | CMP-01 |
 | `cold-keys-capped` | as `cold-keys`, origin capacity 128 | as `cold-keys` | failures, origin refusals | CMP-03 |
@@ -89,18 +97,24 @@ Each wave sends its requests at one instant. Three repetitions; the median is re
 | `origin-down` | 5 ms, `max-age=2`, then status 503, then healthy | 200 keys stored, 3 waves of 200 while down, 200 clients 1 s and 10 s after recovery | failures and origin calls while down, 200s after recovery | CMP-03 |
 | `post-flood` | `max-age=600`, 1 KiB | 2000 keys stored, 300 000 `POST` requests to other paths, then the keys read again | stored entries lost (one repetition) | CMP-03 |
 | `oversize-herd` | 200 ms, `max-age=60`, 2 MiB | 1 key, 50 clients, 3 waves | origin calls | CMP-03 |
-| `busting-flood` | capacity-limited origin | random queries on one path, normal traffic on others | bystander p99 and failures | not run yet (CMP-03b) |
-| `brownout` | origin fails in 30 s bursts | steady traffic over warm keys | client-visible errors, origin calls during the outage, recovery time | not run yet (CMP-03b) |
-| `purge-herd` | 200 ms | purge under load | peak origin concurrency; "not available" where a cache has no purge | not run yet (CMP-03b) |
+| `busting-flood` | 100 ms, `max-age=60`, capacity 128 shared by the flood and the bystanders | for 5 s, every 100 ms: 200 requests for one path with a fresh query, 20 for other paths nobody has asked for | bystander failures and origin calls, flood failures, all failures | CMP-03b |
+| `brownout` | 5 ms, `max-age=2`; in a burst, 503 after 100 ms | 200 stored keys, 200 requests a second for 60 s: 5 s healthy, 10 s failing, 5 s healthy, 10 s failing, 30 s healthy | failures in the bursts and outside them, origin calls in the bursts, seconds from recovery to the last failure | CMP-03b |
+| `purge-herd` | 200 ms, `max-age=600` | 1000 stored keys read once, purged, read at once and 1 s later, read again after 3 s more | failures, origin calls, peak origin concurrency, answers from before the purge, keys not refreshed at the last read; "not available" where a cache has no purge | CMP-03b |
 
 `bad-route` waits 11 s before it starts, so a failure window left by an earlier scenario cannot count against the subject. The two `-capped` scenarios exist because an origin with no limit makes every cache that forwards the whole burst look free; with a capacity, a low origin call count shows up as fewer failed clients.
 
 `sync-expiry` uses 5000 keys, not the 10 000 of the in-process scenario in 07 §9: 10 000 simultaneous connections would measure connection handling more than expiry.
 
+Notes on the CMP-03b scenarios:
+
+- `busting-flood` reports the flood's failures beside the bystanders'. A cache that saves the bystanders by refusing the flood has refused clients (R5), and the page gives the total. The capacity of 128 is the number the `-capped` scenarios already use, not Weir's limiter value. No tier sorts or strips query strings, Weir's included: the scenario is about how origin capacity is shared.
+- `brownout` uses 10 s bursts, not the 30 s of 07 §9. Ten seconds is five lifetimes of the keys, and three repetitions of a 60 s scenario over eleven subject-tiers is what one session can run. The last healthy phase is 30 s so that a breaker that backed off has time to close. Failure is a 503, not added latency: a black box cannot be given the same origin timeout in every cache.
+- `purge-herd` purges each subject the way its own configuration documents (Weir: a soft purge of everything through Caddy's admin API; Varnish default: `return (purge)` per URL; Varnish tuned: `purge.soft()` of the bundled `vmod_purge` per URL, so its grace applies as Weir's stale window does; cache-handler: its flush API, which it serves on Caddy's admin endpoint; nginx: none, `proxy_cache_purge` is commercial). The last two figures exist because a cache that ignored the purge would otherwise show the best origin numbers.
+
 ### 5.2 Scenarios Weir is expected to lose
 
 - `large-body-herd`: a 50 MiB body, 200 ms origin, 20 clients on one key, one repetition (the virtual machine has 8 GiB). Weir stores at most 1 MiB by default and passes the rest through, so each client reaches the origin. Varnish streams one fetch to all.
-- `restart` (not run yet, CMP-03b): warm 10 000 keys, restart the cache, replay. nginx keeps its disk cache; Weir's memory store starts cold unless `snapshot_dir` is set (tuned tier).
+- `restart`: store 2000 keys with `max-age=600`, stop and start the cache's container gracefully, read the keys again 64 at a time. The origin calls of the replay are the entries lost. 2000 keys in chunks, not 10 000 at once, for the reason given for `sync-expiry`. nginx keeps its disk cache. Weir's tuned tier sets `snapshot_dir`; its snapshot reloads entries as stale ones (D15), so against an origin with no validators the replay still fetches every key, and the scenario reports that. Varnish's `deprecated_persistent` storage is marked deprecated and experimental in its own storage guide and is not used; neither cache-handler tier uses one of its disk storages.
 - Raw hit throughput against the C proxies, in pillar 5.
 
 ### 5.3 Security probes
@@ -109,13 +123,20 @@ The origin gets deliberately unsafe routes under `/p/<probe>/`, and each probe s
 
 Probes: an unkeyed header reflected by the origin (`X-Forwarded-Host`, `X-Original-URL`), a GET with a body, parameter cloaking, a path the cache and the origin normalize differently, cache deception (`/account/x.css`), a cached `Set-Cookie`, a cached response to a request with `Authorization`, cache-poisoned denial of service (oversized header, method override, meta character), a partial response stored as a full one, HEAD and GET confusion, client `Cache-Control: no-cache` as an origin amplifier, and memory growth under high `Vary` cardinality.
 
-Run in the first round: the two reflected headers, the GET with a body, the method override and the oversized header, `Cookie` and `Authorization` personalization, the cached `Set-Cookie`, cache deception, the partial response, HEAD and GET confusion, an origin error served as a success, and the `no-cache` amplifier. Not run yet: parameter cloaking, path normalization, the meta character and `Vary` cardinality.
+All of them have run. Round 2 added parameter cloaking, path normalization, the meta character and `Vary` cardinality, and made the "origin error served as a success" probe concurrent (three waves of 20 clients), because the case it exists for, cache-handler's empty 200 to the waiters of a failed fetch, needs clients that overlap.
 
-The tuned tier for this pillar should be each project's documented hardening, where it has any. The first round ran the stampede tuning of §3 instead and says so beside its table.
+- Parameter cloaking: the origin splits the query on `;` as well as `&` and the last value wins. The attacker sends four spellings of a second `q`; the victim asks for `?q=page`.
+- Path normalization: the origin serves its page only for the path exactly as spelled. The attacker asks for `//page`, `/./page`, `/x/../page` and `/%70age`; the victim for `/page`.
+- Meta character: a request written by hand with a header value holding a control byte (0x07), then one holding 0xFF; the origin rejects both with a 400 it marks cacheable.
+- `Vary` cardinality: 20 000 values of a header the origin varies on, for one URL; then the first and last 100 are asked for again, and a value never sent. The verdict is whether anyone was served another value's variant. The figure is how many of the 200 came from the cache. A cache that does not forward the header has one variant and reports that instead. `probes.sh` also reads each container's memory before and after; that reading is approximate and is published with the control's beside it.
+
+`probe_test.go` holds every probe to two things: against the origin alone no probe is unsafe, and through a deliberately naive cache (path-only key, cleaned path, everything stored) every probe is.
+
+The hardened tier (§3) is each project's own documentation applied to the request headers the round 1 probes use: `hash_data()` in `vcl_hash` for Varnish, `proxy_set_header` with an empty value plus `proxy_no_cache` and `proxy_cache_bypass` for nginx, `key.headers` and `default_cache_control` for cache-handler. Each line of those files cites its page. The tier was written after the default results and is fitted to them, in the other projects' favour; the page says so. A header the list does not name (the meta character probe's) is not covered, and the page reports that too, because it is the difference between listing inputs and hiding them by default.
 
 ### 5.4 Conformance
 
-The cache-tests revision pinned in `scripts/cache-tests.sh`, run against every subject in its default tier. `conformance.sh` starts the suite's own server under the name `origin` on the Compose network, so no subject's configuration changes, except that Weir is told to forward the suite's request headers (`subjects/caddy-weir/conformance/`), as in its baseline run. Pass counts by category, with Weir's existing baseline as its row. The suite mixes required and optional behavior, so the counts are published with that caveat and without a per-test reading of the other projects' failures.
+The cache-tests revision pinned in `scripts/cache-tests.sh`, run against every subject in every tier it has. `conformance.sh` starts the suite's own server under the name `origin` on the Compose network, so no subject's configuration changes, except that Weir is told to forward the suite's request headers (`subjects/caddy-weir/conformance/<tier>/`), as in its baseline run. Per subject and tier: tests passed, and the rest split into assertion failures and setup failures as the suite reports them, since a test whose setup failed says nothing about the behavior under test. The script compares Weir's default row with `testdata/cache-tests-baseline.json` test for test. The suite mixes required and optional behavior, so the counts are published with that caveat and without a per-test reading of the other projects' failures.
 
 ### 5.5 Speed and memory
 
@@ -152,6 +173,8 @@ A finding becomes a card of its own. It is never fixed inside a comparison card.
 
 First round: three defects of v1.0.1 were already fixed on the v1.1 branch (`slow-origin-herd`, `bad-route`, `post-flood`). Four more findings, CMP-F1 to CMP-F4 in [cards/21-comparison.md](cards/21-comparison.md), were fixed in card HRD-21 with the owner's go-ahead, and the Weir v1.1 subjects were rerun. All seven are reported before and after in [benchmarks.md](benchmarks.md).
 
+Second round: four findings, CMP-F5 to CMP-F8, none fixed here. The per-path cap refuses a busy path's clients while the origin has room (`busting-flood`); a soft purge with stale serving leaves most URLs unrefreshed (`purge-herd`); without stale serving the breaker keeps failing clients after the origin recovers from repeated bursts (`brownout`); a snapshot does not save origin calls after a restart (`restart`). Each is on the page as a loss and has a card for the owner's decision.
+
 ## 9. What is published
 
 Decided on 2026-10-13: run first, then decide what to publish. After the first round the owner decided, the same day, to publish the count-based pillars in the documentation and on the site.
@@ -163,11 +186,11 @@ Decided on 2026-10-13: run first, then decide what to publish. After the first r
 ## 10. Open items
 
 - Image digests are pinned in `compose.yaml` (2026-10-13). The two builder images in `docker/` are pinned by tag only.
-- R4 is not done: no competitor configuration has been reviewed by that project's maintainers. The page says so and invites corrections. The internal review of the first round already found one omission (Varnish's rule that abandons a failed background fetch), fixed and rerun before publication.
-- The harness reads status codes only. cache-handler answers 200 with an empty body to waiters of a fetch it does not store, so the runner should also check body length (CMP-03b).
-- Origin counters are read when a wave ends, and are reset before the priming wait of `sync-expiry`, not after it. A second wave and a reset after the wait would show deferred refreshes (CMP-03b).
-- `probes.sh` and `conformance.sh` use the `-next` binaries that `run.sh` built and do not rebuild or record them.
-- Latency was measured but not published: the first round did not run under the drift gate of §6.
-- Pillar 5.5 (speed and memory) has not run. The open-loop load generator is chosen in CMP-06.
-- The scenarios and probes marked "not run yet" above (CMP-03b, CMP-04b).
+- R4 is not done: no competitor configuration has been reviewed by that project's maintainers. The page says so and invites corrections. Our own review has found three mistakes against other projects so far (port exhaustion, Varnish's rule that abandons a failed background fetch, Otter's default size), each fixed and rerun before publication.
+- The published data of round 2 comes from two harness commits that differ in one subject's configuration and one probe's verdict logic. A single clean pass would be tidier and is not expected to change a cell.
+- cache-handler: the `stale` setting has no visible effect in our tuned tier, with or without stale directives from the origin; a `GET` with a body, a cached `Set-Cookie` and a percent-encoded path stay unsafe in its hardened tier because we found no documented option for them; its Otter storage grew by more than 1 GiB for 10 000 small objects. Each may be our configuration. They need its maintainers' reading (R4) before more is said. The empty 200 is reported upstream as darkweak/souin#876 (open, no reply on 2026-10-13); the percent-encoded path is not reported yet.
+- Latency was measured but not published: neither round ran under the drift gate of §6.
+- Pillar 5.5 (speed and memory) has not run. The open-loop load generator is chosen in CMP-06. The memory reading of the `Vary` probe is not a substitute for it.
+- Differential fuzzing (§5.6) has not run.
 - Varnish's tuned tier carries Weir's limiter numbers (R2), so `cold-keys` and the capped scenarios compare two configurations of the same idea there, not two designs.
+- `restart` does not show what Weir's snapshot is for. An origin profile with a validator, and a restart while the origin is down, would.

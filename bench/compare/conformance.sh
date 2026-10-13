@@ -66,10 +66,12 @@ done
 # says went wrong. "Setup" means the test could not reach its assertion (a
 # request that should have been conditional was not, for example), which is
 # not a statement about the behavior under test. The last column compares a
-# Weir default row with the project's baseline, test for test.
+# Weir default row with the project's baseline, test for test. A second table
+# gives passes by the suite's test groups.
 docker run --rm -v "$PWD/$out:/r:ro" -v "$PWD/../../testdata/cache-tests-baseline.json:/baseline.json:ro" "$NODE" node -e '
   const fs = require("fs")
   const base = JSON.parse(fs.readFileSync("/baseline.json")).results
+  const cats = {}, runs = []
   console.log("| subject | tier | tests | pass | assertion failed | setup failed | other | against Weir baseline |")
   console.log("|---|---|---:|---:|---:|---:|---:|---|")
   for (const f of fs.readdirSync("/r").filter(f => f.endsWith(".json")).sort()) {
@@ -86,5 +88,18 @@ docker run --rm -v "$PWD/$out:/r:ro" -v "$PWD/../../testdata/cache-tests-baselin
     for (const id of Object.keys(base)) if (!(id in r)) diff++
     const cmp = s.includes("weir") && tier === "default" ? (diff === 0 ? "equal" : diff + " tests differ") : ""
     console.log(`| ${s} | ${tier} | ${Object.keys(r).length} | ${n.pass} | ${n.Assertion} | ${n.Setup} | ${n.other} | ${cmp} |`)
+    for (const [id, v] of Object.entries(r)) {
+      const c = id.split("-")[0]
+      cats[c] = cats[c] || {}
+      const k = s + " " + tier
+      cats[c][k] = cats[c][k] || [0, 0]
+      cats[c][k][0] += v === true ? 1 : 0
+      cats[c][k][1]++
+      if (!runs.includes(k)) runs.push(k)
+    }
   }
+  // Passed of run, by the first word of the test id (the groups of the suite).
+  console.log("\n| group | " + runs.join(" | ") + " |")
+  console.log("|---|" + runs.map(() => "---:").join("|") + "|")
+  for (const c of Object.keys(cats).sort()) console.log("| " + c + " | " + runs.map(k => (cats[c][k] ? cats[c][k][0] + "/" + cats[c][k][1] : "")).join(" | ") + " |")
 ' | tee "$out/summary.md"
