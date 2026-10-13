@@ -215,7 +215,7 @@ High findings first, then Medium, then Low, then documents, review and release. 
 - Plan: v1.1 · Size: M · Depends on: HRD-16
 - AC: every probe from the 2026-10-13 review is rerun against the branch and its result recorded in the pull request; the card-reviewer agent has read the whole diff; every must-fix finding is fixed with a test; `make check`, `make vuln` and `make fuzz-short` pass
 
-### [ ] HRD-18 Release v1.1.0
+### [x] HRD-18 Release v1.1.0
 - Plan: v1.1 · Size: S · Depends on: HRD-17 merged
 - AC: docs/release.md steps 1 to 10 for `v1.1.0`, all four modules; `release-gate` green on the merged commit; the site and the `caddy-published` job name `v1.1.0`; the site is deployed
 - Notes: cannot start before Ashwin merges the pull request (`main` is protected). Tags are immutable on the module proxy, so the rehearsal tag `v1.1.0-rc.1` comes first

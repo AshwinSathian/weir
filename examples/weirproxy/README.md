@@ -3,7 +3,7 @@
 A caching reverse proxy built from `weir` and `weirhttp` with default settings. It is the program the [quickstart](https://weir.ashwinsathian.com/docs/quickstart/) runs, and the one the cache-tests conformance job tests.
 
 ```sh
-go run github.com/AshwinSathian/weir/examples/weirproxy@v1.0.1 -listen :8080 -origin http://localhost:9000
+go run github.com/AshwinSathian/weir/examples/weirproxy@v1.1.0 -listen :8080 -origin http://localhost:9000
 ```
 
 | Flag | Default | Meaning |

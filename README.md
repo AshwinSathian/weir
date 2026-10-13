@@ -41,7 +41,7 @@ func main() {
 `examples/weirproxy` is this program with flags. Run it in front of an origin that answers `Cache-Control: max-age=60` and ask twice:
 
 ```console
-$ go run github.com/AshwinSathian/weir/examples/weirproxy@v1.0.1 -listen :8080 -origin http://localhost:9000
+$ go run github.com/AshwinSathian/weir/examples/weirproxy@v1.1.0 -listen :8080 -origin http://localhost:9000
 $ curl -si localhost:8080/ | grep -i -e '^age' -e cache-status
 Cache-Status: Weir; fwd=uri-miss; fwd-status=200; stored
 $ curl -si localhost:8080/ | grep -i -e '^age' -e cache-status
@@ -67,10 +67,10 @@ A CDN, a WAF, a per-client rate limiter, a private (browser) cache, or a cache f
 ## Install
 
 ```sh
-go get github.com/AshwinSathian/weir@v1.0.1                    # the engine, weirhttp, the memory store
-go get github.com/AshwinSathian/weir/observe/prom@v1.0.1       # Prometheus metrics
-go get github.com/AshwinSathian/weir/store/valkey@v1.0.1       # shared store for several nodes
-xcaddy build --with github.com/AshwinSathian/weir@v1.0.1 --with github.com/AshwinSathian/weir/caddy@v1.0.1   # Caddy with the weir handler
+go get github.com/AshwinSathian/weir@v1.1.0                    # the engine, weirhttp, the memory store
+go get github.com/AshwinSathian/weir/observe/prom@v1.1.0       # Prometheus metrics
+go get github.com/AshwinSathian/weir/store/valkey@v1.1.0       # shared store for several nodes
+xcaddy build --with github.com/AshwinSathian/weir@v1.1.0 --with github.com/AshwinSathian/weir/caddy@v1.1.0   # Caddy with the weir handler
 ```
 
 The four modules are tagged together and share a version number, so use the same one for all of them. The Caddy module has the import path `github.com/AshwinSathian/weir/caddy` and the Go package name `weircaddy`; it is tested only against the root module at its own version, which is why xcaddy gets both pinned.

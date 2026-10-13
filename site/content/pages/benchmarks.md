@@ -25,13 +25,13 @@ make bench
 
 ## After the v1.1 hardening
 
-The same benchmarks on `v1.0.1` and on the v1.1 branch, run interleaved on the reference machine, and `make load` against the record above.
+The same benchmarks on `v1.0.1` and on the code that became `v1.1.0`, run interleaved on the reference machine, and `make load` against the record above.
 
 {{include docs/benchmarks.md "### v1.1 hardening (2026-10-13)"}}
 
 ## Against other caches
 
-One round of black-box tests against Varnish, nginx `proxy_cache` and the Caddy cache-handler (Souin), each in a container behind the same origin, in a default and a tuned configuration. It counts origin calls and failed clients; it does not measure speed. The notes under each table matter as much as the cells: (a) marks cells that undercount. "Weir v1.1" in these tables is the unreleased v1.1 code. The configurations, the harness and the method are in [`bench/compare/`](https://github.com/AshwinSathian/weir/tree/main/bench/compare) and the [comparison specification](https://github.com/AshwinSathian/weir/blob/main/docs/11-comparison-spec.md). Every figure about another project here comes from our own runs with configurations we wrote. None has been verified by that project's owners, so treat them as our measurements, not as statements those projects would sign, and send corrections.
+One round of black-box tests against Varnish, nginx `proxy_cache` and the Caddy cache-handler (Souin), each in a container behind the same origin, in a default and a tuned configuration. It counts origin calls and failed clients; it does not measure speed. The notes under each table matter as much as the cells: (a) marks cells that undercount. "Weir v1.1" in these tables is the `v1.1.0` code, built from the working tree shortly before the tag. The configurations, the harness and the method are in [`bench/compare/`](https://github.com/AshwinSathian/weir/tree/main/bench/compare) and the [comparison specification](https://github.com/AshwinSathian/weir/blob/main/docs/11-comparison-spec.md). Every figure about another project here comes from our own runs with configurations we wrote. None has been verified by that project's owners, so treat them as our measurements, not as statements those projects would sign, and send corrections.
 
 How many requests reached the origin:
 
