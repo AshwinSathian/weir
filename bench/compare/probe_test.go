@@ -144,3 +144,22 @@ func TestErrorProbeCatchesEmptySuccessForWaiters(t *testing.T) {
 		}
 	}
 }
+
+// A cache that hides the varied header from the origin serves everyone the
+// same response to a request without it. Nobody got anybody else's variant,
+// so the Vary probe must not call that unsafe (it did, for Weir, before this
+// test existed).
+func TestVaryProbeAcceptsAHiddenHeader(t *testing.T) {
+	defer func(n int) { varyN = n }(varyN)
+	varyN = 300
+	o := newOrigin()
+	strip := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.Header.Del("X-Variant")
+		o.data().ServeHTTP(w, r)
+	}))
+	defer strip.Close()
+	row := varyProbe(t.Context(), http.DefaultClient, strip.URL+"/p/vary/k", "strip", "default")
+	if row.Verdict != "safe" || row.Figure != "header not forwarded" {
+		t.Fatalf("%s, figure %q (%s); want safe, header not forwarded", row.Verdict, row.Figure, row.Why)
+	}
+}

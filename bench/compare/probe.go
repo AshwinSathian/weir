@@ -446,8 +446,9 @@ func runProbes(ctx context.Context, c *http.Client, target, subject, tier string
 // one URL, then asks again for the first and the last 100 of them and for a
 // value never sent. The verdict is whether every answer was the asker's own
 // variant. The figure is how many of the 200 came from the cache: what a
-// client can make one URL hold. probes.sh reads the container's memory
-// before and after.
+// client can make one URL hold. A cache that does not forward the header at
+// all has one variant for the URL and nothing to count. probes.sh reads the
+// container's memory before and after.
 func varyProbe(ctx context.Context, c *http.Client, url, subject, tier string) probeRow {
 	type answer struct {
 		status     int
@@ -485,7 +486,7 @@ func varyProbe(ctx context.Context, c *http.Client, url, subject, tier string) p
 	wg.Wait()
 
 	sample := min(100, varyN/2)
-	kept, wrong, failed := 0, 0, 0
+	kept, wrong, failed, hidden := 0, 0, 0, 0
 	vic := exchange{Method: "GET", Header: "X-Variant: victim"}
 	for i := range varyN {
 		if i >= sample && i < varyN-sample {
@@ -495,6 +496,11 @@ func varyProbe(ctx context.Context, c *http.Client, url, subject, tier string) p
 		switch {
 		case a.status != http.StatusOK:
 			failed++
+		case a.body == "variant=":
+			// The header never reached the origin: the cache does not
+			// forward what it does not key. Nobody's value was served to
+			// anybody, and the URL has one variant.
+			hidden++
 		case a.body != "variant=v"+strconv.Itoa(i):
 			wrong++
 			vic.Status, vic.Body, vic.Header = a.status, a.body, "X-Variant: v"+strconv.Itoa(i)
@@ -504,14 +510,18 @@ func varyProbe(ctx context.Context, c *http.Client, url, subject, tier string) p
 	}
 	if a := get("victim"); wrong == 0 {
 		vic.Status, vic.Body = a.status, a.body
-		if a.status == http.StatusOK && a.body != "variant=victim" {
+		if a.status == http.StatusOK && a.body != "variant=victim" && a.body != "variant=" {
 			wrong++
 		}
 	}
 	row := probeRow{Subject: subject, Tier: tier, Probe: "vary-cardinality", Victim: vic,
 		Figure: strconv.Itoa(kept) + " of " + strconv.Itoa(2*sample)}
+	if hidden == 2*sample {
+		row.Figure = "header not forwarded"
+	}
 	row.Verdict, row.Why = unsafeIf(wrong > 0, "a request was served another value's variant",
-		"every answer was the asker's own variant; "+row.Figure+" sampled variants of "+strconv.Itoa(varyN)+" were still served from the cache, "+strconv.Itoa(failed)+" requests failed")
+		"no answer was another value's variant; "+row.Figure+" (sampled variants of "+strconv.Itoa(varyN)+" still served from the cache), "+
+			strconv.Itoa(hidden)+" answers were for a request without the header, "+strconv.Itoa(failed)+" requests failed")
 	return row
 }
 

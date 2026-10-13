@@ -1,6 +1,11 @@
 # Tuned tier: the Otter storage, because cache-handler logs that its default
 # storage is "not optimized and for development purpose" (Souin storages
 # docs), and stale serving for 5 minutes ("stale" in the Souin Caddy docs).
+# Otter's size is raised from its default of 10000 (README,
+# "otter.configuration.size"): with the default, 5000 stored URLs were already
+# being evicted, and sync-expiry counted the evictions as origin calls. Room
+# to store the test's keys is plumbing, as nginx's max_size and Varnish's
+# storage size are (docs/11 R1).
 # The API block and the admin endpoint are as in the default tier.
 {
 	auto_https off
@@ -9,7 +14,11 @@
 		api {
 			souin
 		}
-		otter
+		otter {
+			configuration {
+				size 1000000
+			}
+		}
 		stale 5m
 	}
 }
