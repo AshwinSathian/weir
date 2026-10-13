@@ -2006,7 +2006,7 @@ Entry template:
 - Context: far over one card's budget by design; the cards themselves were sized S or M and each fit.
 
 ## 2026-10-13 · CMP-01 to CMP-05, CMP-08 (partial) · done
-- Branch / PR: card/CMP-01-compare-harness / opened by this session, stacked on card/HRD-01-hardening
+- Branch / PR: card/CMP-01-compare-harness / https://github.com/AshwinSathian/weir/pull/123 (stacked on card/HRD-01-hardening)
 - Done: the first comparison round against Varnish 9.1.0, nginx 1.30.5 and Caddy cache-handler v0.17.0 in Docker: 15 protection scenarios in two tiers, 13 security probes, cache-tests across subjects. `-next` subjects built from the working tree put v1.0.1 and the v1.1 branch side by side. Results as medians in docs/benchmarks.md, included into the site's benchmarks and compare pages; docs/11 is v0.2; image digests pinned.
 - Findings: three v1.0.1 defects confirmed black-box and already fixed on the v1.1 branch (slow-origin herd, breaker opened by one path, entries lost to an invalidation flood). Four open findings as cards CMP-F1 to CMP-F4, all needing the owner's decision. Weir is safe on every probe and passes 284 of 365 cache-tests, equal to its baseline.
 - Tests: `bench/compare` vet, race tests and lint pass with `GOWORK=off`; `make site-check` passes. The card-reviewer agent found a Varnish tuned config omission (fixed, rerun: 400 failed clients became 0), cells that undercount cache-handler's failures (reproduced by hand, footnoted), a latency table that broke 11 §6 (removed) and report notes that were not medians (fixed).
