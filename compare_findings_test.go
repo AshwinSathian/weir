@@ -78,11 +78,11 @@ func TestBurstBehindProbe(t *testing.T) {
 	}
 }
 
-// FR-CB-3 (v1.2), CMP-F7: at the defaults the breaker probes every OpenFor,
-// however many probes have failed, so a recovered origin is noticed within
-// one period. With the doubling of v1.1 the probe after three failures came
-// 20 s after the last, and clients failed against a healthy origin
-// meanwhile.
+// FR-CB-3 (v1.2), CMP-F7: at the defaults the breaker probes every OpenFor
+// (1 s), however many probes have failed, so a recovered origin is noticed
+// within one period. With v1.1's 5 s doubled per failed probe, the fourth
+// probe came 35 s after the breaker opened, and clients failed against a
+// healthy origin meanwhile.
 func TestBreakerNoticesRecoveryWithinOpenFor(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		o := testorigin.New()
@@ -92,8 +92,8 @@ func TestBreakerNoticesRecoveryWithinOpenFor(t *testing.T) {
 		e := newEngine(t, cfg)
 		defer closeEngine(t, e)
 		openBreaker(t, e, o)
-		// One client a second. The origin comes back 16 s in, after the
-		// probes at 5, 10 and 15 s have failed.
+		// One client a second, each the probe of its period. The origin comes
+		// back 16 s in, after fifteen probes have failed.
 		var firstOK time.Duration
 		for sec := 1; sec <= 30 && firstOK == 0; sec++ {
 			time.Sleep(time.Second)
@@ -105,8 +105,8 @@ func TestBreakerNoticesRecoveryWithinOpenFor(t *testing.T) {
 				firstOK = time.Duration(sec) * time.Second
 			}
 		}
-		if firstOK != 20*time.Second {
-			t.Fatalf("first client served %v after the breaker opened, want 20s: the probe after the origin came back at 16s", firstOK)
+		if firstOK != 16*time.Second {
+			t.Fatalf("first client served %v after the breaker opened, want 16s: the first probe after the origin came back", firstOK)
 		}
 	})
 }

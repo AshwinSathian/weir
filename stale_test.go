@@ -182,6 +182,10 @@ func TestBreakerOpensHalfOpenCloses(t *testing.T) {
 		cfg := cacheCfg
 		cfg.Observer = obs
 		cfg.Rand = func() float64 { return 0.5 } // no jitter: open for exactly OpenFor
+		// The periods of v1.1, which are no longer the defaults: 5 s, doubled
+		// by a failed probe (FR-CB-3 keeps the doubling for a MaxOpenFor
+		// above OpenFor).
+		cfg.Breaker.OpenFor, cfg.Breaker.MaxOpenFor = 5*time.Second, time.Minute
 		e := newEngine(t, cfg)
 		defer closeEngine(t, e)
 

@@ -194,7 +194,7 @@ type BreakerConfig struct {
 	Window         time.Duration // 0: 10s (10 buckets)
 	MinRequests    int           // 0: 20
 	FailureRatio   float64       // 0: 0.5; (0, 1]
-	OpenFor        time.Duration // 0: 5s
+	OpenFor        time.Duration // 0: 1s
 	MaxOpenFor     time.Duration // 0: OpenFor (no backoff); at least OpenFor
 	HalfOpenProbes int           // 0: 1
 	CountStatus500 bool
@@ -363,7 +363,7 @@ func (c *Config) applyDefaults() {
 	orDur(&b.Window, 10*time.Second)
 	orInt(&b.MinRequests, 20)
 	orFloat(&b.FailureRatio, 0.5)
-	orDur(&b.OpenFor, 5*time.Second)
+	orDur(&b.OpenFor, time.Second)
 	orDur(&b.MaxOpenFor, b.OpenFor) // FR-CB-3: no backoff unless asked for
 	orInt(&b.HalfOpenProbes, 1)
 	orInt(&b.MinPartitions, 2)
