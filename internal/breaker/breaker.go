@@ -53,6 +53,17 @@ type Config struct {
 	OpenFor        time.Duration // first open period, before jitter
 	MaxOpenFor     time.Duration // cap on the doubled open period
 	HalfOpenProbes int           // concurrent probes while half-open
+	// HalfOpenFor is how long a half-open period lasts before the probes
+	// it admitted are given up and a new period starts (0: MaxOpenFor). It
+	// must outlast the origin timeout, or a hanging origin gets a new probe
+	// each period while the old ones still hang.
+	HalfOpenFor time.Duration
+	// RampTo makes closing gradual (FR-CB-4). Each probe that succeeds
+	// doubles the probes admitted at a time, and the breaker closes when
+	// that number reaches RampTo, or when a half-open period ends with a
+	// success and no failure. At or below HalfOpenProbes the first success
+	// closes it.
+	RampTo         int
 	CountStatus500 bool
 	// MinPartitions is how many distinct partitions must have failed in the
 	// window before it may trip, unless nothing in the window succeeded
@@ -103,6 +114,8 @@ type Breaker struct {
 	openUntil time.Time     // while Open: end of the period; while HalfOpen: when held probes are given up
 	openFor   time.Duration // current, doubles on reopen
 	probes    int           // in flight while HalfOpen
+	allowed   int           // probes admitted at a time in this half-open period; doubles per success
+	good      bool          // a probe of this half-open period succeeded
 	gen       uint64        // counts half-open periods; a Probe names its period
 	halfSince time.Time     // when the current half-open period began
 	ended     chan struct{} // closed when a probe ends or the period does; nil until a caller waits
@@ -193,7 +206,7 @@ func (b *Breaker) allow(part uint64, wait bool) (Probe, <-chan struct{}, error) 
 	case b.state == Closed:
 	case b.state == HalfOpen && b.yields(part) && now.Sub(b.halfSince) < probeYield:
 		err = ErrCircuitOpen
-	case b.state == HalfOpen && b.probes < b.cfg.HalfOpenProbes:
+	case b.state == HalfOpen && b.probes < b.allowed:
 		b.probes++
 		p = Probe{b.gen}
 	case b.state == HalfOpen && wait:
@@ -280,10 +293,12 @@ func (b *Breaker) RecordFor(p Probe, part uint64, o Outcome) {
 				b.yield[b.nyield] = part
 				b.nyield++
 			}
+		} else if b.allowed *= 2; b.allowed >= b.cfg.RampTo || b.allowed <= 0 { // <= 0: the doubling overflowed
+			b.shut()
 		} else {
-			b.state = Closed // the next trip starts again from OpenFor (count)
-			b.buckets = [10]bucket{}
-			b.nyield = 0
+			// The ramp: this probe is done, and twice as many may run.
+			b.good = true
+			b.probes--
 		}
 	case b.state == Closed:
 		b.count(now, part, fail)
@@ -311,15 +326,33 @@ func (b *Breaker) Cancel(p Probe) {
 // period lasting MaxOpenFor is replaced by a new one, so probes that never
 // end in Record or Cancel cannot hold the breaker half-open forever; their
 // late outcomes name the old period and are ignored.
+//
+// A half-open period in which a probe succeeded and none failed ends
+// differently: the breaker closes. A site too quiet to fill the ramp to
+// RampTo would otherwise stay half-open for as long as it stayed quiet.
 func (b *Breaker) expire(now time.Time) {
-	if b.state != Closed && !now.Before(b.openUntil) {
-		b.wake() // waiters of a period given up compete for the new one's probe
-		b.state = HalfOpen
-		b.probes = 0
-		b.gen++
-		b.halfSince = now
-		b.openUntil = now.Add(b.cfg.MaxOpenFor)
+	if b.state == Closed || now.Before(b.openUntil) {
+		return
 	}
+	b.wake() // waiters of a period given up compete for the new one's probe
+	if b.state == HalfOpen && b.good {
+		b.shut()
+		return
+	}
+	b.state = HalfOpen
+	b.probes, b.allowed, b.good = 0, b.cfg.HalfOpenProbes, false
+	b.gen++
+	b.halfSince = now
+	b.openUntil = now.Add(max(b.cfg.HalfOpenFor, b.cfg.MaxOpenFor))
+}
+
+// shut closes the breaker with an empty window: the next trip starts again
+// from OpenFor (count). Caller holds b.mu.
+func (b *Breaker) shut() {
+	b.state = Closed
+	b.buckets = [10]bucket{}
+	b.nyield = 0
+	b.good = false
 }
 
 // open starts an open period of d with ±20% jitter (FR-CB-3).

@@ -585,3 +585,121 @@ func TestBreakerAllowOrWait(t *testing.T) {
 		}
 	})
 }
+
+func tripped(t *testing.T, cfg Config) *Breaker {
+	t.Helper()
+	b := New(cfg, func() float64 { return 0.5 }, nil) // no jitter: open for exactly OpenFor
+	record(b, Failure, cfg.MinRequests)
+	if b.State() != Open {
+		t.Fatalf("state = %v after %d failures, want Open", b.State(), cfg.MinRequests)
+	}
+	return b
+}
+
+// admit takes probes until the breaker refuses, 1000 at most (a closed
+// breaker never refuses), and returns them.
+func admit(b *Breaker) []Probe {
+	var ps []Probe
+	for range 1000 {
+		p, err := b.Allow()
+		if err != nil {
+			break
+		}
+		ps = append(ps, p)
+	}
+	return ps
+}
+
+// FR-CB-4 (v1.2), CMP-F7: with RampTo set, a probe that succeeds does not
+// close the breaker at once. Each success doubles the probes admitted at a
+// time, and the breaker closes when that number reaches RampTo: an origin
+// that has just come back meets 1, then 2, then 4 requests at once, not
+// everything that was waiting.
+func TestBreakerRampsClosed(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		cfg := testConfig()
+		cfg.RampTo = 8
+		b := tripped(t, cfg)
+		time.Sleep(cfg.OpenFor)
+		first := admit(b)
+		if len(first) != 1 || b.State() != HalfOpen {
+			t.Fatalf("%d probes admitted in state %v, want 1 while half-open", len(first), b.State())
+		}
+		b.Record(first[0], Success) // 2 at a time
+		second := admit(b)
+		if len(second) != 2 || b.State() != HalfOpen {
+			t.Fatalf("%d probes after one success in state %v, want 2 while half-open", len(second), b.State())
+		}
+		b.Record(second[0], Success) // 4 at a time: one still out, three more
+		if n := len(admit(b)); n != 3 || b.State() != HalfOpen {
+			t.Fatalf("%d more probes after two successes in state %v, want 3 while half-open", n, b.State())
+		}
+		b.Record(second[1], Success) // 8: RampTo
+		if b.State() != Closed {
+			t.Fatalf("state = %v after the ramp reached RampTo, want Closed", b.State())
+		}
+		// Closed for good: a failure is an outcome in a fresh window, not a reopening.
+		record(b, Failure, cfg.MinRequests-1)
+		if b.State() != Closed {
+			t.Fatalf("state = %v after %d failures in a new window, want Closed", b.State(), cfg.MinRequests-1)
+		}
+	})
+}
+
+// FR-CB-3, FR-CB-4: one failure during the ramp reopens the breaker, and
+// the next half-open period starts again from HalfOpenProbes.
+func TestBreakerRampFailureReopens(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		cfg := testConfig()
+		cfg.RampTo, cfg.MaxOpenFor = 8, cfg.OpenFor
+		b := tripped(t, cfg)
+		time.Sleep(cfg.OpenFor)
+		b.Record(admit(b)[0], Success)
+		ps := admit(b)
+		if len(ps) != 2 {
+			t.Fatalf("%d probes after one success, want 2", len(ps))
+		}
+		b.Record(ps[0], Failure)
+		if b.State() != Open {
+			t.Fatalf("state = %v after a failure in the ramp, want Open", b.State())
+		}
+		b.Record(ps[1], Success) // an outcome of the period that ended: ignored
+		if b.State() != Open {
+			t.Fatalf("state = %v, want Open: a success from the old period must not count", b.State())
+		}
+		time.Sleep(cfg.OpenFor) // MaxOpenFor == OpenFor: the reopening is no longer
+		if n := len(admit(b)); n != 1 {
+			t.Fatalf("%d probes in the next period, want 1", n)
+		}
+	})
+}
+
+// FR-CB-4: on a quiet site the ramp never fills. A half-open period that
+// ends with a success and no failure closes the breaker; one that ends with
+// no outcome at all (a probe that never came back) starts another period.
+func TestBreakerQuietRampCloses(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		cfg := testConfig()
+		cfg.RampTo, cfg.MaxOpenFor = 64, cfg.OpenFor
+		b := tripped(t, cfg)
+		time.Sleep(cfg.OpenFor)
+		lost := admit(b) // one probe, never recorded
+		time.Sleep(cfg.MaxOpenFor)
+		if b.State() != HalfOpen {
+			t.Fatalf("state = %v after a period with no outcome, want HalfOpen", b.State())
+		}
+		b.Record(lost[0], Success) // too late: its period is over
+		ps := admit(b)
+		if len(ps) != 1 {
+			t.Fatalf("%d probes in the new period, want 1", len(ps))
+		}
+		b.Record(ps[0], Success)
+		if b.State() != HalfOpen {
+			t.Fatalf("state = %v after one success of a ramp to 64, want HalfOpen", b.State())
+		}
+		time.Sleep(cfg.MaxOpenFor)
+		if b.State() != Closed {
+			t.Fatalf("state = %v after a period with a success and no failure, want Closed", b.State())
+		}
+	})
+}

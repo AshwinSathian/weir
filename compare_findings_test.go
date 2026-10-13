@@ -78,6 +78,84 @@ func TestBurstBehindProbe(t *testing.T) {
 	}
 }
 
+// FR-CB-3 (v1.2), CMP-F7: at the defaults the breaker probes every OpenFor,
+// however many probes have failed, so a recovered origin is noticed within
+// one period. With the doubling of v1.1 the probe after three failures came
+// 20 s after the last, and clients failed against a healthy origin
+// meanwhile.
+func TestBreakerNoticesRecoveryWithinOpenFor(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		o := testorigin.New()
+		o.Default(cacheable("ok"))
+		cfg := cacheCfg
+		cfg.Rand = func() float64 { return 0.5 } // no jitter: open for exactly OpenFor
+		e := newEngine(t, cfg)
+		defer closeEngine(t, e)
+		openBreaker(t, e, o)
+		// One client a second. The origin comes back 16 s in, after the
+		// probes at 5, 10 and 15 s have failed.
+		var firstOK time.Duration
+		for sec := 1; sec <= 30 && firstOK == 0; sec++ {
+			time.Sleep(time.Second)
+			if sec == 16 {
+				o.SetDown(false)
+			}
+			if resp, err := e.Serve(t.Context(), getReq(fmt.Sprintf("/s%d", sec)), o); err == nil {
+				resp.Body.Close()
+				firstOK = time.Duration(sec) * time.Second
+			}
+		}
+		if firstOK != 20*time.Second {
+			t.Fatalf("first client served %v after the breaker opened, want 20s: the probe after the origin came back at 16s", firstOK)
+		}
+	})
+}
+
+// FR-CB-4 (v1.2): when the probe succeeds, the clients that waited behind it
+// do not all reach the origin at once. The fetches admitted double with each
+// success (1, 2, then 8 as two succeed together) until the breaker closes at
+// MaxConcurrent, and every client is served.
+func TestBurstRampsInAfterProbe(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		const fetch = 100 * time.Millisecond
+		o := testorigin.New()
+		cfg := cacheCfg
+		cfg.Rand = func() float64 { return 0.5 }
+		e := newEngine(t, cfg)
+		defer closeEngine(t, e)
+		openBreaker(t, e, o)
+		o.SetDown(false)
+		b := cacheable("ok")
+		b.Delay = fetch
+		o.Default(b)
+		time.Sleep(5*time.Second + time.Millisecond)
+		o.Reset()
+
+		chs := make([]<-chan timedServe, 200)
+		for i := range chs {
+			chs[i] = serveTimed(t, e, getReq(fmt.Sprintf("/k%d", i)), o)
+		}
+		for step, want := range []int{1, 2, 8} {
+			time.Sleep(fetch / 2)
+			if n := o.MaxInflight(); n != want {
+				t.Fatalf("after %d rounds of probes: %d fetches at once so far, want %d", step, n, want)
+			}
+			time.Sleep(fetch / 2)
+		}
+		for i, ch := range chs {
+			if r := <-ch; r.err != nil {
+				t.Errorf("/k%d: %v, want it served", i, r.err)
+			}
+		}
+		if n := o.MaxInflight(); n != 64 {
+			t.Errorf("%d fetches at once at most, want MaxConcurrent (64) once the breaker closed", n)
+		}
+		if s := e.Stats().BreakerState; s != weir.BreakerClosed {
+			t.Errorf("breaker = %v, want closed", s)
+		}
+	})
+}
+
 // FR-CB-4, FR-STL-2: a request with a stale response to serve does not wait
 // for the probe.
 func TestStaleNotHeldBehindProbe(t *testing.T) {

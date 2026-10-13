@@ -145,6 +145,10 @@ func New(cfg Config) (*Engine, error) {
 		e.cb = breaker.New(breaker.Config{
 			Window: b.Window, MinRequests: b.MinRequests, FailureRatio: b.FailureRatio,
 			OpenFor: b.OpenFor, MaxOpenFor: b.MaxOpenFor, HalfOpenProbes: b.HalfOpenProbes,
+			RampTo: c.Limiter.MaxConcurrent, // closed means the whole budget is admitted (FR-CB-4)
+			// As long as v1.1's default MaxOpenFor, which was also this:
+			// well past the default origin timeout.
+			HalfOpenFor:    time.Minute,
 			CountStatus500: b.CountStatus500, MinPartitions: b.MinPartitions,
 		}, c.Rand, e.breakerChanged)
 	}

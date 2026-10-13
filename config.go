@@ -195,7 +195,7 @@ type BreakerConfig struct {
 	MinRequests    int           // 0: 20
 	FailureRatio   float64       // 0: 0.5; (0, 1]
 	OpenFor        time.Duration // 0: 5s
-	MaxOpenFor     time.Duration // 0: max(60s, OpenFor); at least OpenFor
+	MaxOpenFor     time.Duration // 0: OpenFor (no backoff); at least OpenFor
 	HalfOpenProbes int           // 0: 1
 	CountStatus500 bool
 	Disable        bool
@@ -364,7 +364,7 @@ func (c *Config) applyDefaults() {
 	orInt(&b.MinRequests, 20)
 	orFloat(&b.FailureRatio, 0.5)
 	orDur(&b.OpenFor, 5*time.Second)
-	orDur(&b.MaxOpenFor, max(60*time.Second, b.OpenFor)) // FR-CB-3: never below the first open
+	orDur(&b.MaxOpenFor, b.OpenFor) // FR-CB-3: no backoff unless asked for
 	orInt(&b.HalfOpenProbes, 1)
 	orInt(&b.MinPartitions, 2)
 

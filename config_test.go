@@ -54,7 +54,7 @@ func TestZeroConfigValid(t *testing.T) {
 		{"Breaker.MinRequests", c.Breaker.MinRequests, 20},
 		{"Breaker.FailureRatio", c.Breaker.FailureRatio, 0.5},
 		{"Breaker.OpenFor", c.Breaker.OpenFor, 5 * time.Second},
-		{"Breaker.MaxOpenFor", c.Breaker.MaxOpenFor, 60 * time.Second},
+		{"Breaker.MaxOpenFor", c.Breaker.MaxOpenFor, 5 * time.Second},
 		{"Breaker.HalfOpenProbes", c.Breaker.HalfOpenProbes, 1},
 		{"Breaker.MinPartitions", c.Breaker.MinPartitions, 2},
 		{"Negative.TTL", c.Negative.TTL, 2 * time.Second},
