@@ -33,7 +33,7 @@ Out of the first round: Apache Traffic Server and a Valkey-against-Redis pairing
 
 ## 3. Config tiers and fairness rules
 
-Every subject runs in two tiers.
+Every cache runs in two tiers, and the three other caches in a third for the probes and conformance.
 
 - `default`: the smallest configuration that turns caching on. It answers "what does someone who follows the quickstart get".
 - `tuned`: the project's own documented stampede and stale settings. Each line of a tuned config cites the documentation it comes from, in a comment.
@@ -69,7 +69,7 @@ Rules:
 - The runner is a container and cannot restart another one. For `restart` it writes `restart.request` into the results directory and `run.sh` performs a graceful `docker compose restart` of the same container, so whatever the cache keeps on its own disk is still there.
 - `compare probe` runs the security probes of §5.3; `probes.sh` and `conformance.sh` drive it and the cache-tests suite across subjects.
 
-With no cache in between, the origin must count exactly the requests the runner sent. Every row records both numbers (`sent`, `seen`). `TestRunCountsAgainstOriginDirect` runs every scenario against the origin alone, in a synctest bubble over an in-memory transport, and holds each to that; the `origin` control row repeats the check in every real run, and `compare report` fails when one of its rows disagrees.
+With no cache in between, the origin must count exactly the requests the runner sent. Every row records both numbers (`sent`, `seen`). `TestRunCountsAgainstOriginDirect` runs every scenario the origin can run against the origin alone, in a synctest bubble over an in-memory transport, and holds each to that and to its request counts (`purge-herd` needs a cache and has its own test against one that purges and one that only says so); the `origin` control row repeats the check in every real run, and `compare report` fails when one of its rows disagrees.
 
 Timing runs (pillar 5) use an established open-loop load generator, chosen and verified in CMP-06, so that latency numbers do not rest on a load tool we wrote.
 
@@ -109,7 +109,7 @@ Notes on the CMP-03b scenarios:
 
 - `busting-flood` reports the flood's failures beside the bystanders'. A cache that saves the bystanders by refusing the flood has refused clients (R5), and the page gives the total. The capacity of 128 is the number the `-capped` scenarios already use, not Weir's limiter value. No tier sorts or strips query strings, Weir's included: the scenario is about how origin capacity is shared.
 - `brownout` uses 10 s bursts, not the 30 s of 07 §9. Ten seconds is five lifetimes of the keys, and three repetitions of a 60 s scenario over eleven subject-tiers is what one session can run. The last healthy phase is 30 s so that a breaker that backed off has time to close. Failure is a 503, not added latency: a black box cannot be given the same origin timeout in every cache.
-- `purge-herd` purges each subject the way its own configuration documents (Weir: a soft purge of everything through Caddy's admin API; Varnish default: `return (purge)` per URL; Varnish tuned: `purge.soft()` of the bundled `vmod_purge` per URL, so its grace applies as Weir's stale window does; cache-handler: its flush API, which it serves on Caddy's admin endpoint; nginx: none, `proxy_cache_purge` is commercial). The last two figures exist because a cache that ignored the purge would otherwise show the best origin numbers.
+- `purge-herd` purges each subject the way its own configuration documents (Weir: a soft purge of everything through Caddy's admin API; Varnish default: `return (purge)` per URL; Varnish tuned: `purge.soft()` of the bundled `vmod_purge` per URL, so its grace applies as Weir's stale window does; cache-handler: its flush API, which answered on Caddy's admin endpoint and not on the site in our build, though its README routes it on the site; nginx: none, `proxy_cache_purge` is commercial). The last two figures exist because a cache that ignored the purge would otherwise show the best origin numbers.
 
 ### 5.2 Scenarios Weir is expected to lose
 
@@ -130,7 +130,7 @@ All of them have run. Round 2 added parameter cloaking, path normalization, the 
 - Meta character: a request written by hand with a header value holding a control byte (0x07), then one holding 0xFF; the origin rejects both with a 400 it marks cacheable.
 - `Vary` cardinality: 20 000 values of a header the origin varies on, for one URL; then the first and last 100 are asked for again, and a value never sent. The verdict is whether anyone was served another value's variant. The figure is how many of the 200 came from the cache. A cache that does not forward the header has one variant and reports that instead. `probes.sh` also reads each container's memory before and after; that reading is approximate and is published with the control's beside it.
 
-`probe_test.go` holds every probe to two things: against the origin alone no probe is unsafe, and through a deliberately naive cache (path-only key, cleaned path, everything stored) every probe is.
+`probe_test.go` holds every probe to two things: against the origin alone no probe is unsafe, and through a deliberately naive cache (path-only key, cleaned path, everything stored) every probe is, except the error probe, which has its own stand-in: a cache that replays a stored 500 is not serving a success, and one that hands waiters an empty 200 is.
 
 The hardened tier (§3) is each project's own documentation applied to the request headers the round 1 probes use: `hash_data()` in `vcl_hash` for Varnish, `proxy_set_header` with an empty value plus `proxy_no_cache` and `proxy_cache_bypass` for nginx, `key.headers` and `default_cache_control` for cache-handler. Each line of those files cites its page. The tier was written after the default results and is fitted to them, in the other projects' favour; the page says so. A header the list does not name (the meta character probe's) is not covered, and the page reports that too, because it is the difference between listing inputs and hiding them by default.
 

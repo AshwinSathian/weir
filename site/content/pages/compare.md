@@ -3,7 +3,7 @@ title: Compare
 description: Where Varnish, nginx, Souin, Pingora, singleflight or a CDN is the better choice, and where Weir is.
 ---
 
-Most of this page is qualitative. We have not measured speed against any of these projects, so there are no speed claims here. Two rounds of black-box tests against Varnish, nginx and the Caddy cache-handler counted origin calls, failed clients and poisoning verdicts; it is summarized [below](#measured-side-by-side). Those measured results are ours alone: we wrote the configurations and ran the tests, and the owners of the other projects have not verified them. Every statement about another project comes from that project's own documentation, linked in each section and read on 2026-10-12. If a claim could not be checked there, it was left out. Corrections are welcome: [open an issue](https://github.com/AshwinSathian/weir/issues/new).
+Most of this page is qualitative. We have not measured speed against any of these projects, so there are no speed claims here. Two rounds of black-box tests against Varnish, nginx and the Caddy cache-handler counted origin calls, failed clients and poisoning verdicts; they are summarized [below](#measured-side-by-side). Those measured results are ours alone: we wrote the configurations and ran the tests, and the owners of the other projects have not verified them. Every statement about another project comes from that project's own documentation, linked in each section and read on 2026-10-12. If a claim could not be checked there, it was left out. Corrections are welcome: [open an issue](https://github.com/AshwinSathian/weir/issues/new).
 
 Each technique in Weir exists somewhere else. What Weir adds is the combination in one Go library, with a written threat model and a test for each claim.
 
@@ -87,7 +87,7 @@ Origin calls and failed clients under herds, expiry and outages are on the [benc
 ## Where Weir is wrong or unproven
 
 - It is new. `v1.0.0` is the first stable release and there are no public production deployments to point to.
-- It has no speed or memory benchmark against any project above, and the one measured round ran on a single machine with configurations no other project's maintainer has reviewed.
+- It has no speed or memory benchmark against any project above, and the measured rounds ran on a single machine with configurations no other project's maintainer has reviewed.
 - It does not store responses over 1 MiB by default, and nothing is served stale unless you or the origin allow it. See the list on the [benchmarks page](/benchmarks/#against-other-caches).
 - In the measured round it refused most clients of a flooded path while the origin had room, left most URLs unrefreshed seconds after a soft purge, kept failing clients for seconds after an origin recovered when stale serving was off, and refetched every URL after a restart. The numbers are on the benchmarks page.
 - 81 of the 365 cache-tests fail, most by design, and more with stale serving turned on; read [the reasons](/conformance/) before deciding they suit you.

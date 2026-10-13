@@ -69,10 +69,27 @@ func direct() (*runner, *origin, memTransport) {
 		restart: func(context.Context) error { return nil }}, o, m
 }
 
+// wantDirect is what each scenario with its own shape sends when nothing
+// caches: the requests its row counts, and everything it sent after its last
+// counter reset. Without these, a scenario that lost a wave would still have
+// sent == seen.
+var wantDirect = map[string][2]int64{
+	"turned-private": {300, 300},
+	"bad-route":      {200, 261},  // one warm-up, 60 failing, 200 healthy
+	"origin-down":    {600, 1000}, // three waves while down, two after recovery
+	"leader-abort":   {50, 51},
+	"post-flood":     {2000, 2000},
+	"busting-flood":  {1000, 11000},
+	"brownout":       {12000, 12000},
+	"restart":        {2000, 2000},
+}
+
 // With no cache in between, every request the runner sends is one the origin
-// counts or refuses (docs/11 §4). Every scenario is held to that, so a
-// scenario that sends requests it does not account for, or reads the
-// counters at the wrong moment, fails here before it measures a cache.
+// counts or refuses (docs/11 §4). Every scenario the origin can run is held
+// to that and to its request counts, so a scenario that sends requests it
+// does not account for, loses some, or reads the counters at the wrong
+// moment, fails here before it measures a cache. purge-herd needs a cache:
+// TestPurgeHerdSeesWhetherThePurgeWorked holds it.
 func TestRunCountsAgainstOriginDirect(t *testing.T) {
 	for _, sc := range scenarios {
 		t.Run(sc.Name, func(t *testing.T) {
@@ -102,8 +119,18 @@ func TestRunCountsAgainstOriginDirect(t *testing.T) {
 						t.Fatalf("the origin's own bodies were judged wrong: %v", got.Status)
 					}
 				}
-				if sc.Custom == nil && got.OriginCalls+got.OriginRefused != int64(got.Requests) {
-					t.Fatalf("%d requests in the row, %d origin calls and %d refusals", got.Requests, got.OriginCalls, got.OriginRefused)
+				if sc.Custom == nil {
+					if n := sc.Keys * sc.Clients * sc.Waves; got.Requests != n || got.OriginCalls+got.OriginRefused != int64(n) {
+						t.Fatalf("%d requests in the row, %d origin calls and %d refusals, want %d", got.Requests, got.OriginCalls, got.OriginRefused, n)
+					}
+					return
+				}
+				want, ok := wantDirect[sc.Name]
+				if !ok {
+					t.Fatalf("no expected counts for %s: add it to wantDirect", sc.Name)
+				}
+				if int64(got.Requests) != want[0] || got.Sent != want[1] {
+					t.Fatalf("%d requests in the row and %d sent, want %d and %d", got.Requests, got.Sent, want[0], want[1])
 				}
 			})
 		})
@@ -249,7 +276,7 @@ func TestPurgeHerdSeesWhetherThePurgeWorked(t *testing.T) {
 					t.Fatal(err)
 				}
 				n := got.Notes
-				if got.Requests != 2000 || got.OriginCalls != tc.wantCalls || n["origin_calls_before_purge"] != 0 || n["not_refreshed_at_last_read"] != tc.wantStale {
+				if got.Requests != 2000 || got.Sent != 4000 || got.OriginCalls != tc.wantCalls || n["origin_calls_before_purge"] != 0 || n["not_refreshed_at_last_read"] != tc.wantStale {
 					t.Fatalf("%d requests, %d origin calls, notes %v", got.Requests, got.OriginCalls, n)
 				}
 			})
