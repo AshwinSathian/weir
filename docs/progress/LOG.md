@@ -2039,7 +2039,7 @@ Entry template:
 - Context: continued session.
 
 ## 2026-10-13 · HRD-18 · done
-- Branch / PR: docs/v1.1.0-released / PRLINK
+- Branch / PR: docs/v1.1.0-released / https://github.com/AshwinSathian/weir/pull/127
 - Done: `v1.1.0` released, all four modules (root on `0bcedb8`, leaf modules on `5fe93bc`, `caddy` on `73a74f9`, branch `release/v1.1.0`), after a clean `v1.1.0-rc.1` rehearsal. Gate run 38369566716 green on `0e581b1` (36 jobs, 30 fuzz targets). `make release-check`, the sub-modules' race tests against the published siblings, `make release-smoke` and runbook 7.8 on Caddy built from the tags pass. GitHub release published; `@latest` is `v1.1.0`. This pull request moves the README, docs 08, the runbook, the site and `caddy-published` to the new version and records the release in docs/release.md.
 - Tests: none added.
 - Deviations: none from docs/release.md. pkg.go.dev had fetched two of the four module pages when this was written; the other two were requested.

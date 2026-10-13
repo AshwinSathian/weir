@@ -5,7 +5,7 @@ Phase: v1.1.0 released (2026-10-13)
 Current card: none
 Card state: awaiting-merge
 Branch: docs/v1.1.0-released
-PR: PRLINK
+PR: https://github.com/AshwinSathian/weir/pull/127
 Next card: none open. Candidates: CMP-03b, CMP-04b, CMP-06 (comparison), HRD-22 (share one over-size fetch), HRD-20 (deferred)
 
 ## Waiting on Ashwin
