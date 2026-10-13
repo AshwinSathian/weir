@@ -37,7 +37,7 @@ Read in this order the first time. After that, go straight to the one you need.
 | 08 | [caddy-adapter-spec](08-caddy-adapter-spec.md) | Phase 2 adapter | normative (v1.0) |
 | 09 | [research-notes](09-research-notes.md) | sources, verified facts, seed errata | living |
 | 10 | [experiments-spec](10-experiments-spec.md) | Phase 3 experiment dimensions: locked decisions E1–E9 | v1.0 |
-| 11 | [comparison-spec](11-comparison-spec.md) | head-to-head benchmark against other caches: subjects, tiers, scenarios; normative for `bench/compare/` only | v0.1 draft |
+| 11 | [comparison-spec](11-comparison-spec.md) | head-to-head benchmark against other caches: subjects, tiers, scenarios; normative for `bench/compare/` only | v0.2 |
 
 ## Contribute
 

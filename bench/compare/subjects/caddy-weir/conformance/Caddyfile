@@ -1,0 +1,16 @@
+# Conformance run only (docs/11 §5.4). The cache-tests origin reads the
+# suite's own request headers to know which test a request belongs to, and
+# strict forwarding (D4) would hide them, so they are allowed, as
+# scripts/cache-tests.sh does for weirproxy.
+{
+	auto_https off
+}
+:8080 {
+	weir {
+		name bench
+		forward {
+			allow Req-Num Test-ID Test-Name Foo Bar Baz Abc
+		}
+	}
+	reverse_proxy origin:9000
+}

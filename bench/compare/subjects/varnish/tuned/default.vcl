@@ -15,4 +15,9 @@ backend default {
 sub vcl_backend_response {
     set beresp.grace = 60s;
     set beresp.keep = 5m;
+    # vcl-grace, "Misbehaving servers": a failed background fetch must not
+    # replace the object it was refreshing.
+    if (beresp.status >= 500 && bereq.is_bgfetch) {
+        return (abandon);
+    }
 }

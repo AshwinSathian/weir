@@ -70,3 +70,7 @@ Each was read in the project's own documentation on 2026-10-12. Versions are the
 | singleflight | package overview; documentation silent on timeouts, panics and stored results (page showed x/sync v0.24.0) | https://pkg.go.dev/golang.org/x/sync/singleflight |
 | sturdyc | self-description; stampede protection, early refreshes, batching | https://github.com/viccon/sturdyc |
 | Fastly | definition of request collapsing; serial queue on uncacheable responses; hit-for-pass | https://www.fastly.com/documentation/guides/concepts/edge-state/cache/request-collapsing/ |
+
+## Measured statements about other projects (benchmarks and compare pages)
+
+Every figure and verdict about Varnish, nginx and the Caddy cache-handler on those pages is rendered from `docs/benchmarks.md`, section "Comparison with other caches, round 1 (2026-10-13)", measured with `bench/compare/` on 2026-10-13: Varnish 9.1.0, nginx 1.30.5, Caddy 2.11.7 with cache-handler v0.17.0. The hand-written copy around the tables states no figure of its own. No maintainer of those projects has reviewed the configurations (docs/11 R4).
