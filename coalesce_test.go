@@ -853,7 +853,7 @@ func TestFollowerFallsBackAfterFlightDeadline(t *testing.T) {
 		if n := calls.Load(); n != 1 {
 			t.Fatalf("calls at 31 s = %d, want 1", n)
 		}
-		time.Sleep(2 * time.Second) // past Timeouts.Origin + MaxQueueWait
+		time.Sleep(10 * time.Second) // past Timeouts.Origin + 2 x MaxQueueWait
 		s := <-follow
 		if s.err != nil || s.body != "ok" {
 			t.Fatalf("follower got %q, %v; want its own fetch's ok", s.body, s.err)

@@ -149,10 +149,10 @@ func (e *Engine) fetchCoalesced(ctx context.Context, sp *fetchSpec, origin Origi
 				continue
 			}
 			// FR-COA-4: a follower keeps a flight that is still inside its
-			// bound, the queue wait plus the origin timeout. Fetching now
-			// would turn one slow fetch into MaxPerPartition of them and
-			// shed the rest (T-19).
-			timer.Reset(e.cfg.Timeouts.Origin + e.cfg.Limiter.MaxQueueWait - e.cfg.Coalesce.FollowerMaxWait)
+			// bound: the wait for a half-open probe, the queue wait and the
+			// origin timeout. Fetching now would turn one slow fetch into
+			// MaxPerPartition of them and shed the rest (T-19).
+			timer.Reset(e.cfg.Timeouts.Origin + 2*e.cfg.Limiter.MaxQueueWait - e.cfg.Coalesce.FollowerMaxWait)
 		case <-ctx.Done():
 			if created {
 				e.leaveFlight(f)

@@ -347,7 +347,7 @@ func TestEveryEventKindEmitted(t *testing.T) {
 		if n := l.count(weir.EvCoalesceTimeout); n != 1 {
 			t.Errorf("EvCoalesceTimeout events at FollowerMaxWait = %d, want 1", n)
 		}
-		time.Sleep(2 * time.Second) // past Timeouts.Origin + MaxQueueWait
+		time.Sleep(10 * time.Second) // past Timeouts.Origin + 2 x MaxQueueWait
 		synctest.Wait()
 		seen.want(t, l, weir.EvCoalesceTimeout, "direct")
 		close(gate)

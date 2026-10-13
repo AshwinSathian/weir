@@ -22,9 +22,9 @@ import (
 // defaultStoreBytes is also FR-MEM-1's size when no memory limit is set.
 const (
 	// minStoreBytes is the smallest max_bytes whose largest object (10% of a
-	// shard, 05 §5.1) fits the default 1 MiB Storable.MaxObjectBytes, which
-	// the adapter has no key for. Rejected early instead of clamped, so the
-	// operator sees why (16 shards x 10 x 1 MiB).
+	// shard, 05 §5.1) fits the default 1 MiB Storable.MaxObjectBytes.
+	// Rejected early instead of clamped, so the operator sees why
+	// (16 shards x 10 x 1 MiB).
 	minStoreBytes     = defaultShards * 10 << 20
 	defaultStoreBytes = 256 << 20
 	defaultShards     = 16
@@ -45,6 +45,7 @@ var stores = newStoreRegistry()
 type storeSpec struct {
 	name        string
 	maxBytes    int64
+	maxObject   int64 // sets the shard count, so a change needs a new store
 	ownerCap    bool
 	snapshotDir string
 	valkey      [sha256.Size]byte
@@ -359,7 +360,7 @@ func (h *Handler) storeSpec() storeSpec {
 		return storeSpec{name: h.Name, valkey: h.Store.digestFor(h.Name)}
 	}
 	return storeSpec{
-		name: h.Name, maxBytes: int64(h.MaxBytes), ownerCap: h.MultiHost, snapshotDir: h.snapshotDir(),
+		name: h.Name, maxBytes: int64(h.MaxBytes), maxObject: int64(h.MaxObjectBytes), ownerCap: h.MultiHost, snapshotDir: h.snapshotDir(),
 	}
 }
 
@@ -369,9 +370,9 @@ func (h *Handler) memoryConfig(size int64, sink *evictSink) memory.Config {
 	// A store above 256 MiB gets more shards of about 16 MiB instead of 16
 	// larger ones: a full shard of hot records pauses its readers for one
 	// queue walk when it evicts, and that walk grows with the shard (05 §5.1).
-	// The adapter has no key for Storable.MaxObjectBytes, so the default
-	// 1 MiB object is what a shard must hold.
-	shards := memory.Shards(max(size, defaultStoreBytes), 1<<20)
+	// A shard must hold the largest object (max_object_bytes, 1 MiB when
+	// unset) in its small queue, so a larger object means fewer shards.
+	shards := memory.Shards(max(size, defaultStoreBytes), max(int64(h.MaxObjectBytes), 1<<20))
 	cfg := memory.Config{
 		MaxBytes:        size,
 		Shards:          shards,

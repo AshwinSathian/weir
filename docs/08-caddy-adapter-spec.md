@@ -39,7 +39,7 @@ example.com {
 		limiter {
 			max_concurrent    128
 			max_per_partition 16
-			max_queue_wait    2s
+			max_queue_wait    5s
 		}
 		stale {
 			if_error 5m        # operator default, off unless set (D6)
@@ -55,6 +55,7 @@ Keys the cards implement (a card that needs another key adds it here in the same
 
 | Key | Meaning |
 |---|---|
+| `max_object_bytes` | optional size (same forms as `max_bytes`); `Storable.MaxObjectBytes`, the largest response, headers included, that is stored (FR-STO-9). Absent means 1 MiB. A larger response is passed through to every client that asks, each with a fetch of its own. With the memory store the value also sets the shard count, because an object has to fit a tenth of a shard (05 §5.1): it must be at most a tenth of `max_bytes`, larger objects mean fewer, larger shards and a longer eviction pause, and it is part of the store identity (§3), so a reload that changes it starts an empty store. Up to `max_concurrent` fetches buffer a body of this size at once (64 x 4 MiB is 256 MiB beside the store). With `store valkey` the limit of a record is 64 MiB |
 | `name` | required; `[A-Za-z0-9._-]{1,64}`, not starting with a dot (`.` and `..` would collapse in the admin URL); used in the admin URL, as a metrics label and in the snapshot file name, so nothing else is accepted |
 | `max_bytes` | store size; unset means auto-sized (§7, Memory). At least 160 MiB when set: the largest cacheable object is 10% of a shard (05 §5.1) and there is no key for `Storable.MaxObjectBytes` yet (16 shards x 10 x the 1 MiB default) |
 | `snapshot_dir` | optional directory; the snapshot file is `<snapshot_dir>/<name>.weir` (FR-SNP-1) |
@@ -65,7 +66,7 @@ Keys the cards implement (a card that needs another key adds it here in the same
 | `key` | `query_drop`, `query_keep`, `query_sort`, `normalize_path`, `headers`, `cookies`, `accept_encoding` (as `weir.KeyConfig`) |
 | `forward` | `allow`; the mode stays strict, `ForwardAll` has no JSON form (D4) |
 | `bypass` | `cookies`, `headers` |
-| `limiter` | `max_concurrent`, `max_queue`, `max_queue_wait`, `max_per_partition`, `max_per_client` (FR-FAIR-4; the client is Caddy's `client_ip`, so set `trusted_proxies` when a load balancer is in front) |
+| `limiter` | `max_concurrent`, `max_queue`, `max_queue_wait`, `max_per_partition`, `partition_headroom` (FR-LIM-3; set it to `max_concurrent` for a strict per-path cap), `max_per_client` (FR-FAIR-4; the client is Caddy's `client_ip`, so set `trusted_proxies` when a load balancer is in front) |
 | `stale` | `while_revalidate`, `if_error` (operator defaults, off unless set; D6) |
 
 `max_bytes` takes a number of bytes or a string such as `512MiB` (P2-01 parses it, up to 1 PiB; P2-02 applies it). `snapshot_dir` may not contain braces or NUL (placeholders are not expanded) and must be absolute, is created with mode 0700 when the store is built, and is refused when group or others can write it or when it belongs to another user (a planted snapshot would be decoded as trusted cache content; the owner check is unix only); `/data` and `/data/` are one store. `max_bytes` below 160 MiB is rejected by `Validate`: the largest cacheable object is 10% of a shard (05 §5.1) and the adapter has no key for `Storable.MaxObjectBytes`, so smaller stores cannot hold the default 1 MiB object. Unknown keys fail the load, because Caddy decodes module config strictly.

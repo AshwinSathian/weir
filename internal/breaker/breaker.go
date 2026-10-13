@@ -105,6 +105,7 @@ type Breaker struct {
 	probes    int           // in flight while HalfOpen
 	gen       uint64        // counts half-open periods; a Probe names its period
 	halfSince time.Time     // when the current half-open period began
+	ended     chan struct{} // closed when a probe ends or the period does; nil until a caller waits
 	// yield holds the partitions whose probes failed since the breaker last
 	// closed, newest last, at most bucketParts (FR-CB-4).
 	yield    [bucketParts]uint64
@@ -164,14 +165,29 @@ func (b *Breaker) Allow() (Probe, error) { return b.AllowFor(0) }
 // is not admitted as a probe during the first probeYield of the period: one
 // failing route must not take every probe (FR-CB-4).
 func (b *Breaker) AllowFor(part uint64) (Probe, error) {
+	p, _, err := b.allow(part, false)
+	return p, err
+}
+
+// AllowOrWait is AllowFor for a caller that can wait for a probe (FR-CB-4).
+// When it refuses because the half-open period's probes are all in flight,
+// it also returns a channel that is closed when one of them ends or the
+// period does; the caller then calls again. The channel is nil for every
+// other refusal: an open breaker and a yielding partition fail at once.
+func (b *Breaker) AllowOrWait(part uint64) (Probe, <-chan struct{}, error) {
+	return b.allow(part, true)
+}
+
+func (b *Breaker) allow(part uint64, wait bool) (Probe, <-chan struct{}, error) {
 	if b == nil {
-		return Probe{}, nil
+		return Probe{}, nil, nil
 	}
 	now := time.Now()
 	b.mu.Lock()
 	from := b.state
 	b.expire(now)
 	var p Probe
+	var ended <-chan struct{}
 	var err error
 	switch {
 	case b.state == Closed:
@@ -180,13 +196,26 @@ func (b *Breaker) AllowFor(part uint64) (Probe, error) {
 	case b.state == HalfOpen && b.probes < b.cfg.HalfOpenProbes:
 		b.probes++
 		p = Probe{b.gen}
+	case b.state == HalfOpen && wait:
+		if b.ended == nil {
+			b.ended = make(chan struct{})
+		}
+		ended, err = b.ended, ErrCircuitOpen
 	default:
 		err = ErrCircuitOpen
 	}
 	to := b.state
 	b.mu.Unlock()
 	b.notify(from, to)
-	return p, err
+	return p, ended, err
+}
+
+// wake releases the callers waiting in AllowOrWait. Caller holds b.mu.
+func (b *Breaker) wake() {
+	if b.ended != nil {
+		close(b.ended)
+		b.ended = nil
+	}
 }
 
 // Remaining returns how long the current open period lasts, or 0 when the
@@ -236,6 +265,7 @@ func (b *Breaker) RecordFor(p Probe, part uint64, o Outcome) {
 	b.expire(now)
 	switch {
 	case b.state == HalfOpen && p.gen == b.gen && p.gen != 0:
+		b.wake()
 		if fail {
 			d := b.openFor * 2
 			if d <= 0 || d > b.cfg.MaxOpenFor { // <= 0: the doubling overflowed
@@ -272,6 +302,7 @@ func (b *Breaker) Cancel(p Probe) {
 	b.mu.Lock()
 	if b.state == HalfOpen && p.gen == b.gen && b.probes > 0 {
 		b.probes--
+		b.wake() // a waiter takes the freed probe
 	}
 	b.mu.Unlock()
 }
@@ -282,6 +313,7 @@ func (b *Breaker) Cancel(p Probe) {
 // late outcomes name the old period and are ignored.
 func (b *Breaker) expire(now time.Time) {
 	if b.state != Closed && !now.Before(b.openUntil) {
+		b.wake() // waiters of a period given up compete for the new one's probe
 		b.state = HalfOpen
 		b.probes = 0
 		b.gen++

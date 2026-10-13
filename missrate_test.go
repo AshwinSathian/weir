@@ -61,7 +61,7 @@ func flood(t *testing.T, e *weir.Engine, o weir.Origin, path string, seq *int, n
 		*seq++
 	}
 	for i, ch := range chs {
-		if r := <-ch; r.err != nil && !isShed(r.err, 2*time.Second) {
+		if r := <-ch; r.err != nil && !isShed(r.err, 5*time.Second) {
 			t.Fatalf("flood request %d: %v, want success or a shed", i, r.err)
 		}
 	}
@@ -100,7 +100,7 @@ func TestRandomQueryFloodBounded(t *testing.T) {
 			}
 		}
 		for i, ch := range chs {
-			if r := <-ch; r.err != nil && !isShed(r.err, 2*time.Second) {
+			if r := <-ch; r.err != nil && !isShed(r.err, 5*time.Second) {
 				t.Fatalf("/p %d: %v, want success or a shed", i, r.err)
 			}
 		}
@@ -314,7 +314,7 @@ func TestOneHitWondersDoNotEvictHot(t *testing.T) {
 // reports nothing: the limiter is what bounds this flood (04 §8.4).
 func TestPathFloodOriginBounded(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		const wait = 2 * time.Second
+		const wait = 5 * time.Second
 		o := slowOrigin(t)
 		obs := &anomalyLog{}
 		cfg := cacheCfg
@@ -585,7 +585,7 @@ func TestThrottledPartitionReturnsProbe(t *testing.T) {
 		}
 		time.Sleep(5 * time.Second) // half-open
 
-		if _, _, err := serveResult(t, e, floodReq("/p", 1), o); !isShed(err, 2*time.Second) {
+		if _, _, err := serveResult(t, e, floodReq("/p", 1), o); !isShed(err, 5*time.Second) {
 			t.Fatalf("probe behind the throttle: %v, want a shed", err)
 		}
 		if _, body, err := serveResult(t, e, getReq("/ok"), o); err != nil || body != "v" {

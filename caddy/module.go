@@ -36,14 +36,20 @@ const closeTimeout = 5 * time.Second
 type Handler struct {
 	// Name is required: store identity across reloads, admin URL and
 	// metrics label.
-	Name        string        `json:"name,omitempty"`
-	MaxBytes    ByteSize      `json:"max_bytes,omitempty"`
-	SnapshotDir string        `json:"snapshot_dir,omitempty"`
-	Key         KeyConfig     `json:"key,omitempty"`
-	Forward     ForwardConfig `json:"forward,omitempty"`
-	Bypass      BypassConfig  `json:"bypass,omitempty"`
-	Limiter     LimiterConfig `json:"limiter,omitempty"`
-	Stale       StaleConfig   `json:"stale,omitempty"`
+	Name     string   `json:"name,omitempty"`
+	MaxBytes ByteSize `json:"max_bytes,omitempty"`
+	// MaxObjectBytes is weir.StorableConfig.MaxObjectBytes: the largest
+	// response, headers included, that is stored (FR-STO-9). 0: 1 MiB. A
+	// larger response is passed through to every client that asks. Up to
+	// max_concurrent fetches buffer a body of this size at once, so the
+	// process needs that much memory beside the store.
+	MaxObjectBytes ByteSize      `json:"max_object_bytes,omitempty"`
+	SnapshotDir    string        `json:"snapshot_dir,omitempty"`
+	Key            KeyConfig     `json:"key,omitempty"`
+	Forward        ForwardConfig `json:"forward,omitempty"`
+	Bypass         BypassConfig  `json:"bypass,omitempty"`
+	Limiter        LimiterConfig `json:"limiter,omitempty"`
+	Stale          StaleConfig   `json:"stale,omitempty"`
 	// Experiments is the A/B block (docs/10 §3). It changes which key a
 	// request maps to, so it is not part of the key-generation hash (08 §3).
 	Experiments *ExperimentsConfig `json:"experiments,omitempty"`
@@ -239,6 +245,12 @@ func (h *Handler) Validate() error {
 	}
 	if h.MaxBytes != 0 && h.MaxBytes < minStoreBytes {
 		return fmt.Errorf("weir: max_bytes must be at least %d MiB (the largest cacheable object is 10%% of a shard)", minStoreBytes>>20)
+	}
+	if h.MaxObjectBytes < 0 {
+		return errors.New("weir: max_object_bytes must not be negative")
+	}
+	if h.MaxBytes != 0 && h.MaxObjectBytes*10 > h.MaxBytes {
+		return errors.New("weir: max_object_bytes must be at most a tenth of max_bytes (an object has to fit a shard's small queue)")
 	}
 	return validateSnapshotDir(h.SnapshotDir)
 }

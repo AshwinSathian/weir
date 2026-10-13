@@ -93,9 +93,10 @@ type CoalesceConfig struct {
 
 type LimiterConfig struct {
 	MaxConcurrent     int           // 0: 64
-	MaxQueue          int           // 0: 1024
-	MaxQueueWait      time.Duration // 0: 2s
+	MaxQueue          int           // 0: 8192
+	MaxQueueWait      time.Duration // 0: 5s
 	MaxPerPartition   int           // 0: 16 (clamped to MaxConcurrent)
+	PartitionHeadroom int           // 0: MaxPerPartition; >= MaxConcurrent: strict cap (FR-LIM-3)
 	ReserveForeground int           // 0: MaxConcurrent/4 (at least 1 when MaxConcurrent >= 2)
 	MaxPerHost        int           // 0: off (M14)
 	MaxPerClient      int           // 0: off (FR-FAIR-4)
@@ -742,7 +743,7 @@ func (e *Engine) fetchCoalesced(ctx, c, lk, origin, attempt):
             return e.fromEntry(c, lk.entry, staleInfo(StaleCoalesceTimeout))
         if created: wait for f.Done() or ctx.Done() as above   // the creator keeps waiting on its own fetch
         // a follower keeps the flight until the flight's own bound has passed (FR-COA-4)
-        timer.Reset(Timeouts.Origin + Limiter.MaxQueueWait - FollowerMaxWait)
+        timer.Reset(Timeouts.Origin + 2*Limiter.MaxQueueWait - FollowerMaxWait)
         on the second expiry: e.emit(EvCoalesceTimeout{direct}); return e.fetchDirect(ctx, c, lk, origin)
     case <-ctx.Done():
         if created: e.leaveFlight(f)
@@ -753,7 +754,7 @@ func (e *Engine) fetchCoalesced(ctx, c, lk, origin, attempt):
 
 The timer covers the creator too, so it can serve stale under stale-if-error like any follower. Without a stale entry the creator does not fetch again: its fetch is the flight, already bounded by `Timeouts.Origin`, and the default `FollowerMaxWait` equals `Timeouts.Origin` whenever that is under 10 s, so a second fetch would start just as the first one times out and double the origin load of every slow request.
 
-A follower without a stale entry does not fetch at `FollowerMaxWait` either (v1.1). The flight it waits on ends within `Limiter.MaxQueueWait + Timeouts.Origin` unless its origin ignores the context, so the follower waits that long, counted from when it joined, and fetches for itself only after that. Before v1.1 it fetched at `FollowerMaxWait`: with the defaults, 100 requests for one key behind an origin that answered in 15 s made 16 fetches and shed 84 requests.
+A follower without a stale entry does not fetch at `FollowerMaxWait` either (v1.1). The flight it waits on ends within `2 × Limiter.MaxQueueWait + Timeouts.Origin` (a wait for a half-open probe, a wait for a slot, the fetch) unless its origin ignores the context, so the follower waits that long, counted from when it joined, and fetches for itself only after that. Before v1.1 it fetched at `FollowerMaxWait`: with the defaults, 100 requests for one key behind an origin that answered in 15 s made 16 fetches and shed 84 requests.
 
 Before publishing, `runFlight` checks the built entry against epochs newer than its `RequestTime` (FR-PRG-7). If one applies, the entry is not shared: a follower may have arrived after the purge, and every follower arrived before `Publish`, so one check covers them all. The creator still gets its own response. If the origin calls `runtime.Goexit`, the flight publishes an `*OriginError` instead of leaving its waiters blocked.
 
@@ -852,7 +853,7 @@ type fetchResult struct {
 
 ```
 func (e *Engine) fetch(ctx, s, origin) fetchResult:
-    probe, err := e.cb.Allow()              // ErrCircuitOpen when open
+    probe, err := e.breakerAdmit(...)       // ErrCircuitOpen when open; waits for a half-open probe, see §8.3
     if err: return errResult(ErrCircuitOpen)
     pool := e.lim; if s.hasBody: pool = e.upl   // FR-LIM-7, T-39
     permit, err := pool.Acquire(ctx, s.class, s.partition)
@@ -1028,7 +1029,7 @@ func (f *Flight) CreatorGone() (published bool) // marks the creator gone; repor
 
 `Join` under the shard lock: if an entry exists and `now.Sub(started) < maxAge`, return it; otherwise create a new flight, replace the map entry, return `created = true`. The aged flight keeps a back-pointer to its shard so `Publish` deletes the map entry only if `m[k] == f`.
 
-Shard selection by key byte is safe here (unlike the store) because flights are short-lived and bounded by the limiter; an attacker grinding keys into one shard only contends one mutex among at most `MaxConcurrent + MaxQueue` flights.
+Shard selection by key byte is safe here (unlike the store) because flights are short-lived and bounded by the limiter; an attacker grinding keys into one shard only contends one mutex among at most `MaxConcurrent + MaxQueue + MaxQueue/4` flights (the last term waits for a half-open probe, §8.3).
 
 ### 8.2 `internal/limiter`
 
@@ -1039,6 +1040,7 @@ type Class uint8 // Foreground, Background, Warm
 
 type Config struct {
 	Max, MaxQueue, PerPartition, Reserve int
+	Headroom                             int // AcquireOver may pass PerPartition while Reserve + Headroom slots stay free; 0: never
 	MaxWait                              time.Duration
 }
 
@@ -1046,7 +1048,8 @@ type Limiter struct {
 	mu       sync.Mutex
 	cfg      Config
 	inflight int
-	byPart   map[uint64]int  // only partitions with inflight > 0; len <= Max
+	borrowed int             // slots held past a partition's cap; in inflight, not in byPart
+	byPart   map[uint64]int  // only partitions with a slot under their cap; len <= Max
 	queue    []*waiter       // FIFO, len <= MaxQueue
 	queuedBy map[uint64]int  // waiters per partition, each <= queueCap() = max(PerPartition, MaxQueue/4); only partitions with queued > 0; len <= MaxQueue
 	throttled map[uint64]int  // cap overrides of the newest miss-rate report, read in capFor; len <= missrate TopK
@@ -1057,8 +1060,10 @@ type Limiter struct {
 type waiter struct {
 	part    uint64
 	class   Class
+	over    bool          // taken with AcquireOver
 	ready   chan struct{} // closed when granted
 	granted bool
+	borrow  bool          // granted past the cap
 }
 
 var ErrShed = errors.New("weir: limiter shed")       // background found no slot
@@ -1067,23 +1072,24 @@ var ErrQueueTimeout = fmt.Errorf("%w: queue timeout", ErrShed)
 
 func New(cfg Config) *Limiter
 func (l *Limiter) Acquire(ctx context.Context, c Class, part uint64) (*Permit, error)
+func (l *Limiter) AcquireOver(ctx context.Context, part uint64) (*Permit, error) // Foreground, may pass the cap (FR-LIM-3)
 func (p *Permit) Release() // idempotent
 func (l *Limiter) Throttle(end, until time.Time, caps map[uint64]int) bool
 ```
 
 The engine fills `Config` from `LimiterConfig` and maps all three errors to its own `ErrShed`; the sentinel says which `EvShed` detail applies (`background`, `queue-full`, `queue-timeout`). The global cap is read only through `limit()` and the partition cap only through `capFor(part)` (D13).
 
-Admission check `canRun(class, part)`: `inflight < limit()`, and for `Background` and `Warm` `inflight < limit() - Reserve`, and `byPart[part] < capFor(part)`.
+Admission check `canRun(class, over, part)`: `inflight < limit()`, and for `Background` and `Warm` `inflight < limit() - Reserve`, and `byPart[part] < capFor(part)`. A waiter taken with `AcquireOver` (`over`, always `Foreground`) may also run with its partition at the cap when `Headroom > 0`, the partition is not throttled and `inflight < limit() - Reserve - Headroom` (FR-LIM-3). Such a slot is counted in `borrowed`, not in `byPart`, and its `Permit` remembers which: the invariant is `sum(byPart) + borrowed == inflight`. Keeping it out of `byPart` is what lets an unvouched waiter of the same partition run when a capped slot frees, in FIFO order, instead of starving behind vouched ones. Subtracting `Reserve` keeps background refreshes of other partitions admissible while a partition borrows. A throttle (FR-MR-3) stops new slots past the cap but does not see the ones already held, which are outside `byPart`: they finish and are not replaced. The engine calls `AcquireOver` only for a fetch whose lookup found a hit-for-miss marker, and sets `Headroom` only on the main pool, so the upload pool and the client gate stay strict. Every change that can make such a waiter runnable is a `Release` or a throttle change, both of which run the grant walk, so the FIFO argument below still holds.
 
 `Acquire`:
 
-1. Lock. If the throttle report is past `thrUntil`, drop it and run the grant walk. If `canRun`, take the slot, unlock, return. No queued waiter can be runnable at this point, because `Release`, `Throttle` and the expiry step grant every runnable waiter before they unlock and nothing else frees capacity, so `canRun` alone keeps FIFO order among runnable waiters. Anything that later raises `limit()` or `capFor` (D13 adaptive limits) must run the same grant walk, or this invariant breaks. `TestLimiterInvariants` checks it after every random step.
+1. Lock. If the throttle report is past `thrUntil`, drop it and run the grant walk. If `canRun`, take the slot, unlock, return. No queued waiter can be runnable at this point, because `Release`, `Throttle` and the expiry step grant every runnable waiter before they unlock and nothing else frees capacity, so `canRun` alone keeps FIFO order among runnable waiters. Anything that later raises `limit()` or `capFor` (D13 adaptive limits) must run the same grant walk, or this invariant breaks. `TestLimiterInvariants` checks it after every random step, `AcquireOver` and a random `Headroom` included.
 2. `Background`: unlock, return `ErrShed` (never queues).
 3. Queue full, or `queuedBy[part] >= queueCap()`, which is max(`PerPartition`, `MaxQueue`/4) (FR-LIM-3, T-11): unlock, return `ErrQueueFull`. The per-partition bound keeps a flood on one path from taking more than a quarter of the queue places every other path shares. It is not `PerPartition` alone because that sheds most of a legitimate cold start on one path. Floods spread over several paths are not stopped by any per-path bound, and the miss-rate tracker sees no heavy partition in them; the global cap bounds their origin load (T-12, `TestPathFloodOriginBounded`).
 4. Append a waiter, increment `queuedBy[part]`, unlock. `select` on `ready`, `ctx.Done()`, and a timer of `MaxWait` (`Warm` waits on `ctx` only).
 5. On timeout or cancellation: lock; drop the throttle report if it is past `thrUntil` and run the grant walk; if `granted` became true in the race, keep the slot and return the permit with a nil error; else remove the waiter and decrement `queuedBy[part]` (delete at zero); unlock; return `ErrQueueTimeout` or `ctx.Err()`. A caller granted with a done context should check `ctx.Err()` before using the slot.
 
-`Release`: lock; decrement `inflight` and `byPart[part]` (delete at zero); drop the throttle report if it is past `thrUntil`; walk the queue from the head and grant every waiter for which `canRun` holds, marking `granted`, updating counters (`queuedBy` included) and closing `ready`; stop as soon as no slot is free (v1.1: a release frees one slot, so the walk usually ends after the first waiter that takes it; `BenchmarkLimiterReleaseFullQueue`, 1 024 waiters of distinct partitions, went from 1.75 µs to 0.23 µs on an M4 Pro); compact the queue slice in place; unlock. Waiters whose partition is at its cap are skipped, not dropped, so one saturated partition does not block others (FR-LIM-3). The walk is O(queue length); `BenchmarkLimiterAcquireRelease/full_queue` measures it with 1 023 parked waiters, one per full partition (about 5 µs per release on an M4 Pro, `ponytail:` in limiter.go).
+`Release`: lock; decrement `inflight` and either `borrowed` or `byPart[part]` (delete at zero), whichever the permit was counted in; drop the throttle report if it is past `thrUntil`; walk the queue from the head and grant every waiter for which `canRun` holds, marking `granted`, updating counters (`queuedBy` included) and closing `ready`; stop as soon as no slot is free (v1.1: a release frees one slot, so the walk usually ends after the first waiter that takes it; `BenchmarkLimiterReleaseFullQueue`, 1 024 waiters of distinct partitions, went from 1.75 µs to 0.23 µs on an M4 Pro); compact the queue slice in place; unlock. Waiters whose partition is at its cap are skipped, not dropped, so one saturated partition does not block others (FR-LIM-3). The walk is O(queue length); `BenchmarkLimiterAcquireRelease/full_queue` measures it with 1 023 parked waiters, one per full partition (about 5 µs per release on an M4 Pro, `ponytail:` in limiter.go). With the v1.1 default of 8192 places, four flooded paths at their queue cap of 2048 park the whole queue, and a release from another partition then walks it in about 65 µs; a waiter's timeout removes it with a linear search, so 8192 timeouts in one instant cost about 35 ms of lock time in total. Both are overload states the queue wait ends.
 
 `Throttle(end, until, caps)` (FR-MR-3) is how the engine passes on a miss-rate report (§8.4): `caps` holds 1 for each anomalous partition, `end` is the closed window's end and `until` is `end + 2 * MissRate.Window`. The engine passes empty `caps` for a report that arrives at or after `end + MissRate.Window`. Lock; if `end` is not after `thrEnd`, return false (a report of an earlier window delivered late). Else record `end` and `until`, replace `throttled` with a copy of `caps`, or with nil when `caps` is empty or `until` has passed (a report more than two windows old; the engine already passes empty `caps` for one that is a window late), run the grant walk because a partition the new report left out has its cap back, and return whether overrides are now in force. `capFor(part)` is `min(throttled[part], PerPartition)` for a listed partition, so an override never raises a cap, and an override below 1 counts as 1: a cap of 0 would park waiters with no fetch in flight to wake them. Only the main pool is throttled; the tracker counts cacheable requests, which never use the upload pool. The cap is on the partition, so bodyless pass-through requests for the same path (a POST without a body, a Range miss) share it while it holds. It binds every class: a background refresh that finds the slot taken is dropped and the stale entry served, and a warm run of the path fetches one URL at a time (`TestThrottleBindsBackgroundAndWarm`). A half-open probe that queues behind the cap and is shed hands its probe back, so the next request probes (`TestThrottledPartitionReturnsProbe`); until then the breaker stays half-open for at most `MaxQueueWait`, as it does behind a full partition without a throttle.
 
@@ -1107,6 +1113,7 @@ type Breaker struct {
 	openFor   time.Duration // current, doubles on reopen
 	probes    int           // in flight while HalfOpen
 	gen       uint64        // counts half-open periods
+	ended     chan struct{} // closed when a probe ends or the period does; nil until AllowOrWait hands it out
 	cfg       Config
 	rnd       func() float64
 	onChange  func(from, to State)
@@ -1114,11 +1121,14 @@ type Breaker struct {
 
 type Probe struct{ gen uint64 } // 0: ordinary fetch; else the half-open period it probes
 func (b *Breaker) Allow() (Probe, error)
+func (b *Breaker) AllowOrWait(part uint64) (Probe, <-chan struct{}, error) // FR-CB-4
 func (b *Breaker) Record(p Probe, o Outcome)
 func (b *Breaker) Cancel(p Probe)
 func (b *Breaker) State() State
 func (b *Breaker) Remaining() time.Duration // rest of the open period; 0 unless Open
 ```
+
+Half-open rejects everything but its probes, and `AllowOrWait(part)` is `AllowFor` for a caller that can wait for one (FR-CB-4). When it refuses because every probe of the half-open period is in flight, it also returns a channel, created on first use and closed when a probe is recorded or cancelled or the period is replaced. `breakerAdmit` in fetch.go uses it for a foreground fetch that has no stale response to fall back on and holds no limiter slot: it waits on the channel, the request context and one timer of `Limiter.MaxQueueWait` for the whole loop, then asks again, and once more when the timer fires. A flight waits here on a context detached from its client, so the engine caps the waiters at max(1, `MaxQueue`/4) (`cbWaiting`) and refuses the next at once (P5): the flights that exist are then at most `MaxConcurrent + MaxQueue + MaxQueue/4`. A success wakes them all into the limiter, which is what bounds the load on the recovered origin.
 
 `Remaining`, floored at 1 s (half-open has no end time, and a zero hint would send every refused client back at once), is the `After` of the `*RetryError` that wraps `ErrCircuitOpen` (§1.3). A buffered fetch is recorded after its body, so a body that fails after good headers counts as a `Failure` (FR-CB-1); streams are recorded at the headers. Only `Foreground` fetches probe (FR-CB-4): when `Allow` hands a `Background` or `Warm` fetch a probe, `fetch` cancels it and treats the breaker as open. A fetch whose caller left before the origin answered ends in `Cancel`, not `Record`, so disconnecting clients cannot trip the breaker.
 
@@ -1199,7 +1209,7 @@ type Event struct {
 | `EvRequest` | every `Serve` return; `Duration` is the time in `Serve`, `Status` the response status or `StatusCode(err)`, `Partition` empty when the request was refused before classification | `hit`, `stale`, `miss`, `revalidated` (the origin answered 304 to a forward made for a stale entry), `collapsed` (a follower answered from its flight's response or buffered 5xx; it sent nothing to the origin, and FR-MR-1 counts it like a hit), `pass` (includes a Range request no entry answered), `bypass`, `negative`, `error`. So `miss` plus `revalidated` plus `pass` plus `bypass` is the number of requests that fetched for themselves |
 | `EvFetchStart`, `EvFetchEnd` | around every `Origin.Fetch`, so twice for a conditional fetch repeated without validators; `EvFetchEnd` is the headers arriving or the error, with `Duration` since the start and `Status` (0 for an error). Every start has an end, also when the origin panics or calls `runtime.Goexit` | `foreground`, `background`, `warm`, `pass` |
 | `EvCoalesceJoin` | a request joined an existing flight | |
-| `EvCoalesceTimeout` | a wait on a flight expired and the request stopped waiting: any waiter that serves stale at `FollowerMaxWait`, or a follower that fetches for itself once the flight has outlived `Timeouts.Origin + Limiter.MaxQueueWait`. A waiter that keeps waiting emits nothing | `stale`, `direct` |
+| `EvCoalesceTimeout` | a wait on a flight expired and the request stopped waiting: any waiter that serves stale at `FollowerMaxWait`, or a follower that fetches for itself once the flight has outlived `Timeouts.Origin + 2 × Limiter.MaxQueueWait`. A waiter that keeps waiting emits nothing | `stale`, `direct` |
 | `EvShed` | limiter refused | `queue-full`, `queue-timeout`, `background` |
 | `EvStaleServed` | a stale response was served | `swr`, `sie`, `shed`, `circuit-open`, `coalesce-timeout` |
 | `EvRefreshDropped` | background refresh not started | `no-slot`, `circuit-open`, `closed` |
@@ -1289,7 +1299,7 @@ The memory store's hit path takes only a shard read lock plus an atomic frequenc
 
 | Goroutine | Started by | Bounded by | Ends when |
 |---|---|---|---|
-| flight fetch | first requester of a key, background refresh | `MaxConcurrent + MaxQueue` flights | fetch done and published |
+| flight fetch | first requester of a key, background refresh | `MaxConcurrent + MaxQueue + MaxQueue/4` flights | fetch done and published |
 | warm workers | `Warm` | `Warm.Concurrency` | `Warm` returns |
 
 All are added to `e.wg`. `Close` sets `closed`, waits on `wg` until its context ends, then cancels `bgCtx` (which cancels in-flight origin calls via the fetch context derived from it) and waits again, for at most 5 s (`closeAbandon`). An `Origin` that ignores its context is the only way to outlast that; `Close` then returns the context's error joined with `errCloseAbandoned` and closes its own store, and the goroutines left behind get `ErrUnavailable` from it (FR-LCY-2).

@@ -33,6 +33,7 @@ func parseCaddyfile(h httpcaddyfile.Helper) (caddyhttp.MiddlewareHandler, error)
 //	weir {
 //	    name <name>
 //	    max_bytes <size>
+//	    max_object_bytes <size>
 //	    snapshot_dir <dir>
 //	    multi_host
 //	    client_placeholders
@@ -44,7 +45,7 @@ func parseCaddyfile(h httpcaddyfile.Helper) (caddyhttp.MiddlewareHandler, error)
 //	    key { query_drop|query_keep|headers|cookies|accept_encoding <v>...; query_sort; normalize_path }
 //	    forward { allow <header>... }
 //	    bypass { cookies|headers <v>... }
-//	    limiter { max_concurrent|max_queue|max_per_partition|max_per_client <n>; max_queue_wait <duration> }
+//	    limiter { max_concurrent|max_queue|max_per_partition|partition_headroom|max_per_client <n>; max_queue_wait <duration> }
 //	    stale { while_revalidate|if_error <duration> }
 //	    experiments {
 //	        cookie|header <name>; max_active <n>; signing_keys <key>...; downstream_keys_on_variant
@@ -114,6 +115,17 @@ func (h *Handler) blockKey(d *caddyfile.Dispenser, key string, seen map[string]b
 		}
 		h.MaxBytes = ByteSize(n)
 		return nil
+	case "max_object_bytes":
+		var s string
+		if err := oneArg(d, &s); err != nil {
+			return err
+		}
+		n, err := parseByteSize(s)
+		if err != nil {
+			return d.Errf("max_object_bytes: %v", err)
+		}
+		h.MaxObjectBytes = ByteSize(n)
+		return nil
 	case "store":
 		return h.storeBlock(d)
 	case "key":
@@ -137,11 +149,12 @@ func (h *Handler) blockKey(d *caddyfile.Dispenser, key string, seen map[string]b
 		})
 	case "limiter":
 		return subBlock(d, "limiter", map[string]func() error{
-			"max_concurrent":    func() error { return intArg(d, &h.Limiter.MaxConcurrent) },
-			"max_queue":         func() error { return intArg(d, &h.Limiter.MaxQueue) },
-			"max_queue_wait":    func() error { return durArg(d, &h.Limiter.MaxQueueWait) },
-			"max_per_partition": func() error { return intArg(d, &h.Limiter.MaxPerPartition) },
-			"max_per_client":    func() error { return intArg(d, &h.Limiter.MaxPerClient) },
+			"max_concurrent":     func() error { return intArg(d, &h.Limiter.MaxConcurrent) },
+			"max_queue":          func() error { return intArg(d, &h.Limiter.MaxQueue) },
+			"max_queue_wait":     func() error { return durArg(d, &h.Limiter.MaxQueueWait) },
+			"max_per_partition":  func() error { return intArg(d, &h.Limiter.MaxPerPartition) },
+			"partition_headroom": func() error { return intArg(d, &h.Limiter.PartitionHeadroom) },
+			"max_per_client":     func() error { return intArg(d, &h.Limiter.MaxPerClient) },
 		})
 	case "experiments":
 		return experimentsBlock(d, h)

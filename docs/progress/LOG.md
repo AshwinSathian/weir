@@ -2004,3 +2004,11 @@ Entry template:
 - Deviations: 18 cards in one session, one branch and one pull request, at Ashwin's request, with context compaction; requirement, default and API changes were decided in the plan and listed for Ashwin instead of asked one by one. docs/01, 03, 04, 05, 06, 07, 08, runbook, benchmarks, CHANGELOG, README and the site changed with the code.
 - Follow-ups: HRD-18 (release v1.1.0) after the merge; HRD-20 deferred; rebase `card/CMP-01-compare-harness`.
 - Context: far over one card's budget by design; the cards themselves were sized S or M and each fit.
+
+## 2026-10-13 · HRD-21 · done
+- Branch / PR: card/CMP-F1-limiter-breaker / https://github.com/AshwinSathian/weir/pull/124
+- Done: the four findings of the comparison round. Queue defaults 8192 and 5 s; `Limiter.PartitionHeadroom` for fetches under a marker; requests wait for the half-open probe; Caddy `max_object_bytes` and `partition_headroom`. Docs 01, 02, 04, 06, 08, runbook, CHANGELOG and the site follow.
+- Tests: nine new tests, each failing without its fix; `make check`, `make site-check` and `make load` pass. The card-reviewer agent reproduced three defects in the first commit (unbounded probe waiters, background refresh starved by a borrowing partition, unmarked requests starved in their own partition); all fixed in the second.
+- Deviations: default and behavior changes decided in the session at Ashwin's request (D-H25 to D-H28) instead of asked one by one. Letting every fetch pass the partition cap was rejected because it weakens T-11. F3 is not fixed by a default: the object limit is tied to the shard size; sharing one over-size fetch is deferred as HRD-22.
+- Follow-ups: rerun the comparison tables on this branch; HRD-18.
+- Context: continued from the comparison session, with compaction.

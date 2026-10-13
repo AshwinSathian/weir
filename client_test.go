@@ -108,7 +108,7 @@ func TestClientCapCountsOnlyOriginWork(t *testing.T) {
 		if n := o.TotalCalls(); n != 1+2+5 {
 			t.Fatalf("origin calls = %d, want the cached one, the client's 2 and 5 from requests without a client", n)
 		}
-		if r := <-over; !errors.Is(r.err, weir.ErrShed) || r.elapsed != 2*time.Second {
+		if r := <-over; !errors.Is(r.err, weir.ErrShed) || r.elapsed != 5*time.Second {
 			t.Fatalf("third request of the client: %v after %v, want ErrShed after MaxQueueWait", r.err, r.elapsed)
 		}
 		close(gate)

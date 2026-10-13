@@ -155,10 +155,22 @@ type CoalesceConfig struct {
 type LimiterConfig struct {
 	MaxConcurrent int // 0: 64
 	// MaxQueue is the number of fetches that may wait for a slot. Zero means
-	// the default 1024; there is no way to set a zero-length queue today.
+	// the default 8192; there is no way to set a zero-length queue today.
+	// MaxQueueWait, not this count, is what protects clients from a long
+	// wait: the count only bounds memory, and a queue too short for what the
+	// origin can drain in MaxQueueWait sheds requests it could have served.
 	MaxQueue        int
-	MaxQueueWait    time.Duration // 0: 2s
+	MaxQueueWait    time.Duration // 0: 5s
 	MaxPerPartition int           // 0: 16; clamped to MaxConcurrent
+	// PartitionHeadroom is the number of slots that stay free for other
+	// partitions, below ReserveForeground, before one partition may run more
+	// than MaxPerPartition fetches (FR-LIM-3). A hot path that cannot be coalesced (an
+	// uncacheable or over-size response) may use the slots nobody else
+	// wants, and falls back to its cap as soon as fewer than this many are
+	// free. Zero means MaxPerPartition. A value of MaxConcurrent or more
+	// makes MaxPerPartition a strict cap. A partition the miss-rate detector
+	// throttles never runs past its cap.
+	PartitionHeadroom int
 	// ReserveForeground is the number of slots background refresh and Warm
 	// may not use. Zero means MaxConcurrent/4, at least 1 when MaxConcurrent
 	// is 2 or more; there is no way to reserve none then. It must stay below
@@ -335,11 +347,12 @@ func (c *Config) applyDefaults() {
 
 	l := &c.Limiter
 	orInt(&l.MaxConcurrent, 64)
-	orInt(&l.MaxQueue, 1024)
-	orDur(&l.MaxQueueWait, 2*time.Second)
+	orInt(&l.MaxQueue, 8192)
+	orDur(&l.MaxQueueWait, 5*time.Second)
 	orInt(&l.MaxPerPartition, 16)
 	if l.MaxConcurrent > 0 {
 		l.MaxPerPartition = min(l.MaxPerPartition, l.MaxConcurrent)
+		orInt(&l.PartitionHeadroom, l.MaxPerPartition)
 	}
 	if l.ReserveForeground == 0 && l.MaxConcurrent >= 2 {
 		l.ReserveForeground = max(1, l.MaxConcurrent/4)
@@ -439,6 +452,7 @@ func (c *Config) validate() error {
 		{"Limiter.MaxQueue", int64(c.Limiter.MaxQueue)},
 		{"Limiter.MaxQueueWait", int64(c.Limiter.MaxQueueWait)},
 		{"Limiter.MaxPerPartition", int64(c.Limiter.MaxPerPartition)},
+		{"Limiter.PartitionHeadroom", int64(c.Limiter.PartitionHeadroom)},
 		{"Limiter.ReserveForeground", int64(c.Limiter.ReserveForeground)},
 		{"Limiter.MaxPerHost", int64(c.Limiter.MaxPerHost)},
 		{"Limiter.MaxPerClient", int64(c.Limiter.MaxPerClient)},

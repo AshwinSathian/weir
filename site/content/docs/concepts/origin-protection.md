@@ -14,7 +14,7 @@ Every origin fetch holds a slot in a limiter from before the request is sent unt
 With defaults:
 
 - `Limiter.MaxConcurrent` is 64. That many fetches run at once.
-- A request that finds no free slot queues. The queue holds `MaxQueue` (1,024) waiters and each waits at most `MaxQueueWait` (2 seconds) (FR-LIM-2).
+- A request that finds no free slot queues. The queue holds `MaxQueue` (8,192) waiters and each waits at most `MaxQueueWait` (5 seconds) (FR-LIM-2).
 - A request that cannot queue, or waits too long, is shed. It gets a stale entry if stale-if-error allows one, and otherwise a 503 with `Retry-After` (FR-LIM-5).
 - Background refreshes never queue and never use the last 25% of slots, so they cannot starve the requests people are waiting on (FR-LIM-4).
 - Requests with a body draw from a separate pool of `MaxUpload` slots (16), of which one path may hold half. A slow uploader can exhaust that pool and nothing else (FR-LIM-7), and a body that stalls or breaks is the client's failure, not the origin's: the breaker does not count it.

@@ -525,3 +525,63 @@ func TestBreakerProbeYieldsFailedPartition(t *testing.T) {
 		}
 	})
 }
+
+// FR-CB-4: a caller refused because the probe is in flight gets a channel
+// that closes when the probe ends, whichever way, or is cancelled. An open
+// breaker and a closed one hand out no channel.
+func TestBreakerAllowOrWait(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		b := New(testConfig(), func() float64 { return 0 }, nil)
+		if _, ended, err := b.AllowOrWait(0); err != nil || ended != nil {
+			t.Fatalf("closed breaker: (%v, %v), want admitted with no channel", ended, err)
+		}
+		record(b, Failure, 20)
+		if _, ended, err := b.AllowOrWait(0); !errors.Is(err, ErrCircuitOpen) || ended != nil {
+			t.Fatalf("open breaker: (%v, %v), want ErrCircuitOpen with no channel", ended, err)
+		}
+		open := func(ch <-chan struct{}) bool {
+			select {
+			case <-ch:
+				return false
+			default:
+				return true
+			}
+		}
+
+		// Cancelled probe: the waiter is woken and takes the probe.
+		p := openAt(t, b, 4*time.Second)
+		_, ended, err := b.AllowOrWait(0)
+		if !errors.Is(err, ErrCircuitOpen) || ended == nil || !open(ended) {
+			t.Fatalf("probe in flight: (%v, %v), want ErrCircuitOpen and an open channel", ended, err)
+		}
+		b.Cancel(p)
+		if open(ended) {
+			t.Fatal("channel still open after the probe was cancelled")
+		}
+		p, ended, err = b.AllowOrWait(0)
+		if err != nil || ended != nil {
+			t.Fatalf("after Cancel: (%v, %v), want the probe", ended, err)
+		}
+
+		// Failed probe: woken, then refused with no channel.
+		_, ended, _ = b.AllowOrWait(0)
+		b.Record(p, Failure)
+		if ended == nil || open(ended) {
+			t.Fatal("channel still open after the probe failed")
+		}
+		if _, ended, err := b.AllowOrWait(0); !errors.Is(err, ErrCircuitOpen) || ended != nil {
+			t.Fatalf("after a failed probe: (%v, %v), want ErrCircuitOpen with no channel", ended, err)
+		}
+
+		// Successful probe: woken, then admitted.
+		p = openAt(t, b, 8*time.Second)
+		_, ended, _ = b.AllowOrWait(0)
+		b.Record(p, Success)
+		if ended == nil || open(ended) {
+			t.Fatal("channel still open after the probe succeeded")
+		}
+		if _, _, err := b.AllowOrWait(0); err != nil {
+			t.Fatalf("after a successful probe: %v, want admitted", err)
+		}
+	})
+}

@@ -17,8 +17,9 @@ const (
 )
 
 // Table maps coalescing keys to in-progress flights. The zero value is
-// ready to use. Its size is bounded by the limiter: at most
-// MaxConcurrent + MaxQueue flights exist at once (P5).
+// ready to use. Its size is bounded by the limiter and the breaker's
+// waiters: at most MaxConcurrent + MaxQueue + MaxQueue/4 flights exist at
+// once (P5, 04 §8.3).
 type Table struct {
 	shards [64]shard // index: first key byte & 63; keys are SHA-256 output
 }
