@@ -2080,7 +2080,7 @@ Entry template:
 - Context: high, with compaction; a continuation of the round 2 session in a separate worktree.
 
 ## 2026-10-14 · site charts for round 2 (no card) · done
-- Branch / PR: site/results-round2 / opened by this session; replaces #129, which is closed
+- Branch / PR: site/results-round2 / #132; replaces #129, which is closed
 - Done: the chart work of pull request 129 merged onto `main` and reworked for the round 2 tables. `lib/results.ts` reads medians with ranges, "not available" cells, the new flood table, default and hardened probe columns, the Vary table and the per-tier conformance table; its headline checks are rewritten for what round 2 says (11 claims that no longer held are gone, 14 new ones are checked). New chart for flood, brownout, purge and restart; the probe grid switches between default and hardened; conformance bars per tier with assertion and setup failures; tiles for the four new losses and three new wins; a section on what the next release changes; "next release" notes on four doc pages that are ahead of v1.1.0.
 - Tests: `make site-check` passes; `check.mjs charts` compares every drawn cell with its table cell after the build. Looked at in a browser at 1280 and 390 px: three layout defects found and fixed (labels running under the first column in two charts, clipped conformance text, clipped group headings on a phone).
 - Deviations: docs/benchmarks.md, one cell: the first probe row carried the harness's internal name (`reflect-host`) instead of its label and footnote (b), a slip of the table generator in pull request 131 that the chart build caught.

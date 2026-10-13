@@ -5,12 +5,12 @@ Phase: v1.1.0 released and deployed (2026-10-13)
 Current card: none (site work outside a card: the result charts, reworked for round 2)
 Card state: awaiting-merge
 Branch: site/results-round2
-PR: opened by this session; it replaces pull request 129
+PR: https://github.com/AshwinSathian/weir/pull/132 (replaces pull request 129, closed)
 Next card: none open. Candidates: a v1.2 release with a rerun of the comparison tables, CMP-06 (speed and memory), HRD-22 (share one over-size fetch), HRD-20 (deferred)
 
 ## Waiting on Ashwin
 
-- Review and merge the site charts pull request (it replaces 129, which is closed). Then `make site-deploy BRANCH=main`. The branches `site/results-presentation` and `site/results-presentation-shots` can be deleted afterwards.
+- Review and merge pull request 132, the site charts (it replaces 129, which is closed). Then `make site-deploy BRANCH=main`. The branches `site/results-presentation` and `site/results-presentation-shots` can be deleted afterwards.
 - The deployed site will describe `main` in a few doc pages that are ahead of `v1.1.0`; each such place is marked "next release". Releasing v1.2 removes the need for those notes: grep `site/content` for "next release".
 - HRD-23 changes three defaults you approved on 2026-10-13 (`Breaker.OpenFor` 1 s, `Breaker.MaxOpenFor` equal to it, borrowing past the per-path cap for every client's fetch) and adds two opt-in settings (`Limiter.AdaptiveMax`, `SnapshotKeepFreshness`). They ship in the next release; the changelog's Unreleased section lists them with the way back for each.
 - The published comparison tables still describe v1.1.0. After a v1.2 release, rerun them (11 §2 measures published modules); card HRD-23 holds the working-tree figures to expect.
