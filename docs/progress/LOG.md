@@ -2023,7 +2023,7 @@ Entry template:
 - Context: over one card's budget by design.
 
 ## 2026-10-13 · CMP rerun after HRD-21 · done
-- Branch / PR: card/CMP-03-compare-round / PRLINK2 (stacked on card/CMP-F1-limiter-breaker)
+- Branch / PR: card/CMP-03-compare-round / https://github.com/AshwinSathian/weir/pull/125 (stacked on card/CMP-F1-limiter-breaker)
 - Done: rebased the comparison work on HRD-21 and reran the Weir v1.1 subjects in both tiers, Varnish tuned (its backend cap mirrors Weir's limiter numbers, R2), the probes and cache-tests. Default tier: `cold-keys` 720 failures to 0, `sync-expiry` 3 848 to 0, `uncacheable-herd` 339 to 0, 200 of 200 served 10 s after an outage where 1 was. Probes and conformance unchanged (all safe, 284 of 365). docs/benchmarks.md has a before and after table; every page with a figure about another project says it is our run, not verified by that project's owners (11 R4a).
 - Tests: `bench/compare` vet, race tests, lint; `make site-check`.
 - Deviations: the earlier pull request 123 was closed by GitHub when its base branch was deleted; this is a new branch and pull request, not a force-push.
