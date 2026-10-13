@@ -138,8 +138,13 @@ type FreshnessConfig struct {
 
 // CoalesceConfig bounds request coalescing (FR-COA).
 type CoalesceConfig struct {
-	LeaderMaxAge    time.Duration // 0: min(10s, Timeouts.Origin); at most Timeouts.Origin
-	FollowerMaxWait time.Duration // 0: min(10s, Timeouts.Origin); at most Timeouts.Origin
+	LeaderMaxAge time.Duration // 0: min(10s, Timeouts.Origin); at most Timeouts.Origin
+	// FollowerMaxWait is how long a request waits on another request's fetch
+	// before it serves a stale entry that stale-if-error permits. Without
+	// one it keeps waiting until the fetch's own bound has passed
+	// (Timeouts.Origin plus Limiter.MaxQueueWait) and only then fetches for
+	// itself. 0: min(10s, Timeouts.Origin); at most Timeouts.Origin.
+	FollowerMaxWait time.Duration
 	// HitForMissTTL is how long an unstorable URI is remembered so requests
 	// skip coalescing. Zero means the default 30s; there is no way to set a
 	// zero TTL today.
@@ -160,7 +165,16 @@ type LimiterConfig struct {
 	// MaxConcurrent.
 	ReserveForeground int
 	MaxPerHost        int // 0: off (FR-FAIR-1); caps in-flight fetches per normalized host, in each pool
-	MaxUpload         int // 0: MaxConcurrent/4, at least 1; requests with a body use this separate pool (D25)
+	// MaxPerClient caps how many requests of one client (Request.Client) may
+	// be at the origin, or waiting for it, at once (FR-FAIR-4). Every other
+	// cap is keyed on the URL, which the client chooses: a flood of distinct
+	// paths has no partition to be capped in. A request over the cap waits
+	// up to MaxQueueWait for one of its client's requests to finish and is
+	// then shed. Hits are never counted. 0: off, because behind a load
+	// balancer every client has one address; set Request.Client from a
+	// trusted source before turning it on. An IPv6 client is its /64.
+	MaxPerClient int
+	MaxUpload    int // 0: MaxConcurrent/4, at least 1; requests with a body use this separate pool (D25)
 }
 
 // BreakerConfig tunes the origin circuit breaker (FR-BRK).
@@ -173,6 +187,15 @@ type BreakerConfig struct {
 	HalfOpenProbes int           // 0: 1
 	CountStatus500 bool
 	Disable        bool
+	// MinPartitions is how many distinct partitions (origin plus path) must
+	// have failed in the window before the breaker may open, unless no fetch
+	// in the window succeeded. One failing path with many query strings then
+	// cannot open it for every other path (FR-CB-2). 0: 2; 1 turns the rule
+	// off, which is the behavior before v1.1. Set 1 for an origin whose
+	// traffic is one path (a single API endpoint): there a total failure is
+	// one failing path, and any success elsewhere, a 404 included, would
+	// keep the breaker shut.
+	MinPartitions int
 }
 
 // NegativeConfig tunes negative caching of origin errors (FR-NEG).
@@ -218,7 +241,10 @@ type TimeoutsConfig struct {
 	Origin     time.Duration // 0: 30s
 	Background time.Duration // 0: 30s; background refresh and Warm (FR-TMO-1)
 	Store      time.Duration // 0: 50ms (remote stores only)
-	StreamIdle time.Duration // 0: 60s; bounds a streamed body by idle time, not total time (D26)
+	// StreamIdle bounds a streamed body by idle time, not total time (D26):
+	// the stream is cancelled when the origin sends nothing for this long, and
+	// when the consumer reads nothing for this long. 0: 60s.
+	StreamIdle time.Duration
 }
 
 // LimitsConfig bounds request input (FR-VAL-1, FR-VAL-3, FR-STO-10).
@@ -327,6 +353,7 @@ func (c *Config) applyDefaults() {
 	orDur(&b.OpenFor, 5*time.Second)
 	orDur(&b.MaxOpenFor, max(60*time.Second, b.OpenFor)) // FR-CB-3: never below the first open
 	orInt(&b.HalfOpenProbes, 1)
+	orInt(&b.MinPartitions, 2)
 
 	orDur(&c.Negative.TTL, 2*time.Second)
 
@@ -414,12 +441,14 @@ func (c *Config) validate() error {
 		{"Limiter.MaxPerPartition", int64(c.Limiter.MaxPerPartition)},
 		{"Limiter.ReserveForeground", int64(c.Limiter.ReserveForeground)},
 		{"Limiter.MaxPerHost", int64(c.Limiter.MaxPerHost)},
+		{"Limiter.MaxPerClient", int64(c.Limiter.MaxPerClient)},
 		{"Limiter.MaxUpload", int64(c.Limiter.MaxUpload)},
 		{"Breaker.Window", int64(c.Breaker.Window)},
 		{"Breaker.MinRequests", int64(c.Breaker.MinRequests)},
 		{"Breaker.OpenFor", int64(c.Breaker.OpenFor)},
 		{"Breaker.MaxOpenFor", int64(c.Breaker.MaxOpenFor)},
 		{"Breaker.HalfOpenProbes", int64(c.Breaker.HalfOpenProbes)},
+		{"Breaker.MinPartitions", int64(c.Breaker.MinPartitions)},
 		{"Negative.TTL", int64(c.Negative.TTL)},
 		{"MissRate.Window", int64(c.MissRate.Window)},
 		{"MissRate.TopK", int64(c.MissRate.TopK)},

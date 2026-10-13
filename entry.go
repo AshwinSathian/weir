@@ -3,6 +3,7 @@ package weir
 import (
 	"net/http"
 	"slices"
+	"strconv"
 	"time"
 
 	"github.com/AshwinSathian/weir/internal/httpcc"
@@ -20,6 +21,12 @@ func buildEntry(cfg *Config, c *keys.Classified, resp *Response, body []byte, re
 	if !ok { // FR-STO-13
 		date = respTime
 		h["Date"] = []string{respTime.UTC().Format(http.TimeFormat)}
+	}
+	if len(h["Content-Length"]) == 0 && resp.StatusCode != http.StatusNoContent {
+		// The origin sent the body chunked, but a stored body has a length.
+		// With it a hit is written in one piece instead of flushed chunks, and
+		// a HEAD is answered with the length a GET would have (RFC 9110 §9.3.2).
+		h["Content-Length"] = []string{strconv.Itoa(len(body))}
 	}
 	lm, _ := httpcc.ParseDate(h.Get("Last-Modified"))
 	etag := h.Get("Etag")
@@ -105,7 +112,9 @@ func storedHeader(h http.Header, stripSetCookie bool) http.Header {
 		out = http.Header{}
 	}
 	keys.DropHopByHop(out, h["Connection"])
-	for _, name := range [...]string{"Proxy-Authenticate", "Proxy-Authentication-Info", "Age"} {
+	// Trailer announces fields that follow a streamed body. A stored body
+	// has none, so the announcement would promise what is never sent.
+	for _, name := range [...]string{"Proxy-Authenticate", "Proxy-Authentication-Info", "Age", "Trailer"} {
 		delete(out, name)
 	}
 	if stripSetCookie {

@@ -16,6 +16,10 @@ type Request struct {
 	RawQuery string
 	Header   http.Header // canonical keys, as net/http builds them; nil is treated as empty
 	Body     io.ReadCloser
+	Client   string // who sent the request; never keyed, forwarded only on a pass-through
+	// PassThrough marks the forwarded request of a ClassPass request for the
+	// Origin; ignored on input.
+	PassThrough bool
 }
 
 // Config is the compiled key configuration. Limits arrive with the root

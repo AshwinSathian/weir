@@ -1,7 +1,7 @@
 # Weir low-level design
 
 Status: v1.0
-Date: 2026-10-12
+Date: 2026-10-13
 Depends on: [01-technical-spec.md](01-technical-spec.md), [02-architecture.md](02-architecture.md), [03-hld.md](03-hld.md)
 
 This document is written for the person (or agent) implementing a milestone. It gives exact type definitions, algorithms, locking rules and pseudo-code. Code may differ in naming of unexported identifiers; exported names, behavior, bounds and locking rules may not change without updating this document in the same commit.
@@ -98,6 +98,7 @@ type LimiterConfig struct {
 	MaxPerPartition   int           // 0: 16 (clamped to MaxConcurrent)
 	ReserveForeground int           // 0: MaxConcurrent/4 (at least 1 when MaxConcurrent >= 2)
 	MaxPerHost        int           // 0: off (M14)
+	MaxPerClient      int           // 0: off (FR-FAIR-4)
 	MaxUpload         int           // D25; 0: MaxConcurrent/4, at least 1
 }
 
@@ -110,6 +111,7 @@ type BreakerConfig struct {
 	HalfOpenProbes int           // 0: 1
 	CountStatus500 bool
 	Disable        bool
+	MinPartitions  int           // 0: 2; 1: off (FR-CB-2)
 }
 
 type NegativeConfig struct {
@@ -209,6 +211,8 @@ var (
 	ErrOriginTimeout  = errors.New("weir: origin timeout")
 	ErrMustRevalidate = errors.New("weir: must-revalidate response could not be validated")
 	ErrOnlyIfCached   = errors.New("weir: only-if-cached and no stored response")
+	ErrRequestBody        = errors.New("weir: request body read failed")
+	ErrRequestBodyTimeout = errors.New("weir: request body timed out")
 	ErrOrigin         = errors.New("weir: origin error")
 	ErrClosed         = errors.New("weir: engine closed")
 	ErrUpgradeNotSupported = errors.New("weir: connect and protocol upgrades not supported") // FR-UPG-1
@@ -219,7 +223,7 @@ type RequestError struct{ Reason string } // Is(ErrInvalidRequest) == true
 type OriginError struct{ Err error }       // Is(ErrOrigin) == true; Unwrap returns Err
 ```
 
-`StatusCode`: `ErrInvalidRequest` 400; `ErrUpgradeNotSupported` 501; `ErrShed`, `ErrCircuitOpen`, `ErrClosed` 503; `ErrOriginTimeout`, `ErrMustRevalidate`, `ErrOnlyIfCached`, `context.DeadlineExceeded` 504; `ErrOrigin` 502; `context.Canceled` 499 (a hint for logs only; the client is gone and adapters should not write); anything else 502. The outermost recognized error in the chain decides, in `errors.Is` walk order, and an `*OriginError` maps to 502 whatever it wraps. An origin that returns weir errors (another engine used as origin) or its own `context` errors (an `http.Client` timeout matches `context.DeadlineExceeded`) cannot turn an origin failure into 400, 499, 503 or 504, and its `RetryError` hint is not returned by `RetryAfter`. So `timeoutOrOrigin(err, ctx, tctx)` (§6.7) decides from the contexts, never from `err`. When `ctx` is done, it returns `ctx.Err()` unwrapped for direct and pass-through fetches, whose `ctx` is the request context, and `ErrClosed` for flights and background fetches, whose context ends only on `Close` (§6.4). Otherwise, when `context.Cause(tctx)` is `ErrOriginTimeout`, it returns `ErrOriginTimeout`. In every other case it returns `*OriginError{err}`. A waiter on a flight cut short by `Close` therefore gets 503, not 499.
+`StatusCode`: `ErrInvalidRequest`, `ErrRequestBody` 400; `ErrRequestBodyTimeout` 408; `ErrUpgradeNotSupported` 501; `ErrShed`, `ErrCircuitOpen`, `ErrClosed` 503; `ErrOriginTimeout`, `ErrMustRevalidate`, `ErrOnlyIfCached`, `context.DeadlineExceeded` 504; `ErrOrigin` 502; `context.Canceled` 499 (a hint for logs only; the client is gone and adapters should not write); anything else 502. The outermost recognized error in the chain decides, in `errors.Is` walk order, and an `*OriginError` maps to 502 whatever it wraps. An origin that returns weir errors (another engine used as origin) or its own `context` errors (an `http.Client` timeout matches `context.DeadlineExceeded`) cannot turn an origin failure into 400, 499, 503 or 504, and its `RetryError` hint is not returned by `RetryAfter`. So `timeoutOrOrigin(err, ctx, tctx)` (§6.7) decides from the contexts, never from `err`. When `ctx` is done, it returns `ctx.Err()` unwrapped for direct and pass-through fetches, whose `ctx` is the request context, and `ErrClosed` for flights and background fetches, whose context ends only on `Close` (§6.4). Otherwise, when `context.Cause(tctx)` is `ErrOriginTimeout`, it returns `ErrOriginTimeout`. In every other case it returns `*OriginError{err}`. A waiter on a flight cut short by `Close` therefore gets 503, not 499.
 
 ```go
 type RetryError struct {
@@ -340,6 +344,8 @@ TagGroup(o, name) = sha256("weir/tag/v1\x03" + len-prefixed(o) + len-prefixed(na
 ## 3. `internal/keys`
 
 ### 3.1 Classification
+
+Deferred forward (v1.1). `Serve` calls `keys.ClassifyDeferred`, which leaves `Forwarded.Header` and `Unkeyed` unbuilt (`fwdPending`) for a cacheable request when the configuration keys no header, no cookie and no experiment. The primary key is then method, scheme, host, path and query, all set at classification, so the key does not depend on the header and INV-1 holds by construction; with anything keyed the key is read from the forward itself and the forward is built at once, as `Classify` does. `(*Classified).Forward` builds it with the same `forwardHeader` and the `Config` the value was classified with. Three places call it, all on the request's goroutine before the value is shared: `shared` (below, §6.2), the vary branch of `lookup`, and `AsRangePass`. `Classify` itself stays eager and is what `Warm`, `Purge` and invalidation use. `TestDeferredForwardEqualsClassify` and `FuzzDeferredForward` assert that deferring and then building equals classifying eagerly; `TestCacheableFetchAlwaysHasForward` fails if an origin-bound path skips the build.
 
 ```go
 type Class uint8 // ClassCacheable, ClassPass
@@ -638,6 +644,10 @@ Engine goroutines start only through `goBackground(f)`, which checks `closed` an
 
 ### 6.2 Serve
 
+Where the request's state lives (v1.1). `Serve` holds its `keys.Classified` in a local variable and the hit path only reads it, so the compiler keeps it on the stack. Every path that hands the request to the origin or to another goroutine (`pass`, `miss`, which is the part of `cacheable` after the lookup found nothing servable, and `background`) first calls `shared(c)`, which builds the forward and returns a heap copy; the address of `Serve`'s own value is never stored. The copy shares the maps and slices, which nothing writes after classification. A hit thereby allocates 608 B in 8 objects instead of 1 536 B in 12.
+
+`fetchCoalesced` calls `storedMeanwhile` when it has created a flight: one more `lookup`, for in-process stores, not for a request that forced validation, and only when the record is still under the same key and is not the one the first lookup found. A fresh entry is published as the flight's result with `fromStore` set, and every waiter serves it as a hit (FR-COA-1).
+
 ```
 func (e *Engine) Serve(ctx, req, origin):
     if e.closed.Load(): return nil, ErrClosed
@@ -730,8 +740,10 @@ func (e *Engine) fetchCoalesced(ctx, c, lk, origin, attempt):
         if lk.entry != nil && staleIfErrorOK(lk):
             if created: e.leaveFlight(f)
             return e.fromEntry(c, lk.entry, staleInfo(StaleCoalesceTimeout))
-        if !created: return e.fetchDirect(ctx, c, lk, origin)
-        wait for f.Done() or ctx.Done() as above        // the creator keeps waiting on its own fetch
+        if created: wait for f.Done() or ctx.Done() as above   // the creator keeps waiting on its own fetch
+        // a follower keeps the flight until the flight's own bound has passed (FR-COA-4)
+        timer.Reset(Timeouts.Origin + Limiter.MaxQueueWait - FollowerMaxWait)
+        on the second expiry: e.emit(EvCoalesceTimeout{direct}); return e.fetchDirect(ctx, c, lk, origin)
     case <-ctx.Done():
         if created: e.leaveFlight(f)
         return nil, ctx.Err()
@@ -740,6 +752,8 @@ func (e *Engine) fetchCoalesced(ctx, c, lk, origin, attempt):
 `staleIfErrorOK(lk)` re-runs `Evaluate` at the current time and checks `sieOK`.
 
 The timer covers the creator too, so it can serve stale under stale-if-error like any follower. Without a stale entry the creator does not fetch again: its fetch is the flight, already bounded by `Timeouts.Origin`, and the default `FollowerMaxWait` equals `Timeouts.Origin` whenever that is under 10 s, so a second fetch would start just as the first one times out and double the origin load of every slow request.
+
+A follower without a stale entry does not fetch at `FollowerMaxWait` either (v1.1). The flight it waits on ends within `Limiter.MaxQueueWait + Timeouts.Origin` unless its origin ignores the context, so the follower waits that long, counted from when it joined, and fetches for itself only after that. Before v1.1 it fetched at `FollowerMaxWait`: with the defaults, 100 requests for one key behind an origin that answered in 15 s made 16 fetches and shed 84 requests.
 
 Before publishing, `runFlight` checks the built entry against epochs newer than its `RequestTime` (FR-PRG-7). If one applies, the entry is not shared: a follower may have arrived after the purge, and every follower arrived before `Publish`, so one check covers them all. The creator still gets its own response. If the origin calls `runtime.Goexit`, the flight publishes an `*OriginError` instead of leaving its waiters blocked.
 
@@ -802,7 +816,7 @@ func (e *Engine) setNegative(ctx, sp, res):
         Entry{Kind: KindNegative, Status: st, RetryAfter: parsed Retry-After (whole seconds), Expires: now + Negative.TTL})
 ```
 
-`setUnlessResponse` is the marker write's guard (§6.7): it re-reads the key and never replaces a live response other than the hard-purged one this request found. `lookup` returns a live negative record as `lk.neg`; `cacheable` serves it before the only-if-cached and Range checks with `fromNegative`: the status, the recorded `Retry-After` less the entry's age (rounded up; omitted once it has passed), an empty body, `Cache-Status: Weir; hit; ttl=<remaining>; detail=negative`, and `EvNegativeServed`.
+`setUnlessResponse` is the marker write's guard (§6.7): it re-reads the key and never replaces a live response other than the one its caller names (§6.7; for a negative entry, the hard-purged response this request found). `lookup` returns a live negative record as `lk.neg`; `cacheable` serves it before the only-if-cached and Range checks with `fromNegative`: the status, the recorded `Retry-After` less the entry's age (rounded up; omitted once it has passed), an empty body, `Cache-Status: Weir; hit; ttl=<remaining>; detail=negative`, and `EvNegativeServed`.
 
 ### 6.7 The fetch function (P3)
 
@@ -890,7 +904,9 @@ Both stream paths stop the origin deadline at headers and hand the context to `i
 
 `e.store(s, ent)` first reads the record currently at the target key; if it is a response whose `Date` (then `ResponseTime`) is later than the new entry's, the write is skipped, so a slow, aged flight finishing late never replaces a newer response (RFC 9111 §4: the most recent response wins). The record the request itself found at lookup is exempt: it was already judged stale or unusable, and an origin whose clock once ran ahead would otherwise pin a purged or invalidated entry until it expires. A record past its `Expires` that a store still returns lazily is exempt too. The read-then-write is not atomic; the race window can only let an older response win when two writes land within the same store round trip, and the next refresh corrects it. It then writes the variant entry first, then the vary spec (or the entry under the primary key when there is no `Vary`), so a concurrent reader that finds the spec usually finds the variant. When the response's `Vary` differs from the stored spec, the new spec replaces it and older variants age out.
 
-Marker and negative writes share `setUnlessResponse`, a read-before-write: they skip the write when the current record at the key is a response that has not passed its `Expires` (an expired one a store returns lazily is a miss to `lookup`), so a marker or negative entry never replaces a response that a concurrent fetch just stored. A live vary spec is kept the same way, since a record at the primary key would hide every variant. Both are written under the lookup's key (`lk.ck`), the variant key when a spec exists.
+`fetchStored` brackets its work with `FetchBegin(c.Primary)` and `FetchEnd` on the store when it implements `store.FetchTracker` (05 §1): a count per primary key of the fetches that may still store under it, bounded by the fetches in progress (P5). It lives in the store, not the engine, because engines can share a store (the Caddy adapter's pool) and one engine's fetch must be visible to an unsafe request another serves. `invalidate` reads it through `needsEpoch` (§7): the count is by primary key, not coalescing key, because a variant's flight is keyed by the variant key while the question is about the URI.
+
+Marker and negative writes share `setUnlessResponse`, a read-before-write: they skip the write when the current record at the key is a response that has not passed its `Expires` (an expired one a store returns lazily is a miss to `lookup`), so a marker or negative entry never replaces a response that a concurrent fetch just stored. The one response it may replace is named by the caller and matched by request and response time, so a store that decodes a copy per `Get` matches too: the hard-purged response the request found, and, for the marker of a full response that is not storable, the response the request found (`fetchSpec.found`), which that full response supersedes (FR-STO-12). A 304 whose merged headers fail storability and a 5xx name no response, so the stored one stays. An over-size body (`res.over`) writes its marker with `Status` 413, which `lookup` reads as `lookupResult.oversize`: `fetchStored` then calls `fetch` unbuffered, the response streams, and nothing is stored until the marker has expired. An engine that does not know the status reads the marker as any other. `fetch` skips the buffered read when one `Content-Length` line of digits is above `MaxObjectBytes`. A live vary spec is kept the same way, since a record at the primary key would hide every variant. Both are written under the lookup's key (`lk.ck`), the variant key when a spec exists.
 
 `fromStream` for a `HEAD` client closes the stream immediately and returns headers only; the origin transfer is canceled rather than downloaded for nothing.
 
@@ -945,6 +961,8 @@ func (e *Engine) pass(ctx, c, origin):
 `fromEntry` clones the stored header map shallowly (a new map whose value slices are shared). This is safe only because `buildEntry` and `freshen` store every header value slice clipped with `slices.Clip`, so `len == cap` and a caller's `Header.Add` (which appends) always reallocates instead of writing into the stored backing array. `Header.Set` and `Del` replace or remove the map entry and never touch the shared slice. A test (`TestServedHeaderMutationDoesNotLeak`) mutates a served response's headers every way `http.Header` allows and asserts the next hit is unchanged. After cloning, `fromEntry` sets `Age`, appends `Cache-Status`, evaluates client conditionals (FR-SRV-2) and returns either a 304 with no body, a 206 whose body is `entry.Body[start:end+1]` with `Content-Range` and `Content-Length` (§13.1), a 416 built from the 304 header subset plus `Age` and `Content-Range: bytes */len`, or the status with `io.NopCloser(bytes.NewReader(entry.Body))`. For `HEAD` the body is `http.NoBody`. Header cloning is the main allocation on the hit path; it is required because adapters may add headers to the response. `respond` (the creator and the direct fetch) also goes through `fromEntry` when `fr.entry` is set and the client's `If-None-Match` or `If-Modified-Since` precondition leads to a 304, so a revalidated or just-stored entry answers like a hit (FR-SRV-2). A hit with `Range` and a matching `If-None-Match` also answers 304 (RFC 9110 §13.2.2 evaluates it before `Range`); on a miss `Range` takes the pass-through first, which drops the client's preconditions (FR-FWD-1), so `respond` never sees it.
 
 ## 7. Purge and invalidation
+
+`invalidate` (unsafe methods, FR-INV-1) reads the epoch time first, then asks `needsEpoch(primary)` for the target and for each same-origin `Location` and `Content-Location` URI, each classified as the `GET` it would be stored under. `needsEpoch` answers true unless `exactInvalidation` holds (a store in this process with `store.FetchTracker`, no `Key.Headers`, no `Key.Cookies`, no experiment: set once in `New`), `FetchInProgress(primary)` is false and `Get(primary)` is `ErrNotFound`. Why the skip loses no invalidation: a fetch sent at or before the epoch time called `FetchBegin` before it was sent, so it is either still counted, or it has ended and what it stored is visible to the `Get`; a fetch sent later is outside the epoch (FR-PRG-7). A vary spec, a marker and a negative entry are records, so they write the epoch. And nothing servable hides behind an empty primary key: `lookup` serves a response under a variant key only while the spec at the primary key lists it (`lists`), so a variant whose spec was evicted or replaced is a miss. Both halves were added after review: the count was first per engine, which two engines on one store defeat, and an orphaned variant was first still served.
 
 ```
 func (e *Engine) Purge(ctx, p):
@@ -1014,6 +1032,8 @@ Shard selection by key byte is safe here (unlike the store) because flights are 
 
 ### 8.2 `internal/limiter`
 
+Per-client admission (FR-FAIR-4) is a second `Limiter`, `Engine.gate`, built only when `Limiter.MaxPerClient` is above 0: its partition is the client hash, its partition cap is `MaxPerClient`, and its global cap is unbounded, so only a client over its own cap ever queues there, and a full queue sheds nobody else. `admit` takes a place in `pass` and in `cacheable` after the lookup found nothing servable and before any flight is joined or created; the place is released when that call returns (at the headers of a stream, like a slot). A re-entering follower keeps the place it holds. `Classified.ClientHash` hashes `Request.Client` with the per-process seed on that path only, so a hit pays nothing for it, and maps an IPv6 address to its /64.
+
 ```go
 type Class uint8 // Foreground, Background, Warm
 
@@ -1063,7 +1083,7 @@ Admission check `canRun(class, part)`: `inflight < limit()`, and for `Background
 4. Append a waiter, increment `queuedBy[part]`, unlock. `select` on `ready`, `ctx.Done()`, and a timer of `MaxWait` (`Warm` waits on `ctx` only).
 5. On timeout or cancellation: lock; drop the throttle report if it is past `thrUntil` and run the grant walk; if `granted` became true in the race, keep the slot and return the permit with a nil error; else remove the waiter and decrement `queuedBy[part]` (delete at zero); unlock; return `ErrQueueTimeout` or `ctx.Err()`. A caller granted with a done context should check `ctx.Err()` before using the slot.
 
-`Release`: lock; decrement `inflight` and `byPart[part]` (delete at zero); drop the throttle report if it is past `thrUntil`; walk the queue from the head and grant every waiter for which `canRun` holds, marking `granted`, updating counters (`queuedBy` included) and closing `ready`; compact the queue slice in place; unlock. Waiters whose partition is at its cap are skipped, not dropped, so one saturated partition does not block others (FR-LIM-3). The walk is O(queue length); `BenchmarkLimiterAcquireRelease/full_queue` measures it with 1 023 parked waiters, one per full partition (about 5 µs per release on an M4 Pro, `ponytail:` in limiter.go).
+`Release`: lock; decrement `inflight` and `byPart[part]` (delete at zero); drop the throttle report if it is past `thrUntil`; walk the queue from the head and grant every waiter for which `canRun` holds, marking `granted`, updating counters (`queuedBy` included) and closing `ready`; stop as soon as no slot is free (v1.1: a release frees one slot, so the walk usually ends after the first waiter that takes it; `BenchmarkLimiterReleaseFullQueue`, 1 024 waiters of distinct partitions, went from 1.75 µs to 0.23 µs on an M4 Pro); compact the queue slice in place; unlock. Waiters whose partition is at its cap are skipped, not dropped, so one saturated partition does not block others (FR-LIM-3). The walk is O(queue length); `BenchmarkLimiterAcquireRelease/full_queue` measures it with 1 023 parked waiters, one per full partition (about 5 µs per release on an M4 Pro, `ponytail:` in limiter.go).
 
 `Throttle(end, until, caps)` (FR-MR-3) is how the engine passes on a miss-rate report (§8.4): `caps` holds 1 for each anomalous partition, `end` is the closed window's end and `until` is `end + 2 * MissRate.Window`. The engine passes empty `caps` for a report that arrives at or after `end + MissRate.Window`. Lock; if `end` is not after `thrEnd`, return false (a report of an earlier window delivered late). Else record `end` and `until`, replace `throttled` with a copy of `caps`, or with nil when `caps` is empty or `until` has passed (a report more than two windows old; the engine already passes empty `caps` for one that is a window late), run the grant walk because a partition the new report left out has its cap back, and return whether overrides are now in force. `capFor(part)` is `min(throttled[part], PerPartition)` for a listed partition, so an override never raises a cap, and an override below 1 counts as 1: a cap of 0 would park waiters with no fetch in flight to wake them. Only the main pool is throttled; the tracker counts cacheable requests, which never use the upload pool. The cap is on the partition, so bodyless pass-through requests for the same path (a POST without a body, a Range miss) share it while it holds. It binds every class: a background refresh that finds the slot taken is dropped and the stale entry served, and a warm run of the path fetches one URL at a time (`TestThrottleBindsBackgroundAndWarm`). A half-open probe that queues behind the cap and is shed hands its probe back, so the next request probes (`TestThrottledPartitionReturnsProbe`); until then the breaker stays half-open for at most `MaxQueueWait`, as it does behind a full partition without a throttle.
 
@@ -1104,7 +1124,7 @@ func (b *Breaker) Remaining() time.Duration // rest of the open period; 0 unless
 
 `Outcome` is `Success` (4xx included), `Failure` (transport error, timeout, 502, 503, 504) or `Status500`, which counts as a failure only with `CountStatus500`, so the rule lives in the breaker and the engine's `classify` only names what it saw. A probe carries the half-open period it was granted in: a probe still in flight when that period ended (it reopened, then a new period began) counts as an ordinary fetch and its `Cancel` frees nothing, so it cannot close or reopen a later period. `onChange` runs after the lock is released, so concurrent transitions may reach it out of order; anything that needs the current state reads `State()`. `rnd` is drawn once per open period, under the lock (`Config.Rand` must be safe for concurrent use and must not call the engine). Bucket times are monotonic offsets from the breaker's creation with a width of at least 1 ns, so any `Window` works and a wall-clock step cannot misplace a bucket. The trip check runs on every outcome, so a success that brings the window to `MinRequests` at `FailureRatio` trips it. A half-open period that lasts `MaxOpenFor` with its probes still held is replaced by a new one (new `gen`, probe count zero), so a probe that never reaches `Record` or `Cancel` cannot hold the breaker half-open forever. A doubling that overflows saturates at `MaxOpenFor`.
 
-Buckets rotate lazily: on each call, buckets whose `start` is older than `Window` are zeroed. `Allow` in `Open` returns `ErrCircuitOpen` until `openUntil`, then moves to `HalfOpen`. In `HalfOpen` it grants at most `HalfOpenProbes` probes and rejects everything else. `Record` with a probe: success closes (reset buckets, reset `openFor`), failure reopens with `openFor = min(openFor*2, MaxOpenFor)` and `openUntil = now + openFor*(0.8 + 0.4*rnd())`. `Record` in `Closed` updates the bucket and trips when volume and ratio thresholds hold.
+Buckets rotate lazily: on each call, buckets whose `start` is older than `Window` are zeroed. `Allow` in `Open` returns `ErrCircuitOpen` until `openUntil`, then moves to `HalfOpen`. In `HalfOpen` it grants at most `HalfOpenProbes` probes and rejects everything else. `Record` with a probe: success closes (reset buckets, reset `openFor`), failure reopens with `openFor = min(openFor*2, MaxOpenFor)` and `openUntil = now + openFor*(0.8 + 0.4*rnd())`. `Record` in `Closed` updates the bucket and trips when volume and ratio thresholds hold and, with `MinPartitions` above 1, either no outcome in the window was a success or the failures name at least `MinPartitions` partitions. `AllowFor` and `RecordFor` carry the partition hash; each bucket keeps up to 8 distinct failing hashes in a fixed array and a flag for "more than that", so the breaker's size does not depend on request input (P5). The count walks at most 80 hashes, only on a failure that already met the ratio. After a failed probe the breaker remembers that probe's partition (at most 8, oldest dropped, cleared when it closes) and `AllowFor` refuses it a probe for the first second of a half-open period (FR-CB-4).
 
 ### 8.4 `internal/missrate`
 
@@ -1136,7 +1156,9 @@ type counter struct {
 }
 ```
 
-`Observe(h, sample, miss)`: rotate if the window ended (evaluate anomalies, emit, reset); if `h` is tracked, increment; else if not full, add; else replace the counter with the minimum `reqs`, setting `reqs = min+1`, `err = min`, `misses = 1 if miss`. `misses` counts only since the counter was (re)assigned, so it is exact for that span and a lower bound overall. Anomaly check at rotation: `misses >= max(1, MinMisses)` and `misses / (reqs - err) >= MinRatio`, so replaced counters do not produce false alarms (`reqs - err` is at least 1 and at least `misses` for every live counter). Threshold ranges are validated by the engine's config, not here. Throttle updates go to the limiter through a callback that replaces the limiter's whole `throttled` map once per window (at most `TopK` entries), so throttles expire by themselves. Partition strings are safe to log: validation already rejected control bytes (FR-VAL-1).
+Locking (v1.1): the tracker has one `RWMutex`. A request whose partition has a counter adds to it atomically under the read lock. A hit whose partition has none returns under the read lock without recording anything: only a miss takes a counter, since only misses make an anomaly, so a site with more live paths than counters no longer replaces a counter on every hit, and hits from many goroutines no longer queue behind one mutex (benchmarks.md, v1.1 hardening). A miss without a counter, and the first request past the window's end, take the write lock.
+
+`Observe(h, sample, miss)`: rotate if the window ended (evaluate anomalies, emit, reset); if `h` is tracked, increment; else if it is a hit, record nothing; else if not full, add; else replace the counter with the minimum `reqs`, setting `reqs = min+1`, `err = min`, `misses = 1 if miss`. `misses` counts only since the counter was (re)assigned, so it is exact for that span and a lower bound overall. Anomaly check at rotation: `misses >= max(1, MinMisses)` and `misses / (reqs - err) >= MinRatio`, so replaced counters do not produce false alarms (`reqs - err` is at least 1 and at least `misses` for every live counter). Threshold ranges are validated by the engine's config, not here. Throttle updates go to the limiter through a callback that replaces the limiter's whole `throttled` map once per window (at most `TopK` entries), so throttles expire by themselves. Partition strings are safe to log: validation already rejected control bytes (FR-VAL-1).
 
 `New(cfg, emit)` returns nil when `TopK` or `Window` is not positive, and every method accepts a nil `*Tracker`, so a disabled tracker costs one nil check. Rotation is lazy: there is no timer, the first `Observe` at or past `start + Window` closes the window and is itself counted in the new one, so an idle engine reports its last window on the next request. `emit(end, found)` runs after the mutex is released (P8), once per closed window with that window's anomalies, an empty slice included; that one call is what replaces the limiter's `throttled` map. `end` is `start + Window` of the closed window, and it grows with every window. The receiver needs it for two reasons. A report can arrive long after its window when traffic stopped (rotation waits for a request), so a throttle is applied only while `end + Window` is still ahead. Once applied it holds until the next report replaces it, and the limiter drops it at `end + 2 * Window` if none comes (§8.2 says why two windows). And two callers stalled a full window apart can deliver their windows out of order, so the receiver keeps the report with the latest `end`.
 
@@ -1177,7 +1199,7 @@ type Event struct {
 | `EvRequest` | every `Serve` return; `Duration` is the time in `Serve`, `Status` the response status or `StatusCode(err)`, `Partition` empty when the request was refused before classification | `hit`, `stale`, `miss`, `revalidated` (the origin answered 304 to a forward made for a stale entry), `collapsed` (a follower answered from its flight's response or buffered 5xx; it sent nothing to the origin, and FR-MR-1 counts it like a hit), `pass` (includes a Range request no entry answered), `bypass`, `negative`, `error`. So `miss` plus `revalidated` plus `pass` plus `bypass` is the number of requests that fetched for themselves |
 | `EvFetchStart`, `EvFetchEnd` | around every `Origin.Fetch`, so twice for a conditional fetch repeated without validators; `EvFetchEnd` is the headers arriving or the error, with `Duration` since the start and `Status` (0 for an error). Every start has an end, also when the origin panics or calls `runtime.Goexit` | `foreground`, `background`, `warm`, `pass` |
 | `EvCoalesceJoin` | a request joined an existing flight | |
-| `EvCoalesceTimeout` | a wait on a flight expired and the request stopped waiting: any waiter that serves stale, or a follower that fetches for itself. The creator without a stale entry keeps waiting on its own fetch and emits nothing | `stale`, `direct` |
+| `EvCoalesceTimeout` | a wait on a flight expired and the request stopped waiting: any waiter that serves stale at `FollowerMaxWait`, or a follower that fetches for itself once the flight has outlived `Timeouts.Origin + Limiter.MaxQueueWait`. A waiter that keeps waiting emits nothing | `stale`, `direct` |
 | `EvShed` | limiter refused | `queue-full`, `queue-timeout`, `background` |
 | `EvStaleServed` | a stale response was served | `swr`, `sie`, `shed`, `circuit-open`, `coalesce-timeout` |
 | `EvRefreshDropped` | background refresh not started | `no-slot`, `circuit-open`, `closed` |
@@ -1270,7 +1292,7 @@ The memory store's hit path takes only a shard read lock plus an atomic frequenc
 | flight fetch | first requester of a key, background refresh | `MaxConcurrent + MaxQueue` flights | fetch done and published |
 | warm workers | `Warm` | `Warm.Concurrency` | `Warm` returns |
 
-All are added to `e.wg`. `Close` sets `closed`, waits on `wg` until its context ends, then cancels `bgCtx` (which cancels in-flight origin calls via the fetch context derived from it) and waits again.
+All are added to `e.wg`. `Close` sets `closed`, waits on `wg` until its context ends, then cancels `bgCtx` (which cancels in-flight origin calls via the fetch context derived from it) and waits again, for at most 5 s (`closeAbandon`). An `Origin` that ignores its context is the only way to outlast that; `Close` then returns the context's error joined with `errCloseAbandoned` and closes its own store, and the goroutines left behind get `ErrUnavailable` from it (FR-LCY-2).
 
 ## 13. Phase 1.x designs (M11 to M15)
 

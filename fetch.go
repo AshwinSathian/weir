@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/AshwinSathian/weir/internal/breaker"
@@ -27,15 +28,18 @@ var (
 // fetchResult is what fetch produced: a response the caller owns, or an
 // error. A buffered fetch also returns the body it read.
 type fetchResult struct {
-	resp     *Response
-	recv     http.Header // resp.Header as received, when it had Connection; storability reads it (FR-FWD-7, T-8)
-	body     []byte      // buffered fetches: the whole body; nil when over
-	notMod   bool        // resp is a 304 validating the prior entry (FR-SRV-3)
-	over     bool        // buffered fetches: the body exceeded MaxObjectBytes and resp.Body streams it all
-	stream   bool        // an event-stream response; resp.Body streams it, never stored (FR-STR-1)
-	reqTime  time.Time
-	respTime time.Time // when the buffered body ended, or the headers arrived
-	err      error
+	resp   *Response
+	recv   http.Header // resp.Header as received, when it had Connection; storability reads it (FR-FWD-7, T-8)
+	body   []byte      // buffered fetches: the whole body; nil when over
+	notMod bool        // resp is a 304 validating the prior entry (FR-SRV-3)
+	over   bool        // buffered fetches: the body exceeded MaxObjectBytes and resp.Body streams it all
+	stream bool        // an event-stream response; resp.Body streams it, never stored (FR-STR-1)
+	// unbuffered: a fetch-and-store that ran behind an over-size marker, so
+	// resp.Body streams the response and nothing is stored (FR-STO-12).
+	unbuffered bool
+	reqTime    time.Time
+	respTime   time.Time // when the buffered body ended, or the headers arrived
+	err        error
 	// bgDropped: a background fetch found no limiter slot, or a warm
 	// fetch's caller left. Foreground requests that joined its flight fetch
 	// again rather than fail (04 §6.8).
@@ -57,7 +61,7 @@ type fetchResult struct {
 // StreamIdle fails it (FR-TMO-2).
 //
 // A non-nil prior, which must have validators, makes the fetch conditional
-// (FR-SRV-3). A 304 whose strong ETag differs from prior's is discarded and
+// (FR-SRV-3). A 304 whose entity-tag does not weakly match prior's is discarded and
 // the request repeated without conditionals under the same timeout and
 // limiter slot. A 304 to that retry is an origin misbehaving; it passes
 // through unstored like any other 304.
@@ -65,7 +69,7 @@ type fetchResult struct {
 // A non-nil held is a slot the caller already acquired from limFor(c);
 // fetch releases it like its own.
 func (e *Engine) fetch(ctx context.Context, c *keys.Classified, origin Origin, class limiter.Class, buffered bool, prior *store.Entry, held *limiter.Permit) fetchResult {
-	probe, err := e.cb.Allow()
+	probe, err := e.cb.AllowFor(c.PartitionH)
 	if err == nil && class != limiter.Foreground && probe != (breaker.Probe{}) {
 		e.cb.Cancel(probe) // FR-CB-4: only foreground fetches probe
 		err = breaker.ErrCircuitOpen
@@ -101,7 +105,20 @@ func (e *Engine) fetch(ctx context.Context, c *keys.Classified, origin Origin, c
 	// A timer, not WithTimeout, so a stream can drop the deadline at its
 	// headers and keep the context (04 §14).
 	tctx, cancelCause := context.WithCancelCause(ctx)
-	deadline := time.AfterFunc(e.timeoutFor(class), func() { cancelCause(ErrOriginTimeout) })
+	// FR-CB-1, T-39: the origin reads a request body from the client, so a
+	// fetch that fails while that read is stuck or broken says nothing about
+	// the origin. upload is nil for a fetch without a body.
+	var upload *uploadBody
+	if c.HasBody && req.Body != nil {
+		upload = &uploadBody{ReadCloser: req.Body, ctx: tctx}
+		r := *req // c.Forwarded is not modified
+		r.Body = upload
+		req = &r
+	}
+	deadline := time.AfterFunc(e.timeoutFor(class), func() {
+		upload.sample() // before the cancel, which ends the blocked Read
+		cancelCause(ErrOriginTimeout)
+	})
 	cancel := func() { deadline.Stop(); cancelCause(nil) }
 	fwd := req
 	if prior != nil {
@@ -111,7 +128,7 @@ func (e *Engine) fetch(ctx context.Context, c *keys.Classified, origin Origin, c
 	// headers arriving, or the error; its Status is 0 for an error.
 	// ponytail: with no Observer the end event still costs one clock read
 	// per fetch; guard it if a profile ever shows it next to an origin call.
-	reason := fetchReason(class, buffered)
+	reason := fetchReason(class, c.Class == keys.ClassPass)
 	var reqTime time.Time
 	send := func(r *Request) (resp *Response, err error) {
 		reqTime = time.Now()
@@ -129,7 +146,7 @@ func (e *Engine) fetch(ctx context.Context, c *keys.Classified, origin Origin, c
 		return safeFetch(tctx, origin, r)
 	}
 	resp, err := send(fwd)
-	if err == nil && prior != nil && resp.StatusCode == http.StatusNotModified && strongETagMismatch(resp.Header, prior.ETag) {
+	if err == nil && prior != nil && resp.StatusCode == http.StatusNotModified && etagMismatch(resp.Header, prior.ETag) {
 		closeBody(resp)
 		prior = nil
 		resp, err = send(req)
@@ -141,10 +158,15 @@ func (e *Engine) fetch(ctx context.Context, c *keys.Classified, origin Origin, c
 			cancelProbe()
 		} else {
 			settled = true
-			e.cb.Record(probe, o)
+			e.cb.RecordFor(probe, c.PartitionH, o)
 		}
 	}
 	if err != nil {
+		if berr := upload.blame(); berr != nil && ctx.Err() == nil {
+			cancelProbe() // not an outcome of the origin
+			cancel()
+			return fetchResult{err: berr}
+		}
 		record(breaker.Failure)
 		cancel()
 		return fetchResult{err: timeoutOrOrigin(ctx, tctx, err)}
@@ -175,6 +197,7 @@ func (e *Engine) fetch(ctx context.Context, c *keys.Classified, origin Origin, c
 		res.respTime = time.Now()
 		stampDate(resp.Header, res.respTime)
 		res.stream = buffered
+		res.unbuffered = !buffered
 		if resp.Body == http.NoBody {
 			cancel() // nothing left to bound; keeps NoBody visible to adapters
 		} else {
@@ -184,6 +207,17 @@ func (e *Engine) fetch(ctx context.Context, c *keys.Classified, origin Origin, c
 		return res
 	}
 	limit := e.cfg.Storable.MaxObjectBytes
+	if declaredLength(resp.Header) > limit {
+		// The length already says it cannot be stored: stream it without
+		// holding MaxObjectBytes of it in memory first (T-18).
+		record(outcome(resp))
+		res.respTime = time.Now()
+		stampDate(resp.Header, res.respTime)
+		deadline.Stop()
+		resp.Body = newIdleBody(tctx, resp.Body, cancelCause, e.cfg.Timeouts.StreamIdle)
+		res.over = true
+		return res
+	}
 	body, rerr := readBounded(resp.Body, limit+1)
 	res.respTime = time.Now()
 	stampDate(resp.Header, res.respTime)
@@ -211,15 +245,28 @@ func (e *Engine) fetch(ctx context.Context, c *keys.Classified, origin Origin, c
 	return res
 }
 
-// fetchReason is the EvFetchStart and EvFetchEnd reason (04 §9.2). Only a
-// pass-through fetch is unbuffered.
-func fetchReason(class limiter.Class, buffered bool) string {
+// declaredLength returns a response's Content-Length when it has exactly one
+// line of digits, else -1: a length Weir cannot read decides nothing.
+func declaredLength(h http.Header) int64 {
+	cl := h["Content-Length"]
+	if len(cl) != 1 {
+		return -1
+	}
+	n, ok := digits(cl[0])
+	if !ok {
+		return -1
+	}
+	return n
+}
+
+// fetchReason is the EvFetchStart and EvFetchEnd reason (04 §9.2).
+func fetchReason(class limiter.Class, pass bool) string {
 	switch {
 	case class == limiter.Background:
 		return "background"
 	case class == limiter.Warm:
 		return "warm"
-	case !buffered:
+	case pass:
 		return "pass"
 	}
 	return "foreground"
@@ -252,7 +299,14 @@ func (e *Engine) shed(c *keys.Classified, class limiter.Class, err error) fetchR
 	if class == limiter.Background {
 		emit(e.cfg.Observer, Event{Kind: EvRefreshDropped, Time: now, Partition: c.Partition, Reason: "no-slot"})
 	}
-	return fetchResult{err: &RetryError{Err: ErrShed, After: e.cfg.Limiter.MaxQueueWait}, bgDropped: class == limiter.Background}
+	// FR-LIM-5: the queue wait plus a whole number of seconds, up to half
+	// the wait again, so the clients shed in one burst do not all come back
+	// in the same second. Whole seconds, because Retry-After has no finer
+	// unit: a fraction would round every draw up to the same value.
+	after := e.cfg.Limiter.MaxQueueWait
+	spread := after/2 + time.Second
+	after += (time.Duration(float64(spread)*e.cfg.Rand()) / time.Second) * time.Second
+	return fetchResult{err: &RetryError{Err: ErrShed, After: after}, bgDropped: class == limiter.Background}
 }
 
 // circuitOpen is the fetch result while the breaker refuses fetches
@@ -311,6 +365,9 @@ type readCloser struct {
 	io.Closer
 }
 
+// Trailer forwards the trailers of the body being read (FR-FWD-8).
+func (r readCloser) Trailer() http.Header { return trailerOf(r.Closer) }
+
 // safeFetch calls origin.Fetch and turns misbehavior into errors: a panic,
 // (nil, nil), and a status net/http would reject or treat as interim (NFR-2).
 // A nil Header or Body on a valid response is filled in.
@@ -368,33 +425,97 @@ func timeoutOrOrigin(ctx, tctx context.Context, err error) error {
 	return &OriginError{Err: err}
 }
 
-// idleBody is a streamed origin body (FR-TMO-2). Each Read arms a timer of
-// idle; a Read still blocked when it fires cancels the fetch context with
-// ErrOriginTimeout. Time the consumer spends between reads does not count.
-// Close cancels the context.
+// uploadBody is a request body on its way to the origin. It records whether
+// the client, not the origin, is why a fetch failed (FR-CB-1, T-39): a Read
+// that returned an error while the fetch was still live, or a Read still
+// blocked when the origin deadline fired. An origin that is slow to read the
+// body, or slow to answer after it, leaves no Read blocked and is counted as
+// an origin failure like any other.
+type uploadBody struct {
+	io.ReadCloser
+	ctx     context.Context // the fetch context
+	reading atomic.Bool     // a Read is in progress
+	failed  atomic.Bool     // a Read failed while the fetch was live
+	stalled atomic.Bool     // a Read was in progress when the deadline fired
+}
+
+func (b *uploadBody) Read(p []byte) (int, error) {
+	b.reading.Store(true)
+	n, err := b.ReadCloser.Read(p)
+	b.reading.Store(false)
+	// A Read that the fetch's own cancellation ended is not the client's.
+	if err != nil && !errors.Is(err, io.EOF) && b.ctx.Err() == nil {
+		b.failed.Store(true)
+	}
+	return n, err
+}
+
+// sample runs when the origin deadline fires, before the fetch is cancelled.
+func (b *uploadBody) sample() {
+	if b != nil && b.reading.Load() {
+		b.stalled.Store(true)
+	}
+}
+
+// blame returns the error for a fetch that failed because of the client's
+// body, or nil when the body is not the reason.
+func (b *uploadBody) blame() error {
+	switch {
+	case b == nil:
+		return nil
+	case b.stalled.Load():
+		return ErrRequestBodyTimeout
+	case b.failed.Load():
+		return ErrRequestBody
+	}
+	return nil
+}
+
+// errStreamUnread is the cause set on a stream whose consumer read nothing
+// for Timeouts.StreamIdle (FR-TMO-2, T-18).
+var errStreamUnread = errors.New("weir: stream not read within Timeouts.StreamIdle")
+
+// idleBody is a streamed origin body (FR-TMO-2). One timer of idle is always
+// armed while the body is open. It is reset when a Read starts and when it
+// returns, so it fires when the origin sends nothing for idle (the fetch ends
+// with ErrOriginTimeout) and also when the consumer asks for nothing for idle
+// (errStreamUnread): a reader that stopped reading must not hold the origin
+// connection (T-18). Close cancels the context.
 type idleBody struct {
 	io.ReadCloser
-	ctx    context.Context
-	cancel context.CancelCauseFunc
-	idle   time.Duration
-	timer  *time.Timer
+	ctx     context.Context
+	cancel  context.CancelCauseFunc
+	idle    time.Duration
+	timer   *time.Timer
+	reading atomic.Bool // a Read is waiting on the origin
 }
 
 func newIdleBody(ctx context.Context, rc io.ReadCloser, cancel context.CancelCauseFunc, idle time.Duration) *idleBody {
 	b := &idleBody{ReadCloser: rc, ctx: ctx, cancel: cancel, idle: idle}
-	b.timer = time.AfterFunc(idle, func() { cancel(ErrOriginTimeout) })
-	b.timer.Stop()
+	b.timer = time.AfterFunc(idle, func() {
+		if b.reading.Load() {
+			cancel(ErrOriginTimeout)
+		} else {
+			cancel(errStreamUnread)
+		}
+	})
 	return b
 }
 
 func (b *idleBody) Read(p []byte) (int, error) {
+	b.reading.Store(true)
 	b.timer.Reset(b.idle)
 	n, err := b.ReadCloser.Read(p)
-	b.timer.Stop()
-	if err != nil && !errors.Is(err, io.EOF) && b.ctx.Err() != nil {
-		err = context.Cause(b.ctx) // the origin's own error cannot pose as the timeout (04 §1.3)
+	b.reading.Store(false)
+	if err != nil {
+		b.timer.Stop() // the stream is over; nothing is left to bound
+		if !errors.Is(err, io.EOF) && b.ctx.Err() != nil {
+			err = context.Cause(b.ctx) // the origin's own error cannot pose as the timeout (04 §1.3)
+		}
+		return n, err
 	}
-	return n, err
+	b.timer.Reset(b.idle)
+	return n, nil
 }
 
 func (b *idleBody) Close() error {
@@ -402,6 +523,22 @@ func (b *idleBody) Close() error {
 	err := b.ReadCloser.Close()
 	b.cancel(nil)
 	return err
+}
+
+// StreamIdle reports the idle bound of a live origin stream. weirhttp reads
+// it through this method to give its writes the same bound (FR-TMO-2).
+func (b *idleBody) StreamIdle() time.Duration { return b.idle }
+
+// Trailer returns the trailers of the origin response, complete once Read has
+// returned io.EOF (FR-FWD-8). Nil when the Origin's body reports none.
+func (b *idleBody) Trailer() http.Header { return trailerOf(b.ReadCloser) }
+
+// trailerOf asks an origin body, or a wrapper around one, for its trailers.
+func trailerOf(v any) http.Header {
+	if t, ok := v.(interface{ Trailer() http.Header }); ok {
+		return t.Trailer()
+	}
+	return nil
 }
 
 // cancelOnClose runs cancel after the body closes.
@@ -414,6 +551,17 @@ func (c *cancelOnClose) Close() error {
 	err := c.ReadCloser.Close()
 	c.cancel()
 	return err
+}
+
+// Trailer forwards the wrapped stream's trailers (FR-FWD-8).
+func (c *cancelOnClose) Trailer() http.Header { return trailerOf(c.ReadCloser) }
+
+// StreamIdle forwards the wrapped stream's idle bound, 0 when it has none.
+func (c *cancelOnClose) StreamIdle() time.Duration {
+	if s, ok := c.ReadCloser.(interface{ StreamIdle() time.Duration }); ok {
+		return s.StreamIdle()
+	}
+	return 0
 }
 
 // timeoutFor is the origin deadline of a fetch of class (FR-TMO-1):

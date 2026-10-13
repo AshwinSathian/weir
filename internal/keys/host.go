@@ -66,9 +66,12 @@ func normalizeHost(scheme, host string) (string, bool) {
 	return name + ":" + strconv.Itoa(n), true // drops leading zeros
 }
 
+// hostByte reports a byte a host may hold. '_' is not a hostname character in
+// DNS, but container and cluster service names use it (app_backend:8080) and
+// it has no meaning to a URL parser or to the key, so it is a plain byte here.
 func hostByte(c byte) bool {
 	return 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z' || '0' <= c && c <= '9' ||
-		c == '.' || c == '-' || c == ':' || c == '[' || c == ']'
+		c == '.' || c == '-' || c == '_' || c == ':' || c == '[' || c == ']'
 }
 
 // parsePort accepts 1-65535 in decimal, leading zeros allowed.

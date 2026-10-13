@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -287,21 +289,43 @@ func TestKettleUserAgent(t *testing.T) {
 	})
 }
 
-// T-5, FR-FWD-1: the body of a GET never reaches the origin.
-func TestFatGETBodyDropped(t *testing.T) {
+// FR-FWD-10, T-5: a GET that carries a body is passed through with it and
+// never touches the cache. Before v1.1 the body was dropped and the answer
+// cached, so a search API that reads its query from the body answered one
+// query with another's result.
+func TestGetWithBodyPassesThrough(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		o := testorigin.NewChecked(t, 64, 16)
-		o.Default(cacheable("x"))
+		o := testorigin.New()
+		o.Default(testorigin.Behavior{Func: func(r *weir.Request) (*weir.Response, error) {
+			var q []byte
+			if r.Body != nil {
+				q, _ = io.ReadAll(r.Body)
+			}
+			return &weir.Response{StatusCode: 200, Header: http.Header{"Cache-Control": {"max-age=60"}},
+				Body: io.NopCloser(strings.NewReader("result for " + string(q)))}, nil
+		}})
 		e := newEngine(t, cacheCfg)
 		defer closeEngine(t, e)
+		search := func(q string) (*weir.Response, string) {
+			r := getReq("/_search")
+			r.Body = io.NopCloser(strings.NewReader(q))
+			r.Header.Set("Content-Length", strconv.Itoa(len(q)))
+			return serve(t, e, r, o)
+		}
 
-		r := getReq("/a")
-		r.Body = io.NopCloser(strings.NewReader("poison"))
-		r.Header.Set("Content-Length", "6")
-		serve(t, e, r, o)
-		reqs := o.Requests()
-		if len(reqs) != 1 || reqs[0].Body != nil || len(reqs[0].Header["Content-Length"]) != 0 {
-			t.Fatalf("forwarded %+v", reqs)
+		for _, q := range []string{"cats", "dogs"} {
+			resp, body := search(q)
+			if body != "result for "+q || resp.Cache.Hit || resp.Cache.Stored || resp.Cache.Fwd != weir.FwdBypass {
+				t.Fatalf("query %q: body %q, cache %+v; want its own answer, passed through", q, body, resp.Cache)
+			}
+		}
+		// Nothing was stored under the URL: a plain GET is a miss, and what it
+		// stores is not what a GET with a body gets afterwards.
+		if resp, body := serve(t, e, getReq("/_search"), o); resp.Cache.Hit || body != "result for " {
+			t.Fatalf("plain GET: body %q, cache %+v; want a miss", body, resp.Cache)
+		}
+		if resp, body := search("birds"); body != "result for birds" || resp.Cache.Hit {
+			t.Fatalf("GET with a body after the URL was cached: body %q, cache %+v", body, resp.Cache)
 		}
 	})
 }
@@ -1158,6 +1182,51 @@ func TestForwardedResponseGetsDate(t *testing.T) {
 		resp, _ := serve(t, e, getReq("/a"), o)
 		if !resp.Cache.Hit || resp.Header.Get("Date") != want {
 			t.Fatalf("hit = %v Date = %q, want the miss's %q", resp.Cache.Hit, resp.Header.Get("Date"), want)
+		}
+	})
+}
+
+// FR-FWD-9, RFC 9110 §7.6.2: a TRACE or OPTIONS request with Max-Forwards 0
+// is answered by Weir, and with a higher value goes forward with one less.
+func TestMaxForwards(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var seen []string
+		o := weir.OriginFunc(func(_ context.Context, r *weir.Request) (*weir.Response, error) {
+			seen = append(seen, r.Method+" "+r.Header.Get("Max-Forwards"))
+			return &weir.Response{StatusCode: 200, Header: http.Header{}, Body: http.NoBody}, nil
+		})
+		e := newEngine(t, cacheCfg)
+		defer closeEngine(t, e)
+		req := func(method, mf string) *weir.Request {
+			r := getReq("/a")
+			r.Method = method
+			if mf != "" {
+				r.Header.Set("Max-Forwards", mf)
+			}
+			return r
+		}
+
+		if resp, _ := serve(t, e, req(http.MethodOptions, "0"), o); resp.StatusCode != http.StatusNoContent || resp.Header.Get("Allow") == "" {
+			t.Fatalf("OPTIONS with Max-Forwards 0: %d %v, want 204 with Allow", resp.StatusCode, resp.Header)
+		}
+		if resp, _ := serve(t, e, req(http.MethodTrace, "0"), o); resp.StatusCode != http.StatusMethodNotAllowed {
+			t.Fatalf("TRACE with Max-Forwards 0: %d, want 405", resp.StatusCode)
+		}
+		if len(seen) != 0 {
+			t.Fatalf("the origin saw %v, want nothing forwarded at 0", seen)
+		}
+		client := req(http.MethodOptions, "3")
+		serve(t, e, client, o)
+		serve(t, e, req(http.MethodTrace, "1"), o)
+		serve(t, e, req(http.MethodOptions, ""), o)
+		serve(t, e, req(http.MethodOptions, "soon"), o)
+		serve(t, e, req(http.MethodPost, "0"), o) // only TRACE and OPTIONS have the field
+		want := []string{"OPTIONS 2", "TRACE 0", "OPTIONS ", "OPTIONS soon", "POST 0"}
+		if !slices.Equal(seen, want) {
+			t.Fatalf("forwarded %v, want %v", seen, want)
+		}
+		if client.Header.Get("Max-Forwards") != "3" {
+			t.Fatal("the client's request header was modified")
 		}
 	})
 }

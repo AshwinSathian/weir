@@ -187,7 +187,8 @@ func TestNormalizeHost(t *testing.T) {
 		{"http", "exa%6Dple.com", "", false},
 		{"http", "a/b", "", false},
 		{"http", "a@b", "", false},
-		{"http", "a_b", "", false},
+		{"http", "a_b", "a_b", true}, // service names in containers and clusters
+		{"http", "App_Backend:8080", "app_backend:8080", true},
 		{"http", "exämple.com", "", false},
 		{"http", ".", "", false},
 		{"http", ".:80", "", false},

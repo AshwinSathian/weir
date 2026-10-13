@@ -15,6 +15,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/caddyserver/caddy/v2"
 	"github.com/caddyserver/caddy/v2/modules/caddyhttp"
 	"github.com/caddyserver/caddy/v2/modules/caddyhttp/headers"
 	"github.com/caddyserver/caddy/v2/modules/caddyhttp/reverseproxy"
@@ -278,35 +279,45 @@ func TestForwardedForWarning(t *testing.T) {
 	})
 }
 
-// T-45, 08 §6: per-client placeholders behind weir leak the first client's
-// data to the origin on cacheable routes.
+// T-45, 08 §6: a placeholder behind weir that still depends on the first
+// client is warned about. With a replacer per forwarded request (the default)
+// that is the peer address and Caddy variables; with client_placeholders it
+// is everything the client's replacer reads.
 func TestPlaceholderHeaderWarning(t *testing.T) {
 	self := &Handler{Name: "x"}
+	legacy := &Handler{Name: "x", ClientPlaceholders: true}
 	strip := []string{"X-Forwarded-For"}
 	cases := []struct {
-		name string
-		ops  *headers.HeaderOps
-		want bool
+		name         string
+		ops          *headers.HeaderOps
+		want, legacy bool
 	}{
-		{"remote_host in header_up", &headers.HeaderOps{Delete: strip, Set: http.Header{"X-Real-Ip": {"{http.request.remote.host}"}}}, true},
-		{"client cookie in header_up", &headers.HeaderOps{Delete: strip, Set: http.Header{"X-Foo": {"{http.request.header.Cookie}"}}}, true},
-		{"shortcut placeholder in Add", &headers.HeaderOps{Delete: strip, Add: http.Header{"X-Ip": {"{remote_host}"}}}, true},
-		{"static value is quiet", &headers.HeaderOps{Delete: strip, Set: http.Header{"X-Env": {"prod"}}}, false},
-		{"request uuid", &headers.HeaderOps{Delete: strip, Set: http.Header{"X-Request-Id": {"{http.request.uuid}"}}}, true},
-		{"tls server name", &headers.HeaderOps{Delete: strip, Set: http.Header{"X-Sni": {"{http.request.tls.server_name}"}}}, true},
-		{"host placeholder is keyed and quiet", &headers.HeaderOps{Delete: strip, Set: http.Header{"X-Host": {"{http.request.host}"}}}, false},
+		{"remote_host in header_up", &headers.HeaderOps{Delete: strip, Set: http.Header{"X-Real-Ip": {"{http.request.remote.host}"}}}, true, true},
+		{"client cookie in header_up", &headers.HeaderOps{Delete: strip, Set: http.Header{"X-Foo": {"{http.request.header.Cookie}"}}}, false, true},
+		{"shortcut placeholder in Add", &headers.HeaderOps{Delete: strip, Add: http.Header{"X-Ip": {"{remote_host}"}}}, true, true},
+		{"caddy variable", &headers.HeaderOps{Delete: strip, Set: http.Header{"X-Geo": {"{http.vars.country}"}}}, true, true},
+		{"static value is quiet", &headers.HeaderOps{Delete: strip, Set: http.Header{"X-Env": {"prod"}}}, false, false},
+		{"request uuid", &headers.HeaderOps{Delete: strip, Set: http.Header{"X-Request-Id": {"{http.request.uuid}"}}}, false, true},
+		{"tls server name", &headers.HeaderOps{Delete: strip, Set: http.Header{"X-Sni": {"{http.request.tls.server_name}"}}}, false, true},
+		{"host placeholder is keyed and quiet", &headers.HeaderOps{Delete: strip, Set: http.Header{"X-Host": {"{http.request.host}"}}}, false, false},
 	}
 	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			got := chainWarnings([]caddyhttp.MiddlewareHandler{self, proxyWith(c.ops)}, self)
-			has := false
-			for _, w := range got {
-				has = has || strings.Contains(w, "placeholder")
-			}
-			if has != c.want {
-				t.Fatalf("warnings = %q, want placeholder warning: %v", got, c.want)
-			}
-		})
+		for _, m := range []struct {
+			name string
+			h    *Handler
+			want bool
+		}{{"own replacer", self, c.want}, {"client_placeholders", legacy, c.legacy}} {
+			t.Run(c.name+"/"+m.name, func(t *testing.T) {
+				got := chainWarnings([]caddyhttp.MiddlewareHandler{m.h, proxyWith(c.ops)}, m.h)
+				has := false
+				for _, w := range got {
+					has = has || strings.Contains(w, "placeholder")
+				}
+				if has != m.want {
+					t.Fatalf("warnings = %q, want placeholder warning: %v", got, m.want)
+				}
+			})
+		}
 	}
 	t.Run("a header handler after weir is checked too", func(t *testing.T) {
 		hh := &headers.Handler{Request: &headers.HeaderOps{Set: http.Header{"X-Ip": {"{http.request.remote.host}"}}}}
@@ -414,7 +425,7 @@ func TestNextErrorTextIsHidden(t *testing.T) {
 			log := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
 			next := caddyhttp.HandlerFunc(func(http.ResponseWriter, *http.Request) error { return boom })
 			fwd := &weir.Request{Method: http.MethodGet, Scheme: "http", Host: "example.com", Path: "/a", Header: http.Header{}}
-			_, err := newNextOrigin(next, base, log).Fetch(context.Background(), fwd)
+			_, err := newNextOrigin(next, base, log, false).Fetch(context.Background(), fwd)
 			if !errors.Is(err, weir.ErrOrigin) || strings.Contains(err.Error(), "10.0.0.7") {
 				t.Fatalf("err = %v", err)
 			}
@@ -434,7 +445,7 @@ func TestNextOriginCopiesVars(t *testing.T) {
 		caddyhttp.SetVar(r.Context(), "k", "fetch")
 		return nil
 	})
-	o := newNextOrigin(next, base, nil)
+	o := newNextOrigin(next, base, nil, false)
 	fwd := &weir.Request{Method: http.MethodGet, Scheme: "http", Host: "example.com", Path: "/a", Header: http.Header{}}
 	resp, err := o.Fetch(ctx, fwd)
 	if err != nil {
@@ -556,4 +567,93 @@ func TestBackgroundRefreshNeverSeesClientWriter(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
+}
+
+// FR-FAIR-4: the engine's client is Caddy's client_ip, the address
+// trusted_proxies resolves, and the peer address when Caddy set none.
+func TestRequestForClient(t *testing.T) {
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "http://example.com/a", nil)
+	r.RemoteAddr = "10.0.0.5:4711"
+	if got := requestFor(r).Client; got != "10.0.0.5" {
+		t.Fatalf("Client without client_ip = %q, want the peer address", got)
+	}
+	vars := map[string]any{caddyhttp.ClientIPVarKey: "203.0.113.9"}
+	r = r.WithContext(context.WithValue(r.Context(), caddyhttp.VarsCtxKey, vars))
+	if got := requestFor(r).Client; got != "203.0.113.9" {
+		t.Fatalf("Client = %q, want Caddy's client_ip", got)
+	}
+}
+
+// placeholderOrigin runs one fetch of fwd for the client request base and
+// returns what the handler behind weir read through its replacer.
+func placeholderOrigin(t *testing.T, base *http.Request, fwd *weir.Request, clientPlaceholders bool, tmpl string) string {
+	t.Helper()
+	var got string
+	next := caddyhttp.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) error {
+		repl := r.Context().Value(caddy.ReplacerCtxKey).(*caddy.Replacer)
+		got = repl.ReplaceAll(tmpl, "")
+		return nil
+	})
+	resp, err := newNextOrigin(next, base, nil, clientPlaceholders).Fetch(base.Context(), fwd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	_ = resp.Body.Close()
+	return got
+}
+
+// clientRequest is a client request as Caddy hands it to weir: a replacer
+// bound to it, its variable table, and Caddy's copy of the original request.
+func clientRequest() *http.Request {
+	vars := map[string]any{"tenant": "acme"}
+	ctx := context.WithValue(context.Background(), caddyhttp.VarsCtxKey, vars)
+	r := httptest.NewRequestWithContext(ctx, http.MethodGet, "http://example.com/a?id=1&utm_source=mail", nil)
+	r.Header.Set("Cookie", "session=secret")
+	r.Header.Set("X-Unkeyed", "client-chosen")
+	r.Header.Set("Accept-Encoding", "gzip, br")
+	orig := *r
+	u := *r.URL
+	orig.URL = &u
+	r = r.WithContext(context.WithValue(r.Context(), caddyhttp.OriginalRequestCtxKey, orig))
+	caddyhttp.NewTestReplacer(r)
+	return r
+}
+
+// T-4, T-45, INV-1: behind weir a placeholder reads the forwarded request.
+// Before v1.1 it read the request of the client that triggered the fetch, so
+// an unkeyed header, a stripped cookie or a dropped query parameter could be
+// written into a fetch whose response everyone shares.
+func TestPlaceholdersReadForwardedRequest(t *testing.T) {
+	fwd := &weir.Request{Method: http.MethodGet, Scheme: "http", Host: "example.com", Path: "/a", RawQuery: "id=1",
+		Header: http.Header{"Accept-Encoding": {"gzip"}}}
+	const tmpl = "{http.request.header.X-Unkeyed}|{http.request.cookie.session}|{http.request.uri}|" +
+		"{http.request.orig_uri}|{http.request.uri.query.utm_source}|{http.request.header.Accept-Encoding}|{http.vars.tenant}"
+
+	got := placeholderOrigin(t, clientRequest(), fwd, false, tmpl)
+	if want := "|" + "|/a?id=1|/a?id=1||gzip|acme"; got != want {
+		t.Fatalf("behind weir the placeholders read %q, want %q", got, want)
+	}
+	// client_placeholders is the old behavior, for sites that need it.
+	got = placeholderOrigin(t, clientRequest(), fwd, true, tmpl)
+	if want := "client-chosen|secret|/a?id=1&utm_source=mail|http://example.com/a?id=1&utm_source=mail|mail|gzip, br|acme"; got != want {
+		t.Fatalf("with client_placeholders the placeholders read %q, want %q", got, want)
+	}
+}
+
+// T-45: the client's own replacer and variable table are not written by the
+// fetch, which may run after the client's request has ended.
+func TestForwardedReplacerLeavesClientAlone(t *testing.T) {
+	base := clientRequest()
+	clientRepl := base.Context().Value(caddy.ReplacerCtxKey).(*caddy.Replacer)
+	vars := base.Context().Value(caddyhttp.VarsCtxKey).(map[string]any)
+	started := vars["start_time"]
+	fwd := &weir.Request{Method: http.MethodGet, Scheme: "http", Host: "example.com", Path: "/a", Header: http.Header{}}
+	placeholderOrigin(t, base, fwd, false, "{http.request.uri}")
+	if got := clientRepl.ReplaceAll("{http.request.header.X-Unkeyed}", ""); got != "client-chosen" {
+		t.Fatalf("the client's replacer now reads %q", got)
+	}
+	if vars["start_time"] != started || len(vars) != 2 {
+		t.Fatalf("the client's variable table was written: %v", vars)
+	}
 }

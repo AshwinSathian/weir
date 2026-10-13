@@ -1341,6 +1341,11 @@ func TestInvalidationFloodLeavesGroupsServable(t *testing.T) {
 				defer closeEngine(t, e)
 
 				serve(t, e, getReq("/a"), o)
+				// The flooded URIs hold records: an unsafe request to a URI
+				// with none writes no epoch on an in-process store (FR-INV-1).
+				for i := range 200 {
+					serve(t, e, getReq("/flood"+strconv.Itoa(i)), o)
+				}
 				time.Sleep(time.Second)
 				for i := range 200 {
 					serve(t, e, postReq("/flood"+strconv.Itoa(i)), o)

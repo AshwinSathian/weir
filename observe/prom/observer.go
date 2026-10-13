@@ -2,6 +2,7 @@ package prom
 
 import (
 	"strings"
+	"sync/atomic"
 
 	"github.com/prometheus/client_golang/prometheus"
 
@@ -28,6 +29,9 @@ type Observer struct {
 	anomalies       *prometheus.CounterVec
 	evictions       *prometheus.CounterVec
 	all             []prometheus.Collector
+	// requestBy holds the requests child of each known outcome once an event
+	// has resolved it, so series still appear on their first event.
+	requestBy [len(requestOutcomes)]atomic.Pointer[counter]
 }
 
 var _ weir.Observer = (*Observer)(nil)
@@ -75,7 +79,22 @@ func vec(name, help string, labels ...string) *prometheus.CounterVec {
 func (o *Observer) Observe(ev weir.Event) {
 	switch ev.Kind {
 	case weir.EvRequest:
-		o.requests.WithLabelValues(label(ev.Reason)).Inc()
+		// Every Serve ends here, so the counter of each known outcome is
+		// resolved once and kept: the label lookup hashes the value and takes
+		// the vector's lock, about 90 ns a request across 12 cores, against
+		// one atomic add (BenchmarkObserveRequest).
+		i := requestOutcome(ev.Reason)
+		if i < 0 {
+			o.requests.WithLabelValues(label(ev.Reason)).Inc()
+			return
+		}
+		c := o.requestBy[i].Load()
+		if c == nil {
+			// A racing first event resolves the same child; either store wins.
+			c = &counter{o.requests.WithLabelValues(ev.Reason)}
+			o.requestBy[i].Store(c)
+		}
+		c.Inc()
 	case weir.EvFetchEnd:
 		o.fetches.WithLabelValues(label(ev.Reason), fetchResult(ev.Status)).Inc()
 		o.fetchSeconds.WithLabelValues(label(ev.Reason)).Observe(ev.Duration.Seconds())
@@ -105,6 +124,23 @@ func (o *Observer) Observe(ev weir.Event) {
 		// Status is the batch size (04 §9.2).
 		o.evictions.WithLabelValues(label(ev.Reason)).Add(float64(max(ev.Status, 0)))
 	}
+}
+
+// counter boxes a resolved child so an atomic.Pointer can hold it.
+type counter struct{ prometheus.Counter }
+
+// requestOutcomes are the EvRequest reasons (04 §9.2). A reason outside the
+// list still counts, through the label lookup.
+var requestOutcomes = [...]string{"hit", "miss", "stale", "collapsed", "bypass", "pass", "revalidated", "negative", "error"}
+
+// requestOutcome returns reason's index in requestOutcomes, or -1.
+func requestOutcome(reason string) int {
+	for i, r := range requestOutcomes {
+		if r == reason {
+			return i
+		}
+	}
+	return -1
 }
 
 // label makes a reason safe for Prometheus, which panics on invalid UTF-8,

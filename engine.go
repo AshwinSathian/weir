@@ -46,14 +46,22 @@ type Engine struct {
 	flights   coalesce.Table
 	lim       *limiter.Limiter
 	upl       *limiter.Limiter          // requests with a body (FR-LIM-7)
+	gate      *limiter.Limiter          // per-client admission, keyed by client; nil when MaxPerClient is 0 (FR-FAIR-4)
 	cb        *breaker.Breaker          // nil when Breaker.Disable
 	mode      atomic.Pointer[modeState] // nil: ModeNormal (FR-MODE-1)
 	cr        *cookieReport             // nil when disabled (FR-OBS-5)
 	mr        *missrate.Tracker         // nil when MissRate.Disable
 	badGroup  sync.Once                 // one warning for invalid Cache-Group-Invalidation (FR-OBS-3)
+	// exactInvalidation: one primary key leads to every stored response of a
+	// URI (no keyed header, keyed cookie or experiment), and the store is in
+	// this process and counts the fetches in progress for every engine that
+	// shares it (store.FetchTracker). Set once by New (needsEpoch, FR-INV-1).
+	// Engines that share a store are assumed to share these key settings, as
+	// the Caddy adapter's pool arranges outside the seconds of a reload.
+	exactInvalidation bool
 
-	mu        sync.Mutex  // orders setting closed against wg.Add in goBackground
-	closed    atomic.Bool // written under mu; read without it on the Serve path
+	mu        sync.RWMutex // orders setting closed (write) against wg.Add in goBackground (read)
+	closed    atomic.Bool  // written under mu; read without it on the Serve path
 	closeDone chan struct{}
 	bgCtx     context.Context // canceled after Close's grace period
 	bgCancel  context.CancelFunc
@@ -73,7 +81,7 @@ func New(cfg Config) (*Engine, error) {
 		if !fromLimit {
 			c.Logger.Warn("weir: no GOMEMLIMIT set; the memory store uses 256 MiB. Set GOMEMLIMIT to size it at 40% of the limit")
 		}
-		mc := memory.Config{MaxBytes: n, Shards: defaultShards(n, c.Storable.MaxObjectBytes)}
+		mc := memory.Config{MaxBytes: n, Shards: memory.Shards(n, c.Storable.MaxObjectBytes)}
 		if obs := c.Observer; obs != nil {
 			// 04 §9.2: Status is how many records left the queue Reason names.
 			mc.OnEvict = func(queue string, n int) {
@@ -101,22 +109,36 @@ func New(cfg Config) (*Engine, error) {
 	e := &Engine{cfg: c, kcfg: keysConfig(&c), sg: newStoreGuard(c.Store, c.Timeouts.Store, c.Observer), ownStore: own, cr: newCookieReport(&c), closeDone: make(chan struct{})}
 	e.kcfgWarm, e.kcfgPurge = e.kcfg, e.kcfg
 	e.experimentsKeys()
+	e.exactInvalidation = e.sg.fetches != nil && !e.sg.remote && len(c.Key.Headers) == 0 && len(c.Key.Cookies) == 0 && e.kcfg.Assign == nil
 	l := &c.Limiter
 	e.lim = limiter.New(limiter.Config{
 		Max: l.MaxConcurrent, MaxQueue: l.MaxQueue, PerPartition: l.MaxPerPartition, PerHost: l.MaxPerHost,
 		Reserve: l.ReserveForeground, MaxWait: l.MaxQueueWait,
 	})
 	// Only foreground pass requests carry a body, so the upload pool has no
-	// reserve (04 §14).
+	// reserve (04 §14). T-39: one path gets at most half of it, so slow
+	// uploads to one URL leave slots for uploads to the others.
 	e.upl = limiter.New(limiter.Config{
-		Max: l.MaxUpload, MaxQueue: l.MaxQueue, PerPartition: min(l.MaxPerPartition, l.MaxUpload),
+		Max: l.MaxUpload, MaxQueue: l.MaxQueue, PerPartition: min(l.MaxPerPartition, max(1, l.MaxUpload/2)),
 		PerHost: l.MaxPerHost, MaxWait: l.MaxQueueWait,
 	})
+	if l.MaxPerClient > 0 {
+		// The limiter with the client as its partition and no global cap of
+		// its own: at most MaxPerClient of one client's requests pass, the
+		// rest queue behind them. Only clients over their cap ever queue, so
+		// they are the only ones a full queue sheds. It has no global cap:
+		// a place is held by a request in Serve (at the origin, or waiting on
+		// another request's flight), so the places held are bounded by the
+		// caller's concurrent Serve calls and the queue by MaxQueue (P5).
+		e.gate = limiter.New(limiter.Config{
+			Max: math.MaxInt32, MaxQueue: l.MaxQueue, PerPartition: l.MaxPerClient, MaxWait: l.MaxQueueWait,
+		})
+	}
 	if b := &c.Breaker; !b.Disable {
 		e.cb = breaker.New(breaker.Config{
 			Window: b.Window, MinRequests: b.MinRequests, FailureRatio: b.FailureRatio,
 			OpenFor: b.OpenFor, MaxOpenFor: b.MaxOpenFor, HalfOpenProbes: b.HalfOpenProbes,
-			CountStatus500: b.CountStatus500,
+			CountStatus500: b.CountStatus500, MinPartitions: b.MinPartitions,
 		}, c.Rand, e.breakerChanged)
 	}
 	if m := &c.MissRate; !m.Disable {
@@ -144,18 +166,6 @@ func defaultStoreBytes(limit int64) (int64, bool) {
 	return min(max(limit/5*2, 16<<20), 8<<30), true
 }
 
-// defaultShards is 16, halved while a shard's small queue (a tenth of the
-// shard) could not hold one maxObject object, down to 1. Without it, a
-// GOMEMLIMIT under about 400 MiB would make the zero Config fail New
-// (FR-LCY-1) against the store's MaxObjectBytes.
-func defaultShards(storeBytes, maxObject int64) int {
-	n := 16
-	for n > 1 && storeBytes/int64(n)/10 < maxObject {
-		n /= 2
-	}
-	return n
-}
-
 // warnForwarding logs forwarding settings that send unkeyed credentials to
 // the origin (R-3).
 func warnForwarding(c Config) {
@@ -174,8 +184,10 @@ func warnForwarding(c Config) {
 // context, which Close cancels after its grace period. It reports false,
 // without running f, once the engine is closed.
 func (e *Engine) goBackground(f func(context.Context)) bool {
-	e.mu.Lock()
-	defer e.mu.Unlock()
+	// A read lock: flights starting at once do not queue behind each other,
+	// and Close's write lock still excludes every one of them.
+	e.mu.RLock()
+	defer e.mu.RUnlock()
 	if e.closed.Load() {
 		return false
 	}
@@ -183,11 +195,20 @@ func (e *Engine) goBackground(f func(context.Context)) bool {
 	return true
 }
 
+// closeAbandon is how long Close waits for engine goroutines after it has
+// cancelled them (FR-LCY-2).
+const closeAbandon = 5 * time.Second
+
+var errCloseAbandoned = errors.New("weir: close: engine goroutines still running after cancellation (an Origin ignores its context)")
+
 // Close rejects new Serve calls with ErrClosed, waits for engine goroutines
-// until ctx is done, then cancels the rest and waits for them (FR-LCY-2). It
-// returns ctx's error when the grace period ran out. It closes the store only
-// if the engine created it. Later calls wait for the first until their own
-// ctx is done and return nil or ctx's error.
+// until ctx is done, then cancels the rest and waits up to 5 s more for them
+// (FR-LCY-2). It returns ctx's error when the grace period ran out. An Origin
+// that honors its context has returned by then; one that does not would hold
+// Close forever, so Close gives up on its goroutines, says so in the error it
+// returns, and leaves them to end when that Origin does. It closes the store
+// only if the engine created it. Later calls wait for the first until their
+// own ctx is done and return nil or ctx's error.
 func (e *Engine) Close(ctx context.Context) error {
 	e.mu.Lock()
 	first := !e.closed.Swap(true)
@@ -211,7 +232,14 @@ func (e *Engine) Close(ctx context.Context) error {
 		graceErr = ctx.Err()
 	}
 	e.bgCancel()
-	<-done
+	var abandoned error
+	t := time.NewTimer(closeAbandon)
+	select {
+	case <-done:
+		t.Stop()
+	case <-t.C:
+		abandoned = errCloseAbandoned
+	}
 	var storeErr error
 	if e.ownStore {
 		if ctx.Err() != nil {
@@ -223,7 +251,7 @@ func (e *Engine) Close(ctx context.Context) error {
 			storeErr = closeStore(ctx, e.sg.s)
 		}
 	}
-	return errors.Join(graceErr, storeErr)
+	return errors.Join(graceErr, abandoned, storeErr)
 }
 
 // closeStore closes s, bounding a snapshot write by the caller's grace period

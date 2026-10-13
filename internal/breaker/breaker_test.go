@@ -421,3 +421,107 @@ func TestBreakerCloseClearsWindow(t *testing.T) {
 		}
 	})
 }
+
+func partConfig() Config {
+	c := testConfig()
+	c.MinPartitions = 2
+	return c
+}
+
+func recordFor(b *Breaker, part uint64, o Outcome, n int) {
+	for range n {
+		p, err := b.AllowFor(part)
+		if err != nil {
+			return
+		}
+		b.RecordFor(p, part, o)
+	}
+}
+
+// FR-CB-2: failures from one partition do not open the breaker while another
+// partition succeeds; a second failing partition does.
+func TestBreakerNeedsTwoPartitions(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		b := New(partConfig(), func() float64 { return 0.5 }, nil)
+		recordFor(b, 2, Success, 1)
+		recordFor(b, 1, Failure, 100)
+		if s := b.State(); s != Closed {
+			t.Fatalf("state = %v after 100 failures of one partition, want closed", s)
+		}
+		recordFor(b, 3, Failure, 1)
+		if s := b.State(); s != Open {
+			t.Fatalf("state = %v after a second partition failed, want open", s)
+		}
+	})
+}
+
+// FR-CB-2: an origin with one URL is still covered: nothing succeeded.
+func TestBreakerOpensWhenNothingSucceeds(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		b := New(partConfig(), func() float64 { return 0.5 }, nil)
+		recordFor(b, 1, Failure, 20)
+		if s := b.State(); s != Open {
+			t.Fatalf("state = %v after 20 failures and no success, want open", s)
+		}
+	})
+}
+
+// FR-CB-2, P5: a bucket remembers at most bucketParts partitions; more count
+// as enough.
+func TestBreakerManyPartitionsBounded(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		c := partConfig()
+		c.MinPartitions = 50
+		b := New(c, func() float64 { return 0.5 }, nil)
+		recordFor(b, 1000, Success, 1)
+		for i := range uint64(bucketParts) {
+			recordFor(b, i+1, Failure, 3)
+		}
+		if s := b.State(); s != Closed {
+			t.Fatalf("state = %v with %d failing partitions of 50, want closed", s, bucketParts)
+		}
+		recordFor(b, 99, Failure, 1)
+		if s := b.State(); s != Open {
+			t.Fatalf("state = %v once a bucket overflowed, want open", s)
+		}
+	})
+}
+
+// FR-CB-4: the partition whose probe failed does not take the next probe
+// while another partition is there to try, and still probes after probeYield
+// when it is alone.
+func TestBreakerProbeYieldsFailedPartition(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		b := New(partConfig(), func() float64 { return 0.5 }, nil)
+		recordFor(b, 1, Failure, 20)
+		time.Sleep(6 * time.Second) // past OpenFor
+		p, err := b.AllowFor(1)
+		if err != nil {
+			t.Fatalf("first probe: %v", err)
+		}
+		b.RecordFor(p, 1, Failure)
+		time.Sleep(11 * time.Second) // past the doubled open period
+		if _, err := b.AllowFor(1); !errors.Is(err, ErrCircuitOpen) {
+			t.Fatalf("failed partition probing again at once: %v, want ErrCircuitOpen", err)
+		}
+		p, err = b.AllowFor(2)
+		if err != nil {
+			t.Fatalf("another partition's probe: %v", err)
+		}
+		b.RecordFor(p, 2, Failure)
+
+		time.Sleep(13 * time.Second) // MaxOpenFor 12 s with jitter 1.0
+		if _, err := b.AllowFor(1); !errors.Is(err, ErrCircuitOpen) {
+			t.Fatalf("partition 1 inside the yield: %v, want ErrCircuitOpen", err)
+		}
+		time.Sleep(probeYield)
+		p, err = b.AllowFor(1)
+		if err != nil {
+			t.Fatalf("partition 1 after the yield: %v, want a probe", err)
+		}
+		b.RecordFor(p, 1, Success)
+		if s := b.State(); s != Closed {
+			t.Fatalf("state = %v after a successful probe, want closed", s)
+		}
+	})
+}

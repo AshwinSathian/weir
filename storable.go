@@ -3,6 +3,7 @@ package weir
 import (
 	"net/http"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/AshwinSathian/weir/internal/httpcc"
@@ -41,6 +42,16 @@ func storability(cfg *Config, c *keys.Classified, resp *Response, body []byte, r
 	h := resp.Header
 	var star bool
 	d.varyNames, star = keys.VaryNames(h["Vary"])
+	if encoded(h["Content-Encoding"]) && !star && !slices.Contains(d.varyNames, "Accept-Encoding") {
+		// FR-STO-14: an encoded response depends on the coding that was asked
+		// for, whether or not the origin said so. Without the name, a gzip
+		// body stored under the URL would answer a client that asked for
+		// identity. The forwarded value is the bucket, so this is one variant
+		// per Key.AcceptEncoding coding, each holding what the origin sends
+		// for that coding.
+		d.varyNames = append(d.varyNames, "Accept-Encoding")
+		slices.Sort(d.varyNames)
+	}
 	statusOK := slices.Contains(cfg.Storable.Statuses, resp.StatusCode)
 	// CacheGroups.Ignore does not apply here: it switches off
 	// Cache-Group-Invalidation only, so an operator Purge by group still works.
@@ -80,6 +91,24 @@ func storability(cfg *Config, c *keys.Classified, resp *Response, body []byte, r
 	}
 	d.ok = true
 	return d
+}
+
+// encoded reports a Content-Encoding that names a coding other than
+// identity. The scan is bytewise over origin bytes, with no split.
+func encoded(lines []string) bool {
+	for _, l := range lines {
+		for i := 0; i <= len(l); {
+			j := i
+			for j < len(l) && l[j] != ',' {
+				j++
+			}
+			if tok := strings.Trim(l[i:j], " \t"); tok != "" && !strings.EqualFold(tok, "identity") {
+				return true
+			}
+			i = j + 1
+		}
+	}
+	return false
 }
 
 // groupList parses the lines of a Cache-Groups or Cache-Group-Invalidation

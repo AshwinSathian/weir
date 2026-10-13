@@ -336,3 +336,62 @@ func TestHeavyHitterAboveBoundReported(t *testing.T) {
 		}
 	})
 }
+
+// FR-MR-1, FR-MR-2, NFR-5: a hit never takes a counter. 100 000 hits on
+// distinct partitions leave the summary empty, and a partition that then
+// misses is counted from its first miss.
+func TestTrackerHitOnUntrackedPartitionTakesNoCounter(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		cfg := testConfig()
+		tr, got := collect(cfg)
+		for i := range 100_000 {
+			tr.Observe(uint64(i), "/hit", false)
+		}
+		if n := len(tr.counters); n != 0 {
+			t.Fatalf("%d counters after hits only, want 0", n)
+		}
+		const flood = uint64(1 << 40)
+		for range 600 {
+			tr.Observe(flood, "/flood", true)
+		}
+		for range 50 {
+			tr.Observe(flood, "/flood", false) // hits of a tracked partition count
+		}
+		rotate(tr, cfg)
+		want := Anomaly{Partition: flood, Sample: "/flood", Reqs: 650, Misses: 600}
+		if len(*got) != 1 || (*got)[0] != want {
+			t.Fatalf("anomalies = %+v, want %+v", *got, want)
+		}
+	})
+}
+
+// FR-MR-1, FR-LCY-3: hits, misses and window rotation from many goroutines
+// lose no miss of a tracked partition (run under -race).
+func TestTrackerConcurrentCounts(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		cfg := testConfig()
+		tr, got := collect(cfg)
+		const flood = uint64(9)
+		tr.Observe(flood, "/flood", true) // takes its counter first
+		var wg sync.WaitGroup
+		for g := range 8 {
+			wg.Go(func() {
+				for i := range 1000 {
+					tr.Observe(flood, "/flood", true)
+					tr.Observe(uint64(1000+g*1000+i), "/other", i%2 == 0)
+				}
+			})
+		}
+		wg.Wait()
+		rotate(tr, cfg)
+		for _, a := range *got {
+			if a.Partition == flood {
+				if a.Misses != 8001 {
+					t.Fatalf("flood misses = %d, want 8001", a.Misses)
+				}
+				return
+			}
+		}
+		t.Fatalf("the flooded partition was not reported: %+v", *got)
+	})
+}

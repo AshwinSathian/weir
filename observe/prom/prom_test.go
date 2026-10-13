@@ -316,3 +316,16 @@ func TestSeriesBoundedByVocabulary(t *testing.T) {
 		t.Errorf("series grew from %d to %d with new partitions", before, after)
 	}
 }
+
+// BenchmarkObserveRequest measures the one event every Serve emits, from
+// GOMAXPROCS goroutines, as a server with metrics on pays for it.
+func BenchmarkObserveRequest(b *testing.B) {
+	o := prom.NewObserver()
+	ev := weir.Event{Kind: weir.EvRequest, Reason: "hit"}
+	b.ReportAllocs()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			o.Observe(ev)
+		}
+	})
+}

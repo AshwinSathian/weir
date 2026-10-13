@@ -2,6 +2,7 @@ package missrate
 
 import (
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -28,7 +29,7 @@ type Anomaly struct {
 // Tracker is a Space-Saving summary of requests and misses per partition
 // (ADR-9). A nil Tracker is valid and records nothing.
 type Tracker struct {
-	mu       sync.Mutex
+	mu       sync.RWMutex // read: add to an existing counter; write: take a counter, rotate
 	cfg      Config
 	start    time.Time
 	counters []counter      // len <= TopK (P5)
@@ -39,7 +40,7 @@ type Tracker struct {
 type counter struct {
 	h            uint64
 	sample       string // set when the counter is (re)assigned
-	reqs, misses uint64
+	reqs, misses uint64 // added to atomically under the read lock, plainly under the write lock
 	err          uint64 // overestimation bound inherited on replacement
 }
 
@@ -78,14 +79,39 @@ func (t *Tracker) Observe(h uint64, sample string, miss bool) {
 
 // ObserveAt is Observe with the time the caller already read, so a request
 // reads the clock once for everything it times (and not under the lock).
+//
+// A hit takes the read lock only: it adds to its partition's counter when the
+// partition has one and does nothing otherwise. Only a miss can take a
+// counter, because only misses make an anomaly (FR-MR-2); a partition that
+// just hits needs none. So hits from many goroutines do not queue behind one
+// mutex, and a site with more live paths than counters does not replace a
+// counter on every hit. Reqs therefore counts a partition's requests from its
+// first miss in the window, which only raises the ratio a flood shows.
 func (t *Tracker) ObserveAt(now time.Time, h uint64, sample string, miss bool) {
 	if t == nil {
 		return
 	}
+	t.mu.RLock()
+	if now.Before(t.start.Add(t.cfg.Window)) {
+		i, ok := t.index[h]
+		if ok {
+			c := &t.counters[i]
+			atomic.AddUint64(&c.reqs, 1)
+			if miss {
+				atomic.AddUint64(&c.misses, 1)
+			}
+		}
+		if ok || !miss {
+			t.mu.RUnlock()
+			return
+		}
+	}
+	t.mu.RUnlock()
+
 	t.mu.Lock()
 	var found []Anomaly
 	end := t.start.Add(t.cfg.Window)
-	closed := !now.Before(end)
+	closed := !now.Before(end) // another caller may have closed it meanwhile
 	if closed {
 		found = t.rotate(now)
 	}
@@ -97,19 +123,24 @@ func (t *Tracker) ObserveAt(now time.Time, h uint64, sample string, miss bool) {
 	}
 }
 
+// count records one request under the write lock. A hit for a partition
+// without a counter is not recorded (ObserveAt).
 func (t *Tracker) count(h uint64, sample string, miss bool) {
 	i, ok := t.index[h]
 	switch {
 	case ok:
 		t.counters[i].reqs++
+	case !miss:
+		return
 	case len(t.counters) < t.cfg.TopK:
 		i = len(t.counters)
 		t.counters = append(t.counters, counter{h: h, sample: truncate(sample), reqs: 1})
 		t.index[h] = i
 	default:
-		// ponytail: O(TopK) scan for the minimum under the mutex, about 64
-		// compares at the default. Past a few hundred counters, keep them in
-		// the stream-summary bucket list of the Space-Saving paper.
+		// ponytail: O(TopK) scan for the minimum under the lock, about 64
+		// compares at the default, once per miss of a partition without a
+		// counter. Past a few hundred counters, keep them in the
+		// stream-summary bucket list of the Space-Saving paper.
 		i = 0
 		for j := range t.counters {
 			if t.counters[j].reqs < t.counters[i].reqs {

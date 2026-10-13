@@ -209,6 +209,15 @@ Spec: [docs/10-experiments-spec.md](docs/10-experiments-spec.md) (decisions E1 t
 - [x] 3.3 `EvExposure` (P3-04). AC: `TestExposureOncePerVisitor` passes.
 - [x] 3.4 Caddy `experiments` block (P3-05). AC: `TestCaddyfileExperiments`, `TestExperimentsExcludedFromKeyGenHash` pass.
 
+### v1.1: Hardening after the adversarial review (2026-10-13)
+
+Cards HRD-01 to HRD-20 in [docs/cards/22-hardening.md](docs/cards/22-hardening.md), with the 24 decisions they took.
+
+- [x] 4.1 High findings (HRD-01 to HRD-07): slow-flight followers, breaker scope, stalled uploads, markers, unread streams, invalidation floods, a cap per client.
+- [x] 4.2 Medium and low findings (HRD-08 to HRD-16): bounded `Close`, hit-path locks, forwarded fields and trailers, Caddy placeholders, key generation, memory store limits, requests with a body, conformance, documents.
+- [x] 4.3 Performance pass and branch review (HRD-19, HRD-17).
+- [ ] 4.4 Release `v1.1.0` (HRD-18), after the pull request is merged.
+
 ## Testing strategy
 
 [docs/07-testing-strategy.md](docs/07-testing-strategy.md). Rollout is by library version: `v0.x` tags per milestone from M1; `v1.0.0` after Phase 3, with `observe/prom`, `store/valkey` and `caddy` tagged at the same version (D24 as amended 2026-10-11). Rollback is a version pin.

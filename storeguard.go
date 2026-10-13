@@ -32,6 +32,7 @@ type storeGuard struct {
 	s       store.Store
 	shared  store.SharedTagEpochs // nil when the store lacks the capability
 	vary    store.VarySetter      // nil when the store lacks the capability
+	fetches store.FetchTracker    // nil when the store lacks the capability (FR-INV-1)
 	remote  bool
 	timeout time.Duration
 	obs     Observer
@@ -45,7 +46,8 @@ type storeGuard struct {
 func newStoreGuard(s store.Store, timeout time.Duration, obs Observer) *storeGuard {
 	sh, _ := s.(store.SharedTagEpochs)
 	vs, _ := s.(store.VarySetter)
-	return &storeGuard{s: s, shared: sh, vary: vs, remote: s.Info().Remote, timeout: timeout, obs: obs, backoff: storeBackoffFirst}
+	ft, _ := s.(store.FetchTracker)
+	return &storeGuard{s: s, shared: sh, vary: vs, fetches: ft, remote: s.Info().Remote, timeout: timeout, obs: obs, backoff: storeBackoffFirst}
 }
 
 func (g *storeGuard) get(ctx context.Context, k store.Key) (*store.Entry, error) {

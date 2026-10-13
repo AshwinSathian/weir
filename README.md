@@ -93,7 +93,7 @@ From `v1.0.0` the exported Go API of the root module, `store`, `store/memory`, `
 
 ## Security
 
-Weir decides what a shared cache stores and serves, so a bug can hand one user's response to another. The [threat model](docs/06-threat-model.md) lists 51 threats with the answer and the test for each, 7 invariants and 10 residual risks; the [security page](https://weir.ashwinsathian.com/security/) puts the residual risks in plain language. Report a vulnerability privately through the repository's Security tab ([SECURITY.md](SECURITY.md)).
+Weir decides what a shared cache stores and serves, so a bug can hand one user's response to another. The [threat model](docs/06-threat-model.md) lists 51 threats with the answer and the test for each, 7 invariants and 15 residual risks; the [security page](https://weir.ashwinsathian.com/security/) puts the residual risks in plain language. Report a vulnerability privately through the repository's Security tab ([SECURITY.md](SECURITY.md)).
 
 ## Performance
 
@@ -101,9 +101,10 @@ Measured on an Apple M4 Pro (12 cores), in-process, with no network or TLS. Othe
 
 | What | Result | Command |
 |---|---|---|
-| One cached hit (`BenchmarkServeHitSmall`, Go 1.27.2) | 852 ns, 12 allocations | `make bench` |
+| One cached hit (`BenchmarkServeHitSmall`, Go 1.27.1) | 669 ns, 8 allocations (`v1.0.1` in the same run: 964 ns, 12) | `make bench` |
+| Hits from 12 goroutines (`BenchmarkServeHitParallel`) | 225 ns per hit (`v1.0.1`: 1,005 ns) | `make bench` |
 | 10,000 keys expiring together, limit 32 (Go 1.27.1) | origin peak in flight 32, 0 client errors | `make load` |
-| Origin brownout (Go 1.27.1) | every request 2xx, 52,975 served stale | `make load` |
+| Origin brownout (Go 1.27.1) | every request 2xx, 54,155 served stale | `make load` |
 
 Method, raw output and what these do not show: [benchmarks](https://weir.ashwinsathian.com/benchmarks/).
 

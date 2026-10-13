@@ -61,7 +61,8 @@ func (e *Engine) background(ctx context.Context, c *keys.Classified, lk lookupRe
 	if lk.entry != nil && hasValidators(lk.entry) { // nil: a Range miss fills a key with no entry (FR-RNG-4)
 		prior = lk.entry
 	}
-	sp := &fetchSpec{c: c, lk: lk, prior: prior, found: lk.entry, class: limiter.Background, rangeFill: rangeFill}
+	// The fetch outlives this request, so it gets its own copy (shared).
+	sp := &fetchSpec{c: shared(c), lk: lk, prior: prior, found: lk.entry, class: limiter.Background, rangeFill: rangeFill}
 	if !e.goBackground(func(bg context.Context) { e.runFlight(bg, ctx, f, sp, origin) }) {
 		emit(e.cfg.Observer, Event{Kind: EvRefreshDropped, Time: time.Now(), Partition: c.Partition, Reason: "closed"})
 		f.Publish(&flightResult{fetchResult: fetchResult{err: ErrClosed}})

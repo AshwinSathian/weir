@@ -13,6 +13,13 @@ Machine for every `docs/benchmarks.md` row unless noted: Apple M4 Pro, 12 cores,
 | `852 ns` | `docs/benchmarks.md` | 2026-10-12 | `BenchmarkServeHitSmall` after the rc.1 hardening, Go 1.27.2, machine not idle |
 | `852.2 ns` | `docs/benchmarks.md` | 2026-10-12 | same run, benchstat value |
 | `12 allocations` | `docs/benchmarks.md` | 2026-10-12 | allocs/op of the same benchmark |
+| `669 ns` | `docs/01-technical-spec.md` | 2026-10-13 | NFR-5: `BenchmarkServeHitSmall` on the v1.1 branch, Go 1.27.1, machine not idle |
+| `8 allocations` | `docs/01-technical-spec.md` | 2026-10-13 | NFR-5: allocs/op of the same run |
+| `964 ns` | `docs/01-technical-spec.md` | 2026-10-13 | NFR-5: `v1.0.1` in the same interleaved run |
+| `225 ns` | `docs/benchmarks.md` | 2026-10-13 | `BenchmarkServeHitParallel/missrate-on`, v1.1 branch, rounded from 224.5 |
+| `1,005 ns` | `docs/benchmarks.md` | 2026-10-13 | the same benchmark on `v1.0.1`, rounded from 1 004.5 |
+| `1,005` | `docs/benchmarks.md` | 2026-10-13 | the same figure as the README writes it |
+| `54,155` | `docs/benchmarks.md` | 2026-10-13 | origin brownout, stale responses, v1.1 branch |
 | `16 allocations` | `docs/01-technical-spec.md` | 2026-10-12 | NFR-5 budget |
 | `1.25 µs` | `docs/01-technical-spec.md` | 2026-10-12 | NFR-5 ceiling |
 | `10,000` | `docs/benchmarks.md` | 2026-10-12 | synchronized-expiry scenario, keys stored |

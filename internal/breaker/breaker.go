@@ -54,11 +54,42 @@ type Config struct {
 	MaxOpenFor     time.Duration // cap on the doubled open period
 	HalfOpenProbes int           // concurrent probes while half-open
 	CountStatus500 bool
+	// MinPartitions is how many distinct partitions must have failed in the
+	// window before it may trip, unless nothing in the window succeeded
+	// (FR-CB-2). 1 or less turns the rule off.
+	MinPartitions int
 }
+
+// bucketParts bounds the failing partitions one bucket remembers (P5). A
+// bucket that saw more counts as "many": the rule is met.
+const bucketParts = 8
+
+// probeYield is how long a half-open period refuses a probe from a partition
+// whose last probe failed, so another partition gets the first try (FR-CB-4).
+// A site with one URL recovers this much later.
+const probeYield = time.Second
 
 type bucket struct {
 	start    int64 // monotonic ns since the breaker was made
 	ok, fail uint32
+	parts    [bucketParts]uint64 // distinct partitions that failed, first nparts
+	nparts   uint8
+	many     bool // more than bucketParts partitions failed
+}
+
+// addPart records that partition part failed in this bucket.
+func (bk *bucket) addPart(part uint64) {
+	for _, p := range bk.parts[:bk.nparts] {
+		if p == part {
+			return
+		}
+	}
+	if int(bk.nparts) == len(bk.parts) {
+		bk.many = true
+		return
+	}
+	bk.parts[bk.nparts] = part
+	bk.nparts++
 }
 
 // Breaker is a failure-ratio circuit breaker over a rolling window
@@ -73,9 +104,14 @@ type Breaker struct {
 	openFor   time.Duration // current, doubles on reopen
 	probes    int           // in flight while HalfOpen
 	gen       uint64        // counts half-open periods; a Probe names its period
-	cfg       Config
-	rnd       func() float64
-	onChange  func(from, to State)
+	halfSince time.Time     // when the current half-open period began
+	// yield holds the partitions whose probes failed since the breaker last
+	// closed, newest last, at most bucketParts (FR-CB-4).
+	yield    [bucketParts]uint64
+	nyield   int
+	cfg      Config
+	rnd      func() float64
+	onChange func(from, to State)
 }
 
 // Probe is the ticket Allow returns. A zero Probe is an ordinary fetch;
@@ -119,19 +155,28 @@ func (b *Breaker) Peek() State {
 	return b.state
 }
 
-// Allow admits a fetch or returns ErrCircuitOpen (FR-CB-5). Every admitted
-// fetch must end in Record or Cancel.
-func (b *Breaker) Allow() (Probe, error) {
+// Allow is AllowFor without a partition.
+func (b *Breaker) Allow() (Probe, error) { return b.AllowFor(0) }
+
+// AllowFor admits a fetch for partition part (a hash) or returns
+// ErrCircuitOpen (FR-CB-5). Every admitted fetch must end in Record,
+// RecordFor or Cancel. While half-open, a partition whose last probe failed
+// is not admitted as a probe during the first probeYield of the period: one
+// failing route must not take every probe (FR-CB-4).
+func (b *Breaker) AllowFor(part uint64) (Probe, error) {
 	if b == nil {
 		return Probe{}, nil
 	}
+	now := time.Now()
 	b.mu.Lock()
 	from := b.state
-	b.expire(time.Now())
+	b.expire(now)
 	var p Probe
 	var err error
 	switch {
 	case b.state == Closed:
+	case b.state == HalfOpen && b.yields(part) && now.Sub(b.halfSince) < probeYield:
+		err = ErrCircuitOpen
 	case b.state == HalfOpen && b.probes < b.cfg.HalfOpenProbes:
 		b.probes++
 		p = Probe{b.gen}
@@ -158,10 +203,29 @@ func (b *Breaker) Remaining() time.Duration {
 	return max(time.Until(b.openUntil), 0)
 }
 
-// Record counts the outcome of a fetch Allow admitted. A probe's success
-// closes the breaker and its failure reopens it (FR-CB-4). A probe from an
-// earlier half-open period counts as an ordinary fetch.
-func (b *Breaker) Record(p Probe, o Outcome) {
+// yields reports whether part's last probe failed. Never with MinPartitions
+// off, which is also how callers without partitions use the breaker. Caller
+// holds b.mu.
+func (b *Breaker) yields(part uint64) bool {
+	if b.cfg.MinPartitions <= 1 {
+		return false
+	}
+	for _, y := range b.yield[:b.nyield] {
+		if y == part {
+			return true
+		}
+	}
+	return false
+}
+
+// Record is RecordFor without a partition.
+func (b *Breaker) Record(p Probe, o Outcome) { b.RecordFor(p, 0, o) }
+
+// RecordFor counts the outcome of a fetch for partition part that AllowFor
+// admitted. A probe's success closes the breaker and its failure reopens it
+// (FR-CB-4). A probe from an earlier half-open period counts as an ordinary
+// fetch.
+func (b *Breaker) RecordFor(p Probe, part uint64, o Outcome) {
 	if b == nil {
 		return
 	}
@@ -178,12 +242,21 @@ func (b *Breaker) Record(p Probe, o Outcome) {
 				d = b.cfg.MaxOpenFor
 			}
 			b.open(now, d)
+			if !b.yields(part) {
+				if b.nyield == len(b.yield) { // drop the oldest
+					copy(b.yield[:], b.yield[1:])
+					b.nyield--
+				}
+				b.yield[b.nyield] = part
+				b.nyield++
+			}
 		} else {
 			b.state = Closed // the next trip starts again from OpenFor (count)
 			b.buckets = [10]bucket{}
+			b.nyield = 0
 		}
 	case b.state == Closed:
-		b.count(now, fail)
+		b.count(now, part, fail)
 	}
 	to := b.state
 	b.mu.Unlock()
@@ -212,6 +285,7 @@ func (b *Breaker) expire(now time.Time) {
 		b.state = HalfOpen
 		b.probes = 0
 		b.gen++
+		b.halfSince = now
 		b.openUntil = now.Add(b.cfg.MaxOpenFor)
 	}
 }
@@ -224,9 +298,11 @@ func (b *Breaker) open(now time.Time, d time.Duration) {
 }
 
 // count adds one outcome to the current bucket and trips the breaker when
-// the window holds MinRequests outcomes at FailureRatio (FR-CB-2). Buckets
-// rotate lazily: a slot whose start is not the current bucket's is reused.
-func (b *Breaker) count(now time.Time, fail bool) {
+// the window holds MinRequests outcomes at FailureRatio, from at least
+// MinPartitions partitions unless nothing in the window succeeded (FR-CB-2).
+// Buckets rotate lazily: a slot whose start is not the current bucket's is
+// reused.
+func (b *Breaker) count(now time.Time, part uint64, fail bool) {
 	// Times are monotonic offsets from base, so a wall-clock step cannot
 	// misplace or resurrect a bucket, and n >= 0 keeps the slot index in
 	// range. Start and slot come from the same number, so they agree for
@@ -240,20 +316,59 @@ func (b *Breaker) count(now time.Time, fail bool) {
 	}
 	if fail {
 		cur.fail++
+		cur.addPart(part)
 	} else {
 		cur.ok++
 	}
 	var ok, failed uint32
-	for _, bk := range b.buckets {
-		if n-bk.start < int64(b.cfg.Window) {
+	for i := range b.buckets {
+		if bk := &b.buckets[i]; n-bk.start < int64(b.cfg.Window) {
 			ok += bk.ok
 			failed += bk.fail
 		}
 	}
 	total := ok + failed
-	if int(total) >= b.cfg.MinRequests && float64(failed) >= b.cfg.FailureRatio*float64(total) {
+	if int(total) >= b.cfg.MinRequests && float64(failed) >= b.cfg.FailureRatio*float64(total) &&
+		(ok == 0 || b.failingParts(n) >= b.cfg.MinPartitions) {
 		b.open(now, b.cfg.OpenFor)
 	}
+}
+
+// failingParts counts the distinct partitions that failed in the window that
+// ends at offset n, stopping at MinPartitions. A bucket that overflowed its
+// set answers MinPartitions. Caller holds b.mu.
+//
+// ponytail: compares up to 10 buckets of 8 hashes pairwise, at most 80
+// entries, and only on a failure that already met the ratio.
+func (b *Breaker) failingParts(n int64) int {
+	want := b.cfg.MinPartitions
+	if want <= 1 {
+		return want
+	}
+	var seen [len(b.buckets) * bucketParts]uint64
+	k := 0
+	for i := range b.buckets {
+		bk := &b.buckets[i]
+		if n-bk.start >= int64(b.cfg.Window) {
+			continue
+		}
+		if bk.many {
+			return want
+		}
+	next:
+		for _, p := range bk.parts[:bk.nparts] {
+			for _, s := range seen[:k] {
+				if s == p {
+					continue next
+				}
+			}
+			seen[k] = p
+			if k++; k >= want {
+				return k
+			}
+		}
+	}
+	return k
 }
 
 func (b *Breaker) notify(from, to State) {

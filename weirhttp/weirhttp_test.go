@@ -8,6 +8,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
+	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -557,4 +560,140 @@ type signalWriter struct {
 func (w *signalWriter) WriteHeader(code int) {
 	w.ResponseRecorder.WriteHeader(code)
 	w.once.Do(func() { close(w.wrote) })
+}
+
+// deadlineWriter records the write deadlines WriteResponse sets.
+type deadlineWriter struct {
+	*httptest.ResponseRecorder
+	deadlines []time.Time
+}
+
+func (w *deadlineWriter) SetWriteDeadline(t time.Time) error {
+	w.deadlines = append(w.deadlines, t)
+	return nil
+}
+
+// liveBody is a response body that says it still streams from the origin.
+type liveBody struct {
+	io.Reader
+	idle time.Duration
+}
+
+func (liveBody) Close() error                { return nil }
+func (b liveBody) StreamIdle() time.Duration { return b.idle }
+
+// FR-TMO-2, T-18: every write of a live origin stream gets the stream's idle
+// bound as its deadline, and the deadline is cleared afterwards because the
+// connection serves the next request.
+func TestWriteResponseDeadlineOnLiveStream(t *testing.T) {
+	w := &deadlineWriter{ResponseRecorder: httptest.NewRecorder()}
+	body := strings.Repeat("x", 100<<10)
+	resp := &weir.Response{StatusCode: 200, Header: http.Header{"Content-Length": {strconv.Itoa(len(body))}},
+		Body: liveBody{strings.NewReader(body), time.Minute}}
+	start := time.Now()
+	if err := weirhttp.WriteResponse(w, resp); err != nil {
+		t.Fatal(err)
+	}
+	if w.Body.Len() != len(body) {
+		t.Fatalf("wrote %d bytes, want %d", w.Body.Len(), len(body))
+	}
+	if len(w.deadlines) < 3 { // 100 KiB in 32 KiB reads, then the reset
+		t.Fatalf("%d deadlines set, want one per write and a reset", len(w.deadlines))
+	}
+	for i, d := range w.deadlines[:len(w.deadlines)-1] {
+		if d.Before(start.Add(time.Minute)) || d.After(time.Now().Add(time.Minute)) {
+			t.Fatalf("deadline %d = %v, want now + the idle bound", i, d)
+		}
+	}
+	if last := w.deadlines[len(w.deadlines)-1]; !last.IsZero() {
+		t.Fatalf("last deadline = %v, want it cleared", last)
+	}
+}
+
+// FR-TMO-2: a stored body pins nothing at the origin, so its write has no
+// deadline of Weir's.
+func TestWriteResponseNoDeadlineOnStoredBody(t *testing.T) {
+	w := &deadlineWriter{ResponseRecorder: httptest.NewRecorder()}
+	resp := &weir.Response{StatusCode: 200, Header: http.Header{"Content-Length": {"2"}}, Body: io.NopCloser(strings.NewReader("ok"))}
+	if err := weirhttp.WriteResponse(w, resp); err != nil {
+		t.Fatal(err)
+	}
+	if len(w.deadlines) != 0 {
+		t.Fatalf("deadlines set on a stored body: %v", w.deadlines)
+	}
+}
+
+// FR-FAIR-4: RequestFrom names the client by the peer address without its
+// port, and by the raw value when it is not host:port.
+func TestRequestFromSetsClient(t *testing.T) {
+	for addr, want := range map[string]string{
+		"203.0.113.9:4711":   "203.0.113.9",
+		"[2001:db8::1]:4711": "2001:db8::1",
+		"@":                  "@", // a unix socket peer
+		"":                   "",
+	} {
+		r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "http://example.com/a", nil)
+		r.RemoteAddr = addr
+		if got := weirhttp.RequestFrom(r).Client; got != want {
+			t.Errorf("RemoteAddr %q: Client = %q, want %q", addr, got, want)
+		}
+	}
+}
+
+// wrappedNoBody is what a server in front of weir can leave in a bodyless
+// request: http.NoBody inside a wrapper, as Caddy's byte counter does.
+type wrappedNoBody struct{ io.ReadCloser }
+
+// FR-FWD-10: whether a GET has a body is read from its declared length, not
+// from the body's type, so a wrapped empty body does not turn every GET into
+// an uncached pass-through.
+func TestRequestFromBodyOfGet(t *testing.T) {
+	mk := func(method string, length int64, body io.ReadCloser) *http.Request {
+		r := httptest.NewRequestWithContext(t.Context(), method, "http://example.com/a", nil)
+		r.Body, r.ContentLength = body, length
+		return r
+	}
+	payload := func() io.ReadCloser { return io.NopCloser(strings.NewReader("q")) }
+	for _, tc := range []struct {
+		name string
+		r    *http.Request
+		want bool
+	}{
+		{"GET, no body", mk(http.MethodGet, 0, http.NoBody), false},
+		{"GET, wrapped empty body", mk(http.MethodGet, 0, wrappedNoBody{http.NoBody}), false},
+		{"HEAD, wrapped empty body", mk(http.MethodHead, 0, wrappedNoBody{http.NoBody}), false},
+		{"GET with a body", mk(http.MethodGet, 1, payload()), true},
+		{"GET with a chunked body", mk(http.MethodGet, -1, payload()), true},
+		{"POST", mk(http.MethodPost, 1, payload()), true},
+		{"POST, wrapped empty body", mk(http.MethodPost, 0, wrappedNoBody{http.NoBody}), true},
+	} {
+		if got := weirhttp.RequestFrom(tc.r).Body != nil; got != tc.want {
+			t.Errorf("%s: body handed to the engine = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+// P4, 04 §6.10: WriteResponse shares the response's value slices with the
+// ResponseWriter instead of copying them. A handler that then adds to or
+// replaces a field must not change the response, which for a hit is the
+// stored entry's header. The response's own map is left as it was.
+func TestWriteResponseSharesValuesSafely(t *testing.T) {
+	clip := func(v ...string) []string { return slices.Clip(v) } // as a stored entry holds them
+	h := http.Header{"Content-Type": clip("text/plain"), "Vary": clip("Accept"), "Connection": clip("X-Hop"), "X-Hop": clip("1"),
+		"Content-Length": clip("2")}
+	want := h.Clone()
+	w := httptest.NewRecorder()
+	if err := weirhttp.WriteResponse(w, &weir.Response{StatusCode: 200, Header: h, Body: io.NopCloser(strings.NewReader("ok"))}); err != nil {
+		t.Fatal(err)
+	}
+	got := w.Header()
+	if got.Get("Content-Type") != "text/plain" || len(got["Connection"]) != 0 || len(got["X-Hop"]) != 0 {
+		t.Fatalf("written header %v, want the end-to-end fields only", got)
+	}
+	got.Add("Vary", "Cookie")
+	got.Set("Content-Type", "text/html")
+	got.Del("Content-Length")
+	if !reflect.DeepEqual(h, want) {
+		t.Fatalf("the response's header changed:\n got %v\nwant %v", h, want)
+	}
 }

@@ -1,26 +1,26 @@
 # Status
 
 Updated: 2026-10-13
-Phase: released (v1.0.1, 2026-10-12)
+Phase: v1.1.0 in review (released: v1.0.1, 2026-10-12)
 Current card: none
-Card state: ready
-Branch: main
-PR: the v1.0.1 wrap-up (site and CI at v1.0.1, `site/go.mod`, branch rules)
-Next card: none (all cards done; M16-02 deferred)
+Card state: awaiting-merge
+Branch: card/HRD-01-hardening
+PR: https://github.com/AshwinSathian/weir/pull/122
+Next card: HRD-18 (release v1.1.0), after the pull request is merged
 
 ## Waiting on Ashwin
 
-- `v1.0.1` is tagged for all four modules and published (docs/release.md, release log). Merge the wrap-up PR, which moves the site and the `caddy-published` CI job to it and adds `site/go.mod` and the branch-rule documents. Then redeploy the site: `make site-deploy BRANCH=main` (the site session that prepared this has ended, and nothing deploys on merge).
-- `main` and `release/*` are protected by rulesets since 2026-10-13 (docs/release.md, Branch rules). PR 120 (Dependabot, TypeScript 7 in `site/`) is open; the site session advised reviewing it as a major bump.
-- The site is live at https://weir.ashwinsathian.com (Pages project `weir-site`, direct upload; nothing deploys on merge). The About page (`site/content/pages/about.md`) is drafted in your voice and still wants your edit.
-
-- `v1.0.0` is tagged for all four modules and published (docs/release.md, rehearsal log).
-- `release/v1.0.0` is not the base for `v1.0.1`: cut `release/v1.0.1` from `main`, which has the new README. The old branch can go once nothing needs it (its tags keep the commits).
-- PR 99 is closed; its six threat rows are in docs/06 as T-46 to T-51, checked against v1.0.0 (PR 118).
-- The five behavior changes of PR 111 shipped in v1.0.0 (FR-KEY-5, FR-FWD-1, FR-RNG-6, `Entry.Size`, `valkey.Config.MaxObjectBytes`).
+- Review and merge the v1.1 hardening pull request (cards HRD-01 to HRD-17 and HRD-19 in docs/cards/22-hardening.md). It changes requirements, defaults and the exported API without the per-change question CLAUDE.md asks for, at your request to do the whole review in one pass. The 24 decisions are the table at the top of the cards file and in the pull request body: accept or reverse each before merging. The ones most likely to matter to an existing deployment: D-H1 (followers wait for a slow flight), D-H2 (`Breaker.MinPartitions` 2), D-H6 (a marker replaces a stale response), D-H12 (`TransportOrigin` strips forwarded fields on pass-through), D-H14 (Caddy placeholders), D-H16 (a `GET` with a body is passed through).
+- After the merge, say so and HRD-18 runs the release: the `release-gate` workflow on the merged commit (fuzz 60 minutes a target, x100 under `-race`), `release/v1.1.0`, the `v1.1.0-rc.1` rehearsal, the four tags, the GitHub release, then the pull request that moves the site, the README install lines and the `caddy-published` job to `v1.1.0`, and `make site-deploy BRANCH=main`. Nothing was tagged in this session: tags go on a branch cut from the merged `main`, and module proxy entries cannot be replaced.
+- `card/CMP-01-compare-harness` (comparison spec and harness) is still local in the main checkout, blocked on Docker Desktop. It carries its own STATUS and LOG entries and will conflict with this branch in `docs/progress/`; rebase it after this merges. Its early signal (Weir's default tier answers 503 to about 70% of clients in `sync-expiry`) is now runbook 4.8 and R-14.
+- A pull request in `../ashwin-portfolio` updates the Weir write-up with the v1.1 numbers; it says "v1.1 (in review)" until the tag exists.
 
 ## Notes for the next session
 
+- HRD-18: follow docs/release.md from step 1. The CHANGELOG's "Unreleased" heading becomes `v1.1.0 (date)` in the step 1 pull request. `make vuln` needs Go 1.27.2 (`GOTOOLCHAIN=go1.27.2`): 1.27.1 reports nine standard library findings.
+- The reference machine was not idle for the v1.1 numbers (docs/benchmarks.md says so). Rerun `benchstat` and `make load` on an idle machine before the tag if the record should replace the 2026-10-11 baseline.
+- A process started in the background by the agent harness ran `make load` at a fraction of its speed (macOS priority). Run load and benchmarks in the foreground.
+- Deferred: HRD-20 (coalescing across nodes, a local tier for remote stores).
 - Site work: `make site-check` (Node 24, pnpm) is the gate; `make site-deploy BRANCH=main` uploads with wrangler. `site/README.md` explains the include directives and the claims register. Not done: Lighthouse and axe in CI, per-page OG images, an outside tester on the quickstart.
 - Use a separate worktree for site or doc work when another session is using this checkout.
 

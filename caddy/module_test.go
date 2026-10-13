@@ -42,7 +42,7 @@ func TestConfigFromJSON(t *testing.T) {
 				"accept_encoding": ["br", "gzip"]},
 			"forward": {"allow": ["x-request-id"]},
 			"bypass": {"cookies": ["session_id"], "headers": ["x-admin"]},
-			"limiter": {"max_concurrent": 128, "max_queue": 256, "max_queue_wait": "2s", "max_per_partition": 16},
+			"limiter": {"max_concurrent": 128, "max_queue": 256, "max_queue_wait": "2s", "max_per_partition": 16, "max_per_client": 32},
 			"stale": {"while_revalidate": "30s", "if_error": "5m"}
 		}`
 		if err := decodeStrict([]byte(raw), h); err != nil {
@@ -55,6 +55,9 @@ func TestConfigFromJSON(t *testing.T) {
 			t.Fatalf("max_bytes = %d", got)
 		}
 		cfg := h.weirConfig()
+		if cfg.Limiter.MaxPerClient != 32 { // FR-FAIR-4
+			t.Fatalf("limiter.max_per_client = %d, want 32", cfg.Limiter.MaxPerClient)
+		}
 		if len(cfg.Key.QueryDrop) != 2 || cfg.Key.QueryDrop[0] != "utm_*" || !cfg.Key.QuerySort || !cfg.Key.NormalizePath ||
 			len(cfg.Key.QueryKeep) != 1 || cfg.Key.Headers[0] != "accept-language" || cfg.Key.Cookies[0] != "currency" ||
 			len(cfg.Key.AcceptEncoding) != 2 {

@@ -1,6 +1,7 @@
 package weir_test
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"net/http"
@@ -9,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -306,41 +308,53 @@ func TestEveryEventKindEmitted(t *testing.T) {
 			seen.want(t, l, weir.EvRequest, "bypass")
 		})
 
-	scenario("coalescing", weir.Config{Coalesce: weir.CoalesceConfig{FollowerMaxWait: time.Second}},
-		func(t *testing.T, cfg weir.Config, l *eventLog) {
-			o := testorigin.NewChecked(t, 64, 16)
-			o.Route("/s", ccBehavior(http.StatusOK, "max-age=1, stale-if-error=600", "s"))
-			e := newEngine(t, cfg)
-			defer closeEngine(t, e)
+	scenario("coalescing", weir.Config{
+		Coalesce: weir.CoalesceConfig{FollowerMaxWait: time.Second},
+		Timeouts: weir.TimeoutsConfig{Origin: 2 * time.Second},
+		Limiter:  weir.LimiterConfig{MaxQueueWait: time.Second},
+	}, func(t *testing.T, cfg weir.Config, l *eventLog) {
+		to := testorigin.NewChecked(t, 64, 16)
+		to.Route("/s", ccBehavior(http.StatusOK, "max-age=1, stale-if-error=600", "s"))
+		e := newEngine(t, cfg)
+		defer closeEngine(t, e)
 
-			serve(t, e, getReq("/s"), o)
-			time.Sleep(2 * time.Second)
-			gate := make(chan struct{})
-			o.Default(testorigin.Behavior{Gate: gate})
-			o.Route("/s", testorigin.Behavior{Gate: gate})
-			lead := serveTimed(t, e, getReq("/c"), o)
-			synctest.Wait()
-			follow := serveTimed(t, e, getReq("/c"), o)
-			stale := serveTimed(t, e, getReq("/s"), o)
-			synctest.Wait()
-			seen.want(t, l, weir.EvCoalesceJoin)
-			time.Sleep(time.Second + time.Millisecond)
-			synctest.Wait()
-			// The follower fetches for itself; the creator of /s has a stale
-			// entry to serve instead (FR-COA-4).
-			seen.want(t, l, weir.EvCoalesceTimeout, "direct", "stale")
-			seen.want(t, l, weir.EvStaleServed, "coalesce-timeout")
-			// The creator of /c keeps waiting on its own fetch: no event.
-			if n := l.count(weir.EvCoalesceTimeout); n != 2 {
-				t.Errorf("EvCoalesceTimeout events = %d, want 2", n)
+		serve(t, e, getReq("/s"), to)
+		time.Sleep(2 * time.Second)
+		gate := make(chan struct{})
+		to.Route("/s", testorigin.Behavior{Gate: gate})
+		// The first fetch of /c ignores its context, so its flight outlives
+		// the flight's own bound and the follower gives up on it (FR-COA-4).
+		var stuck atomic.Bool
+		o := weir.OriginFunc(func(ctx context.Context, r *weir.Request) (*weir.Response, error) {
+			if r.Path == "/c" && stuck.CompareAndSwap(false, true) {
+				<-gate
 			}
-			close(gate)
-			for _, ch := range []<-chan timedServe{lead, follow, stale} {
-				if r := <-ch; r.err != nil {
-					t.Fatalf("request: %v", r.err)
-				}
-			}
+			return to.Fetch(ctx, r)
 		})
+		lead := serveTimed(t, e, getReq("/c"), o)
+		synctest.Wait()
+		follow := serveTimed(t, e, getReq("/c"), o)
+		stale := serveTimed(t, e, getReq("/s"), o)
+		synctest.Wait()
+		seen.want(t, l, weir.EvCoalesceJoin)
+		time.Sleep(time.Second + time.Millisecond)
+		synctest.Wait()
+		// The creator of /s has a stale entry to serve. The follower of /c
+		// has none and keeps its flight; the creator of /c keeps waiting on
+		// its own fetch. Neither is an event.
+		seen.want(t, l, weir.EvCoalesceTimeout, "stale")
+		seen.want(t, l, weir.EvStaleServed, "coalesce-timeout")
+		if n := l.count(weir.EvCoalesceTimeout); n != 1 {
+			t.Errorf("EvCoalesceTimeout events at FollowerMaxWait = %d, want 1", n)
+		}
+		time.Sleep(2 * time.Second) // past Timeouts.Origin + MaxQueueWait
+		synctest.Wait()
+		seen.want(t, l, weir.EvCoalesceTimeout, "direct")
+		close(gate)
+		for _, ch := range []<-chan timedServe{lead, follow, stale} {
+			<-ch // the stuck fetch ends in a timeout; only the events matter here
+		}
+	})
 
 	scenario("shed background refresh", weir.Config{
 		Rand:     func() float64 { return math.Nextafter(1, 0) },

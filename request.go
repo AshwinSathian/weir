@@ -8,13 +8,30 @@ import (
 
 // Request is one client request as the adapter received it (01 §4).
 type Request struct {
-	Method   string        // exactly as received; methods are case-sensitive
-	Scheme   string        // "http" or "https"
-	Host     string        // authority (host[:port]) the client addressed
-	Path     string        // origin-form path, still percent-encoded, as received
-	RawQuery string        // query without the leading '?', as received
-	Header   http.Header   // never mutated by Weir
-	Body     io.ReadCloser // nil for GET and HEAD; passed through for other methods
+	Method   string      // exactly as received; methods are case-sensitive
+	Scheme   string      // "http" or "https"
+	Host     string      // authority (host[:port]) the client addressed
+	Path     string      // origin-form path, still percent-encoded, as received
+	RawQuery string      // query without the leading '?', as received
+	Header   http.Header // never mutated by Weir
+	// Body is nil or http.NoBody for a request without one. A request with a
+	// body is passed through with it, whatever its method: a GET or HEAD that
+	// carries one is never served from or stored in the cache (FR-FWD-10).
+	Body io.ReadCloser
+	// Client names who sent the request, for Limiter.MaxPerClient: any
+	// string that is equal for one client and different for another, usually
+	// the remote address. Weir never keys on it, never puts it in an event,
+	// and never sends it to the origin with a cacheable fetch, whose response
+	// other clients share. A request that is passed through (unsafe methods,
+	// bypass) carries it in the Request the Origin receives, so an Origin can
+	// tell the origin server who asked. Empty: the request is never capped.
+	Client string
+	// PassThrough is set by Weir, on the Request an Origin receives, when the
+	// request is passed through: an unsafe method, a bypass, a request with
+	// a body, a Range miss. Nothing of its response is stored, and its
+	// header is the client's own minus hop-by-hop fields, where a cacheable
+	// fetch carries only keyed and allowed fields. Serve ignores it on input.
+	PassThrough bool
 }
 
 // Response is a response from an Origin or from Serve. The receiver of a
@@ -22,7 +39,11 @@ type Request struct {
 type Response struct {
 	StatusCode int
 	Header     http.Header
-	Body       io.ReadCloser // never nil on responses returned by Serve
+	// Body is never nil on responses returned by Serve. An Origin's body may
+	// also implement Trailer() http.Header, valid once Read has returned
+	// io.EOF; the body of a streamed response from Serve then does too, and
+	// weirhttp.WriteResponse sends those trailers. Stored responses have none.
+	Body io.ReadCloser
 	// Cache describes how Serve produced the response. Serve sets it; an
 	// Origin's value is ignored.
 	Cache CacheInfo

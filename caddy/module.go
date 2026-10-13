@@ -51,6 +51,16 @@ type Handler struct {
 	// TLS. It turns on the per-host fairness caps at 25% (FR-FAIR-3) and is
 	// part of the store identity (08 §3, §4b).
 	MultiHost bool `json:"multi_host,omitempty"`
+	// ClientPlaceholders gives the handlers behind weir the replacer of the
+	// client whose request triggered a fetch, as before v1.1. Off, the
+	// default, each forwarded request has a replacer bound to itself, so
+	// {http.request.header.X}, {http.request.cookie.X} and {http.request.uri}
+	// read what the origin is sent and nothing a client sent outside the key.
+	// Placeholders that a matcher or handler in front of weir defined on the
+	// client's replacer ({http.regexp.*}, {http.auth.*}, map outputs) are
+	// then empty behind it; turn this on only if the site needs them there
+	// and nothing behind weir puts client data into a cacheable fetch (08 §6).
+	ClientPlaceholders bool `json:"client_placeholders,omitempty"`
 	// Store, when set, replaces the memory store with a shared one (08 §2).
 	// max_bytes and snapshot_dir belong to the memory store and are refused
 	// with it.
@@ -266,7 +276,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 	}
 	h.chainOnce.Do(h.warnChain)
 	h.noteHost(r.Host)
-	resp, err := h.engine.Serve(r.Context(), requestFor(r), newNextOrigin(next, r, h.log))
+	resp, err := h.engine.Serve(r.Context(), requestFor(r), newNextOrigin(next, r, h.log, h.ClientPlaceholders))
 	if err != nil {
 		return serveError(w, err)
 	}
@@ -285,6 +295,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 // rewrite is detected by comparing against it.
 func requestFor(r *http.Request) *weir.Request {
 	req := weirhttp.RequestFrom(r)
+	// FR-FAIR-4: Caddy's client_ip is the address trusted_proxies resolves,
+	// so a site behind a load balancer still tells its clients apart.
+	if ip, ok := caddyhttp.GetVar(r.Context(), caddyhttp.ClientIPVarKey).(string); ok && ip != "" {
+		req.Client = ip
+	}
 	if orig, ok := r.Context().Value(caddyhttp.OriginalRequestCtxKey).(http.Request); ok && orig.URL != nil &&
 		(orig.URL.Path != r.URL.Path || orig.URL.RawPath != r.URL.RawPath || orig.URL.RawQuery != r.URL.RawQuery) {
 		req.Path, req.RawQuery = r.URL.EscapedPath(), r.URL.RawQuery
@@ -310,7 +325,7 @@ func serveError(w http.ResponseWriter, err error) error {
 // off (FR-FAIR-3): the per-host caps would be missing on a shared cache. Only
 // the first host is kept, so request input never grows a set.
 func (h *Handler) noteHost(host string) {
-	if h.MultiHost {
+	if h.MultiHost || h.warnedHosts.Load() { // nothing left to decide: every request passes here
 		return
 	}
 	if hp, _, err := net.SplitHostPort(host); err == nil {

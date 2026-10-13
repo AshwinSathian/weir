@@ -3,6 +3,7 @@ package keys
 import (
 	"hash/maphash"
 	"net/http"
+	"net/netip"
 	"slices"
 	"strings"
 	"time"
@@ -62,11 +63,15 @@ type Classified struct {
 	Variants   []Dim // experiment dimensions the key and the forwarded header carry (T-35)
 	Decision   any   // what Config.Assign returned alongside Variants; opaque to this package
 	ClientCond ClientConditionals
-	RangeValue string   // the Range value a hit may slice (FR-RNG-1); "" when absent or repeated
-	HasIfRange bool     // request carried If-Range
-	IfRange    string   // its value; "" when repeated, which never applies
-	expHeader  string   // Config.ExpHeader, for pass
-	expCookie  string   // Config.ExpCookie, for pass
+	RangeValue string // the Range value a hit may slice (FR-RNG-1); "" when absent or repeated
+	HasIfRange bool   // request carried If-Range
+	IfRange    string // its value; "" when repeated, which never applies
+	expHeader  string // Config.ExpHeader, for pass
+	expCookie  string // Config.ExpCookie, for pass
+	// fwdPending: Forwarded.Header and Unkeyed are not built yet; Forward
+	// builds them (ClassifyDeferred). cfg is the Config to build them with.
+	fwdPending bool
+	cfg        *Config
 	rangeHdr   []string // the client's Range lines, for AsRangePass
 	ifRange    []string // the client's If-Range lines, for AsRangePass
 	req        *Request // the client request, for AsBypass; never modified
@@ -79,6 +84,24 @@ func (c *Classified) CanonicalHeader() http.Header {
 		return nil
 	}
 	return c.req.Header
+}
+
+// ClientHash is the hash of the client the request named (weir.Request.Client),
+// with the per-process seed, or 0 when it named none. An IPv6 address counts
+// as its /64: one subscriber holds that many addresses, so a cap per address
+// would cap nothing (FR-FAIR-4). It is computed on use: only a request that
+// goes to the origin needs it.
+func (c *Classified) ClientHash() uint64 {
+	if c.req == nil || c.req.Client == "" {
+		return 0
+	}
+	id := c.req.Client
+	if a, err := netip.ParseAddr(id); err == nil && a.Is6() && !a.Is4In6() {
+		if p, err := a.Prefix(64); err == nil {
+			id = p.String()
+		}
+	}
+	return maphash.String(partitionSeed, id)
 }
 
 // URITag is the tag of the request's URI (04 §3.1). It is computed on use,
@@ -96,7 +119,33 @@ var partitionSeed = maphash.MakeSeed()
 // Classify validates r and builds its keys and forwarded request (04 §3.1).
 // r and its Header are never modified; the forwarded request of a
 // cacheable request has a fresh Header map.
-func Classify(r *Request, c *Config) (Classified, error) {
+func Classify(r *Request, c *Config) (Classified, error) { return classify(r, c, false) }
+
+// ClassifyDeferred is Classify, except that the forwarded header of a
+// cacheable request may be left unbuilt until Forward is called. A hit never
+// reads it, and building it is a third of what a hit allocates (NFR-5).
+//
+// INV-1 is kept by construction. The header is deferred only when the key
+// does not depend on it: no keyed header, no keyed cookie, no experiment.
+// The key is then method, scheme, host, path and query, which are set here.
+// With any of the three the key is computed from the forward itself
+// (keyedHeaders), so the forward is built at once, as in Classify. Whoever
+// reads Forwarded.Header or Unkeyed calls Forward first; the caller's Header
+// must not change in between, which Serve's contract already says.
+func ClassifyDeferred(r *Request, c *Config) (Classified, error) { return classify(r, c, true) }
+
+// Forward builds the forwarded header that ClassifyDeferred left out. It is
+// a no-op when there is nothing pending. Not safe for concurrent use: call it
+// on the request's goroutine, before the value is shared.
+func (c *Classified) Forward() {
+	if !c.fwdPending {
+		return
+	}
+	c.fwdPending = false
+	c.Forwarded.Header, c.Unkeyed = forwardHeader(c.req.Header, c.cfg, nil, nil)
+}
+
+func classify(r *Request, c *Config, deferForward bool) (Classified, error) {
 	// INV-1, T-15: library callers may send keys in any case; the origin
 	// would see a "x-custom" that every keyed and Vary read below misses.
 	if !canonicalKeys(r.Header) {
@@ -164,12 +213,28 @@ func Classify(r *Request, c *Config) (Classified, error) {
 		out.Unsafe = true
 		return pass(out, r, host), nil
 	}
-	if bypassed(h, c) { // FR-BYP-1
+	// FR-BYP-1, and FR-FWD-10: a GET or HEAD that carries a body is passed
+	// through with it. T-5: the body is not in the key, so nothing about such
+	// a request is stored or served from the store; dropping the body and
+	// caching the answer would serve one body's result for another (search
+	// APIs that take their query in a GET body).
+	if hasBody(r) || bypassed(h, c) {
 		out = pass(out, r, host)
 		out.FwdReason = FwdBypass
 		return out, nil
 	}
 
+	if deferForward && len(c.Headers) == 0 && len(c.Cookies) == 0 && c.Assign == nil {
+		// No keyed header, cookie or experiment: the key below is what
+		// Classify computes (keyedHeaders, keyedCookies and dims are all
+		// empty), and Forward builds the same header forwardHeader would
+		// build now.
+		out.fwdPending, out.cfg = true, c
+		out.Forwarded = Request{Method: http.MethodGet, Scheme: r.Scheme, Host: host, Path: path, RawQuery: query}
+		out.Primary = PrimaryKey(&KeyInput{Method: http.MethodGet, Scheme: r.Scheme, Host: host, Path: path, Query: query})
+		out.ClientCond = clientConditionals(h, inm, c)
+		return out, nil
+	}
 	cookies := dropCookie(keyedCookies(h["Cookie"], c), c.ExpCookie)
 	var dims []Dim
 	if c.Assign != nil {
@@ -188,15 +253,21 @@ func Classify(r *Request, c *Config) (Classified, error) {
 	out.Variants = dims
 	out.Primary = PrimaryKey(&KeyInput{Method: http.MethodGet, Scheme: r.Scheme, Host: host, Path: path, Query: query,
 		Headers: keyedHeaders(fh, c), CookieNames: c.Cookies, Cookies: cookies, Variants: dims})
-	out.ClientCond = ClientConditionals{IfNoneMatch: parseIfNoneMatch(inm, c)}
+	out.ClientCond = clientConditionals(h, inm, c)
+	return out, nil
+}
+
+// clientConditionals reads the client's preconditions (FR-SRV-2).
+func clientConditionals(h http.Header, inm []string, c *Config) ClientConditionals {
+	cc := ClientConditionals{IfNoneMatch: parseIfNoneMatch(inm, c)}
 	// RFC 9110 §13.1.3: If-Modified-Since is ignored whenever If-None-Match
 	// is present, even when that field is malformed or over the limit.
 	if ims := h["If-Modified-Since"]; len(ims) == 1 && inm == nil {
 		if t, err := http.ParseTime(ims[0]); err == nil {
-			out.ClientCond.IfModifiedSince = t
+			cc.IfModifiedSince = t
 		}
 	}
-	return out, nil
+	return cc
 }
 
 // AsRangePass turns a cacheable Range request that no entry answers into a
@@ -205,8 +276,10 @@ func Classify(r *Request, c *Config) (Classified, error) {
 // §13.1.5). A HEAD stays a GET (FR-FWD-4); the engine drops the body.
 // T-7: the cacheable forward itself never carries Range.
 func (c *Classified) AsRangePass() *Classified {
+	c.Forward()
 	out := *c
 	out.Class, out.FwdReason = ClassPass, FwdNone
+	out.Forwarded.PassThrough = true
 	out.Forwarded.Header = c.Forwarded.Header.Clone()
 	out.Forwarded.Header["Range"] = slices.Clone(c.rangeHdr)
 	if len(c.ifRange) > 0 {
@@ -231,6 +304,7 @@ func (c *Classified) AsBypass() *Classified {
 // stored under (04 §3.1).
 func pass(out Classified, r *Request, host string) Classified {
 	out.Class, out.FwdReason = ClassPass, FwdMethod
+	out.fwdPending = false // a pass-through builds its own header below
 	h := r.Header.Clone()
 	if h == nil {
 		h = http.Header{}
@@ -240,11 +314,18 @@ func pass(out Classified, r *Request, host string) Classified {
 	if out.expCookie != "" {
 		stripCookie(h, out.expCookie) // the visitor id is for Weir, not the origin
 	}
+	// Nothing of a pass-through is stored, so the Origin may learn who asked.
 	out.Forwarded = Request{Method: r.Method, Scheme: r.Scheme, Host: host, Path: r.Path, RawQuery: r.RawQuery,
-		Header: h, Body: r.Body}
-	// net/http gives every bodyless request http.NoBody (FR-LIM-7: main pool).
-	out.HasBody = r.Body != nil && r.Body != http.NoBody && r.Header.Get("Content-Length") != "0"
+		Header: h, Body: r.Body, Client: r.Client, PassThrough: true}
+	out.HasBody = hasBody(r)
 	return out
+}
+
+// hasBody reports a request that carries a body or may carry one. net/http
+// gives every bodyless request http.NoBody, and a declared length of 0 is no
+// body either (FR-LIM-7: those use the main pool).
+func hasBody(r *Request) bool {
+	return r.Body != nil && r.Body != http.NoBody && r.Header.Get("Content-Length") != "0"
 }
 
 // parseIfNoneMatch returns the entity-tags of the If-None-Match lines

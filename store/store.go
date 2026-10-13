@@ -194,6 +194,22 @@ type VarySetter interface {
 	SetVarySpec(ctx context.Context, k Key, prev, next *Entry) (swapped bool, err error)
 }
 
+// FetchTracker is an optional capability of an in-process Store: a count,
+// per key, of the fetches in progress that may still store a record under it
+// (01 FR-INV-1). The engine calls FetchBegin before it sends a request that
+// may be stored under k and FetchEnd once whatever it stored is in the store.
+// An unsafe request then asks FetchInProgress before it decides that a URI
+// with no record has nothing to invalidate. The count lives in the store, not
+// in the engine, because several engines can share one store, and a fetch one
+// of them runs must be visible to the others. A remote store cannot offer it:
+// another node's fetch is invisible. A wrapper that embeds only Store hides
+// the capability, and the engine then writes every invalidation epoch.
+type FetchTracker interface {
+	FetchBegin(k Key)
+	FetchEnd(k Key)
+	FetchInProgress(k Key) bool
+}
+
 // Sizer is an optional Store capability reporting current bytes and the
 // largest record the store accepts (FR-LCY-1).
 type Sizer interface {

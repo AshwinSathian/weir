@@ -11,14 +11,21 @@ import (
 )
 
 // perClientPrefixes start Caddy placeholders whose value depends on the
-// client that triggered the fetch. The request context's replacer comes from
-// that client (08 §6, T-4, T-45). Best effort: regexp Replace ops and
-// placeholders built from Caddy vars set elsewhere are not inspected.
+// client that triggered the fetch even though the forwarded request has a
+// replacer of its own (08 §6, T-4, T-45): the peer address, which the
+// forwarded request keeps, and Caddy variables, which are copied from the
+// client's request. Best effort: regexp Replace ops are not inspected.
 var perClientPrefixes = []string{
-	"{http.request.header.", "{http.request.cookie.", "{http.request.remote",
+	"{http.request.remote", "{http.vars.", "{remote", "{client_ip}",
+}
+
+// clientReplacerPrefixes are the further placeholders that read the
+// triggering client's request when client_placeholders keeps its replacer.
+var clientReplacerPrefixes = []string{
+	"{http.request.header.", "{http.request.cookie.",
 	"{http.request.uri.query", "{http.auth.", "{http.request.tls.client",
 	"{http.request.uri}", "{http.request.uuid}", "{http.request.proto}", "{http.request.tls.server_name}",
-	"{http.request.tls.version}", "{http.request.tls.cipher_suite}", "{http.request.tls.proto}", "{http.regexp.", "{http.request.orig_uri", "{http.vars.", "{remote", "{client_ip}", "{uri", "{query", "{header.", "{cookie.",
+	"{http.request.tls.version}", "{http.request.tls.cipher_suite}", "{http.request.tls.proto}", "{http.regexp.", "{http.request.orig_uri", "{uri", "{query", "{header.", "{cookie.",
 }
 
 // chainWarnings inspects the handlers that run after self in one route and
@@ -60,7 +67,7 @@ func placeholderWarnings(self *Handler, ops *headers.HeaderOps) []string {
 	for _, hdr := range []map[string][]string{ops.Set, ops.Add} {
 		for name, vals := range hdr {
 			for _, v := range vals {
-				if hasPerClientPlaceholder(v) {
+				if hasPerClientPlaceholder(v, self.ClientPlaceholders) {
 					return []string{fmt.Sprintf("weir %q: request header %q after weir uses a per-client placeholder (%s); "+
 						"the first client's value reaches the origin on cacheable routes (docs/08 §6)", self.Name, name, v)}
 				}
@@ -70,8 +77,9 @@ func placeholderWarnings(self *Handler, ops *headers.HeaderOps) []string {
 	return nil
 }
 
-func hasPerClientPlaceholder(v string) bool {
-	return slices.ContainsFunc(perClientPrefixes, func(p string) bool { return strings.Contains(v, p) })
+func hasPerClientPlaceholder(v string, clientReplacer bool) bool {
+	has := func(p string) bool { return strings.Contains(v, p) }
+	return slices.ContainsFunc(perClientPrefixes, has) || clientReplacer && slices.ContainsFunc(clientReplacerPrefixes, has)
 }
 
 // appWarnings finds self in the http app's routes, subroutes included, and

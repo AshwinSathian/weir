@@ -1,6 +1,6 @@
 # Weir benchmarks
 
-Updated: 2026-10-12
+Updated: 2026-10-13
 
 Benchmark and load-test results. The first section is the current state. Everything from "Earlier runs" on is the record of how the numbers got there, kept so each run can be compared with the one before it using `benchstat` ([07 §10](07-testing-strategy.md)). Every absolute number names its machine. The rendered version, with what the numbers do not show, is at [weir.ashwinsathian.com/benchmarks](https://weir.ashwinsathian.com/benchmarks/).
 
@@ -10,7 +10,8 @@ Reference machine: Apple M4 Pro, 12 cores, 24 GiB, macOS. The budgets are NFR-5 
 
 | What | Result | Budget | Run |
 |---|---|---|---|
-| `BenchmarkServeHitSmall`, Go 1.27.2 | 852.2 ns/op, 12 allocs/op | 1.25 µs, 16 allocs | "Hardening after v1.0.0-rc.1" below |
+| `BenchmarkServeHitSmall`, v1.1 branch, Go 1.27.1, machine not idle | 669.1 ns/op, 8 allocs/op, 608 B/op (`main` measured 963.9 ns, 12 allocs in the same run) | 1.25 µs, 16 allocs | "v1.1 hardening" below |
+| `BenchmarkServeHitSmall`, v1.0, Go 1.27.2 | 852.2 ns/op, 12 allocs/op | 1.25 µs, 16 allocs | "Hardening after v1.0.0-rc.1" below |
 | `BenchmarkServeHitSmall`, Go 1.27.1, idle machine | 833.5 and 821.4 ns/op, 12 allocs/op | same | "Hit path optimization" below |
 | Five load scenarios, idle machine | all pass | [07 §9](07-testing-strategy.md) | "Reference machine run" below |
 | GC per request at 1M entries | 1.08 µs (1.76 µs on the 4-vCPU Linux container) | 2 µs | "Reference machine run" below |
@@ -23,6 +24,56 @@ make load
 ```
 
 Store the raw output next to the table when a run adds a row, so `benchstat old.txt new.txt` works without rerunning the old commit.
+
+### v1.1 hardening (2026-10-13)
+
+The reference machine (Apple M4 Pro, 12 cores), Go 1.27.1, not idle (an editor and one agent session), so `main` measured 964 ns here where the record above says 852. Read each row against the other columns of the same row. Three builds, eight interleaved runs each, `benchstat`: `main` at `c070976` (v1.0.1), the branch after cards HRD-01 to HRD-15, and the branch after the performance card HRD-19. Raw output: [benchmarks/v1.1-hardening-2026-10-13.txt](benchmarks/v1.1-hardening-2026-10-13.txt).
+
+| Benchmark | `main` (v1.0.1) | after HRD-01 to 15 | after HRD-19 | change from `main` |
+|---|---:|---:|---:|---|
+| `BenchmarkServeHitSmall` | 963.9 ns ± 6% | 939.5 ns ± 4% | 669.1 ns ± 2% | -30.6% (p<0.001) |
+| `BenchmarkServeHitVary` | 1.304 µs ± 5% | 1.284 µs ± 4% | 1.204 µs ± 2% | -7.7% (p<0.001) |
+| `BenchmarkServeHitParallel/missrate-on` | 1 004.5 ns ± 7% | 386.7 ns ± 3% | 224.5 ns ± 11% | -77.7% (p<0.001) |
+| `BenchmarkServeHitParallel/missrate-off` | 391.8 ns ± 14% | 386.1 ns ± 9% | 209.0 ns ± 17% | -46.6% (p<0.001) |
+| `BenchmarkServeMissCoalesced` | 37.90 µs ± 11% | 37.58 µs ± 8% | 40.21 µs ± 9% | no significant change (p=0.08) |
+| the same, origin calls per key | 1.003 | 1.003 | 1.000 | |
+| hit, bytes and allocations | 1 536 B, 12 | 1 536 B, 12 | 608 B, 8 | -60%, -33% |
+| vary hit, bytes and allocations | 1 552 B, 13 | 1 552 B, 13 | 1 040 B, 12 | |
+
+What moved the numbers:
+
+- HRD-09 took the miss-rate tracker's mutex off the hit path: a hit takes a read lock and adds to a counter only when its partition already has one. That is the first drop in the parallel row. A single-threaded hit did not change. (An earlier note here claimed it had, from a run that was not interleaved with its baseline; that was noise.)
+- HRD-19 keeps the request's classification on the stack for a hit and does not build the forwarded header until a miss, a pass-through or a vary lookup needs it. That is the 928 B and the 4 allocations, and with less to collect the parallel rows fall again.
+- A request that creates a flight looks at the store once more first, so the window in which a follower's lookup misses just before the leader stores no longer costs a second fetch (1.003 to 1.000 calls per key).
+
+In round figures, as the README quotes them: hits from 12 goroutines take 225 ns each on the branch and 1,005 ns on `v1.0.1`.
+
+Smaller measurements on the same machine: `BenchmarkLimiterReleaseFullQueue` (one release with 1 024 waiters of distinct partitions) 1 750 to 225 ns; `BenchmarkObserveRequest` in `observe/prom` (one request event, 12 goroutines) 95 to 30 ns.
+
+`make load`, scale 1, on the same machine. The first column is the record of 2026-10-12 further down; the other two are this branch before and after HRD-19.
+
+| Scenario | v1.0.0-rc (2026-10-12) | after HRD-01 to 16 | after HRD-19 | Result |
+|---|---|---|---|---|
+| steady hits, paced at half the saturated rate | 578 k/s, p50 1.5 µs, p99 7.7 to 11.3 µs per window | 1 308 k/s, p50 1.4 µs, p99 5.6 to 7.7 µs | 1 331 k/s, p50 1.3 µs, median-window p99 9.2 µs | pass |
+| synchronized expiry | all 10 000 refetched, peak 32 in flight, 1 455 calls in the busiest second, 0 errors | the same, 1 410 calls | the same, 1 464 calls | pass |
+| busting flood plus normal | 70 784 of 99 976 shed, in-flight peak 8, normal p99 53.2 µs alone and 36.9 µs under flood | 70 833 shed, 41.0 and 28.7 µs | 71 150 shed, 45.1 and 32.8 µs | pass |
+| origin brownout (×20) | 16 breaker opens, 55 054 stale, every request 2xx | 17 opens, 53 843 stale, every request 2xx | 17 opens, 54 155 stale, every request 2xx | pass |
+| store flap (50%) | 11.2 M requests, 0 errors, slowest 49.2 ms | 11.0 M, 0 errors, 50.5 ms | 15.4 M, 0 errors, 66.0 ms (bound 208 ms) | pass |
+| GC at 1M entries | 1 728 B allocated and 0.93 µs of GC per request | 1 736 B, 0.94 µs | 808 B, 0.46 to 0.71 µs (two runs) | pass (gate 2 µs) |
+
+The paced target of the steady-hits scenario is half of what the engine does saturated, so its rate more than doubling is the tracker's lock again. The saturated stage of the GC test is noisy on a machine that is not idle: two runs after HRD-19 made 88 M and 206 M requests in 60 s at 1M entries (138 M before it), with GC at 0.71 and 0.46 µs per request. Allocation per request is the stable figure, and it halved.
+
+`make cache-tests`: no regression against the baseline, and `UPDATE=1` leaves the baseline file unchanged, before and after HRD-19.
+
+Eviction pause by shard size (card HRD-13, same machine): the longest single `Set` on a full shard of hot 64-byte records, `BenchmarkEvictionPauseLargeShard`, three runs each.
+
+| Shard | Longest `Set` |
+|---|---|
+| 16 MiB | 0.48 ms |
+| 64 MiB | 2.56 ms |
+| 256 MiB | 9.76 ms |
+
+The walk is linear in the shard, so the 512 MiB shards of an 8 GiB default store before v1.1 come to about 20 ms. `memory.Shards` now keeps shards near 16 MiB ([05 §5.1](05-storage-interface-spec.md)).
 
 ## What each benchmark measures
 

@@ -52,3 +52,4 @@ There are no L cards. A card that grows past M during the session is split (see 
 | [10-m10.md](10-m10.md) | M10 observability, performance, conformance |
 | [11-phase1x.md](11-phase1x.md) | M11 to M16 |
 | [20-later.md](20-later.md) | Phase 2, 2.5 and 3 entry cards |
+| [22-hardening.md](22-hardening.md) | v1.1 hardening after the adversarial review of v1.0.1 |

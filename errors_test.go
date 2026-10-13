@@ -25,6 +25,8 @@ func TestStatusCode(t *testing.T) {
 		{"origin timeout", ErrOriginTimeout, 504},
 		{"must-revalidate", ErrMustRevalidate, 504},
 		{"only-if-cached", ErrOnlyIfCached, 504},
+		{"request body", ErrRequestBody, 400},
+		{"request body timeout", ErrRequestBodyTimeout, 408},
 		{"origin transport error", &OriginError{Err: io.ErrUnexpectedEOF}, 502},
 		// The engine returns the caller's ctx.Err() unwrapped (timeoutOrOrigin).
 		// Context errors inside *OriginError are the origin's own; 499 would

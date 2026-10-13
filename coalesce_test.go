@@ -131,8 +131,9 @@ func wideLimiter(cfg weir.Config) weir.Config {
 	return cfg
 }
 
-// FR-COA-4, T6.2a: a stuck flight holds no follower past FollowerMaxWait.
-// Followers serve stale when stale-if-error permits, else fetch themselves.
+// FR-COA-4, T6.2a: at FollowerMaxWait a follower serves stale when
+// stale-if-error permits. Without a stale entry it keeps the flight until the
+// flight's own bound has passed (TestFollowerFallsBackAfterFlightDeadline).
 // The limiter is widened so its partition cap does not bind; the cap itself
 // is TestPartitionFairness.
 func TestCoalesceStuckLeader(t *testing.T) {
@@ -140,7 +141,7 @@ func TestCoalesceStuckLeader(t *testing.T) {
 	cfg := wideLimiter(cacheCfg)
 	cfg.Coalesce.FollowerMaxWait = wait
 
-	t.Run("no stale entry: each follower fetches", func(t *testing.T) {
+	t.Run("no stale entry: followers keep the flight", func(t *testing.T) {
 		synctest.Test(t, func(t *testing.T) {
 			gate := make(chan struct{})
 			o := testorigin.NewChecked(t, wideSlots, wideSlots)
@@ -158,15 +159,19 @@ func TestCoalesceStuckLeader(t *testing.T) {
 			}
 			time.Sleep(wait + time.Millisecond)
 			synctest.Wait()
-			// The creator keeps waiting on its own flight instead of fetching twice.
-			if n := o.TotalCalls(); n != 100 {
-				t.Fatalf("calls after FollowerMaxWait = %d, want 1 flight + 99 follower fetches", n)
+			// The flight is inside its own bound (Timeouts.Origin plus the
+			// queue wait), so nobody fetches a second time.
+			if n := o.TotalCalls(); n != 1 {
+				t.Fatalf("calls after FollowerMaxWait = %d, want 1: followers keep waiting for a live flight", n)
 			}
 			close(gate)
 			for _, ch := range chs {
 				if s := <-ch; s.err != nil {
 					t.Fatal(s.err)
 				}
+			}
+			if n := o.TotalCalls(); n != 1 {
+				t.Fatalf("calls = %d, want 1", n)
 			}
 		})
 	})
@@ -735,27 +740,6 @@ func TestOversizedStreamedNotBuffered(t *testing.T) {
 	})
 }
 
-// FR-STO-12, 04 §6.7: a marker never replaces a stored response. A stale
-// entry kept for stale-if-error is refetched; the origin now answers
-// private, and the stale response stays rather than a marker taking its
-// place.
-func TestMarkerNeverReplacesResponse(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		o := testorigin.NewChecked(t, 64, 16)
-		o.Default(testorigin.Behavior{Header: http.Header{"Cache-Control": {"max-age=1, stale-if-error=60"}}, Body: []byte("a")})
-		e := newEngine(t, cacheCfg)
-		defer closeEngine(t, e)
-
-		serve(t, e, getReq("/a"), o)
-		time.Sleep(2 * time.Second)
-		o.Default(testorigin.Behavior{Header: http.Header{"Cache-Control": {"private"}}, Body: []byte("p")})
-		serve(t, e, getReq("/a"), o)
-		if resp, _ := serve(t, e, getReq("/a"), o); resp.Cache.Detail == "hit-for-miss" {
-			t.Fatalf("a marker replaced the stored response: %+v", resp.Cache)
-		}
-	})
-}
-
 // FR-COA-5 (decided 2026-10-01): a storable flight response that needs
 // validation before its next reuse (no-cache) is still shared with the
 // followers waiting on it.
@@ -811,6 +795,119 @@ func TestPanicInBodyReadClosesBody(t *testing.T) {
 		}
 		if !closed.Load() {
 			t.Fatal("origin body was not closed after its Read panicked")
+		}
+	})
+}
+
+// FR-COA-4, T-19: a slow origin that still answers inside Timeouts.Origin
+// costs one fetch, and every waiter gets its response. Before v1.1 each
+// follower fetched for itself at FollowerMaxWait: 16 fetches and 84 requests
+// shed at the defaults.
+func TestFollowersOutwaitSlowFlight(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		o := testorigin.NewChecked(t, 1, 1)
+		o.Default(testorigin.Behavior{Delay: 15 * time.Second, Header: http.Header{"Cache-Control": {"max-age=60"}}, Body: []byte("ok")})
+		e := newEngine(t, cacheCfg)
+		defer closeEngine(t, e)
+
+		chs := make([]<-chan served, 100)
+		for i := range chs {
+			chs[i] = serveAsync(t.Context(), e, getReq("/a"), o)
+		}
+		for _, ch := range chs {
+			if s := <-ch; s.err != nil || s.body != "ok" {
+				t.Fatalf("got %q, %v; want ok from the one flight", s.body, s.err)
+			}
+		}
+		if n := o.TotalCalls(); n != 1 {
+			t.Fatalf("origin calls = %d, want 1", n)
+		}
+	})
+}
+
+// FR-COA-4, T6.2a: a flight that has not published Timeouts.Origin plus
+// Limiter.MaxQueueWait after the follower joined is broken (its origin ignores
+// the context), and the follower fetches for itself.
+func TestFollowerFallsBackAfterFlightDeadline(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		stuck := make(chan struct{})
+		var calls atomic.Int32
+		o := weir.OriginFunc(func(context.Context, *weir.Request) (*weir.Response, error) {
+			if calls.Add(1) == 1 {
+				<-stuck // ignores its context
+				return nil, errors.New("late")
+			}
+			return &weir.Response{StatusCode: 200, Header: http.Header{"Cache-Control": {"max-age=60"}}, Body: io.NopCloser(strings.NewReader("ok"))}, nil
+		})
+		obs := &eventCounter{}
+		cfg := cacheCfg
+		cfg.Observer = obs
+		e := newEngine(t, cfg)
+		defer closeEngine(t, e)
+
+		lead := serveAsync(t.Context(), e, getReq("/a"), o)
+		synctest.Wait()
+		follow := serveAsync(t.Context(), e, getReq("/a"), o)
+		time.Sleep(31 * time.Second) // past FollowerMaxWait (10 s) and Timeouts.Origin (30 s)
+		synctest.Wait()
+		if n := calls.Load(); n != 1 {
+			t.Fatalf("calls at 31 s = %d, want 1", n)
+		}
+		time.Sleep(2 * time.Second) // past Timeouts.Origin + MaxQueueWait
+		s := <-follow
+		if s.err != nil || s.body != "ok" {
+			t.Fatalf("follower got %q, %v; want its own fetch's ok", s.body, s.err)
+		}
+		if n := obs.count("coalesce-timeout/direct"); n != 1 {
+			t.Errorf("EvCoalesceTimeout{direct} = %d, want 1", n)
+		}
+		close(stuck)
+		<-lead
+	})
+}
+
+// missOnce hides the record of the next Get, as a lookup that ran just
+// before another request's flight stored its response sees the store.
+type missOnce struct {
+	store.Store
+	armed atomic.Bool
+}
+
+func (s *missOnce) Get(ctx context.Context, k store.Key) (*store.Entry, error) {
+	if s.armed.CompareAndSwap(true, false) {
+		return nil, store.ErrNotFound
+	}
+	return s.Store.Get(ctx, k)
+}
+
+// FR-COA-1: a request whose lookup missed just before another request's
+// flight stored the response, and that then finds no flight to join, does not
+// fetch again. Creating the flight, it looks once more and serves the entry.
+// Before v1.1 this window cost a second origin call (BenchmarkServeMissCoalesced
+// read 1.003 calls per key, and more as the path between lookup and join grew).
+func TestCreatorFindsEntryStoredMeanwhile(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		m, err := memory.New(memory.Config{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer m.Close()
+		st := &missOnce{Store: m}
+		cfg := cacheCfg
+		cfg.Store = st
+		e := newEngine(t, cfg)
+		defer closeEngine(t, e)
+		o := testorigin.NewChecked(t, 1, 1)
+		o.Default(testorigin.Behavior{Header: http.Header{"Cache-Control": {"max-age=60"}}, Body: []byte("v")})
+
+		serve(t, e, getReq("/a"), o)
+		st.armed.Store(true) // the next lookup misses although the entry is stored
+		resp, body := serve(t, e, getReq("/a"), o)
+		if n := o.TotalCalls(); n != 1 || body != "v" || !resp.Cache.Hit {
+			t.Fatalf("origin calls %d, body %q, cache %+v; want the stored entry served as a hit after one call", n, body, resp.Cache)
+		}
+		if n := weir.Flights(e); n != 0 {
+			t.Fatalf("%d flights left in the table", n)
 		}
 	})
 }

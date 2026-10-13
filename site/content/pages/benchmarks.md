@@ -23,6 +23,12 @@ After the last hardening changes before v1.0.0 the same benchmark measured 852.2
 make bench
 ```
 
+## After the v1.1 hardening
+
+The same benchmarks on `v1.0.1` and on the v1.1 branch, run interleaved on the reference machine, and `make load` against the record above.
+
+{{include docs/benchmarks.md "### v1.1 hardening (2026-10-13)"}}
+
 ## Five load scenarios
 
 `make load` runs each failure mode against a real engine for about eight minutes in total and checks a threshold. This is the idle reference run of 2026-10-11.
