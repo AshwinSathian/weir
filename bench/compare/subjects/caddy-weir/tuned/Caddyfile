@@ -1,11 +1,15 @@
-# Tuned tier: stale serving on, which is off by default (D6). The limiter
-# stays at its defaults (64 concurrent, 16 per path, 1024 queued, 2 s wait).
+# Tuned tier: stale serving on, which is off by default (D6), and a snapshot
+# directory, without which every restart is a cold cache (docs/08 §2). The
+# limiter stays at its defaults (64 concurrent, 16 per path, 8192 queued,
+# 5 s wait). The admin endpoint is as in the default tier.
 {
 	auto_https off
+	admin :2019
 }
 :8080 {
 	weir {
 		name bench
+		snapshot_dir /data/weir
 		stale {
 			while_revalidate 60s
 			if_error 5m

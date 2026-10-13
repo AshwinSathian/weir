@@ -70,7 +70,7 @@ func flood(t *testing.T, e *weir.Engine, o weir.Origin, path string, seq *int, n
 // slowOrigin is a checked origin whose every response is cacheable and
 // takes 50 ms, so concurrent misses overlap.
 func slowOrigin(t *testing.T) *testorigin.Origin {
-	o := testorigin.NewChecked(t, 64, 16)
+	o := testorigin.NewChecked(t, 64, 32)
 	b := cacheable("v")
 	b.Delay = 50 * time.Millisecond
 	o.Default(b)
@@ -78,8 +78,9 @@ func slowOrigin(t *testing.T) *testorigin.Origin {
 }
 
 // FR-LIM-3, T-11, T6.8: 10 000 requests to one path with random query
-// strings keep at most MaxPerPartition fetches in flight, and keys on other
-// paths stay hits while the flood runs.
+// strings keep at most 32 fetches in flight with the rest of the budget idle
+// (MaxPerPartition and the 16 it may borrow), and keys on other paths stay
+// hits while the flood runs.
 func TestRandomQueryFloodBounded(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		o := slowOrigin(t)
@@ -104,8 +105,8 @@ func TestRandomQueryFloodBounded(t *testing.T) {
 				t.Fatalf("/p %d: %v, want success or a shed", i, r.err)
 			}
 		}
-		if n := o.MaxInflightPartition(); n != 16 {
-			t.Fatalf("/p max in-flight = %d, want exactly MaxPerPartition (16)", n)
+		if n := o.MaxInflightPartition(); n != 32 {
+			t.Fatalf("/p max in-flight = %d, want exactly 32 (MaxPerPartition and 16 borrowed)", n)
 		}
 	})
 }
@@ -192,8 +193,8 @@ func TestMissRateThrottle(t *testing.T) {
 			return o.MaxInflightPartition()
 		}
 
-		if n := inflight(1000); n != 16 {
-			t.Fatalf("window 1: /p max in-flight = %d, want 16", n)
+		if n := inflight(1000); n != 32 { // not throttled yet: the cap and what it may borrow
+			t.Fatalf("window 1: /p max in-flight = %d, want 32", n)
 		}
 		time.Sleep(missWindow)
 		serve(t, e, getReq("/tick"), o) // closes window 1
@@ -203,22 +204,22 @@ func TestMissRateThrottle(t *testing.T) {
 		if n := inflight(1000); n != 1 {
 			t.Fatalf("window 2: /p max in-flight = %d, want 1", n)
 		}
-		// Other paths keep their cap.
+		// Other paths keep their cap and what it may borrow.
 		o.Reset()
 		flood(t, e, o, "/other", &seq, 100)
-		if n := o.MaxInflightPartition(); n != 16 {
-			t.Fatalf("window 2: /other max in-flight = %d, want 16", n)
+		if n := o.MaxInflightPartition(); n != 32 {
+			t.Fatalf("window 2: /other max in-flight = %d, want 32", n)
 		}
 
 		// Window 2 was a flood too, but nothing closes it for an hour. The
 		// throttle of window 1 has ended by then without a report, and the
 		// report of window 2, an hour late, must not start one.
 		time.Sleep(time.Hour)
-		if n := inflight(1000); n != 16 {
-			t.Fatalf("after an idle hour: /p max in-flight = %d, want 16", n)
+		if n := inflight(1000); n != 32 {
+			t.Fatalf("after an idle hour: /p max in-flight = %d, want 32", n)
 		}
-		if n := inflight(1000); n != 16 {
-			t.Fatalf("after the hour-old report: /p max in-flight = %d, want 16", n)
+		if n := inflight(1000); n != 32 {
+			t.Fatalf("after the hour-old report: /p max in-flight = %d, want 32", n)
 		}
 		if got, want := obs.count("miss-rate-anomaly/throttle"), 1; got != want {
 			t.Fatalf("%d throttle events, want %d: the late report throttled", got, want)
@@ -245,7 +246,7 @@ func TestMissRateThrottle(t *testing.T) {
 func TestOneHitWondersDoNotEvictHot(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		const hot = 100
-		o := testorigin.NewChecked(t, 64, 16)
+		o := testorigin.NewChecked(t, 64, 32)
 		b := cacheable(strings.Repeat("x", 1024))
 		o.Default(b)
 		b.Delay = time.Millisecond // the flood takes fake time, so the hot reads fall inside it
@@ -400,7 +401,7 @@ func TestMissRateIgnoresFreeRequests(t *testing.T) {
 // delay does not divide the window, so no fetch completes on a boundary.
 func TestMissRateThrottleHoldsAcrossWindows(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		o := testorigin.NewChecked(t, 64, 16)
+		o := testorigin.NewChecked(t, 64, 32)
 		b := cacheable("v")
 		b.Delay = 37 * time.Millisecond
 		o.Default(b)
@@ -559,7 +560,7 @@ func TestMissRateThrottleSkipsLateReport(t *testing.T) {
 func TestThrottledPartitionReturnsProbe(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		gate := make(chan struct{})
-		o := testorigin.NewChecked(t, 64, 16)
+		o := testorigin.NewChecked(t, 64, 32)
 		o.Default(cacheable("v"))
 		o.Route("/down", ccBehavior(http.StatusServiceUnavailable, "", "down"))
 		held := cacheable("held")
@@ -602,12 +603,12 @@ func TestThrottledPartitionReturnsProbe(t *testing.T) {
 }
 
 // FR-MR-3, FR-LIM-4, FR-WRM-1: the cap binds every class. With the
-// partition's one slot taken, a background refresh is dropped and the stale
-// entry served; a warm run of that path proceeds one fetch at a time.
+// partition's one slot taken, the stale entry is served and its refresh
+// waits for that slot; a warm run of that path proceeds one fetch at a time.
 func TestThrottleBindsBackgroundAndWarm(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		gate := make(chan struct{})
-		o := testorigin.NewChecked(t, 64, 16)
+		o := testorigin.NewChecked(t, 64, 32)
 		o.Default(ccBehavior(http.StatusOK, "max-age=1, stale-while-revalidate=600", "w"))
 		obs := &eventCounter{}
 		cfg := cacheCfg
@@ -630,12 +631,16 @@ func TestThrottleBindsBackgroundAndWarm(t *testing.T) {
 		if body != "w" || resp.Cache.Stale != weir.StaleWhileRevalidate {
 			t.Fatalf("stale key under throttle: %q stale=%v, want the stale entry", body, resp.Cache.Stale)
 		}
-		if n := obs.count("refresh-dropped/no-slot"); n != 1 {
-			t.Fatalf("%d refreshes dropped for no slot, want 1", n)
+		if n, calls := obs.count("refresh-dropped/no-slot"), o.TotalCalls(); n != 0 || calls != 2 {
+			t.Fatalf("%d refreshes dropped, %d origin calls; want the refresh waiting behind the held slot (0 and 2)", n, calls)
 		}
 		close(gate)
 		if s := <-slow; s.err != nil {
 			t.Fatalf("held fetch: %v", s.err)
+		}
+		synctest.Wait()
+		if calls := o.TotalCalls(); calls != 3 {
+			t.Fatalf("%d origin calls after the slot was freed, want 3: the refresh ran", calls)
 		}
 
 		b := cacheable("v")

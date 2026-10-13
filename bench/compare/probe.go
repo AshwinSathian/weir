@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -8,10 +9,13 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -25,6 +29,13 @@ import (
 
 var probeCalls atomic.Int64
 
+// varyPad brings a variant's body to about 1 KiB.
+var varyPad = strings.Repeat("x", 1000)
+
+// varyN is how many values of the varied header the cardinality probe sends
+// for one URL. A variable so the tests can send fewer.
+var varyN = 20000
+
 // probeOrigin serves /p/{probe}/{key...}. It reflects request input into
 // text/plain bodies on purpose: that is the unsafe behavior under test.
 //
@@ -35,7 +46,8 @@ func probeOrigin(w http.ResponseWriter, r *http.Request) {
 	h.Set("Content-Type", "text/plain")
 	h.Set("X-Origin-Call", strconv.FormatInt(n, 10))
 	cacheable := func() { h.Set("Cache-Control", "max-age=60") }
-	switch r.PathValue("probe") {
+	name, _, _ := strings.Cut(strings.TrimPrefix(r.URL.Path, "/p/"), "/")
+	switch name {
 	case "reflect-host": // an unkeyed header in the body (Kettle 2018)
 		cacheable()
 		_, _ = fmt.Fprintf(w, "script=//%s/app.js", firstNonEmpty(r.Header.Get("X-Forwarded-Host"), "origin.example"))
@@ -92,7 +104,46 @@ func probeOrigin(w http.ResponseWriter, r *http.Request) {
 	case "no-cache": // counts what client revalidation demands cost
 		cacheable()
 		_, _ = io.WriteString(w, "page")
-	case "error-200": // always fails
+	case "cloak": // a query parser that also splits on ";", last value wins
+		cacheable()
+		q := "none"
+		for _, kv := range strings.FieldsFunc(r.URL.RawQuery, func(c rune) bool { return c == '&' || c == ';' }) {
+			if v, ok := strings.CutPrefix(kv, "q="); ok {
+				q = v
+			}
+		}
+		_, _ = fmt.Fprintf(w, "q=%s", q)
+	case "pathnorm": // routes on the path exactly as sent: no cleaning, no decoding
+		cacheable()
+		raw := r.URL.EscapedPath()
+		seg := strings.Split(strings.TrimPrefix(raw, "/p/pathnorm/"), "/")
+		if len(seg) == 2 && seg[1] == "page" && !strings.ContainsAny(seg[0], "%.") {
+			_, _ = io.WriteString(w, "page")
+			return
+		}
+		_, _ = fmt.Fprintf(w, "other:%s", raw)
+	case "meta": // rejects a header value with a byte outside printable ASCII, and says the error may be cached
+		cacheable()
+		for _, c := range []byte(r.Header.Get("X-Meta")) {
+			if c < 0x20 || c >= 0x7f {
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = io.WriteString(w, "bad header")
+				return
+			}
+		}
+		_, _ = io.WriteString(w, "page")
+	case "vary": // one URL, one response per value of a request header
+		cacheable()
+		h.Set("Vary", "X-Variant")
+		_, _ = fmt.Fprintf(w, "variant=%s\n%s", r.Header.Get("X-Variant"), varyPad)
+	case "error-200": // always fails, slowly enough for clients to overlap
+		t := time.NewTimer(100 * time.Millisecond)
+		defer t.Stop()
+		select {
+		case <-t.C:
+		case <-r.Context().Done():
+			return
+		}
 		w.WriteHeader(http.StatusInternalServerError)
 		_, _ = io.WriteString(w, "boom")
 	default:
@@ -129,6 +180,7 @@ type probeRow struct {
 	Tier     string   `json:"tier"`
 	Probe    string   `json:"probe"`
 	Verdict  string   `json:"verdict"` // safe, unsafe, or a count for the amplification probe
+	Figure   string   `json:"figure,omitempty"`
 	Why      string   `json:"why"`
 	Attacker exchange `json:"attacker"`
 	Victim   exchange `json:"victim"`
@@ -136,20 +188,75 @@ type probeRow struct {
 
 type probe struct {
 	name string
-	// attack builds the attacker's request for url; victim reads the plain
-	// GET that follows and returns the verdict.
-	attack func(url string) (*http.Request, error)
+	// suffix is appended to /p/<name>/<nonce> to make the victim's URL.
+	suffix string
+	// attack sends the attacker's request or requests, given the victim's
+	// URL, and returns the last exchange. The victim's plain GET follows
+	// and judge reads it.
+	attack func(ctx context.Context, c *http.Client, url string) exchange
 	judge  func(att, vic exchange) (verdict, why string)
 }
 
-func withHeader(method, name, value string) func(string) (*http.Request, error) {
-	return func(url string) (*http.Request, error) {
-		req, err := http.NewRequest(method, url, nil) //nolint:noctx // the caller attaches the context
-		if err == nil && name != "" {
+func withHeader(method, name, value string) func(context.Context, *http.Client, string) exchange {
+	return func(ctx context.Context, c *http.Client, url string) exchange {
+		req, err := http.NewRequest(method, url, nil) //nolint:noctx // do attaches the context
+		if err != nil {
+			return exchange{Body: "error: " + err.Error()}
+		}
+		if name != "" {
 			req.Header.Set(name, value)
 		}
-		return req, err
+		return do(ctx, c, req)
 	}
+}
+
+// each sends a plain GET to every URL that variants derives from the
+// victim's and returns the last exchange.
+func each(variants func(url string) []string) func(context.Context, *http.Client, string) exchange {
+	return func(ctx context.Context, c *http.Client, url string) exchange {
+		var last exchange
+		for _, u := range variants(url) {
+			req, err := http.NewRequest(http.MethodGet, u, nil) //nolint:noctx // do attaches the context
+			if err != nil {
+				return exchange{Body: "error: " + err.Error()}
+			}
+			last = do(ctx, c, req)
+			_, rest, _ := strings.Cut(u, "/p/")
+			last.Header = "URL: /p/" + rest
+		}
+		return last
+	}
+}
+
+// rawGet writes a GET by hand, with one header line net/http would refuse
+// to send, and reads the response.
+func rawGet(ctx context.Context, rawURL, headerLine string) exchange {
+	ex := exchange{Method: "GET", Header: strconv.QuoteToASCII(headerLine)}
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		ex.Body = "error: " + err.Error()
+		return ex
+	}
+	conn, err := (&net.Dialer{Timeout: 10 * time.Second}).DialContext(ctx, "tcp", u.Host)
+	if err != nil {
+		ex.Body = "error: " + err.Error()
+		return ex
+	}
+	defer func() { _ = conn.Close() }()
+	_ = conn.SetDeadline(time.Now().Add(10 * time.Second))
+	if _, err := fmt.Fprintf(conn, "GET %s HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n%s\r\n\r\n", u.RequestURI(), u.Host, headerLine); err != nil {
+		ex.Body = "error: " + err.Error()
+		return ex
+	}
+	resp, err := http.ReadResponse(bufio.NewReader(conn), nil)
+	if err != nil {
+		ex.Body = "error: " + err.Error()
+		return ex
+	}
+	defer func() { _ = resp.Body.Close() }()
+	b, _ := io.ReadAll(io.LimitReader(resp.Body, 256))
+	ex.Status, ex.Body = resp.StatusCode, string(b)
+	return ex
 }
 
 func unsafeIf(bad bool, yes, no string) (string, string) {
@@ -160,40 +267,71 @@ func unsafeIf(bad bool, yes, no string) (string, string) {
 }
 
 var probes = []probe{
-	{"reflect-host", withHeader("GET", "X-Forwarded-Host", "evil.example"), func(_, v exchange) (string, string) {
+	{name: "reflect-host", attack: withHeader("GET", "X-Forwarded-Host", "evil.example"), judge: func(_, v exchange) (string, string) {
 		return unsafeIf(strings.Contains(v.Body, "evil.example"), "the victim was served the attacker's host", "the victim got the origin's own host")
 	}},
-	{"reflect-url", withHeader("GET", "X-Original-URL", "/admin"), func(_, v exchange) (string, string) {
+	{name: "reflect-url", attack: withHeader("GET", "X-Original-URL", "/admin"), judge: func(_, v exchange) (string, string) {
 		return unsafeIf(strings.Contains(v.Body, "/admin"), "the victim was served the page the attacker's header chose", "the victim got its own page")
 	}},
-	{"fat-get", func(url string) (*http.Request, error) {
-		return http.NewRequest(http.MethodGet, url, strings.NewReader("evil")) //nolint:noctx // the caller attaches the context
-	}, func(_, v exchange) (string, string) {
+	{name: "fat-get", attack: func(ctx context.Context, c *http.Client, url string) exchange {
+		req, err := http.NewRequest(http.MethodGet, url, strings.NewReader("evil")) //nolint:noctx // do attaches the context
+		if err != nil {
+			return exchange{Body: "error: " + err.Error()}
+		}
+		return do(ctx, c, req)
+	}, judge: func(_, v exchange) (string, string) {
 		return unsafeIf(strings.Contains(v.Body, "evil"), "the victim was served the answer to the attacker's body", "the attacker's body did not reach the victim")
 	}},
-	{"method-override", withHeader("GET", "X-HTTP-Method-Override", "DELETE"), func(_, v exchange) (string, string) {
+	{name: "method-override", attack: withHeader("GET", "X-HTTP-Method-Override", "DELETE"), judge: func(_, v exchange) (string, string) {
 		return unsafeIf(v.Status != 200, "the victim got the error the attacker's header caused", "the victim got the page")
 	}},
-	{"big-header", withHeader("GET", "X-Padding", strings.Repeat("a", 6000)), func(_, v exchange) (string, string) {
+	{name: "big-header", attack: withHeader("GET", "X-Padding", strings.Repeat("a", 6000)), judge: func(_, v exchange) (string, string) {
 		return unsafeIf(v.Status != 200, "the victim got the error the attacker's header caused", "the victim got the page")
 	}},
-	{"cookie", withHeader("GET", "Cookie", "user=alice"), func(_, v exchange) (string, string) {
+	{name: "cookie", attack: withHeader("GET", "Cookie", "user=alice"), judge: func(_, v exchange) (string, string) {
 		return unsafeIf(strings.Contains(v.Body, "alice"), "a request without the cookie was served alice's page", "alice's page was not served to anyone else")
 	}},
-	{"auth", withHeader("GET", "Authorization", "Bearer alice"), func(_, v exchange) (string, string) {
+	{name: "auth", attack: withHeader("GET", "Authorization", "Bearer alice"), judge: func(_, v exchange) (string, string) {
 		return unsafeIf(strings.Contains(v.Body, "alice"), "a request without credentials was served alice's account", "alice's account was not served to anyone else")
 	}},
-	{"set-cookie", withHeader("GET", "", ""), func(a, v exchange) (string, string) {
+	{name: "set-cookie", attack: withHeader("GET", "", ""), judge: func(a, v exchange) (string, string) {
 		return unsafeIf(v.SetCk != "" && v.SetCk == a.SetCk, "the second visitor was handed the first visitor's session cookie", "no session cookie was replayed")
 	}},
-	{"deception", withHeader("GET", "Cookie", "user=alice"), func(_, v exchange) (string, string) {
+	{name: "deception", suffix: "/x.css", attack: withHeader("GET", "Cookie", "user=alice"), judge: func(_, v exchange) (string, string) {
 		return unsafeIf(strings.Contains(v.Body, "alice"), "alice's account page, sent with no caching headers, was served to another visitor", "the response without caching headers was not reused")
 	}},
-	{"range", withHeader("GET", "Range", "bytes=0-0"), func(_, v exchange) (string, string) {
+	{name: "range", attack: withHeader("GET", "Range", "bytes=0-0"), judge: func(_, v exchange) (string, string) {
 		return unsafeIf(v.Status != 200 || v.Body != "0123456789", "the victim got a partial or truncated response", "the victim got the whole object")
 	}},
-	{"head", withHeader("HEAD", "", ""), func(_, v exchange) (string, string) {
+	{name: "head", attack: withHeader("HEAD", "", ""), judge: func(_, v exchange) (string, string) {
 		return unsafeIf(v.Body != "0123456789", "a GET after a HEAD got no body", "the GET got its body")
+	}},
+	// Parameter cloaking: the origin splits the query on ";" as well as "&"
+	// and lets the last value win. A cache that drops, sorts or dedupes
+	// parameters before it builds its key can file the attacker's URL
+	// under the victim's.
+	{name: "cloak", suffix: "?q=page", attack: each(func(u string) []string {
+		return []string{u + "&q=evil", u + ";q=evil", u + "&utm_content=1;q=evil", strings.Replace(u, "?q=page", "?q=evil&q=page;q=evil", 1)}
+	}), judge: func(_, v exchange) (string, string) {
+		return unsafeIf(strings.Contains(v.Body, "evil"), "the victim was served the answer to the attacker's cloaked parameter", "the victim got the answer to its own query")
+	}},
+	// Path normalization: the origin routes on the path exactly as sent. A
+	// cache that cleans or decodes the path for its key, and forwards what
+	// it received, stores the attacker's page under the victim's URL.
+	{name: "pathnorm", suffix: "/page", attack: each(func(u string) []string {
+		base := strings.TrimSuffix(u, "/page")
+		return []string{base + "//page", base + "/./page", base + "/x/../page", base + "/%70age"}
+	}), judge: func(_, v exchange) (string, string) {
+		return unsafeIf(v.Body != "page", "the victim was served the page of a differently spelled path", "the victim got its own page")
+	}},
+	// A meta character in a header (Nguyen et al. 2019, "HMC"): the origin
+	// rejects the value with an error it marks cacheable. Sent twice by
+	// hand, with a control byte and with a byte above ASCII.
+	{name: "meta", attack: func(ctx context.Context, _ *http.Client, u string) exchange {
+		rawGet(ctx, u, "X-Meta: a\x07b")
+		return rawGet(ctx, u, "X-Meta: a\xffb")
+	}, judge: func(_, v exchange) (string, string) {
+		return unsafeIf(v.Status != 200, "the victim got the error the attacker's header caused", "the victim got the page")
 	}},
 }
 
@@ -223,18 +361,9 @@ func runProbes(ctx context.Context, c *http.Client, target, subject, tier string
 	nonce := strconv.FormatInt(time.Now().UnixNano(), 36)
 	var out []probeRow
 	for _, p := range probes {
-		url := target + "/p/" + p.name + "/" + nonce
-		if p.name == "deception" {
-			url += "/x.css"
-		}
+		url := target + "/p/" + p.name + "/" + nonce + p.suffix
 		row := probeRow{Subject: subject, Tier: tier, Probe: p.name}
-		areq, err := p.attack(url)
-		if err != nil {
-			row.Verdict, row.Why = "error", err.Error()
-			out = append(out, row)
-			continue
-		}
-		row.Attacker = do(ctx, c, areq)
+		row.Attacker = p.attack(ctx, c, url)
 		vreq, _ := http.NewRequest(http.MethodGet, url, nil) //nolint:noctx // do attaches the context
 		row.Victim = do(ctx, c, vreq)
 		if row.Victim.Status == 0 {
@@ -278,20 +407,122 @@ func runProbes(ctx context.Context, c *http.Client, target, subject, tier string
 		Verdict: strconv.Itoa(len(seen)) + " of 50", Why: "distinct origin responses among 50 requests that asked for revalidation",
 		Attacker: a, Victim: last})
 
-	// An origin that only ever answers 500: does any client get a 2xx?
+	// An origin that only ever answers 500, asked by 20 clients at once,
+	// three times: does any client get a 2xx? The clients overlap on
+	// purpose. Asked one after another, as in the first round, the probe
+	// never reached a cache that hands the waiters of a failed fetch an
+	// empty 200 (darkweak/souin#876).
 	url = target + "/p/error-200/" + nonce
-	ok := 0
-	var lastErr exchange
-	for range 20 {
-		req, _ := http.NewRequest(http.MethodGet, url, nil) //nolint:noctx // do attaches the context
-		lastErr = do(ctx, c, req)
-		if lastErr.Status >= 200 && lastErr.Status < 300 {
-			ok++
+	ok, empty := 0, 0
+	var shown exchange
+	for range 3 {
+		got := make([]exchange, 20)
+		var wg sync.WaitGroup
+		for i := range got {
+			wg.Go(func() {
+				req, _ := http.NewRequest(http.MethodGet, url, nil) //nolint:noctx // do attaches the context
+				got[i] = do(ctx, c, req)
+			})
+		}
+		wg.Wait()
+		for _, g := range got {
+			if g.Status/100 == 2 {
+				ok++
+				shown = g
+				if g.Body == "" {
+					empty++
+				}
+			} else if ok == 0 {
+				shown = g
+			}
 		}
 	}
-	v, why := unsafeIf(ok > 0, strconv.Itoa(ok)+" of 20 clients got a 2xx for a URL whose origin only answers 500", "every client saw the error")
-	out = append(out, probeRow{Subject: subject, Tier: tier, Probe: "error-as-success", Verdict: v, Why: why, Victim: lastErr})
-	return out
+	v, why := unsafeIf(ok > 0, strconv.Itoa(ok)+" of 60 concurrent clients got a 2xx ("+strconv.Itoa(empty)+" with an empty body) for a URL whose origin only answers 500", "every client saw the error")
+	out = append(out, probeRow{Subject: subject, Tier: tier, Probe: "error-as-success", Verdict: v, Why: why, Victim: shown})
+	return append(out, varyProbe(ctx, c, target+"/p/vary/"+nonce, subject, tier))
+}
+
+// varyProbe sends varyN values of a header the origin varies on, all for
+// one URL, then asks again for the first and the last 100 of them and for a
+// value never sent. The verdict is whether every answer was the asker's own
+// variant. The figure is how many of the 200 came from the cache: what a
+// client can make one URL hold. A cache that does not forward the header at
+// all has one variant for the URL and nothing to count. probes.sh reads the
+// container's memory before and after.
+func varyProbe(ctx context.Context, c *http.Client, url, subject, tier string) probeRow {
+	type answer struct {
+		status     int
+		call, body string
+	}
+	get := func(variant string) answer {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if err != nil {
+			return answer{}
+		}
+		req.Header.Set("X-Variant", variant)
+		resp, err := c.Do(req)
+		if err != nil {
+			return answer{}
+		}
+		defer func() { _ = resp.Body.Close() }()
+		b, _ := io.ReadAll(resp.Body)
+		first, _, _ := strings.Cut(string(b), "\n")
+		return answer{resp.StatusCode, resp.Header.Get("X-Origin-Call"), first}
+	}
+	calls := make([]string, varyN)
+	next := make(chan int)
+	var wg sync.WaitGroup
+	for range 32 {
+		wg.Go(func() {
+			for i := range next {
+				calls[i] = get("v" + strconv.Itoa(i)).call
+			}
+		})
+	}
+	for i := range varyN {
+		next <- i
+	}
+	close(next)
+	wg.Wait()
+
+	sample := min(100, varyN/2)
+	kept, wrong, failed, hidden := 0, 0, 0, 0
+	vic := exchange{Method: "GET", Header: "X-Variant: victim"}
+	for i := range varyN {
+		if i >= sample && i < varyN-sample {
+			continue
+		}
+		a := get("v" + strconv.Itoa(i))
+		switch {
+		case a.status != http.StatusOK:
+			failed++
+		case a.body == "variant=":
+			// The header never reached the origin: the cache does not
+			// forward what it does not key. Nobody's value was served to
+			// anybody, and the URL has one variant.
+			hidden++
+		case a.body != "variant=v"+strconv.Itoa(i):
+			wrong++
+			vic.Status, vic.Body, vic.Header = a.status, a.body, "X-Variant: v"+strconv.Itoa(i)
+		case a.call == calls[i]:
+			kept++
+		}
+	}
+	if a := get("victim"); wrong == 0 {
+		vic.Status, vic.Body = a.status, a.body
+		if a.status == http.StatusOK && a.body != "variant=victim" && a.body != "variant=" {
+			wrong++
+		}
+	}
+	row := probeRow{Subject: subject, Tier: tier, Probe: "vary-cardinality", Victim: vic,
+		Figure: strconv.Itoa(kept) + " of " + strconv.Itoa(2*sample)}
+	if hidden == 2*sample {
+		row.Figure = "header not forwarded"
+	}
+	row.Verdict, row.Why = unsafeIf(wrong > 0, "a request was served another value's variant",
+		"no answer was another value's variant; "+row.Figure+" (sampled variants of "+strconv.Itoa(varyN)+" still served from the cache), "+
+			strconv.Itoa(hidden)+" answers were for a request without the header, "+strconv.Itoa(failed)+" requests failed")
+	return row
 }
 
 func probeCmd(ctx context.Context, args []string) error {
@@ -300,6 +531,7 @@ func probeCmd(ctx context.Context, args []string) error {
 	subject := fs.String("subject", "", "subject name recorded in each row")
 	tier := fs.String("tier", "default", "config tier recorded in each row")
 	outPath := fs.String("out", "", "append JSON lines to this file (default: stdout)")
+	readyOnly := fs.Bool("ready-only", false, "wait until the subject answers, then stop")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -316,8 +548,8 @@ func probeCmd(ctx context.Context, args []string) error {
 		out = f
 	}
 	c := &http.Client{Timeout: 30 * time.Second, Transport: &http.Transport{DisableCompression: true}}
-	r := &runner{client: c, target: strings.TrimRight(*target, "/")}
-	if err := r.ready(ctx, 90*time.Second); err != nil {
+	r := &runner{client: c, target: strings.TrimRight(*target, "/"), want: -1}
+	if err := r.ready(ctx); err != nil || *readyOnly {
 		return err
 	}
 	enc := json.NewEncoder(out)
@@ -325,7 +557,7 @@ func probeCmd(ctx context.Context, args []string) error {
 		if err := enc.Encode(row); err != nil {
 			return err
 		}
-		log.Printf("%s/%s %-18s %-8s %s", *subject, *tier, row.Probe, row.Verdict, row.Why)
+		log.Printf("%s/%s %-18s %-8s %s | attacker %d %q | victim %d %q", *subject, *tier, row.Probe, row.Verdict, row.Why, row.Attacker.Status, row.Attacker.Body, row.Victim.Status, row.Victim.Body)
 	}
 	return nil
 }

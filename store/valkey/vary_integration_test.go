@@ -81,7 +81,9 @@ func TestVaryCASConcurrentWriters(t *testing.T) {
 // most 8 reachable from the server.
 func TestEngineVaryCapHoldsAcrossWriters(t *testing.T) {
 	t.Parallel()
-	o := testorigin.NewChecked(t, 128, 16)
+	// One path, 64 languages at once: 16 under the cap and 16 more borrowed
+	// while the rest of the engine's 64 slots are idle (FR-LIM-3, v1.2).
+	o := testorigin.NewChecked(t, 128, 32)
 	o.Default(testorigin.Behavior{Delay: 100 * time.Millisecond, Func: func(r *weir.Request) (*weir.Response, error) {
 		return &weir.Response{StatusCode: http.StatusOK,
 			Header: http.Header{"Cache-Control": {"max-age=60"}, "Vary": {"Accept-Language"}},

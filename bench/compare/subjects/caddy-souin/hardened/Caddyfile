@@ -1,0 +1,21 @@
+# Hardened tier (docs/11 §5.3): the default tier plus the key and default
+# Cache-Control options of the cache-handler README
+# (https://github.com/caddyserver/cache-handler, table of options).
+{
+	auto_https off
+	cache {
+		# "key.headers: Add headers to the key matching the regexp". The
+		# request headers the probes use become part of the cache key.
+		key {
+			headers X-Forwarded-Host X-Original-URL X-HTTP-Method-Override Cookie Authorization
+		}
+		# "default_cache_control: Set the default value of Cache-Control
+		# response header if not set by upstream (Souin treats empty
+		# Cache-Control as public if omitted)".
+		default_cache_control no-store
+	}
+}
+:8080 {
+	cache
+	reverse_proxy origin:9000
+}

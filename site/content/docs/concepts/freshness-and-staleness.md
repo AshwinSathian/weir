@@ -41,7 +41,7 @@ So the batch spreads over six seconds on its first expiry, and further on each o
 
 Jitter spreads expiries. Early refresh removes some of them. On a fresh hit, Weir draws a random number and may start a background refresh before the entry expires (FR-FRS-6). The chance grows as expiry approaches and with how long the last fetch took: an entry that takes 2 seconds to regenerate starts refreshing earlier than one that takes 20 milliseconds. A hot key is usually renewed without any request seeing a miss. This is the XFetch algorithm from Vattani, Chierichetti and Lowenstein's "Optimal Probabilistic Cache Stampede Prevention" (2015).
 
-Background refreshes never queue. If the limiter has no room outside the foreground reserve, the refresh is dropped and a later request tries again.
+The refresh a stale hit starts is owed, so it waits for a slot outside the foreground reserve, behind every client that is waiting (FR-LIM-4). An early refresh of an entry that is still fresh is not owed: if there is no room it is dropped and a later request tries again.
 
 ## Stale serving is the origin's call
 

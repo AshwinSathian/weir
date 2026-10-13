@@ -100,7 +100,7 @@ func TestBreakerProbeNotCapturedByFailingRoute(t *testing.T) {
 		if resp, err := e.Serve(t.Context(), queryReq("/report", 100), o); err == nil {
 			resp.Body.Close()
 		}
-		time.Sleep(10*time.Second + time.Millisecond) // the doubled open period
+		time.Sleep(10*time.Second + time.Millisecond) // well past the next open period
 		// /report arrives first again and is refused the probe.
 		if _, err := e.Serve(t.Context(), queryReq("/report", 101), o); !errors.Is(err, weir.ErrCircuitOpen) {
 			t.Fatalf("/report took the probe twice in a row: %v", err)
@@ -108,8 +108,16 @@ func TestBreakerProbeNotCapturedByFailingRoute(t *testing.T) {
 		if _, body := serve(t, e, getReq("/home"), o); body != "ok" {
 			t.Fatalf("/home = %q, want the probe to succeed", body)
 		}
+		// FR-CB-4: each success doubles what is admitted; the sixth reaches
+		// MaxConcurrent (64) and closes the breaker.
+		for i := range 5 {
+			if s := e.Stats().BreakerState; s != weir.BreakerHalfOpen {
+				t.Fatalf("breaker = %v after %d successful probes, want half-open", s, i+1)
+			}
+			serve(t, e, getReq("/home"+strconv.Itoa(i)), o)
+		}
 		if s := e.Stats().BreakerState; s != weir.BreakerClosed {
-			t.Fatalf("breaker = %v after a successful probe, want closed", s)
+			t.Fatalf("breaker = %v after six successful probes, want closed", s)
 		}
 	})
 }

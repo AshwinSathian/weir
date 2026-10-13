@@ -136,6 +136,9 @@ type LimiterConfig struct {
 	MaxPerPartition int            `json:"max_per_partition,omitempty"`
 	// PartitionHeadroom is weir.LimiterConfig.PartitionHeadroom (FR-LIM-3).
 	PartitionHeadroom int `json:"partition_headroom,omitempty"`
+	// AdaptiveMax is weir.LimiterConfig.AdaptiveMax (FR-LIM-8): above
+	// max_concurrent, the limit may grow to it while the origin answers well.
+	AdaptiveMax int `json:"adaptive_max,omitempty"`
 	// MaxPerClient caps one client's requests at the origin (FR-FAIR-4). The
 	// client is Caddy's client_ip, which honors trusted_proxies. 0: off.
 	MaxPerClient int `json:"max_per_client,omitempty"`
@@ -318,6 +321,7 @@ func (h *Handler) weirConfig() weir.Config {
 			MaxConcurrent: h.Limiter.MaxConcurrent, MaxQueue: h.Limiter.MaxQueue,
 			MaxQueueWait:    time.Duration(h.Limiter.MaxQueueWait),
 			MaxPerPartition: h.Limiter.MaxPerPartition, PartitionHeadroom: h.Limiter.PartitionHeadroom,
+			AdaptiveMax:  h.Limiter.AdaptiveMax,
 			MaxPerClient: h.Limiter.MaxPerClient,
 		},
 		Freshness: weir.FreshnessConfig{

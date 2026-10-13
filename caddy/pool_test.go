@@ -288,6 +288,20 @@ func TestSnapshotDirValidation(t *testing.T) {
 	if err := (&Handler{Name: "a", SnapshotDir: "/var/lib/weir"}).Validate(); err != nil {
 		t.Error(err)
 	}
+	// FR-SNP-5: keeping freshness is a property of the snapshot.
+	if err := (&Handler{Name: "a", SnapshotKeepFresh: true}).Validate(); err == nil {
+		t.Error("snapshot_keep_fresh accepted without snapshot_dir")
+	}
+	h := &Handler{Name: "a", SnapshotDir: "/var/lib/weir", SnapshotKeepFresh: true}
+	if err := h.Validate(); err != nil {
+		t.Error(err)
+	}
+	if !h.memoryConfig(0, nil).SnapshotKeepFreshness {
+		t.Error("snapshot_keep_fresh did not reach the store's config")
+	}
+	if a, b := h.storeSpec(), (&Handler{Name: "a", SnapshotDir: "/var/lib/weir"}).storeSpec(); a == b {
+		t.Error("snapshot_keep_fresh is not part of the store's identity: a reload that turns it on would keep the old store")
+	}
 }
 
 // R-3: the hash is recorded only after the purge, so a Provision that failed

@@ -48,6 +48,7 @@ type storeSpec struct {
 	maxObject   int64 // sets the shard count, so a change needs a new store
 	ownerCap    bool
 	snapshotDir string
+	keepFresh   bool // decides what the store writes and trusts, so a change needs a new store
 	valkey      [sha256.Size]byte
 }
 
@@ -361,6 +362,7 @@ func (h *Handler) storeSpec() storeSpec {
 	}
 	return storeSpec{
 		name: h.Name, maxBytes: int64(h.MaxBytes), maxObject: int64(h.MaxObjectBytes), ownerCap: h.MultiHost, snapshotDir: h.snapshotDir(),
+		keepFresh: h.SnapshotKeepFresh,
 	}
 }
 
@@ -381,6 +383,7 @@ func (h *Handler) memoryConfig(size int64, sink *evictSink) memory.Config {
 	}
 	if dir := h.snapshotDir(); dir != "" {
 		cfg.SnapshotPath = filepath.Join(dir, h.Name+".weir")
+		cfg.SnapshotKeepFreshness = h.SnapshotKeepFresh
 	}
 	if h.MultiHost {
 		size := cfg.MaxBytes

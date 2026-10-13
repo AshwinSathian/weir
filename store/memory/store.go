@@ -38,6 +38,19 @@ type Config struct {
 	// engine that wrote it. Put weir.Config.KeyGeneration() in the file name
 	// so that an engine with other rules does not load them (FR-SNP-4).
 	SnapshotPath string
+	// SnapshotKeepFreshness makes a restart keep the cache warm (FR-SNP-5).
+	// Without it every loaded entry is invalid as of the load and is
+	// revalidated before any use, because a snapshot does not hold soft
+	// purges or the invalidations of unsafe requests. With it, Close leaves
+	// out the entries one of those covers and marks the file, and a load
+	// that finds the mark, lost no record and sees a clock not behind the
+	// file's keeps every entry as fresh as it was.
+	//
+	// The cost is T-33: a purge sent while the process was down, which it
+	// could not receive, is not applied to what the snapshot brings back.
+	// Purge again after a restart if one may have been missed, or leave
+	// this off. A version before v1.2 that reads a marked file starts cold.
+	SnapshotKeepFreshness bool
 	// SnapshotTimeout bounds the snapshot written by Close; CloseContext uses
 	// its own context instead. 0: 5s.
 	SnapshotTimeout time.Duration
@@ -93,10 +106,11 @@ type Store struct {
 	ep      *epochs
 	closed  atomic.Bool
 
-	closeMu     sync.Mutex // serializes CloseContext
-	snapDone    bool       // the snapshot was written; guarded by closeMu
+	closeMu     sync.RWMutex // serializes CloseContext, and keeps SetEpoch out of it
+	snapDone    bool         // the snapshot was written; guarded by closeMu
 	snapPath    string
 	snapTimeout time.Duration
+	snapKeep    bool          // Config.SnapshotKeepFreshness
 	snapLoad    snapLoadStats // set once by New, then read-only
 }
 
@@ -177,6 +191,7 @@ func New(cfg Config) (*Store, error) {
 		onEvict:     cfg.OnEvict,
 		snapPath:    cfg.SnapshotPath,
 		snapTimeout: cfg.SnapshotTimeout,
+		snapKeep:    cfg.SnapshotKeepFreshness,
 		ep:          newEpochs(cfg.EpochSlots, cfg.MaxHardEpochs, cfg.MaxRetention),
 	}
 	for i := range s.shards {
@@ -320,6 +335,12 @@ func (s *Store) Delete(_ context.Context, k store.Key) error {
 // SetEpoch records ep for t (E-2). A new hard tag beyond MaxHardEpochs
 // returns an error wrapping store.ErrUnavailable (E-6).
 func (s *Store) SetEpoch(_ context.Context, t store.Tag, ep store.Epoch) error {
+	// Under closeMu, so that an epoch this call acknowledges cannot land
+	// after Close has decided which entries a kept snapshot holds (FR-SNP-5,
+	// T-33). A call that arrives during the snapshot waits for it and is
+	// then refused.
+	s.closeMu.RLock()
+	defer s.closeMu.RUnlock()
 	if s.closed.Load() {
 		return store.ErrUnavailable
 	}

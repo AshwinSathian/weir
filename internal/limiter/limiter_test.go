@@ -448,7 +448,7 @@ func TestLimiterInvariants(t *testing.T) {
 			for range 200 {
 				switch r.IntN(5) {
 				case 0, 1:
-					c, part, host := Class(r.IntN(3)), uint64(r.IntN(4)), uint64(r.IntN(3))
+					c, part, host := Class(r.IntN(4)), uint64(r.IntN(4)), uint64(r.IntN(3))
 					ctx, cancel := context.WithTimeout(t.Context(), time.Duration(r.IntN(8))*time.Millisecond)
 					go func() {
 						defer cancel()
@@ -850,4 +850,119 @@ func BenchmarkLimiterReleaseFullQueue(b *testing.B) {
 		held = append(held[1:], &Permit{l: l, part: head.part})
 		enqueue()
 	}
+}
+
+// FR-LIM-4 (v1.2), CMP-F6: a Refresh waits for a slot outside the reserve
+// where a Background fetch is dropped, and a foreground request that arrives
+// later is granted first.
+func TestRefreshQueuesBehindForeground(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		l := newLimiter(2, 8, 2, 1) // one slot outside the reserve
+		a := mustAcquire(t, l, Foreground, 1)
+		b := mustAcquire(t, l, Foreground, 2)
+		if _, err := l.Acquire(t.Context(), Background, 3, 0); !errors.Is(err, ErrShed) {
+			t.Fatalf("Background with no slot: %v, want ErrShed", err)
+		}
+		ref := acquireAsync(t.Context(), l, Refresh, 3)
+		synctest.Wait()
+		fg := acquireAsync(t.Context(), l, Foreground, 4) // queued after the refresh
+		synctest.Wait()
+		if len(ref) != 0 || len(fg) != 0 {
+			t.Fatal("a waiter ran with both slots held")
+		}
+		a.Release()
+		synctest.Wait()
+		if len(fg) == 0 || len(ref) != 0 {
+			t.Fatal("the freed slot went to the refresh, or to nobody; want the foreground waiter")
+		}
+		(<-fg).p.Release() // one slot held (b): the refresh needs inflight < Max-Reserve = 1
+		synctest.Wait()
+		if len(ref) != 0 {
+			t.Fatal("the refresh took a reserved slot")
+		}
+		b.Release()
+		r := <-ref
+		if r.err != nil {
+			t.Fatalf("refresh: %v", r.err)
+		}
+		time.Sleep(10 * wait) // a refresh has no queue timeout of its own; nothing is left to time out
+		r.p.Release()
+		if in, q, parts := l.state(); in != 0 || q != 0 || parts != 0 || len(l.later) != 0 || len(l.laterBy) != 0 {
+			t.Fatalf("state: inflight=%d queued=%d parts=%d later=%d", in, q, parts, len(l.later))
+		}
+	})
+}
+
+// FR-LIM-4, FR-LIM-6, T-11: the refresh backlog has its own bound and its
+// own per-partition share, so stale entries of one path, however many,
+// neither fill the queue foreground requests wait in nor take the whole
+// backlog. A refresh leaves the backlog when its context ends.
+func TestRefreshBacklogBounded(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		l := newLimiter(1, 8, 1, 0) // backlog 8, 2 per partition (a quarter, at least the partition's slots)
+		hold := mustAcquire(t, l, Foreground, 99)
+		ctx, cancel := context.WithCancel(t.Context())
+		var chs []<-chan result
+		for range 5 {
+			chs = append(chs, acquireAsync(ctx, l, Refresh, 1))
+		}
+		synctest.Wait()
+		shed := 0
+		for _, ch := range chs {
+			if len(ch) != 0 { // len, not pending: pending would take the result
+				if r := <-ch; !errors.Is(r.err, ErrQueueFull) {
+					t.Fatalf("refresh past the partition's share: %v, want ErrQueueFull", r.err)
+				}
+				shed++
+			}
+		}
+		if shed != 3 || len(l.later) != 2 {
+			t.Fatalf("%d shed, %d in the backlog; want 3 and 2", shed, len(l.later))
+		}
+		for part := uint64(10); part < 20; part++ {
+			chs = append(chs, acquireAsync(ctx, l, Refresh, part))
+		}
+		synctest.Wait()
+		if len(l.later) != 8 {
+			t.Fatalf("backlog holds %d, want its bound of 8", len(l.later))
+		}
+		// The foreground queue is untouched: all 8 places are free.
+		var fg []<-chan result
+		for part := uint64(100); part < 108; part++ {
+			fg = append(fg, acquireAsync(t.Context(), l, Foreground, part))
+		}
+		synctest.Wait()
+		for i, ch := range fg {
+			if len(ch) != 0 {
+				t.Fatalf("foreground waiter %d was shed with the refresh backlog full: %v", i, (<-ch).err)
+			}
+		}
+		cancel()
+		synctest.Wait()
+		if len(l.later) != 0 || len(l.laterBy) != 0 {
+			t.Fatalf("backlog holds %d after its contexts ended", len(l.later))
+		}
+		hold.Release()
+		for range fg { // one slot: each release grants the next, in queue order
+			synctest.Wait()
+			granted := 0
+			for i, ch := range fg {
+				if len(ch) == 0 {
+					continue
+				}
+				r := <-ch
+				if r.err != nil {
+					t.Fatalf("foreground waiter %d: %v", i, r.err)
+				}
+				granted++
+				r.p.Release()
+			}
+			if granted == 0 {
+				break
+			}
+		}
+		if in, q, _ := l.state(); in != 0 || q != 0 {
+			t.Fatalf("state: inflight=%d queued=%d", in, q)
+		}
+	})
 }

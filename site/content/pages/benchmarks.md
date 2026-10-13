@@ -31,7 +31,7 @@ The same benchmarks on `v1.0.1` and on the code that became `v1.1.0`, run interl
 
 ## Against other caches
 
-One round of black-box tests against Varnish, nginx `proxy_cache` and the Caddy cache-handler (Souin), each in a container behind the same origin, in a default and a tuned configuration. It counts origin calls and failed clients; it does not measure speed. The notes under each table matter as much as the cells: (a) marks cells that undercount. "Weir v1.1" in these tables is the `v1.1.0` code, built from the working tree shortly before the tag. The configurations, the harness and the method are in [`bench/compare/`](https://github.com/AshwinSathian/weir/tree/main/bench/compare) and the [comparison specification](https://github.com/AshwinSathian/weir/blob/main/docs/11-comparison-spec.md). Every figure about another project here comes from our own runs with configurations we wrote. None has been verified by that project's owners, so treat them as our measurements, not as statements those projects would sign, and send corrections.
+Black-box tests against Varnish, nginx `proxy_cache` and the Caddy cache-handler (Souin), each in a container behind the same origin, in a default and a tuned configuration. They count origin calls and failed clients; they do not measure speed. The notes under each table matter as much as the cells. Weir in these tables is the published `v1.1.0` module. The tables are from the second round, which reran everything with a corrected harness and added a flood, a brownout, a purge and a restart. The configurations, the harness and the method are in [`bench/compare/`](https://github.com/AshwinSathian/weir/tree/main/bench/compare) and the [comparison specification](https://github.com/AshwinSathian/weir/blob/main/docs/11-comparison-spec.md). Every figure about another project here comes from our own runs with configurations we wrote. None has been verified by that project's owners, so treat them as our measurements, not as statements those projects would sign, and send corrections.
 
 How many requests reached the origin:
 
@@ -45,9 +45,13 @@ Failure and recovery:
 
 {{include docs/benchmarks.md "### Comparison: failure and recovery scenarios"}}
 
+A flood of one path, an origin that fails in bursts, a purge and a restart. Weir loses on at least one figure in each:
+
+{{include docs/benchmarks.md "### Comparison: flood, brownout, purge and restart"}}
+
 {{include docs/benchmarks.md "### Comparison: what the numbers say about Weir"}}
 
-The round also changed Weir. Three defects of the last release and four problems with its defaults showed up, and all seven were fixed before this page was written:
+The first round also changed Weir. Three defects of the release before and four problems with its defaults showed up, and all seven were fixed in `v1.1.0`. The four losses the second round found are open:
 
 {{include docs/benchmarks.md "### Comparison: what the round changed in Weir"}}
 
@@ -78,7 +82,7 @@ At 1 million entries the collector costs 1.08 µs per request here, and 1.76 µs
 
 ## What this does not show
 
-- **No speed comparison with any other cache.** The round above counts origin calls and failures. Throughput, latency and memory against other caches have not been measured.
+- **No speed comparison with any other cache.** The rounds above count origin calls and failures. Throughput, latency and memory against other caches have not been measured.
 - No network, TLS or HTTP parsing. A request served through `net/http` over TLS costs many times the 852 ns measured here, and most of that is outside Weir.
 - No real origin. The synthetic origin answers instantly or fails on cue.
 - One reference machine and one container. No ARM server, no NUMA box, no production trace.

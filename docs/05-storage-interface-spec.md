@@ -130,6 +130,7 @@ type Config struct {
 	EpochSlots       int           // 0: 1 << 19; a power of two, at most 1 << 26 (MaxEpochSlots)
 	MaxBytesPerOwner int64         // 0: off; per shard (M14, FR-FAIR-2)
 	SnapshotPath     string        // "": off (M13, FR-SNP-1..3)
+	SnapshotKeepFreshness bool     // false: loaded entries are invalid as of the load; true: FR-SNP-5
 	SnapshotTimeout  time.Duration // 0: 5s; bounds the snapshot written by Close
 	OnEvict      func(queue string, n int) // optional; "small", "main", "expired"
 }
@@ -212,7 +213,7 @@ The global tag's three timestamps and the newest-epoch value are atomics. Hard e
 
 ```
 magic "WEIRSNAP", version 0x01, base wall time int64
-then records: kind byte (0x01 entry, 0x02 hard epoch), uvarint length, payload, CRC-32C (Castagnoli) of kind+length+payload
+then records: kind byte (0x01 entry, 0x02 hard epoch, 0x03 kept mark with payload 0x01, written only with SnapshotKeepFreshness, FR-SNP-5), uvarint length, payload, CRC-32C (Castagnoli) of kind+length+payload
 entry payload: 32-byte key + codec-encoded Entry (§6)
 hard-epoch payload: 32-byte tag + int64 at
 trailer: record 0xFF with the record count; a file without a valid trailer is incomplete and ignored

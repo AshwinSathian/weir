@@ -53,9 +53,6 @@ type fetchOpts struct {
 	// behind it (FR-CB-4). False when the caller has a stale response to
 	// serve.
 	patient bool
-	// marked: a hit-for-miss marker covers the URL, so the fetch may run past
-	// its partition's cap while the limiter has headroom (FR-LIM-3).
-	marked bool
 }
 
 // fetch is the only caller of Origin.Fetch (P3, 04 §6.7). It forwards
@@ -105,7 +102,9 @@ func (e *Engine) fetch(ctx context.Context, c *keys.Classified, origin Origin, c
 	defer cancelProbe()
 	permit := held
 	if permit == nil {
-		if fo.marked && class == limiter.Foreground {
+		if class == limiter.Foreground {
+			// FR-LIM-3: any client's fetch may use slots the other
+			// partitions leave idle.
 			permit, err = e.limFor(c).AcquireOver(ctx, c.PartitionH, c.HostH)
 		} else {
 			permit, err = e.limFor(c).Acquire(ctx, class, c.PartitionH, c.HostH)
@@ -176,6 +175,11 @@ func (e *Engine) fetch(ctx context.Context, c *keys.Classified, origin Origin, c
 		} else {
 			settled = true
 			e.cb.RecordFor(probe, c.PartitionH, o)
+			if !c.HasBody { // the upload pool has its own, fixed limit
+				// FR-LIM-8: the same verdict tells an adaptive limit
+				// whether the origin took this level of concurrency.
+				e.lim.Report(o != breaker.Failure, time.Since(reqTime))
+			}
 		}
 	}
 	if err != nil {
@@ -302,7 +306,12 @@ func fetchReason(class limiter.Class, pass bool) string {
 func (e *Engine) breakerAdmit(ctx context.Context, c *keys.Classified, class limiter.Class, patient bool) (breaker.Probe, error) {
 	if class != limiter.Foreground || !patient {
 		probe, err := e.cb.AllowFor(c.PartitionH)
-		if err == nil && class != limiter.Foreground && probe != (breaker.Probe{}) {
+		// Only a client's fetch may be the first probe of a half-open
+		// period. Once one has succeeded the breaker is ramping up
+		// (FR-CB-4), and a refresh may take one of the probes it admits:
+		// refused for the whole ramp, every refresh owed after an outage
+		// would be dropped just as the origin came back.
+		if err == nil && class != limiter.Foreground && probe != (breaker.Probe{}) && !e.cb.Ramping() {
 			e.cb.Cancel(probe)
 			err = breaker.ErrCircuitOpen
 		}

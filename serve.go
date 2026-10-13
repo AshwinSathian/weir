@@ -394,7 +394,7 @@ func (e *Engine) cacheable(ctx context.Context, c *keys.Classified, origin Origi
 		case httpcc.StaleSWR: // FR-STL-1, 03 §2.3; before only-if-cached and Range, which it answers
 			emit(e.cfg.Observer, Event{Kind: EvStaleServed, Time: now, Partition: c.Partition, Reason: "swr"})
 			if !c.Authorized && !c.ReqCC.NoStore { // the early-refresh gate (T-8, T-31)
-				e.backgroundRefresh(ctx, c, lk, origin)
+				e.owedRefresh(ctx, c, lk, origin)
 			}
 			return e.fromEntry(c, lk.entry, now, CacheInfo{Hit: true, Stale: StaleWhileRevalidate, TTL: -staleness}), nil
 		case httpcc.Unusable: // FR-PRG-3: exactly a miss
@@ -473,7 +473,7 @@ func (e *Engine) fetchStored(ctx context.Context, sp *fetchSpec, origin Origin) 
 		_, stale := e.staleOK(sp, time.Now())
 		patient = !stale
 	}
-	fo := fetchOpts{buffered: !sp.lk.oversize, patient: patient, marked: sp.lk.marker}
+	fo := fetchOpts{buffered: !sp.lk.oversize, patient: patient}
 	fr := &flightResult{fetchResult: e.fetch(ctx, c, origin, sp.class, fo, prior, sp.permit)}
 	if fr.notMod && e.hardPurgedSince(ctx, prior) {
 		// FR-PRG-3, FR-PRG-7: a hard purge after prior was stored makes it

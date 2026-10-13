@@ -65,8 +65,19 @@ type Engine struct {
 	closeDone chan struct{}
 	cbWaiting atomic.Int64    // requests waiting for a half-open probe (breakerAdmit); at most MaxQueue/4
 	bgCtx     context.Context // canceled after Close's grace period
-	bgCancel  context.CancelFunc
-	wg        sync.WaitGroup // every engine-owned goroutine (04 §12)
+	// waitCtx ends when Close begins. A refresh waiting for a slot gives up
+	// then: Close's grace period is for fetches that have started, not for
+	// working off a backlog against the origin.
+	waitCtx    context.Context
+	waitCancel context.CancelFunc
+	bgCancel   context.CancelFunc
+	wg         sync.WaitGroup // every engine-owned goroutine (04 §12)
+	// owed is the keys whose stale-while-revalidate refresh is waiting for
+	// a slot or running, so repeated stale hits queue one (FR-LIM-4). Each
+	// has a goroutine in wg; at most Limiter.MaxQueue wait, plus those
+	// between this map and the limiter.
+	owedMu sync.Mutex
+	owed   map[store.Key]struct{}
 }
 
 // New validates cfg, applies defaults and returns a ready engine. It returns
@@ -115,6 +126,7 @@ func New(cfg Config) (*Engine, error) {
 	e.lim = limiter.New(limiter.Config{
 		Max: l.MaxConcurrent, MaxQueue: l.MaxQueue, PerPartition: l.MaxPerPartition, PerHost: l.MaxPerHost,
 		Reserve: l.ReserveForeground, MaxWait: l.MaxQueueWait, Headroom: l.PartitionHeadroom,
+		Ceiling: l.AdaptiveMax,
 	})
 	// Only foreground pass requests carry a body, so the upload pool has no
 	// reserve (04 §14). T-39: one path gets at most half of it, so slow
@@ -139,6 +151,10 @@ func New(cfg Config) (*Engine, error) {
 		e.cb = breaker.New(breaker.Config{
 			Window: b.Window, MinRequests: b.MinRequests, FailureRatio: b.FailureRatio,
 			OpenFor: b.OpenFor, MaxOpenFor: b.MaxOpenFor, HalfOpenProbes: b.HalfOpenProbes,
+			RampTo: c.Limiter.MaxConcurrent, // closed means the whole budget is admitted (FR-CB-4)
+			// A minute, as in v1.1, or longer for a long origin timeout: a probe must
+			// be able to time out and be recorded before its period is given up.
+			HalfOpenFor:    max(time.Minute, c.Timeouts.Origin+c.Limiter.MaxQueueWait),
 			CountStatus500: b.CountStatus500, MinPartitions: b.MinPartitions,
 		}, c.Rand, e.breakerChanged)
 	}
@@ -148,6 +164,7 @@ func New(cfg Config) (*Engine, error) {
 		}, e.missWindow)
 	}
 	e.bgCtx, e.bgCancel = context.WithCancel(context.Background())
+	e.waitCtx, e.waitCancel = context.WithCancel(e.bgCtx)
 	return e, nil
 }
 
@@ -223,6 +240,7 @@ func (e *Engine) Close(ctx context.Context) error {
 		}
 	}
 	defer close(e.closeDone)
+	e.waitCancel() // refreshes still waiting for a slot are dropped (FR-LIM-4)
 	// No wg.Add can follow: goBackground checks closed under mu.
 	done := make(chan struct{})
 	go func() { e.wg.Wait(); close(done) }()

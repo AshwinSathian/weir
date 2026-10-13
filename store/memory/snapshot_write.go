@@ -15,10 +15,16 @@ import (
 
 // Snapshot file framing (05 §5.5).
 const (
-	snapMagic       = "WEIRSNAP"
-	snapVersion     = 0x01
-	snapKindEntry   = 0x01
-	snapKindEpoch   = 0x02
+	snapMagic     = "WEIRSNAP"
+	snapVersion   = 0x01
+	snapKindEntry = 0x01
+	snapKindEpoch = 0x02
+	// snapKindKept marks a file written with SnapshotKeepFreshness: it
+	// holds no entry that a soft, invalidating or hard epoch covered when
+	// it was written (FR-SNP-5). Payload: one byte, 1. A loader that does
+	// not know the kind counts a lost record and starts cold, which is the
+	// safe reading.
+	snapKindKept    = 0x03
 	snapKindTrailer = 0xFF
 
 	defaultSnapshotTimeout = 5 * time.Second
@@ -48,6 +54,8 @@ func (s *Store) Close() error {
 // calls return nil, and after a failure a later call tries again (the store
 // accepts no writes by then, so the content does not change).
 func (s *Store) CloseContext(ctx context.Context) error {
+	// Exclusive with SetEpoch: an epoch that was acknowledged is in place
+	// before the walk below decides what a kept snapshot may hold (T-33).
 	s.closeMu.Lock()
 	defer s.closeMu.Unlock()
 	s.closed.Store(true)
@@ -88,9 +96,16 @@ func (s *Store) writeSnapshot(ctx context.Context) (err error) {
 	for _, queue := range [...]uint8{queueMain, queueSmall} {
 		for i := range s.shards {
 			for _, r := range s.shards[i].live(queue) {
+				if s.snapKeep && s.covered(r.e) {
+					continue
+				}
 				w.entry(r)
 			}
 		}
+	}
+	if s.snapKeep {
+		w.record(snapKindKept, []byte{1})
+		w.count++
 	}
 	for t, at := range s.ep.hardEpochs() {
 		w.epoch(t, at)
@@ -126,6 +141,18 @@ func (s *Store) writeSnapshot(ctx context.Context) (err error) {
 // live copies the unexpired response and vary-spec records of one queue,
 // head to tail, under the read lock. Markers and negative entries are not
 // persisted (FR-SNP-1).
+// covered reports whether any epoch applies to e now. Soft and invalidating
+// epochs live in a sketch keyed with a per-process seed and cannot be
+// written out, so a kept snapshot leaves such entries out instead: they come
+// back as misses, never as fresh hits (FR-SNP-5, FR-STL-5). Every tag is
+// read in every plane, also the group tags the engine reads as shared (05
+// E-12): the store cannot know its caller's layout, and a sketch false
+// positive here only leaves out an entry that could have been kept.
+func (s *Store) covered(e *store.Entry) bool {
+	_, ok := s.ep.newestOf(e.Tags, nil, e.RequestTime)
+	return ok
+}
+
 func (sh *shard) live(queue uint8) []snapRec {
 	now := time.Now()
 	q := &sh.small

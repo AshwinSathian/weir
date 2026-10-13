@@ -103,6 +103,7 @@ func TestCaddyfileParse(t *testing.T) {
 		max_bytes  512MiB          # memory store size
 		max_object_bytes 4MiB      # largest stored response, 1 MiB when absent
 		snapshot_dir /var/lib/weir
+		snapshot_keep_fresh
 		multi_host
 		client_placeholders
 		key {
@@ -127,6 +128,7 @@ func TestCaddyfileParse(t *testing.T) {
 			max_queue_wait    2s
 			max_per_partition 16
 			partition_headroom 16
+			adaptive_max 256
 			max_per_client    32
 		}
 		stale {
@@ -148,13 +150,13 @@ func TestCaddyfileParse(t *testing.T) {
 		}
 		var want Handler
 		const raw = `{
-			"name": "site-a", "max_bytes": "512MiB", "max_object_bytes": "4MiB", "snapshot_dir": "/var/lib/weir", "multi_host": true, "client_placeholders": true,
+			"name": "site-a", "max_bytes": "512MiB", "max_object_bytes": "4MiB", "snapshot_dir": "/var/lib/weir", "snapshot_keep_fresh": true, "multi_host": true, "client_placeholders": true,
 			"key": {"query_drop": ["utm_*", "fbclid", "gclid"], "query_keep": ["id"], "query_sort": true,
 				"normalize_path": true, "headers": ["Accept-Language"], "cookies": ["currency"],
 				"accept_encoding": ["br", "gzip"]},
 			"forward": {"allow": ["X-Request-Id"]},
 			"bypass": {"cookies": ["session_id"], "headers": ["X-Admin"]},
-			"limiter": {"max_concurrent": 128, "max_queue": 256, "max_queue_wait": "2s", "max_per_partition": 16, "partition_headroom": 16, "max_per_client": 32},
+			"limiter": {"max_concurrent": 128, "max_queue": 256, "max_queue_wait": "2s", "max_per_partition": 16, "partition_headroom": 16, "adaptive_max": 256, "max_per_client": 32},
 			"stale": {"while_revalidate": "30s", "if_error": "5m"}
 		}`
 		if err := decodeStrict([]byte(raw), &want); err != nil {

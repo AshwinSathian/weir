@@ -2,7 +2,7 @@
 
 Scope: [docs/11-comparison-spec.md](../11-comparison-spec.md). Reading references to `11` mean that document. No card commits a file from `bench/compare/results/`; published tables are medians copied into docs/benchmarks.md (11 §9).
 
-State after the session of 2026-10-13, which ran one round on one branch at the owner's request: CMP-01 and CMP-02 are done. CMP-03, CMP-04, CMP-05 and CMP-08 are partly done and stay open; what each still lacks is in CMP-03b, CMP-04b and the notes below. CMP-07's decision came early: the owner chose to publish the count-based pillars before CMP-06, so no scorecard with marks exists (11 §7). The findings are CMP-F1 to CMP-F4, resolved in card HRD-21.
+State after the second session of 2026-10-13, which ran CMP-03b and CMP-04b on one branch at the owner's request: the count-based pillars are complete. CMP-01 to CMP-05, CMP-03b and CMP-04b are done. CMP-06 (speed and memory) has not run. CMP-07's decision came early: the owner chose to publish the count-based pillars before CMP-06, so no scorecard with marks exists (11 §7), and CMP-08 stays open until CMP-06 is published or dropped. Findings CMP-F1 to CMP-F4 were resolved in card HRD-21; CMP-F5 to CMP-F8, from round 2, are open and wait for the owner's decision.
 
 ### [x] CMP-01 Comparison spec, harness and subject configs
 - Plan: comparison · Size: M · Depends on: none
@@ -21,28 +21,30 @@ State after the session of 2026-10-13, which ran one round on one branch at the 
 - Out of scope: reading meaning into the numbers (CMP-07)
 - Notes: check against the running containers, not memory: the Varnish 9.1 image's `VARNISH_HTTP_PORT` and `VARNISH_SIZE`, the tmpfs path, `.wait_limit` in VCL 4.1; that the Caddy builder image honors `GOTOOLCHAIN=auto`. The Weir and Souin Caddyfiles already validate and cache on native builds of the same versions; Varnish and nginx have not run at all. In the native smoke, Souin answered 2xx to 597 of 600 clients in `error-herd` although the origin only ever sent 500: confirm or clear that in Docker before CMP-07 reads it. A native run on macOS lost connections at 1000 simultaneous connects (listen backlog 128); if the Linux run shows `error` in the `origin` row, fix the plumbing (11 R1) before trusting any row.
 
-### [ ] CMP-03 Origin failure cues and the remaining protection scenarios
+### [x] CMP-03 Origin failure cues and the remaining protection scenarios
 - Plan: comparison · Size: M · Depends on: CMP-02
 - Read: 11 §5.1, §5.2; loadtest/scenarios_test.go (brownout and flood shapes)
 - Touch: bench/compare/origin.go, bench/compare/run.go, bench/compare/compare_test.go, bench/compare/subjects/ (purge access per subject)
 - Tests: one test per new origin cue (capacity, fail-on-cue, hang), against the origin direct
 - AC: `busting-flood`, `brownout`, `slow-leader`, `leader-abort`, `purge-herd`, `large-body-herd` and `restart` run for every subject; a subject without a feature reports `not available`, never a zero
 - Out of scope: security probes (CMP-04)
-- Notes: split at `purge-herd` if the card overruns; purge differs per subject and is the costly part.
+- Notes: split at `purge-herd` if the card overruns; purge differs per subject and is the costly part. Closed by CMP-03b: every scenario listed has run for every subject (`slow-leader` is `slow-origin-herd`), and each cue has a test against the origin direct.
 
-### [ ] CMP-04 Security probes
+### [x] CMP-04 Security probes
 - Plan: comparison · Size: M · Depends on: CMP-02
 - Read: 11 §5.3; 06 §6; 06 T-rows for key poisoning and deception (grep the probe names)
 - Touch: bench/compare/origin.go (unsafe routes), bench/compare/probe.go (new), bench/compare/probe_test.go (new), bench/compare/subjects/ (hardened tier where a project documents one)
 - Tests: each probe against the origin direct yields `not applicable` (nothing caches); against a deliberately naive in-test cache yields `poisoned`
 - AC: every probe of 11 §5.3 returns `poisoned`, `safe` or `not applicable` for every subject and tier; each verdict keeps the two responses that decided it in the results file
 - Out of scope: fixing anything found in Weir (new card, 11 §8)
+- Notes: closed by CMP-04b. The verdicts are `unsafe` and `safe` (11 §5.3), not the `poisoned` and `not applicable` this card first named: against the origin direct every probe is `safe`. One criterion is met in part: a probe that sends several attacker requests (cloaking, path, meta character) keeps the last one and the victim's response, and the two counting probes (errors, `Vary`) keep a victim response and the count, not two responses.
 
-### [ ] CMP-05 Conformance across subjects
+### [x] CMP-05 Conformance across subjects
 - Plan: comparison · Size: S · Depends on: CMP-02
 - Read: 11 §5.4; scripts/cache-tests.sh; docs/cache-tests-expected-failures.md
 - Touch: bench/compare/conformance.sh (new), scripts/cache-tests.sh only if a shared function is lifted out
 - AC: the pinned cache-tests revision runs against every subject in both tiers; pass counts by category land in the results directory; Weir's row matches `testdata/cache-tests-baseline.json`
+- Notes: closed by CMP-04b. Three tiers ran (default, tuned, hardened); `summary.md` splits failures into assertion and setup and lists passes by test group; the script itself compares Weir's default row with the baseline (equal, on Caddy and `weirproxy`).
 
 ### [ ] CMP-06 Speed and memory
 - Plan: comparison · Size: M · Depends on: CMP-02
@@ -64,19 +66,21 @@ State after the session of 2026-10-13, which ran one round on one branch at the 
 - Touch: docs/benchmarks.md, site/content/pages/{benchmarks,compare}.md, the claims register, the chosen result files
 - AC: every published number has its config, command, machine and date; the page names every pillar that was run; `make site-check` passes
 
-### [ ] CMP-03b Remaining protection scenarios
+### [x] CMP-03b Remaining protection scenarios
 - Plan: comparison · Size: M · Depends on: CMP-03
 - Read: 11 §5.1, §5.2; loadtest/scenarios_test.go
 - Touch: bench/compare/{origin.go,run.go,scenarios.go,compare_test.go}, bench/compare/subjects/ (purge access per subject)
 - AC: `busting-flood`, `brownout`, `purge-herd` and `restart` run for every subject; a subject without a feature reports `not available`, never a zero
 - Also: the runner checks body length as well as status (cache-handler's empty 200s); `post-flood` records the status of its `POST` requests; counters are reset after the priming wait and a second wave shows deferred refreshes; a replaced profile keeps its in-flight count.
 - Notes: CMP-03 ran `slow-origin-herd`, `leader-abort`, `turned-private`, `bad-route`, `origin-down`, `post-flood`, `oversize-herd`, `large-body-herd` and the two capped scenarios instead of these four. The new origin cues have no test of their own against the origin direct; add them here.
+- Done 2026-10-13: the four scenarios ran for all eleven subject-tiers, three repetitions; nginx, `weirproxy` and the controls report `not available` for `purge-herd`. Every scenario was rerun with the corrected harness, not only cache-handler's two, because the body check and the second wave can change any cell. `brownout` uses 10 s bursts and `restart` 2000 keys (11 §5.1, §5.2 say why). Tests: every scenario against the origin direct in a synctest bubble with sent equal to seen, and `TestOriginCapacity`, `TestOriginStatusChangeKeepsCountersAndInFlight`, `TestOriginHang`.
 
-### [ ] CMP-04b Remaining probes and a hardened tier
+### [x] CMP-04b Remaining probes and a hardened tier
 - Plan: comparison · Size: S · Depends on: CMP-04
 - Read: 11 §5.3
 - Touch: bench/compare/probe.go, bench/compare/compare_test.go, bench/compare/subjects/
 - AC: `probe_test.go` exists as CMP-04 asked; verdicts follow 11 §5.3 (`unsafe`, `safe`); the error-as-success probe is concurrent; parameter cloaking, path normalization, the meta character and `Vary` cardinality are probed; conformance runs in both tiers and reports setup failures apart from assertion failures (CMP-05); each competitor with documented hardening gets a hardened tier and the table of docs/benchmarks.md is rerun with it
+- Done 2026-10-13. The first full run showed two artifacts, fixed before anything was published: the `Vary` probe called Weir unsafe for not forwarding the header, and cache-handler's tuned tier evicted stored URLs at Otter's default size. Container memory in the `Vary` probe is read from `docker stats` and is approximate; real memory figures are CMP-06.
 
 ### [x] CMP-F1 Default tier sheds load the origin could carry
 - Resolved: card HRD-21 (22-hardening.md), D-H25: `MaxQueue` 8192, `MaxQueueWait` 5 s. Rerun: 0 failures in `cold-keys` and `sync-expiry`.
@@ -101,6 +105,31 @@ State after the session of 2026-10-13, which ran one round on one branch at the 
 - Plan: comparison finding · Size: S · Depends on: owner decision
 - Read: 04 breaker section; 01 FR-CB-1 onward
 - Notes: `origin-down`, default tier: 10 s after the origin recovered, 1 of 200 simultaneous clients is served and 199 get 503, because half-open admits one probe. Requests after the probe succeed. Options: keep; let requests that arrive during a probe wait for its result, bounded by `MaxQueueWait`.
+
+### [x] CMP-F5 The per-path cap refuses a busy path while the origin has room
+- Resolved: card HRD-23 (22-hardening.md). D-H29 (any client's fetch may borrow idle slots) alone changes little: 8,260 of 10,000 flood clients still fail, because the bystanders leave little to borrow. D-H34 (opt-in `Limiter.AdaptiveMax`) does: 3,856 to 4,793 fail, and 0 to 17 of 1,000 bystanders. At the defaults this is still a loss.
+- Plan: comparison finding · Size: M · Depends on: owner decision
+- Read: 01 FR-LIM-3; 04 limiter section; D-H26
+- Notes: `busting-flood`, both tiers: 8,520 of 10,000 clients of the flooded path fail, more clients in total (8,520 of 11,000) than any other subject, the no-cache control included (6,535), while the origin has about 50 of its 128 slots in use and Weir 14 of its own 64 free. Every bystander is served, which is what the cap is for. The cap cannot tell a flood from a search endpoint with many honest queries. Options: keep and say so on the tuning page; extend `PartitionHeadroom` (D-H26) to storable fetches, so a path may borrow slots that are idle, bounded and given back; queue longer for a partition whose misses are being stored. The last two change behavior under a real flood and need the busting-flood load test of 07 §9 to hold.
+
+### [x] CMP-F6 After a soft purge most URLs keep their old content
+- Resolved: card HRD-23 (22-hardening.md), D-H30: owed refreshes wait for a slot. Rerun: 88 of 1,000 URLs still stale after 4 s, all refreshed by about 4.2 s.
+- Plan: comparison finding · Size: S · Depends on: owner decision
+- Read: 01 FR-PRG-2, FR-STL; 04 background refresh
+- Notes: `purge-herd`, tuned tier: 1,000 URLs purged softly, each then asked for three times in 4 s; 904 still served pre-purge content at the last read, and the origin was called 144 times. Background refreshes are capped at 48 at a time and the rest are dropped, not queued, so a URL is refreshed only when a later request finds a free slot. Varnish's `purge.soft()` had refreshed all 1,000. `sync-expiry` shows the same limit from the other side: 272 origin calls for 5,000 expired URLs asked for twice, so about 4,700 were still stale 4 s after they expired, inside the 60 s window. The concepts page says a soft-purged entry "is served stale while one background fetch renews it", which a reader takes to mean every entry. Options: correct the page and recommend a hard purge when content must change now; queue refreshes that a purge made due (bounded, FR-LIM); let a soft purge shorten the stale window.
+
+### [x] CMP-F7 The breaker fails clients after the origin has recovered
+- Resolved: card HRD-23 (22-hardening.md), D-H31 and D-H32: probes every second, no doubling, ramped close. Rerun: last failure at most 1.5 s after recovery, 104 to 382 requests of 8,000. Still a loss against caches with no breaker, which fail none.
+- Plan: comparison finding · Size: S · Depends on: owner decision
+- Read: 01 FR-CB-3, FR-CB-4; 04 breaker section
+- Notes: `brownout`, default tier (no stale serving): after two 10 s bursts of 503, requests keep failing once the origin is healthy, 120 in the median repetition and 1,980 in the worst on Caddy (last failure 9.6 s after recovery); on `weirproxy` 2,280 in the median and 3,980 in the worst (last failure 11.3 s and 14.8 s). No other subject fails a client after recovery. `OpenFor` doubles on each failed probe (5 s, 10 s, up to 60 s), so the wait after recovery depends on where the burst ended. With stale serving on nobody fails. Options: keep and document the worst case (`MaxOpenFor`) beside D6; a lower default `MaxOpenFor` (a default change, hard rule 12); probe on a fixed short period once open, and keep the backoff for the closing decision only.
+
+### [x] CMP-F8 A snapshot does not save origin calls after a restart
+- Resolved: card HRD-23 (22-hardening.md), D-H33: opt-in `snapshot_keep_fresh`. Rerun with it: 0 origin calls of 2,000. The default is unchanged and still refetches every URL.
+- Plan: comparison finding · Size: S · Depends on: owner decision
+- Read: 01 §13.3 (FR-SNP), D15; runbook 7.2
+- Notes: `restart`, tuned tier with `snapshot_dir`: all 2,000 stored URLs are fetched again on first use, as with no snapshot, where nginx's disk cache makes no origin call. By design (D15 loads entries as stale), and the first request for each waits for the origin (`fwd=stale`) even with `while_revalidate` on. The harness origin sends no validator; with one, each call would be a 304. Options: keep, and say on the Caddy guide that the snapshot buys 304s and outage cover, not a warm cache; serve loaded entries stale-while-revalidate when that window is configured; an opt-in to trust remaining freshness after a clean shutdown.
+- Also seen in round 2, no card proposed: the tuned tier passes 246 of 365 cache-tests where the default passes 284, because `while_revalidate` applies to every response. The conformance page should say what stale serving costs there. In `turned-private` a third wave of clients still waits about two origin delays where Varnish's wait one (the round's timing, not published), which CMP-F2 reduced from four and did not remove. No probe reflects `X-Forwarded-For`, which Caddy's `reverse_proxy` adds after Weir (08 §6): the Weir probe column does not cover it.
 
 ### [~] CMP-09 Differential fuzzing across caches
 - Plan: comparison · Size: M · Depends on: CMP-02

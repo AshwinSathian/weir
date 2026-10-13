@@ -1,10 +1,15 @@
 package weir_test
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"slices"
+	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -76,6 +81,84 @@ func TestBurstBehindProbe(t *testing.T) {
 			})
 		})
 	}
+}
+
+// FR-CB-3 (v1.2), CMP-F7: at the defaults the breaker probes every OpenFor
+// (1 s), however many probes have failed, so a recovered origin is noticed
+// within one period. With v1.1's 5 s doubled per failed probe, the fourth
+// probe came 35 s after the breaker opened, and clients failed against a
+// healthy origin meanwhile.
+func TestBreakerNoticesRecoveryWithinOpenFor(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		o := testorigin.New()
+		o.Default(cacheable("ok"))
+		cfg := cacheCfg
+		cfg.Rand = func() float64 { return 0.5 } // no jitter: open for exactly OpenFor
+		e := newEngine(t, cfg)
+		defer closeEngine(t, e)
+		openBreaker(t, e, o)
+		// One client a second, each the probe of its period. The origin comes
+		// back 16 s in, after fifteen probes have failed.
+		var firstOK time.Duration
+		for sec := 1; sec <= 30 && firstOK == 0; sec++ {
+			time.Sleep(time.Second)
+			if sec == 16 {
+				o.SetDown(false)
+			}
+			if resp, err := e.Serve(t.Context(), getReq(fmt.Sprintf("/s%d", sec)), o); err == nil {
+				resp.Body.Close()
+				firstOK = time.Duration(sec) * time.Second
+			}
+		}
+		if firstOK != 16*time.Second {
+			t.Fatalf("first client served %v after the breaker opened, want 16s: the first probe after the origin came back", firstOK)
+		}
+	})
+}
+
+// FR-CB-4 (v1.2): when the probe succeeds, the clients that waited behind it
+// do not all reach the origin at once. The fetches admitted double with each
+// success (1, 2, then 8 as two succeed together) until the breaker closes at
+// MaxConcurrent, and every client is served.
+func TestBurstRampsInAfterProbe(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		const fetch = 100 * time.Millisecond
+		o := testorigin.New()
+		cfg := cacheCfg
+		cfg.Rand = func() float64 { return 0.5 }
+		e := newEngine(t, cfg)
+		defer closeEngine(t, e)
+		openBreaker(t, e, o)
+		o.SetDown(false)
+		b := cacheable("ok")
+		b.Delay = fetch
+		o.Default(b)
+		time.Sleep(5*time.Second + time.Millisecond)
+		o.Reset()
+
+		chs := make([]<-chan timedServe, 200)
+		for i := range chs {
+			chs[i] = serveTimed(t, e, getReq(fmt.Sprintf("/k%d", i)), o)
+		}
+		for step, want := range []int{1, 2, 8} {
+			time.Sleep(fetch / 2)
+			if n := o.MaxInflight(); n != want {
+				t.Fatalf("after %d rounds of probes: %d fetches at once so far, want %d", step, n, want)
+			}
+			time.Sleep(fetch / 2)
+		}
+		for i, ch := range chs {
+			if r := <-ch; r.err != nil {
+				t.Errorf("/k%d: %v, want it served", i, r.err)
+			}
+		}
+		if n := o.MaxInflight(); n != 64 {
+			t.Errorf("%d fetches at once at most, want MaxConcurrent (64) once the breaker closed", n)
+		}
+		if s := e.Stats().BreakerState; s != weir.BreakerClosed {
+			t.Errorf("breaker = %v, want closed", s)
+		}
+	})
 }
 
 // FR-CB-4, FR-STL-2: a request with a stale response to serve does not wait
@@ -214,6 +297,82 @@ func TestMarkedURLUsesFreeSlots(t *testing.T) {
 	}
 }
 
+// FR-LIM-3 (v1.2), T-11, CMP-F5: a path asked for with many distinct query
+// strings, each storable, runs past its cap of 16 while the rest of the
+// budget is idle, up to MaxConcurrent less ReserveForeground and
+// PartitionHeadroom (32 at the defaults). It cannot be told from a flood, so
+// what protects the others is not the cap but the headroom: another path
+// still starts at once, and while other paths are busy the first is back at
+// its cap.
+func TestBusyPathBorrowsIdleSlots(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		o := testorigin.New()
+		gate := make(chan struct{})
+		held := cacheable("r")
+		held.Gate = gate
+		o.Default(held)
+		e := newEngine(t, cacheCfg)
+		defer closeEngine(t, e)
+		chs := make([]<-chan timedServe, 100)
+		for i := range chs {
+			chs[i] = serveTimed(t, e, floodReq("/search", i), o)
+		}
+		synctest.Wait()
+		if n := o.MaxInflightPartition(); n != 32 {
+			t.Fatalf("%d fetches of /search in flight with the budget idle, want 32", n)
+		}
+		// 20 other paths arrive: every one starts at once.
+		others := make([]<-chan timedServe, 20)
+		for i := range others {
+			others[i] = serveTimed(t, e, getReq(fmt.Sprintf("/page%d", i)), o)
+		}
+		synctest.Wait()
+		if n := o.MaxInflight(); n != 52 {
+			t.Fatalf("%d fetches in flight, want 52: 32 of /search and all 20 other paths", n)
+		}
+		close(gate)
+		for i, ch := range append(chs, others...) {
+			if r := <-ch; r.err != nil {
+				t.Errorf("request %d: %v", i, r.err)
+			}
+		}
+	})
+}
+
+// FR-LIM-3, T-11: while other paths hold the idle slots, a busy path gets
+// its cap and no more, and slots it borrowed earlier are not replaced.
+func TestBusyPathYieldsUnderContention(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		o := testorigin.New()
+		gate := make(chan struct{})
+		held := cacheable("r")
+		held.Gate = gate
+		o.Default(held)
+		e := newEngine(t, cacheCfg)
+		defer closeEngine(t, e)
+		var all []<-chan timedServe
+		for i := range 20 { // 20 other paths first: 20 of 64 in use
+			all = append(all, serveTimed(t, e, getReq(fmt.Sprintf("/page%d", i)), o))
+		}
+		synctest.Wait()
+		for i := range 100 {
+			all = append(all, serveTimed(t, e, floodReq("/search", i), o))
+		}
+		synctest.Wait()
+		// 16 under the cap; borrowing needs fewer than 32 in flight, and
+		// there are 36.
+		if n, total := o.MaxInflightPartition(), o.MaxInflight(); n != 16 || total != 36 {
+			t.Fatalf("%d fetches of one path, %d in all; want 16 of /search and 36 in all", n, total)
+		}
+		close(gate)
+		for i, ch := range all {
+			if r := <-ch; r.err != nil {
+				t.Errorf("request %d: %v", i, r.err)
+			}
+		}
+	})
+}
+
 // FR-LIM-2: the default queue holds a burst the origin can drain inside
 // MaxQueueWait. 5 000 distinct keys against a 20 ms origin take 1.6 s at 64
 // at a time; the 1 024 places of v1.0 shed 3 900 of them.
@@ -235,4 +394,91 @@ func TestDefaultQueueHoldsExpiryBurst(t *testing.T) {
 			}
 		}
 	})
+}
+
+// capOrigin answers 200 after delay while at most capacity requests are in
+// it, and 503 at once to one more: an origin whose limit is not the one the
+// cache was configured with.
+type capOrigin struct {
+	capacity         int
+	delay            time.Duration
+	mu               sync.Mutex
+	inflight, peak   int
+	served, rejected int
+}
+
+func (o *capOrigin) Fetch(ctx context.Context, _ *weir.Request) (*weir.Response, error) {
+	o.mu.Lock()
+	if o.inflight >= o.capacity {
+		o.rejected++
+		o.mu.Unlock()
+		return &weir.Response{StatusCode: http.StatusServiceUnavailable, Header: http.Header{}, Body: io.NopCloser(strings.NewReader("busy"))}, nil
+	}
+	o.inflight++
+	o.peak = max(o.peak, o.inflight)
+	o.mu.Unlock()
+	defer func() { o.mu.Lock(); o.inflight--; o.served++; o.mu.Unlock() }()
+	select {
+	case <-time.After(o.delay):
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	return &weir.Response{StatusCode: http.StatusOK, Header: http.Header{"Cache-Control": {"max-age=60"}}, Body: io.NopCloser(strings.NewReader("ok"))}, nil
+}
+
+// FR-LIM-8 (v1.2), D13, CMP-F5: an origin that serves 100 requests at once
+// behind a limit of 64. With AdaptiveMax the limit finds the room: the
+// origin is driven well past 64, is asked for more than it can take only
+// now and then, and the breaker never opens. Without it the origin never
+// sees more than 64 (FR-LIM-1).
+func TestAdaptiveLimitFindsOriginCapacity(t *testing.T) {
+	for name, tc := range map[string]struct{ adaptiveMax, wantPeakMin, wantPeakMax int }{
+		"adaptive": {256, 90, 100},
+		"fixed":    {0, 64, 64},
+	} {
+		t.Run(name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				o := &capOrigin{capacity: 100, delay: 20 * time.Millisecond}
+				cfg := cacheCfg
+				cfg.Limiter.AdaptiveMax = tc.adaptiveMax
+				e := newEngine(t, cfg)
+				defer closeEngine(t, e)
+				// 20 s of 4,000 distinct URLs a second, each its own path:
+				// more than 64 slots of 20 ms can serve (3,200), and less
+				// than 100 can (5,000).
+				var wg sync.WaitGroup
+				var failed atomic.Int64
+				for tick := range 2000 {
+					for i := range 40 {
+						wg.Go(func() {
+							resp, err := e.Serve(t.Context(), getReq(fmt.Sprintf("/t%d/%d", tick, i)), o)
+							if err != nil {
+								failed.Add(1)
+								return
+							}
+							if resp.StatusCode != http.StatusOK {
+								failed.Add(1)
+							}
+							resp.Body.Close()
+						})
+					}
+					time.Sleep(10 * time.Millisecond)
+				}
+				wg.Wait()
+				if o.peak < tc.wantPeakMin || o.peak > tc.wantPeakMax {
+					t.Errorf("origin peak %d, want %d to %d", o.peak, tc.wantPeakMin, tc.wantPeakMax)
+				}
+				if s := e.Stats().BreakerState; s != weir.BreakerClosed {
+					t.Errorf("breaker = %v, want closed", s)
+				}
+				t.Logf("served %d, origin refused %d, clients failed %d of 80000, peak %d", o.served, o.rejected, failed.Load(), o.peak)
+				if tc.adaptiveMax > 0 && (o.rejected > 2000 || failed.Load() > 2000) {
+					t.Errorf("origin refused %d and %d clients failed; want the limit to cross the origin's now and then, not ride it", o.rejected, failed.Load())
+				}
+				if tc.adaptiveMax == 0 && o.rejected != 0 {
+					t.Errorf("origin refused %d with a fixed limit of 64", o.rejected)
+				}
+			})
+		})
+	}
 }

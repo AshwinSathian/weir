@@ -1,0 +1,1 @@
+PURGE http://varnish:8080{path}
