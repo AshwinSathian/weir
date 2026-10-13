@@ -106,8 +106,8 @@ type Store struct {
 	ep      *epochs
 	closed  atomic.Bool
 
-	closeMu     sync.Mutex // serializes CloseContext
-	snapDone    bool       // the snapshot was written; guarded by closeMu
+	closeMu     sync.RWMutex // serializes CloseContext, and keeps SetEpoch out of it
+	snapDone    bool         // the snapshot was written; guarded by closeMu
 	snapPath    string
 	snapTimeout time.Duration
 	snapKeep    bool          // Config.SnapshotKeepFreshness
@@ -335,6 +335,12 @@ func (s *Store) Delete(_ context.Context, k store.Key) error {
 // SetEpoch records ep for t (E-2). A new hard tag beyond MaxHardEpochs
 // returns an error wrapping store.ErrUnavailable (E-6).
 func (s *Store) SetEpoch(_ context.Context, t store.Tag, ep store.Epoch) error {
+	// Under closeMu, so that an epoch this call acknowledges cannot land
+	// after Close has decided which entries a kept snapshot holds (FR-SNP-5,
+	// T-33). A call that arrives during the snapshot waits for it and is
+	// then refused.
+	s.closeMu.RLock()
+	defer s.closeMu.RUnlock()
 	if s.closed.Load() {
 		return store.ErrUnavailable
 	}

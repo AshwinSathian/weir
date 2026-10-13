@@ -1,6 +1,7 @@
 package limiter
 
 import (
+	"context"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -223,4 +224,56 @@ func TestAdaptiveBaselineIgnoresRefusals(t *testing.T) {
 			t.Fatalf("limit %d after six healthy windows, want it above %d: 100 ms is this origin's speed, not a slowdown", got, low)
 		}
 	})
+}
+
+// FR-LIM-8, FR-LIM-3, T-11: a limit that drops while fetches admitted under
+// the higher one are still in flight does not shut the other partitions
+// out. It stops the reserve and the headroom above what is in flight, and
+// comes down the rest of the way as those fetches end.
+func TestAdaptiveDropKeepsRoomForOthers(t *testing.T) {
+	for name, drop := range map[string]func(*Limiter){
+		"a failing window":    func(l *Limiter) { l.Report(false, 0) },
+		"ten idle seconds":    func(*Limiter) { time.Sleep(adaptIdle) },
+		"both, one then both": func(l *Limiter) { l.Report(false, 0); time.Sleep(adaptIdle) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				l := New(Config{Max: 8, Ceiling: 32, MaxQueue: 64, PerPartition: 2, Headroom: 2, Reserve: 2, MaxWait: time.Second})
+				for l.limit() < 32 {
+					round(t, l, true, 10*time.Millisecond)
+				}
+				var held []*Permit // one partition takes all it may: its cap and everything it can borrow
+				for {
+					ctx, cancel := context.WithCancel(t.Context())
+					ch := make(chan result, 1)
+					go func() {
+						p, err := l.AcquireOver(ctx, 1, 0)
+						ch <- result{p, err}
+					}()
+					synctest.Wait()
+					if len(ch) == 0 {
+						cancel()
+						<-ch
+						break
+					}
+					cancel()
+					held = append(held, (<-ch).p)
+				}
+				if len(held) != 28 {
+					t.Fatalf("%d slots held by one partition at a limit of 32, want 28", len(held))
+				}
+				for range 32 { // a whole window, so the limiter decides
+					drop(l)
+				}
+				p, err := l.AcquireOver(t.Context(), 2, 0)
+				if err != nil {
+					t.Fatalf("another partition after the drop: %v (limit %d, %d in flight)", err, l.limit(), len(held))
+				}
+				p.Release()
+				for _, h := range held {
+					h.Release()
+				}
+			})
+		})
+	}
 }

@@ -33,7 +33,7 @@ Every key is optional except `name`. Unset keys take the engine default from the
 | `key { ... }` | `query_drop`, `query_keep`, `query_sort`, `normalize_path`, `headers`, `cookies`, `accept_encoding` |
 | `forward { allow ... }` | Headers the origin may see unkeyed. The mode is always strict: `ForwardAll` has no Caddy form |
 | `bypass { ... }` | `cookies`, `headers`: requests that skip the cache |
-| `limiter { ... }` | `max_concurrent`, `max_queue`, `max_queue_wait`, `max_per_partition` |
+| `limiter { ... }` | `max_concurrent`, `max_queue`, `max_queue_wait`, `max_per_partition`, `partition_headroom`, and `adaptive_max`: above `max_concurrent`, the limit may grow to it while requests wait and the origin answers well |
 | `stale { ... }` | `while_revalidate`, `if_error`: operator defaults, off unless set |
 | `experiments { ... }` | A/B bucketing; see the [experiments guide](/docs/guides/experiments/) |
 

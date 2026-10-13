@@ -239,8 +239,8 @@ func (h *Handler) Validate() error {
 		return err
 	}
 	if h.Store != nil {
-		if h.MaxBytes != 0 || h.SnapshotDir != "" {
-			return errors.New("weir: max_bytes and snapshot_dir size and persist the memory store; they cannot be combined with a store block")
+		if h.MaxBytes != 0 || h.SnapshotDir != "" || h.SnapshotKeepFresh {
+			return errors.New("weir: max_bytes, snapshot_dir and snapshot_keep_fresh size and persist the memory store; they cannot be combined with a store block")
 		}
 		if err := h.Store.validate(h.Name); err != nil {
 			return err

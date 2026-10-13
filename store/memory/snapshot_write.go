@@ -54,6 +54,8 @@ func (s *Store) Close() error {
 // calls return nil, and after a failure a later call tries again (the store
 // accepts no writes by then, so the content does not change).
 func (s *Store) CloseContext(ctx context.Context) error {
+	// Exclusive with SetEpoch: an epoch that was acknowledged is in place
+	// before the walk below decides what a kept snapshot may hold (T-33).
 	s.closeMu.Lock()
 	defer s.closeMu.Unlock()
 	s.closed.Store(true)
@@ -142,14 +144,12 @@ func (s *Store) writeSnapshot(ctx context.Context) (err error) {
 // covered reports whether any epoch applies to e now. Soft and invalidating
 // epochs live in a sketch keyed with a per-process seed and cannot be
 // written out, so a kept snapshot leaves such entries out instead: they come
-// back as misses, never as fresh hits (FR-SNP-5, FR-STL-5). Tags are split
-// as the engine splits them (05 E-12).
+// back as misses, never as fresh hits (FR-SNP-5, FR-STL-5). Every tag is
+// read in every plane, also the group tags the engine reads as shared (05
+// E-12): the store cannot know its caller's layout, and a sketch false
+// positive here only leaves out an entry that could have been kept.
 func (s *Store) covered(e *store.Entry) bool {
-	own, shared := e.Tags, []store.Tag(nil)
-	if len(own) > 2 {
-		own, shared = e.Tags[:2], e.Tags[2:]
-	}
-	_, ok := s.ep.newestOf(own, shared, e.RequestTime)
+	_, ok := s.ep.newestOf(e.Tags, nil, e.RequestTime)
 	return ok
 }
 

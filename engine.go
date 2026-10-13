@@ -65,8 +65,13 @@ type Engine struct {
 	closeDone chan struct{}
 	cbWaiting atomic.Int64    // requests waiting for a half-open probe (breakerAdmit); at most MaxQueue/4
 	bgCtx     context.Context // canceled after Close's grace period
-	bgCancel  context.CancelFunc
-	wg        sync.WaitGroup // every engine-owned goroutine (04 §12)
+	// waitCtx ends when Close begins. A refresh waiting for a slot gives up
+	// then: Close's grace period is for fetches that have started, not for
+	// working off a backlog against the origin.
+	waitCtx    context.Context
+	waitCancel context.CancelFunc
+	bgCancel   context.CancelFunc
+	wg         sync.WaitGroup // every engine-owned goroutine (04 §12)
 	// owed is the keys whose stale-while-revalidate refresh is waiting for
 	// a slot or running, so repeated stale hits queue one (FR-LIM-4). Each
 	// has a goroutine in wg; at most Limiter.MaxQueue wait, plus those
@@ -147,9 +152,9 @@ func New(cfg Config) (*Engine, error) {
 			Window: b.Window, MinRequests: b.MinRequests, FailureRatio: b.FailureRatio,
 			OpenFor: b.OpenFor, MaxOpenFor: b.MaxOpenFor, HalfOpenProbes: b.HalfOpenProbes,
 			RampTo: c.Limiter.MaxConcurrent, // closed means the whole budget is admitted (FR-CB-4)
-			// As long as v1.1's default MaxOpenFor, which was also this:
-			// well past the default origin timeout.
-			HalfOpenFor:    time.Minute,
+			// A minute, as in v1.1, or longer for a long origin timeout: a probe must
+			// be able to time out and be recorded before its period is given up.
+			HalfOpenFor:    max(time.Minute, c.Timeouts.Origin+c.Limiter.MaxQueueWait),
 			CountStatus500: b.CountStatus500, MinPartitions: b.MinPartitions,
 		}, c.Rand, e.breakerChanged)
 	}
@@ -159,6 +164,7 @@ func New(cfg Config) (*Engine, error) {
 		}, e.missWindow)
 	}
 	e.bgCtx, e.bgCancel = context.WithCancel(context.Background())
+	e.waitCtx, e.waitCancel = context.WithCancel(e.bgCtx)
 	return e, nil
 }
 
@@ -234,6 +240,7 @@ func (e *Engine) Close(ctx context.Context) error {
 		}
 	}
 	defer close(e.closeDone)
+	e.waitCancel() // refreshes still waiting for a slot are dropped (FR-LIM-4)
 	// No wg.Add can follow: goBackground checks closed under mu.
 	done := make(chan struct{})
 	go func() { e.wg.Wait(); close(done) }()

@@ -2061,3 +2061,12 @@ Entry template:
 - Deviations: docs/11 to v0.3. `brownout` bursts are 10 s, `restart` uses 2000 keys, `sync-expiry` has two waves, `-next` and v1.0.1 were not run (reasons in 11 §2, §5). Two artifacts against other subjects were found and fixed before publication: the `Vary` probe misjudged Weir, and cache-handler's tuned tier evicted at Otter's default size.
 - Follow-ups: CMP-F5 to CMP-F8 (four losses for Weir, owner decides); cache-handler's percent-encoded path keying is not reported upstream; pull request 129 (site charts) must follow the changed tables; CMP-06 is still the only pillar not run.
 - Context: high; two cards in one session, with compaction, as authorised. This session switched branches in the shared checkout, which put a site commit on its branch; it was rebased off before the push.
+
+## 2026-10-13 · HRD-23 · done
+- Branch / PR: card/HRD-23-round2-losses / opened by this session, stacked on #130
+- Done: fixes for the four losses of comparison round 2, each a requirement or default change the owner approved in the session. Owed refreshes wait for a slot (FR-LIM-4); every client's fetch may borrow idle slots (FR-LIM-3); the breaker probes every second with no doubling and closes on a ramp (FR-CB-3, FR-CB-4); opt-in warm restart (`SnapshotKeepFreshness`, FR-SNP-5); opt-in adaptive limit (`Limiter.AdaptiveMax`, FR-LIM-8, closes D13).
+- Tests: 30 new, named on the card and in 07; `make check` (trace 152/152) and `make site-check` pass; `FuzzSnapshotLoad` 20 s clean with three new seeds.
+- Measured with working-tree builds through the comparison harness: `purge-herd` URLs still stale after 4 s, 904 to 88 of 1,000; `brownout` last failure after recovery, up to 14.8 s to at most 1.5 s; `restart` with the option, 2,000 origin calls to 0; `busting-flood` with `adaptive_max 256`, flood failures 8,520 to about 4,300 of 10,000 with 0 to 17 bystanders failing. Worse and more honest: `origin-down` tuned, origin calls while down 144 to 434.
+- Deviations: 01, 04, 05, 06, 07, 08, runbook, changelog and four site pages updated in the same branch. The card-reviewer found one blocker (Close worked off the whole refresh backlog against the origin) and eleven more; all but four small ones are fixed here, the four are in STATUS.
+- Follow-ups: rerun the published tables at a v1.2 release; the four notes in STATUS.
+- Context: high, with compaction; a continuation of the round 2 session in a separate worktree.

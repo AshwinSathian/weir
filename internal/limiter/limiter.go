@@ -155,6 +155,17 @@ const (
 // the origin cannot take is overshot by at most that much.
 func adaptStep(n int) int { return max(1, n/8) }
 
+// lowered is the limit a drop to want may take effect at now. Fetches
+// admitted under the higher limit are still in flight, and a limit at or
+// below their number would refuse every other partition until they end:
+// the room FR-LIM-3 keeps for the others (the reserve and the headroom)
+// must still be there after the drop, so the limit stops that far above
+// what is in flight and comes down the rest of the way as they finish.
+// Caller holds l.mu.
+func (l *Limiter) lowered(want int) int {
+	return min(l.limit(), max(want, l.inflight+l.cfg.Reserve+l.cfg.Headroom))
+}
+
 // Report tells an adaptive limiter how one fetch ended: whether the origin
 // answered (ok is false for a timeout, a transport error or a 502, 503 or
 // 504, the breaker's failures) and how long it took to answer. A limiter
@@ -204,9 +215,11 @@ func (l *Limiter) Report(ok bool, rtt time.Duration) {
 			// Not a window to learn the baseline from.
 		case l.baseline == 0 || mean < l.baseline:
 			l.baseline = mean
-		case !slow:
-			// The origin's own latency drifts; follow it slowly, and only
-			// from windows that were not overloaded.
+		default:
+			// The origin's own latency drifts; follow it slowly. Slow
+			// windows count too, or a lasting change (a deploy, a heavier
+			// mix of pages) would read as overload for ever and pin the
+			// limit at Max.
 			l.baseline += (mean - l.baseline) / 64
 		}
 	}
@@ -214,7 +227,7 @@ func (l *Limiter) Report(ok bool, rtt time.Duration) {
 	switch {
 	case l.failed || slow:
 		l.bad, l.badUntil = cur, now.Add(adaptHold)
-		l.cur = max(l.cfg.Max, cur*3/4)
+		l.cur = l.lowered(max(l.cfg.Max, cur*3/4))
 		l.cool = cur
 	case l.limited:
 		top := l.cfg.Ceiling
@@ -233,8 +246,8 @@ func (l *Limiter) Report(ok bool, rtt time.Duration) {
 // a burst after a quiet spell meets the budget the operator vouched for,
 // not what the origin could take a while ago. Caller holds l.mu.
 func (l *Limiter) settle() {
-	if l.cur > l.cfg.Max && time.Since(l.lastReport) >= adaptIdle {
-		l.cur, l.bad, l.badUntil = l.cfg.Max, 0, time.Time{}
+	if l.cur > l.cfg.Max && time.Since(l.lastReport) >= adaptIdle && l.lowered(l.cfg.Max) == l.cfg.Max {
+		l.cur, l.baseline = l.cfg.Max, 0
 		l.samples, l.timed, l.rttSum, l.failed, l.limited, l.cool = 0, 0, 0, false, false, 0
 	}
 }

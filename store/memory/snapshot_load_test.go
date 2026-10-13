@@ -278,14 +278,30 @@ func FuzzSnapshotLoad(f *testing.F) {
 	kept.b = append(kept.b, frame(snapKindEntry, make([]byte, 40))...)
 	f.Add(append(append(bytes.Clone(kept.b), frame(snapKindKept, []byte{1})...), frame(snapKindTrailer, binary.BigEndian.AppendUint64(nil, 2))...))
 	f.Add(append(append(bytes.Clone(kept.b), frame(snapKindKept, []byte{2, 0})...), frame(snapKindTrailer, binary.BigEndian.AppendUint64(nil, 2))...))
+	// The same with an entry that decodes, so the kept path is reached with
+	// something loaded.
+	if enc, err := store.Encode(liveEntry("seed")); err == nil {
+		k := numKey(1)
+		whole := newSnapFile()
+		whole.b = append(whole.b, frame(snapKindEntry, append(k[:], enc...))...)
+		f.Add(append(append(bytes.Clone(whole.b), frame(snapKindKept, []byte{1})...), frame(snapKindTrailer, binary.BigEndian.AppendUint64(nil, 2))...))
+	}
 	f.Fuzz(func(t *testing.T, b []byte) {
 		path := filepath.Join(t.TempDir(), "weir.snap")
 		if err := os.WriteFile(path, b, 0o600); err != nil {
 			t.Fatal(err)
 		}
 		for _, keep := range []bool{false, true} { // the second load finds no file, which is also a path
-			if _, err := New(Config{SnapshotPath: path, MaxBytes: 1 << 20, Shards: 1, SnapshotKeepFreshness: keep}); err != nil {
+			s, err := New(Config{SnapshotPath: path, MaxBytes: 1 << 20, Shards: 1, SnapshotKeepFreshness: keep})
+			if err != nil {
 				t.Fatal(err)
+			}
+			// T-33: whatever the bytes, freshness is kept only for a file
+			// that carried the mark and lost nothing. Any other load ends
+			// with an epoch written at load time.
+			vouched := keep && s.snapLoad.kept && !s.snapLoad.lost
+			if _, loaded := s.ep.newestOf([]store.Tag{s.ep.globalTag}, nil, time.Unix(0, 0)); !loaded && s.snapLoad.seen > 0 && !vouched {
+				t.Fatalf("no epoch after a load that read %d records, kept=%v lost=%v keep=%v", s.snapLoad.seen, s.snapLoad.kept, s.snapLoad.lost, keep)
 			}
 			if err := os.WriteFile(path, b, 0o600); err != nil {
 				t.Fatal(err)

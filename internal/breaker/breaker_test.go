@@ -703,3 +703,33 @@ func TestBreakerQuietRampCloses(t *testing.T) {
 		}
 	})
 }
+
+// FR-CB-4, FR-CB-3: the partition whose probe failed stands aside for half
+// of OpenFor when that is shorter than a second, so with the default period
+// of 1 s a site whose every request is for one failing path still probes
+// about once per period and a half, not once every two.
+func TestBreakerYieldScalesWithOpenFor(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		cfg := testConfig()
+		cfg.OpenFor, cfg.MaxOpenFor, cfg.MinPartitions = time.Second, time.Second, 2
+		b := New(cfg, func() float64 { return 0.5 }, nil)
+		for range cfg.MinRequests {
+			p, _ := b.AllowFor(7)
+			b.RecordFor(p, 7, Failure)
+		}
+		time.Sleep(time.Second)
+		p, err := b.AllowFor(7)
+		if err != nil {
+			t.Fatalf("first probe: %v", err)
+		}
+		b.RecordFor(p, 7, Failure) // 7 now yields
+		time.Sleep(time.Second)
+		if _, err := b.AllowFor(7); !errors.Is(err, ErrCircuitOpen) {
+			t.Fatalf("the failed partition at the start of the next period: %v, want it to stand aside", err)
+		}
+		time.Sleep(500 * time.Millisecond)
+		if _, err := b.AllowFor(7); err != nil {
+			t.Fatalf("the failed partition half a period later: %v, want the probe", err)
+		}
+	})
+}

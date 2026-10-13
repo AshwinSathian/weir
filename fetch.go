@@ -306,7 +306,12 @@ func fetchReason(class limiter.Class, pass bool) string {
 func (e *Engine) breakerAdmit(ctx context.Context, c *keys.Classified, class limiter.Class, patient bool) (breaker.Probe, error) {
 	if class != limiter.Foreground || !patient {
 		probe, err := e.cb.AllowFor(c.PartitionH)
-		if err == nil && class != limiter.Foreground && probe != (breaker.Probe{}) {
+		// Only a client's fetch may be the first probe of a half-open
+		// period. Once one has succeeded the breaker is ramping up
+		// (FR-CB-4), and a refresh may take one of the probes it admits:
+		// refused for the whole ramp, every refresh owed after an outage
+		// would be dropped just as the origin came back.
+		if err == nil && class != limiter.Foreground && probe != (breaker.Probe{}) && !e.cb.Ramping() {
 			e.cb.Cancel(probe)
 			err = breaker.ErrCircuitOpen
 		}

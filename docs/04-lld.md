@@ -92,6 +92,7 @@ type CoalesceConfig struct {
 }
 
 type LimiterConfig struct {
+	AdaptiveMax       int           // 0: off; above MaxConcurrent: ceiling of the adaptive limit (FR-LIM-8)
 	MaxConcurrent     int           // 0: 64
 	MaxQueue          int           // 0: 8192
 	MaxQueueWait      time.Duration // 0: 5s
@@ -107,8 +108,8 @@ type BreakerConfig struct {
 	Window         time.Duration // 0: 10s (10 buckets)
 	MinRequests    int           // 0: 20
 	FailureRatio   float64       // 0: 0.5
-	OpenFor        time.Duration // 0: 5s
-	MaxOpenFor     time.Duration // 0: max(60s, OpenFor); at least OpenFor
+	OpenFor        time.Duration // 0: 1s
+	MaxOpenFor     time.Duration // 0: OpenFor (no doubling); at least OpenFor
 	HalfOpenProbes int           // 0: 1
 	CountStatus500 bool
 	Disable        bool
@@ -1081,12 +1082,14 @@ func (l *Limiter) Throttle(end, until time.Time, caps map[uint64]int) bool
 
 The engine fills `Config` from `LimiterConfig` and maps all three errors to its own `ErrShed`; the sentinel says which `EvShed` detail applies (`background`, `queue-full`, `queue-timeout`). The global cap is read only through `limit()` and the partition cap only through `capFor(part)` (D13).
 
-Admission check `canRun(class, over, part)`: `inflight < limit()`, and for `Background` and `Warm` `inflight < limit() - Reserve`, and `byPart[part] < capFor(part)`. A waiter taken with `AcquireOver` (`over`, always `Foreground`) may also run with its partition at the cap when `Headroom > 0`, the partition is not throttled and `inflight < limit() - Reserve - Headroom` (FR-LIM-3). Such a slot is counted in `borrowed`, not in `byPart`, and its `Permit` remembers which: the invariant is `sum(byPart) + borrowed == inflight`. Keeping it out of `byPart` is what lets an unvouched waiter of the same partition run when a capped slot frees, in FIFO order, instead of starving behind vouched ones. Subtracting `Reserve` keeps background refreshes of other partitions admissible while a partition borrows. A throttle (FR-MR-3) stops new slots past the cap but does not see the ones already held, which are outside `byPart`: they finish and are not replaced. The engine calls `AcquireOver` only for a fetch whose lookup found a hit-for-miss marker, and sets `Headroom` only on the main pool, so the upload pool and the client gate stay strict. Every change that can make such a waiter runnable is a `Release` or a throttle change, both of which run the grant walk, so the FIFO argument below still holds.
+Admission check `canRun(class, over, part)`: `inflight < limit()`, and for `Background`, `Warm` and `Refresh` `inflight < limit() - Reserve`, and `byPart[part] < capFor(part)`. A waiter taken with `AcquireOver` (`over`, always `Foreground`; every foreground fetch since v1.2), and any `Refresh`, may also run with its partition at the cap when `Headroom > 0`, the partition is not throttled and `inflight < limit() - Reserve - Headroom` (FR-LIM-3). Such a slot is counted in `borrowed`, not in `byPart`, and its `Permit` remembers which: the invariant is `sum(byPart) + borrowed == inflight`. Keeping it out of `byPart` is what lets an unvouched waiter of the same partition run when a capped slot frees, in FIFO order, instead of starving behind vouched ones. Subtracting `Reserve` keeps background refreshes of other partitions admissible while a partition borrows. A throttle (FR-MR-3) stops new slots past the cap but does not see the ones already held, which are outside `byPart`: they finish and are not replaced. The engine calls `AcquireOver` only for a fetch whose lookup found a hit-for-miss marker, and sets `Headroom` only on the main pool, so the upload pool and the client gate stay strict. Every change that can make such a waiter runnable is a `Release` or a throttle change, both of which run the grant walk, so the FIFO argument below still holds.
 
 `Acquire`:
 
 1. Lock. If the throttle report is past `thrUntil`, drop it and run the grant walk. If `canRun`, take the slot, unlock, return. No queued waiter can be runnable at this point, because `Release`, `Throttle` and the expiry step grant every runnable waiter before they unlock and nothing else frees capacity, so `canRun` alone keeps FIFO order among runnable waiters. Anything that later raises `limit()` or `capFor` (D13 adaptive limits) must run the same grant walk, or this invariant breaks. `TestLimiterInvariants` checks it after every random step, `AcquireOver` and a random `Headroom` included.
-Adaptive limit (v1.2, FR-LIM-8): `limit()` returns `cur` when `Config.Ceiling` is above `Max`. `fetch` calls `Report(ok, rtt)` on the main pool's limiter where it records the breaker's outcome, with the time from sending the request to its headers. `Report` counts a window of `limit()` reports and then moves `cur` as FR-LIM-8 says; when `cur` rises it runs the grant walk, as any raised cap must. `limited`, the flag that allows growth, is set in `acquire` when a fetch that could not run found the global cap reached or was a would-be borrower over its partition's cap. `settle`, called at the top of `acquire`, returns `cur` to `Max` after 10 s without a report. State: eight scalars, no allocation.
+Adaptive limit (v1.2, FR-LIM-8): `limit()` returns `cur` when `Config.Ceiling` is above `Max`. `fetch` calls `Report(ok, rtt)` on the main pool's limiter where it records the breaker's outcome, with the time from sending the request to its headers. `Report` counts a window of `limit()` reports and then moves `cur` as FR-LIM-8 says; when `cur` rises it runs the grant walk, as any raised cap must. `limited`, the flag that allows growth, is set in `acquire` when a fetch that could not run found the global cap reached or was a would-be borrower over its partition's cap. `settle`, called at the top of `acquire`, returns `cur` to `Max` after 10 s without a report. A drop, from a cut or from `settle`, goes through `lowered`: fetches admitted under the higher limit are still in flight, so the limit stops `Reserve + Headroom` above `inflight` and comes down the rest of the way as they end (a cut is retried at the next failing window, `settle` at the next `acquire`); without that a drop below `inflight` would refuse every other partition until the borrowers finished. State: nine scalars, no allocation.
+
+Close and owed refreshes: `Close` cancels `waitCtx` first, which ends every wait in the `Refresh` backlog with `EvRefreshDropped` reason `closed`; the grace period then covers only fetches already at the origin. The breaker lets a non-foreground fetch keep a probe only while `Ramping()` (a probe of this half-open period has succeeded), so the first probe is always a client's and the refreshes owed after an outage take part in the ramp. The yield of FR-CB-4 lasts `min(1 s, OpenFor/2)`, and a half-open period `max(1 min, Timeouts.Origin + MaxQueueWait)`.
 
 2. `Background`: unlock, return `ErrShed` (never queues). `Refresh` queues in `later`, a second FIFO with the same bound (`MaxQueue`) and the same share per partition (`laterBy`), with no timer of its own: its context ends the wait. Every grant walk serves `queue` first and `later` with what is left, so a refresh never takes a slot a waiting client could use. A `Refresh` may borrow past its partition's cap under the headroom rule, as a fetch taken with `AcquireOver` may; since v1.2 the engine uses `AcquireOver` for every foreground fetch (FR-LIM-3).
 3. Queue full, or `queuedBy[part] >= queueCap()`, which is max(`PerPartition`, `MaxQueue`/4) (FR-LIM-3, T-11): unlock, return `ErrQueueFull`. The per-partition bound keeps a flood on one path from taking more than a quarter of the queue places every other path shares. It is not `PerPartition` alone because that sheds most of a legitimate cold start on one path. Floods spread over several paths are not stopped by any per-path bound, and the miss-rate tracker sees no heavy partition in them; the global cap bounds their origin load (T-12, `TestPathFloodOriginBounded`).
@@ -1114,7 +1117,7 @@ type Breaker struct {
 	state     State // Closed, Open, HalfOpen
 	buckets   [10]bucket // {start time.Time; ok, fail uint32}
 	openUntil time.Time
-	openFor   time.Duration // current, doubles on reopen
+	openFor   time.Duration // current; doubles on reopen, up to MaxOpenFor (no doubling at the default)
 	probes    int           // in flight while HalfOpen
 	gen       uint64        // counts half-open periods
 	ended     chan struct{} // closed when a probe ends or the period does; nil until AllowOrWait hands it out

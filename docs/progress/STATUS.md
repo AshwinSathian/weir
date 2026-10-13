@@ -2,20 +2,24 @@
 
 Updated: 2026-10-13
 Phase: v1.1.0 released and deployed (2026-10-13)
-Current card: CMP-03b and CMP-04b (one session and one branch, at the owner's request)
+Current card: HRD-23 (fixes for the round 2 losses), stacked on CMP-03b and CMP-04b
 Card state: awaiting-merge
-Branch: card/CMP-03b-compare-round-2
-PR: https://github.com/AshwinSathian/weir/pull/130
-Next card: none open. Candidates: CMP-F5 to CMP-F8 (decisions on the round 2 findings), CMP-06 (speed and memory), HRD-22 (share one over-size fetch), HRD-20 (deferred)
+Branch: card/HRD-23-round2-losses (contains card/CMP-03b-compare-round-2)
+PR: opened by this session; pull request 130 is its base
+Next card: none open. Candidates: a v1.2 release with a rerun of the comparison tables, CMP-06 (speed and memory), HRD-22 (share one over-size fetch), HRD-20 (deferred)
 
 ## Waiting on Ashwin
 
-- Merge pull request 130 (round 2: CMP-03b, CMP-04b). The site is not deployed by it.
-- Four findings about Weir from round 2 need a decision each: CMP-F5 (the per-path cap refuses a busy path while the origin has room), CMP-F6 (a soft purge leaves most URLs unrefreshed), CMP-F7 (the breaker fails clients after recovery when stale serving is off), CMP-F8 (a snapshot does not save origin calls after a restart). Options are on the cards in docs/cards/21-comparison.md.
+- Merge pull request 130 (round 2: CMP-03b, CMP-04b), then the HRD-23 pull request, which is stacked on it. Neither deploys the site.
+- HRD-23 changes three defaults you approved on 2026-10-13 (`Breaker.OpenFor` 1 s, `Breaker.MaxOpenFor` equal to it, borrowing past the per-path cap for every client's fetch) and adds two opt-in settings (`Limiter.AdaptiveMax`, `SnapshotKeepFreshness`). They ship in the next release; the changelog's Unreleased section lists them with the way back for each.
+- The published comparison tables still describe v1.1.0. After a v1.2 release, rerun them (11 §2 measures published modules); card HRD-23 holds the working-tree figures to expect.
 - The cache-handler bug report is posted as https://github.com/darkweak/souin/issues/876 (open, no reply on 2026-10-13). Round 2 found a second behavior worth reporting there if you want to: a request for `/%70age` is stored under the key of `/page` and forwarded as spelled (docs/benchmarks.md, probe note (e)). Not reported.
 - The site's chart branch (pull request 129) reads the comparison tables of docs/benchmarks.md. Round 2 changed their columns (no `Weir v1.0.1` column, `Weir v1.1.0` for `Weir v1.1`, new rows and a new table), so that branch needs to follow whichever of the two merges second.
 
 ## Notes for the next session
+
+- HRD-23 follow-ups the reviewer raised and this card left: the refresh backlog has no gauge (`limiter.Counts` reports the clients' queue only); `refresh-dropped/no-slot` has no test for the one-minute wait running out; a kept snapshot trusts a restored old file up to each entry's own expiry (no maximum file age); `limited` is also set when `MaxPerHost` alone held a fetch whose partition is at its cap.
+- To measure an unreleased engine change against the comparison harness: `SUBJECTS=caddy-weir-next TIERS=default PATH="$PATH:$HOME/go/bin" ./run.sh -reps 3 -scenario <names>` from `bench/compare`. An opt-in Caddy setting needs a temporary tier directory under `subjects/caddy-weir/` (not committed).
 
 - Comparison runs: one `run.sh` call per subject and tier, and half the scenario list per call, keeps each under ten minutes (`bench/compare/results/r2.sh` on this machine did it; the directory is not committed). The full count-based pillar is about two and a half hours: 22 scenario calls, probes (cache-handler's three tiers take five minutes each for the Vary probe), conformance.
 - Do not switch branches in the main checkout while another session may be using it. The round 2 session did, and the site session committed onto its branch; it had to be rebased off. Use `git worktree add`.

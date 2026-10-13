@@ -526,3 +526,92 @@ func TestOwedRefreshHoldsNoFlight(t *testing.T) {
 		}
 	})
 }
+
+// FR-LIM-4, FR-LCY-2: Close does not work off the refresh backlog. The
+// refreshes still waiting for a slot are dropped when Close begins; only
+// fetches already at the origin are waited for.
+func TestCloseDropsWaitingRefreshes(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		const keys = 60
+		o := testorigin.New()
+		b := cacheable("v")
+		b.Delay = time.Second
+		o.Default(b)
+		obs := &eventCounter{}
+		cfg := cacheCfg
+		cfg.Observer = obs
+		cfg.Freshness.DefaultStaleWhileRevalidate = time.Hour
+		cfg.Freshness.NoEarlyRefresh = true
+		cfg.Limiter = weir.LimiterConfig{MaxConcurrent: 8, ReserveForeground: 2}
+		e := newEngine(t, cfg)
+		for chunk := 0; chunk < keys; chunk += 6 { // six at a time, so none is shed waiting
+			var chs []<-chan served
+			for i := chunk; i < chunk+6; i++ {
+				chs = append(chs, serveAsync(t.Context(), e, getReq("/k"+strconv.Itoa(i)+"/x"), o))
+			}
+			for _, ch := range chs {
+				if s := <-ch; s.err != nil {
+					t.Fatal(s.err)
+				}
+			}
+		}
+		time.Sleep(70 * time.Second)
+		t0 := time.Now()
+		for i := range keys {
+			resp, _ := serve(t, e, getReq("/k"+strconv.Itoa(i)+"/x"), o)
+			if resp.Cache.Stale != weir.StaleWhileRevalidate || time.Since(t0) != 0 {
+				t.Fatalf("key %d: stale %v at +%v, want a stale hit at once", i, resp.Cache.Stale, time.Since(t0))
+			}
+		}
+		synctest.Wait()
+		before := o.TotalCalls() // 60 stored, 6 refreshes at the origin, 54 waiting
+		start := time.Now()
+		closeEngine(t, e)
+		if took := time.Since(start); took > time.Second {
+			t.Fatalf("Close took %v, want the second the six running refreshes need", took)
+		}
+		if n := o.TotalCalls(); n != before || before != keys+6 {
+			t.Fatalf("origin calls %d before Close and %d after, want %d and no more", before, n, keys+6)
+		}
+		if n := obs.count("refresh-dropped/closed"); n != keys-6 {
+			t.Fatalf("%d refreshes dropped as closed, want %d", n, keys-6)
+		}
+	})
+}
+
+// FR-CB-4, FR-LIM-4: once a client's probe has succeeded and the breaker is
+// ramping up, a refresh that stale serving owes takes one of the probes it
+// admits. Refused for the whole ramp, the refreshes owed after an outage
+// would all be dropped as the origin came back.
+func TestOwedRefreshJoinsBreakerRamp(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		o := testorigin.New()
+		o.Default(ccBehavior(200, "max-age=1, stale-while-revalidate=600", "v"))
+		obs := &eventCounter{}
+		cfg := cacheCfg
+		cfg.Observer = obs
+		cfg.Freshness.NoEarlyRefresh = true
+		cfg.Rand = func() float64 { return 0.5 }
+		e := newEngine(t, cfg)
+		defer closeEngine(t, e)
+		serve(t, e, getReq("/swr"), o)
+		openBreaker(t, e, o)
+		o.SetDown(false)
+		time.Sleep(time.Second + time.Millisecond) // half-open
+		serve(t, e, getReq("/client"), o)          // the first probe, a client's: the ramp begins
+		if s := e.Stats().BreakerState; s != weir.BreakerHalfOpen {
+			t.Fatalf("breaker = %v after one successful probe, want half-open", s)
+		}
+		calls := o.Calls("/swr")
+		if resp, _ := serve(t, e, getReq("/swr"), o); resp.Cache.Stale != weir.StaleWhileRevalidate {
+			t.Fatalf("stale = %v, want stale-while-revalidate", resp.Cache.Stale)
+		}
+		synctest.Wait()
+		if n := o.Calls("/swr"); n != calls+1 {
+			t.Fatalf("/swr origin calls %d, want %d: the refresh ran as a probe of the ramp", n, calls+1)
+		}
+		if n := obs.count("refresh-dropped/circuit-open"); n != 0 {
+			t.Fatalf("%d refreshes dropped for the breaker during the ramp", n)
+		}
+	})
+}

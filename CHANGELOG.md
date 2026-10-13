@@ -4,7 +4,7 @@ Format: one section per release, newest first. Changes land under "Unreleased" i
 
 ## Unreleased
 
-Fixes for the losses the second comparison round found (card HRD-23, findings CMP-F5 to CMP-F7 in [docs/cards/21-comparison.md](docs/cards/21-comparison.md)). Three defaults change.
+Fixes for the losses the second comparison round found (card HRD-23, findings CMP-F5 to CMP-F8 in [docs/cards/21-comparison.md](docs/cards/21-comparison.md)). Three defaults change.
 
 ### Changed behavior
 
@@ -12,6 +12,8 @@ Fixes for the losses the second comparison round found (card HRD-23, findings CM
 - Limiter: every client's fetch may start past `Limiter.MaxPerPartition` while more than `ReserveForeground` plus `PartitionHeadroom` slots are free, not only a fetch under a hit-for-miss marker (FR-LIM-3). One path with many distinct query strings can hold 32 of the 64 origin slots while the rest are idle, where it held 16. Way back: `PartitionHeadroom` at `MaxConcurrent`.
 - Breaker: `Breaker.OpenFor` defaults to 1 s (was 5 s) and `Breaker.MaxOpenFor` to `OpenFor` (was 60 s), so the breaker probes about once a second and no longer doubles the period per failed probe (FR-CB-3). Way back: `OpenFor: 5 * time.Second, MaxOpenFor: time.Minute`.
 - Breaker: closing is gradual. Each probe that succeeds doubles the fetches admitted at a time; the breaker closes when that reaches `MaxConcurrent` (FR-CB-4). `Stats().BreakerState` reads half-open during the ramp.
+- Breaker: a half-open period is given up after one minute, or `Timeouts.Origin` plus `Limiter.MaxQueueWait` when that is longer, whatever `MaxOpenFor` is; before, it lasted `MaxOpenFor`. The partition whose probe failed stands aside for half of `OpenFor` when that is under a second.
+- Events: `refresh-dropped` with reason `no-slot` now means the refresh waited up to a minute first, and a refresh still waiting when `Close` begins is dropped with reason `closed`.
 
 ### Added
 

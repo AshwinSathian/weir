@@ -153,6 +153,35 @@ func TestSnapshotKeepFallsBack(t *testing.T) {
 	})
 }
 
+// FR-SNP-5, T-33: every tag of an entry is read in every plane when a kept
+// snapshot decides what to hold, also tags past the second, which the engine
+// reads as shared. A store used directly may invalidate through any of them.
+func TestSnapshotKeepReadsEveryTag(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "weir.snap")
+	ctx := context.Background()
+	s, err := New(Config{SnapshotPath: path, SnapshotKeepFreshness: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := taggedEntry("grouped", 1)
+	e.Tags = append(e.Tags, store.Tag{9})
+	if err := s.Set(ctx, numKey(1), e); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetEpoch(ctx, store.Tag{9}, store.Epoch{At: time.Now(), Mode: store.EpochInvalid}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CloseContext(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetEpoch(ctx, store.Tag{1}, store.Epoch{At: time.Now(), Mode: store.EpochSoft}); !errors.Is(err, store.ErrUnavailable) {
+		t.Fatalf("SetEpoch after Close: %v, want ErrUnavailable: an epoch the snapshot cannot hold must not be acknowledged", err)
+	}
+	if _, err := loadFrom(t, path, Config{SnapshotKeepFreshness: true}).Get(ctx, numKey(1)); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("entry invalidated through its third tag: %v, want ErrNotFound", err)
+	}
+}
+
 func (f *snapFile) keep() {
 	f.b = append(f.b, frame(snapKindKept, []byte{1})...)
 	f.count++

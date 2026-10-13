@@ -204,7 +204,7 @@ func (b *Breaker) allow(part uint64, wait bool) (Probe, <-chan struct{}, error) 
 	var err error
 	switch {
 	case b.state == Closed:
-	case b.state == HalfOpen && b.yields(part) && now.Sub(b.halfSince) < probeYield:
+	case b.state == HalfOpen && b.yields(part) && now.Sub(b.halfSince) < min(probeYield, b.cfg.OpenFor/2):
 		err = ErrCircuitOpen
 	case b.state == HalfOpen && b.probes < b.allowed:
 		b.probes++
@@ -344,6 +344,17 @@ func (b *Breaker) expire(now time.Time) {
 	b.gen++
 	b.halfSince = now
 	b.openUntil = now.Add(max(b.cfg.HalfOpenFor, b.cfg.MaxOpenFor))
+}
+
+// Ramping reports whether a probe of the current half-open period has
+// succeeded, so that more than the first probe is being admitted (FR-CB-4).
+func (b *Breaker) Ramping() bool {
+	if b == nil {
+		return false
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.state == HalfOpen && b.good
 }
 
 // shut closes the breaker with an empty window: the next trip starts again

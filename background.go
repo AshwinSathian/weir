@@ -111,13 +111,23 @@ func (e *Engine) owedRefresh(ctx context.Context, c *keys.Classified, lk lookupR
 	sc := shared(c) // the wait and the fetch outlive this request
 	if !e.goBackground(func(bg context.Context) {
 		defer done()
+		// The wait ends after owedRefreshWait, or when Close begins
+		// (waitCtx), which is before bg ends.
 		wctx, cancel := context.WithTimeout(bg, owedRefreshWait)
+		stop := context.AfterFunc(e.waitCtx, cancel) //nolint:contextcheck // a second, earlier end for the same wait, not a new lineage
 		permit, err := e.limFor(sc).Acquire(wctx, limiter.Refresh, sc.PartitionH, sc.HostH)
+		stop()
 		cancel()
+		if err == nil && e.closed.Load() { // granted as Close began: start nothing new
+			permit.Release()
+			err = ErrClosed
+		}
 		if err != nil {
-			if bg.Err() == nil {
-				emit(e.cfg.Observer, Event{Kind: EvRefreshDropped, Time: time.Now(), Partition: sc.Partition, Reason: "no-slot"})
+			reason := "no-slot"
+			if e.closed.Load() {
+				reason = "closed"
 			}
+			emit(e.cfg.Observer, Event{Kind: EvRefreshDropped, Time: time.Now(), Partition: sc.Partition, Reason: reason})
 			return
 		}
 		// Look again: a request may have refreshed the entry, or a purge
@@ -128,7 +138,10 @@ func (e *Engine) owedRefresh(ctx context.Context, c *keys.Classified, lk lookupR
 			permit.Release()
 			return
 		}
-		if st, _, _ := httpcc.Evaluate(cur.entry, cur.epoch, cur.epochOK, now); st == httpcc.Fresh || st == httpcc.Unusable {
+		// Only an entry still inside its stale-while-revalidate window is
+		// owed a refresh. One that is fresh has had it; one past the window
+		// or unusable is the next request's to fetch.
+		if st, _, _ := httpcc.Evaluate(cur.entry, cur.epoch, cur.epochOK, now); st != httpcc.StaleSWR {
 			permit.Release()
 			return
 		}
