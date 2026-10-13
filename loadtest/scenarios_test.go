@@ -178,7 +178,7 @@ func closedLoopPaced(n, rps int, stop <-chan struct{}, fn func(r *rand.Rand, h *
 // TestBustingFloodWithNormalTraffic: 5 000 rps of unique queries on one path
 // beside 500 rps of normal traffic. FR-LIM-3, FR-MR-1 to FR-MR-3, T-6.
 func TestBustingFloodWithNormalTraffic(t *testing.T) {
-	const maxPart = 8
+	const maxPart, floodMax = 8, 64 - 16 - 8
 	phase := dur(20*time.Second, 4*time.Second)
 	base := baseline()
 	org := newCapOrigin(64, func(string) time.Duration { return svcTime(5 * time.Millisecond) }, cacheControl("max-age=3600"))
@@ -211,9 +211,14 @@ func TestBustingFloodWithNormalTraffic(t *testing.T) {
 		row("normal p99 alone", b), row("normal p99 under flood", f), row("normal p50 alone / flood", fmt.Sprint(baseH.quantile(0.5), " / ", floodH.quantile(0.5))),
 		row("normal hit ratio under flood", fmt.Sprintf("%.4f", float64(floodC.hits.Load())/float64(floodC.total.Load()))),
 		row("flood requests / shed errors", fmt.Sprint(flood.total.Load(), " / ", flood.errs.Load())), row("flood client drops", flood.dropped.Load()), row("normal offered (target ~500/s)", fmt.Sprint(floodC.offered.Load()/int64(phase.Seconds()), "/s, drops ", baseC.dropped.Load()+floodC.dropped.Load())),
-		row("flood peak in-flight", org.peakPartition("/flood")), row("MaxPerPartition", maxPart))
-	if got := org.peakPartition("/flood"); got > maxPart {
-		t.Errorf("flooded path peak in-flight %d, want <= MaxPerPartition %d", got, maxPart)
+		row("flood peak in-flight", org.peakPartition("/flood")), row("MaxPerPartition", maxPart), row("with idle slots borrowed", floodMax))
+	// FR-LIM-3 (v1.2): the normal traffic here is hits, so the rest of the
+	// budget is idle and the flooded path may borrow it, up to
+	// MaxConcurrent less ReserveForeground (16) and PartitionHeadroom
+	// (MaxPerPartition). What protects the normal traffic is the p99 check
+	// below, not this number.
+	if got := org.peakPartition("/flood"); got > floodMax {
+		t.Errorf("flooded path peak in-flight %d, want <= %d (MaxConcurrent - ReserveForeground - PartitionHeadroom)", got, floodMax)
 	}
 	if n := floodC.offered.Load(); n < int64(0.95*500*phase.Seconds()) || baseC.dropped.Load()+floodC.dropped.Load() != 0 {
 		t.Errorf("normal traffic offered %d requests (drops %d), want >= 95%% of 500 rps and no drops", n, baseC.dropped.Load()+floodC.dropped.Load())

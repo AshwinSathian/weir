@@ -18,6 +18,8 @@ Next card: none open. Candidates: a v1.2 release with a rerun of the comparison 
 
 ## Notes for the next session
 
+- Before a v1.2 release rerun `make load`: the busting-flood scenario's record in docs/benchmarks.md and the sentence on the site's benchmarks page ("held to its per-path cap of 8") describe v1.1. On this branch the flood borrows idle slots up to 40 and normal p99 under flood measured 74 µs against 45 µs alone (inside the test's bound, machine not idle).
+- `make check` does not run the `integration` or `load` tagged tests. A change to limiter or breaker behavior needs `make test-valkey` against a local Valkey (`docker run -p 127.0.0.1:6379:6379 valkey/valkey:8.1 valkey-server --maxmemory-policy volatile-lfu`) and the affected `loadtest` scenarios before a push; CI caught one of each kind missed here.
 - HRD-23 follow-ups the reviewer raised and this card left: the refresh backlog has no gauge (`limiter.Counts` reports the clients' queue only); `refresh-dropped/no-slot` has no test for the one-minute wait running out; a kept snapshot trusts a restored old file up to each entry's own expiry (no maximum file age); `limited` is also set when `MaxPerHost` alone held a fetch whose partition is at its cap.
 - To measure an unreleased engine change against the comparison harness: `SUBJECTS=caddy-weir-next TIERS=default PATH="$PATH:$HOME/go/bin" ./run.sh -reps 3 -scenario <names>` from `bench/compare`. An opt-in Caddy setting needs a temporary tier directory under `subjects/caddy-weir/` (not committed).
 

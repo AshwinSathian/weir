@@ -314,7 +314,7 @@ Real time, real scheduler, in-process origin with a capacity model (a semaphore 
 |---|---|---|
 | steady hits | 64 goroutines, 10 000 hot keys, 60 s | hit ratio > 99%; engine p99 < 200 µs |
 | synchronized expiry | 10 000 keys stored in 1 s with `max-age=60` | origin peak in-flight ≤ `MaxConcurrent`; origin calls per second during expiry ≤ 20% of key count |
-| busting flood plus normal traffic | 5 000 rps unique queries on one path, 500 rps normal | normal traffic p99 unchanged within 20%; origin in-flight for flooded path ≤ `MaxPerPartition` |
+| busting flood plus normal traffic | 5 000 rps unique queries on one path, 500 rps normal | normal traffic p99 unchanged within 20%; origin in-flight for flooded path ≤ `MaxConcurrent − ReserveForeground − PartitionHeadroom` (40 here; `MaxPerPartition` before v1.2, when a flood could not borrow idle slots, FR-LIM-3) |
 | origin brownout | origin p50 latency ×20 for 30 s | breaker behavior per config; stale served where permitted; no goroutine growth after recovery |
 | store flap | remote-flagged fake store failing 50% for 30 s | no request exceeds `Timeouts.Store` + origin time; store breaker cycles |
 
