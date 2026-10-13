@@ -389,11 +389,12 @@ func TestLimiterInvariants(t *testing.T) {
 	for seed := range uint64(200) {
 		synctest.Test(t, func(t *testing.T) {
 			r := rand.New(rand.NewPCG(seed, 7))
-			slots, per := 1+r.IntN(6), 1+r.IntN(3)
+			slots, per := 1+r.IntN(8), 1+r.IntN(3)
 			perHost := r.IntN(3) // 0: off (FR-FAIR-1)
 			l := New(Config{
 				Max: slots, MaxQueue: 1 + r.IntN(6), PerPartition: per, PerHost: perHost,
-				Reserve: r.IntN(slots), MaxWait: time.Duration(1+r.IntN(5)) * time.Millisecond,
+				// No reserve in half the seeds, so fetches past the cap occur (FR-LIM-3).
+				Reserve: r.IntN(slots) * r.IntN(2), MaxWait: time.Duration(1+r.IntN(5)) * time.Millisecond,
 				Headroom: r.IntN(3), // 0: strict (FR-LIM-3)
 			})
 			var held []*Permit
