@@ -40,8 +40,9 @@ type Config struct {
 	MaxQueue     int // waiters at once (FR-LIM-2)
 	PerPartition int // slots per partition (FR-LIM-3)
 	// Headroom lets a fetch taken with AcquireOver run although its
-	// partition is at PerPartition, while more than Headroom slots are free
-	// (FR-LIM-3). Zero makes PerPartition a strict cap for every fetch.
+	// partition is at PerPartition, while more than Reserve + Headroom slots
+	// are free (FR-LIM-3). Zero makes PerPartition a strict cap for every
+	// fetch.
 	Headroom int
 	PerHost  int           // slots per host; 0 disables (FR-FAIR-1)
 	Reserve  int           // slots only Foreground may take (FR-LIM-4)
@@ -56,7 +57,11 @@ type Limiter struct {
 	mu       sync.Mutex
 	cfg      Config
 	inflight int
-	byPart   map[uint64]int // only partitions with inflight > 0; len <= Max
+	// borrowed counts the slots held past a partition's cap (FR-LIM-3).
+	// inflight includes them and byPart does not, so the fetches a caller
+	// vouched for never use up the cap the partition's other fetches share.
+	borrowed int
+	byPart   map[uint64]int // only partitions with a slot under their cap; len <= Max
 	byHost   map[uint64]int // only hosts with inflight > 0, and only when PerHost > 0; len <= Max
 	queue    []*waiter      // FIFO, len <= MaxQueue
 	queuedBy map[uint64]int // waiters per partition, each <= queueCap(); only partitions with queued > 0; len <= MaxQueue
@@ -76,6 +81,7 @@ type waiter struct {
 	over    bool          // taken with AcquireOver
 	ready   chan struct{} // closed when granted
 	granted bool
+	borrow  bool // granted past the partition's cap
 }
 
 // Permit is one held slot. Release returns it.
@@ -83,6 +89,7 @@ type Permit struct {
 	l        *Limiter
 	part     uint64
 	host     uint64
+	borrow   bool // the slot is counted in borrowed, not byPart
 	released bool // guarded by l.mu
 }
 
@@ -168,44 +175,50 @@ func (l *Limiter) expire() bool {
 func (l *Limiter) queueCap() int { return max(l.cfg.PerPartition, l.cfg.MaxQueue/4) }
 
 // canRun reports whether a fetch of class c for part and host may take a
-// slot now. Caller holds l.mu.
-func (l *Limiter) canRun(c Class, over bool, part, host uint64) bool {
+// slot now, and whether that slot is one past the partition's cap. Caller
+// holds l.mu.
+func (l *Limiter) canRun(c Class, over bool, part, host uint64) (ok, borrow bool) {
 	limit := l.limit()
 	if c != Foreground {
 		limit -= l.cfg.Reserve
 	}
 	if l.cfg.PerHost > 0 && l.byHost[host] >= l.cfg.PerHost {
-		return false // FR-FAIR-1: one host cannot take every slot
+		return false, false // FR-FAIR-1: one host cannot take every slot
 	}
 	if l.inflight >= limit {
-		return false
+		return false, false
 	}
 	if l.byPart[part] < l.capFor(part) {
-		return true
+		return true, false
 	}
 	// FR-LIM-3: past its cap a partition runs only the fetches the caller
-	// vouches for, and only while Headroom slots stay free for the rest, so
-	// a fetch for any other partition still starts at once. A partition the
-	// miss-rate report throttles has no such allowance (FR-MR-3).
+	// vouches for, and only while Headroom slots stay free below the
+	// reserve, so a foreground or a background fetch for any other partition
+	// still starts at once. A partition the miss-rate report throttles has
+	// no such allowance (FR-MR-3).
 	if !over || l.cfg.Headroom <= 0 {
-		return false
+		return false, false
 	}
 	if _, thr := l.throttled[part]; thr {
-		return false
+		return false, false
 	}
-	return l.inflight < l.limit()-l.cfg.Headroom
+	return l.inflight < l.limit()-l.cfg.Reserve-l.cfg.Headroom, true
 }
 
 // take records a granted slot. Caller holds l.mu.
-func (l *Limiter) take(part, host uint64) *Permit {
-	l.hold(part, host)
-	return &Permit{l: l, part: part, host: host}
+func (l *Limiter) take(part, host uint64, borrow bool) *Permit {
+	l.hold(part, host, borrow)
+	return &Permit{l: l, part: part, host: host, borrow: borrow}
 }
 
 // hold counts one more slot in flight. Caller holds l.mu.
-func (l *Limiter) hold(part, host uint64) {
+func (l *Limiter) hold(part, host uint64, borrow bool) {
 	l.inflight++
-	l.byPart[part]++
+	if borrow {
+		l.borrowed++
+	} else {
+		l.byPart[part]++
+	}
 	if l.cfg.PerHost > 0 {
 		l.byHost[host]++
 	}
@@ -236,8 +249,8 @@ func (l *Limiter) acquire(ctx context.Context, c Class, over bool, part, host ui
 	// Release, Throttle and the lines above grant every runnable waiter
 	// before they unlock, so no queued waiter is runnable here and canRun
 	// alone keeps FIFO order among them.
-	if l.canRun(c, over, part, host) {
-		p := l.take(part, host)
+	if ok, borrow := l.canRun(c, over, part, host); ok {
+		p := l.take(part, host, borrow)
 		l.mu.Unlock()
 		return p, nil
 	}
@@ -268,7 +281,7 @@ func (l *Limiter) acquire(ctx context.Context, c Class, over bool, part, host ui
 	var err error
 	select {
 	case <-w.ready:
-		return &Permit{l: l, part: part, host: host}, nil
+		return &Permit{l: l, part: part, host: host, borrow: w.borrow}, nil // written before ready closed
 	case <-expired:
 		err = ErrQueueTimeout
 	case <-ctx.Done():
@@ -283,7 +296,7 @@ func (l *Limiter) acquire(ctx context.Context, c Class, over bool, part, host ui
 		l.grant()
 	}
 	if w.granted { // a grant won the race: the slot is ours, keep it.
-		return &Permit{l: l, part: part, host: host}, nil
+		return &Permit{l: l, part: part, host: host, borrow: w.borrow}, nil
 	}
 	if i := slices.Index(l.queue, w); i >= 0 {
 		l.queue = slices.Delete(l.queue, i, i+1)
@@ -303,7 +316,9 @@ func (p *Permit) Release() {
 	}
 	p.released = true
 	l.inflight--
-	if l.byPart[p.part]--; l.byPart[p.part] <= 0 {
+	if p.borrow {
+		l.borrowed--
+	} else if l.byPart[p.part]--; l.byPart[p.part] <= 0 {
 		delete(l.byPart, p.part)
 	}
 	if l.cfg.PerHost > 0 {
@@ -319,8 +334,9 @@ func (p *Permit) Release() {
 // Caller holds l.mu.
 func (l *Limiter) grant() {
 	// ponytail: the walk passes every waiter whose partition is full before
-	// it finds one that can run, at most MaxQueue (8192 by default) of them;
-	// per-partition queues if BenchmarkLimiterReleaseFullQueue says it matters.
+	// it finds one that can run, at most MaxQueue (8192 by default) of them,
+	// about 8 ns each: four flooded paths at their queue cap cost a release
+	// some 65 µs under the lock. Per-partition queues if that ever shows.
 	kept := l.queue[:0]
 	for i, w := range l.queue {
 		if l.inflight >= l.limit() {
@@ -330,9 +346,9 @@ func (l *Limiter) grant() {
 			kept = append(kept, l.queue[i:]...)
 			break
 		}
-		if l.canRun(w.class, w.over, w.part, w.host) {
-			l.hold(w.part, w.host)
-			w.granted = true
+		if ok, borrow := l.canRun(w.class, w.over, w.part, w.host); ok {
+			l.hold(w.part, w.host, borrow)
+			w.granted, w.borrow = true, borrow
 			close(w.ready)
 			l.unqueue(w.part)
 			continue

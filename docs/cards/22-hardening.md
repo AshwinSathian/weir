@@ -224,11 +224,11 @@ High findings first, then Medium, then Low, then documents, review and release. 
 - Plan: hardening · Size: M · Depends on: HRD-17
 - Read: 01 FR-LIM-2, FR-LIM-3, FR-CB-4, FR-STO-9; 04 §8.2, §8.3; 06 T-11, INV-7, R-14; docs/11 §8
 - Touch: internal/limiter/limiter.go, internal/breaker/breaker.go, fetch.go, serve.go, config.go, engine.go, caddy/{module,pool,config,caddyfile}.go
-- Tests: `TestDefaultQueueHoldsExpiryBurst`, `TestMarkedURLUsesFreeSlots`, `TestHeadroomLeavesSlotsForOtherPartitions`, `TestHeadroomStrictCases`, `TestBurstBehindProbe`, `TestStaleNotHeldBehindProbe`, `TestBreakerAllowOrWait`, `TestMaxObjectBytes`
+- Tests: `TestDefaultQueueHoldsExpiryBurst`, `TestMarkedURLUsesFreeSlots`, `TestHeadroomLeavesSlotsForOtherPartitions`, `TestHeadroomStrictCases`, `TestHeadroomDoesNotStarveOwnPartition`, `TestBurstBehindProbe`, `TestProbeWaitersBounded`, `TestStaleNotHeldBehindProbe`, `TestBreakerAllowOrWait`, `TestMaxObjectBytes`
 - Decisions, each a default or behavior change made at the owner's request to fix the four findings (CMP-F1 to CMP-F4 in 21-comparison.md):
   - D-H25 (F1): `Limiter.MaxQueue` 1024 to 8192 and `MaxQueueWait` 2 s to 5 s. Origin concurrency is unchanged; clients wait longer before a 503. Stale serving stays off by default (D6).
-  - D-H26 (F2): new `Limiter.PartitionHeadroom` (0: `MaxPerPartition`). Only a fetch under a hit-for-miss marker may pass its partition's cap, and only while that many slots stay free. Rejected: letting every fetch borrow, which would have tripled what a cache-busting flood on one path takes from the origin (T-11, hard rule 12).
-  - D-H27 (F4): a foreground request without a stale response waits for the half-open probe, bounded by `MaxQueueWait`.
+  - D-H26 (F2): new `Limiter.PartitionHeadroom` (0: `MaxPerPartition`). Only a fetch under a hit-for-miss marker may pass its partition's cap, and only while that many slots stay free below the foreground reserve (32 of 64 in use at the defaults). Slots past the cap are counted apart, so they do not starve the partition's other requests. Rejected: letting every fetch borrow, which would have tripled what a cache-busting flood on one path takes from the origin (T-11, hard rule 12).
+  - D-H27 (F4): a foreground request without a stale response waits for the half-open probe, bounded by `MaxQueueWait` and by `MaxQueue`/4 waiters. A follower's bound grows to `Timeouts.Origin + 2 × MaxQueueWait`.
   - D-H28 (F3): the default `Storable.MaxObjectBytes` stays 1 MiB. It is tied to the memory store's shard size (a tenth of a 16 MiB shard), and a larger default means fewer shards and more memory buffered per fetch for everyone. The Caddy adapter gets `max_object_bytes`, which it lacked. One fetch streamed to many waiting clients without storing it is not built: deferred as HRD-22.
 
 ### [~] HRD-22 Share one over-size fetch among waiting clients

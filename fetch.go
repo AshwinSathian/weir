@@ -295,7 +295,10 @@ func fetchReason(class limiter.Class, pass bool) string {
 // Limiter.MaxQueueWait, and then asks again: a burst that arrives with the
 // probe is served by the recovered origin instead of failing behind it. A
 // caller with a stale response to serve, or holding a limiter slot, is not
-// patient.
+// patient. At most a quarter of Limiter.MaxQueue requests wait at once (P5):
+// a flight waits here on a context detached from its client, so without the
+// cap a flood of distinct keys during a slow probe would park a flight each.
+// One past the cap is refused at once, as every request was before v1.1.
 func (e *Engine) breakerAdmit(ctx context.Context, c *keys.Classified, class limiter.Class, patient bool) (breaker.Probe, error) {
 	if class != limiter.Foreground || !patient {
 		probe, err := e.cb.AllowFor(c.PartitionH)
@@ -312,6 +315,11 @@ func (e *Engine) breakerAdmit(ctx context.Context, c *keys.Classified, class lim
 			return probe, err
 		}
 		if expired == nil {
+			if e.cbWaiting.Add(1) > int64(max(1, e.cfg.Limiter.MaxQueue/4)) {
+				e.cbWaiting.Add(-1)
+				return breaker.Probe{}, breaker.ErrCircuitOpen
+			}
+			defer e.cbWaiting.Add(-1)
 			t := time.NewTimer(e.cfg.Limiter.MaxQueueWait)
 			defer t.Stop()
 			expired = t.C
@@ -319,7 +327,9 @@ func (e *Engine) breakerAdmit(ctx context.Context, c *keys.Classified, class lim
 		select {
 		case <-ended:
 		case <-expired:
-			return breaker.Probe{}, breaker.ErrCircuitOpen
+			// Asked once more: the probe may have ended in this instant.
+			probe, _, err := e.cb.AllowOrWait(c.PartitionH)
+			return probe, err
 		case <-ctx.Done():
 			return breaker.Probe{}, ctx.Err()
 		}

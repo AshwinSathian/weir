@@ -47,19 +47,30 @@ func overAsync(ctx context.Context, l *Limiter, part uint64) <-chan result {
 func TestHeadroomLeavesSlotsForOtherPartitions(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		ctx := t.Context()
-		l := New(Config{Max: 8, MaxQueue: 64, PerPartition: 2, Headroom: 2, MaxWait: time.Hour})
+		l := New(Config{Max: 10, MaxQueue: 64, PerPartition: 2, Headroom: 2, Reserve: 2, MaxWait: time.Hour})
 		var hot []*Permit
-		for range 6 { // 8 slots less 2 of headroom
+		for range 6 { // 10 slots less 2 of reserve and 2 of headroom
 			hot = append(hot, granted(t, overAsync(ctx, l, 1)))
 		}
 		seventh := overAsync(ctx, l, 1)
 		parked(t, seventh)
 
+		// A refresh of another partition never queues: it must find a slot.
+		bg, err := l.Acquire(ctx, Background, 5, 0)
+		if err != nil {
+			t.Fatalf("background fetch of another partition = %v, want a slot below the reserve", err)
+		}
+		bg.Release()
+		if _, err := l.Acquire(ctx, Background, 1, 0); err == nil {
+			t.Fatal("a background fetch ran past its partition's cap")
+		}
+
 		a := granted(t, acquireAsync(ctx, l, Foreground, 2))
 		b := granted(t, acquireAsync(ctx, l, Foreground, 3))
 
-		// Full limiter: a slot the hot partition frees is not handed back to it.
-		hot[0].Release()
+		// Busy limiter: a slot past the cap that the hot partition frees is
+		// not handed back to it.
+		hot[5].Release()
 		parked(t, seventh)
 		c := granted(t, acquireAsync(ctx, l, Foreground, 4))
 
@@ -69,7 +80,7 @@ func TestHeadroomLeavesSlotsForOtherPartitions(t *testing.T) {
 		c.Release()
 		p := granted(t, seventh)
 		p.Release()
-		for _, h := range hot[1:] {
+		for _, h := range hot[:5] {
 			h.Release()
 		}
 		if in, q := l.Counts(); in != 0 || q != 0 {
@@ -117,6 +128,32 @@ func TestHeadroomStrictCases(t *testing.T) {
 			<-third
 			first.Release()
 			second.Release()
+		}
+	})
+}
+
+// FR-LIM-3: vouched fetches past the cap do not use up the cap, so an
+// unvouched fetch of the same partition (a new key, or one whose marker
+// expired) is served in its turn instead of waiting behind them.
+func TestHeadroomDoesNotStarveOwnPartition(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx := t.Context()
+		l := New(Config{Max: 16, MaxQueue: 64, PerPartition: 2, Headroom: 2, MaxWait: time.Hour})
+		var hot []*Permit
+		for range 6 {
+			hot = append(hot, granted(t, overAsync(ctx, l, 1)))
+		}
+		plain := acquireAsync(ctx, l, Foreground, 1)
+		parked(t, plain) // both capped slots are held
+		later := overAsync(ctx, l, 1)
+		hot[0].Release() // one of the two capped slots
+		p := granted(t, plain)
+		q := granted(t, later) // room again past the cap
+		for _, h := range append(hot[1:], p, q) {
+			h.Release()
+		}
+		if in, _ := l.Counts(); in != 0 || l.borrowed != 0 || len(l.byPart) != 0 {
+			t.Fatalf("after every release: %d in flight, %d borrowed, partitions %v", in, l.borrowed, l.byPart)
 		}
 	})
 }

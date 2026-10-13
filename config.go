@@ -163,8 +163,8 @@ type LimiterConfig struct {
 	MaxQueueWait    time.Duration // 0: 5s
 	MaxPerPartition int           // 0: 16; clamped to MaxConcurrent
 	// PartitionHeadroom is the number of slots that stay free for other
-	// partitions before one partition may run more than MaxPerPartition
-	// fetches (FR-LIM-3). A hot path that cannot be coalesced (an
+	// partitions, below ReserveForeground, before one partition may run more
+	// than MaxPerPartition fetches (FR-LIM-3). A hot path that cannot be coalesced (an
 	// uncacheable or over-size response) may use the slots nobody else
 	// wants, and falls back to its cap as soon as fewer than this many are
 	// free. Zero means MaxPerPartition. A value of MaxConcurrent or more

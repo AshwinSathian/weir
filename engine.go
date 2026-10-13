@@ -63,6 +63,7 @@ type Engine struct {
 	mu        sync.RWMutex // orders setting closed (write) against wg.Add in goBackground (read)
 	closed    atomic.Bool  // written under mu; read without it on the Serve path
 	closeDone chan struct{}
+	cbWaiting atomic.Int64    // requests waiting for a half-open probe (breakerAdmit); at most MaxQueue/4
 	bgCtx     context.Context // canceled after Close's grace period
 	bgCancel  context.CancelFunc
 	wg        sync.WaitGroup // every engine-owned goroutine (04 §12)

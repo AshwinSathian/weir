@@ -41,8 +41,8 @@ type Handler struct {
 	// MaxObjectBytes is weir.StorableConfig.MaxObjectBytes: the largest
 	// response, headers included, that is stored (FR-STO-9). 0: 1 MiB. A
 	// larger response is passed through to every client that asks. Up to
-	// 64 fetches buffer a body of this size at once, so the process needs
-	// that much memory beside the store.
+	// max_concurrent fetches buffer a body of this size at once, so the
+	// process needs that much memory beside the store.
 	MaxObjectBytes ByteSize      `json:"max_object_bytes,omitempty"`
 	SnapshotDir    string        `json:"snapshot_dir,omitempty"`
 	Key            KeyConfig     `json:"key,omitempty"`

@@ -394,6 +394,7 @@ func TestLimiterInvariants(t *testing.T) {
 			l := New(Config{
 				Max: slots, MaxQueue: 1 + r.IntN(6), PerPartition: per, PerHost: perHost,
 				Reserve: r.IntN(slots), MaxWait: time.Duration(1+r.IntN(5)) * time.Millisecond,
+				Headroom: r.IntN(3), // 0: strict (FR-LIM-3)
 			})
 			var held []*Permit
 			got := make(chan *Permit, 256)
@@ -408,6 +409,11 @@ func TestLimiterInvariants(t *testing.T) {
 					}
 					sum += n
 				}
+				if l.borrowed < 0 || l.borrowed > max(0, slots-l.cfg.Reserve-l.cfg.Headroom) || l.cfg.Headroom == 0 && l.borrowed != 0 {
+					t.Fatalf("seed %d: %d borrowed slots, max %d, reserve %d, headroom %d",
+						seed, l.borrowed, slots, l.cfg.Reserve, l.cfg.Headroom)
+				}
+				sum += l.borrowed
 				if l.inflight > slots || sum != l.inflight || l.inflight != len(held) {
 					t.Fatalf("seed %d: inflight %d, max %d, partition sum %d, permits %d",
 						seed, l.inflight, slots, sum, len(held))
@@ -424,7 +430,7 @@ func TestLimiterInvariants(t *testing.T) {
 				}
 				queued := map[uint64]int{}
 				for _, w := range l.queue {
-					if l.canRun(w.class, false, w.part, w.host) {
+					if ok, _ := l.canRun(w.class, w.over, w.part, w.host); ok {
 						t.Fatalf("seed %d: runnable waiter left in the queue", seed)
 					}
 					queued[w.part]++
@@ -445,7 +451,14 @@ func TestLimiterInvariants(t *testing.T) {
 					ctx, cancel := context.WithTimeout(t.Context(), time.Duration(r.IntN(8))*time.Millisecond)
 					go func() {
 						defer cancel()
-						if p, err := l.Acquire(ctx, c, part, host); err == nil {
+						var p *Permit
+						var err error
+						if c == Foreground && part%2 == 0 {
+							p, err = l.AcquireOver(ctx, part, host)
+						} else {
+							p, err = l.Acquire(ctx, c, part, host)
+						}
+						if err == nil {
 							got <- p
 						}
 					}()
