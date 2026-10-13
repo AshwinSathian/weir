@@ -5,7 +5,7 @@ Phase: v1.1.0 not released yet (released: v1.0.1, 2026-10-12)
 Current card: HRD-21 (findings of the comparison round)
 Card state: awaiting-merge
 Branch: card/CMP-F1-limiter-breaker
-PR: PRLINK
+PR: https://github.com/AshwinSathian/weir/pull/124
 Next card: HRD-18 (release v1.1.0), after HRD-21 and the comparison pull request are merged
 
 ## Waiting on Ashwin
