@@ -1,0 +1,9 @@
+# Default tier: the cache-handler README quickstart, default storage.
+{
+	auto_https off
+	cache
+}
+:8080 {
+	cache
+	reverse_proxy origin:9000
+}

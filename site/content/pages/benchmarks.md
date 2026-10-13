@@ -1,9 +1,9 @@
 ---
 title: Benchmarks
-description: Hit-path cost, five load scenarios and garbage-collection cost, each with its machine, its command and what it does not show.
+description: Hit-path cost, five load scenarios, garbage-collection cost and a black-box round against Varnish, nginx and Souin, each with its machine, its command and what it does not show.
 ---
 
-Every number on this page was measured on one machine, in process, with a synthetic origin. They tell you what Weir costs and whether its limits hold under load. They do not tell you what your deployment will do. The tables are rendered from [docs/benchmarks.md](https://github.com/AshwinSathian/weir/blob/main/docs/benchmarks.md) in the repository, where the raw output files are linked.
+Every number on this page was measured on one machine with a synthetic origin, in process except for the round against other caches. They tell you what Weir costs and whether its limits hold under load. They do not tell you what your deployment will do. The tables are rendered from [docs/benchmarks.md](https://github.com/AshwinSathian/weir/blob/main/docs/benchmarks.md) in the repository, where the raw output files are linked.
 
 ## The reference machine
 
@@ -29,6 +29,32 @@ The same benchmarks on `v1.0.1` and on the v1.1 branch, run interleaved on the r
 
 {{include docs/benchmarks.md "### v1.1 hardening (2026-10-13)"}}
 
+## Against other caches
+
+One round of black-box tests against Varnish, nginx `proxy_cache` and the Caddy cache-handler (Souin), each in a container behind the same origin, in a default and a tuned configuration. It counts origin calls and failed clients; it does not measure speed. The notes under each table matter as much as the cells: (a) marks cells that undercount. "Weir v1.1" in these tables is the unreleased v1.1 code. The configurations, the harness and the method are in [`bench/compare/`](https://github.com/AshwinSathian/weir/tree/main/bench/compare) and the [comparison specification](https://github.com/AshwinSathian/weir/blob/main/docs/11-comparison-spec.md). Every figure about another project here comes from our own runs with configurations we wrote. None has been verified by that project's owners, so treat them as our measurements, not as statements those projects would sign, and send corrections.
+
+How many requests reached the origin:
+
+{{include docs/benchmarks.md "### Comparison: origin calls"}}
+
+How many clients got something other than a 2xx. A 503 that a cache sends to protect the origin counts as a failure:
+
+{{include docs/benchmarks.md "### Comparison: clients that did not get a 2xx"}}
+
+Failure and recovery:
+
+{{include docs/benchmarks.md "### Comparison: failure and recovery scenarios"}}
+
+{{include docs/benchmarks.md "### Comparison: what the numbers say about Weir"}}
+
+The round also changed Weir. Three defects of the last release and four problems with its defaults showed up, and all seven were fixed before this page was written:
+
+{{include docs/benchmarks.md "### Comparison: what the round changed in Weir"}}
+
+```sh
+cd bench/compare && ./run.sh -reps 3 && ./probes.sh && ./conformance.sh
+```
+
 ## Five load scenarios
 
 `make load` runs each failure mode against a real engine for about eight minutes in total and checks a threshold. This is the idle reference run of 2026-10-11.
@@ -52,7 +78,7 @@ At 1 million entries the collector costs 1.08 µs per request here, and 1.76 µs
 
 ## What this does not show
 
-- **No comparison with any other cache.** We have not run one, so the [comparison page](/compare/) is qualitative.
+- **No speed comparison with any other cache.** The round above counts origin calls and failures. Throughput, latency and memory against other caches have not been measured.
 - No network, TLS or HTTP parsing. A request served through `net/http` over TLS costs many times the 852 ns measured here, and most of that is outside Weir.
 - No real origin. The synthetic origin answers instantly or fails on cue.
 - One reference machine and one container. No ARM server, no NUMA box, no production trace.

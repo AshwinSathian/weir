@@ -11,7 +11,8 @@ Next card: HRD-18 (release v1.1.0), after HRD-21 and the comparison pull request
 ## Waiting on Ashwin
 
 - Review and merge the HRD-21 pull request. It changes defaults and behavior at your request (decisions D-H25 to D-H28 in docs/cards/22-hardening.md): `Limiter.MaxQueue` 8192 and `MaxQueueWait` 5 s; fetches under a hit-for-miss marker may pass the partition cap while the reserve and `PartitionHeadroom` slots stay free; requests wait for the half-open probe; Caddy gets `max_object_bytes`. The default object limit stays 1 MiB (D-H28): say so if you want it raised anyway.
-- Then the comparison pull request (card/CMP-01-compare-harness), rebased on this one with the tables rerun.
+- Then the comparison pull request (https://github.com/AshwinSathian/weir/pull/125, stacked on 124; retarget it to `main` after 124 merges). It publishes tables about Varnish, nginx and the Caddy cache-handler in docs/benchmarks.md and on the site's benchmarks and compare pages, each marked as our own runs, not verified by those projects' owners. The site is not deployed until you run `make site-deploy`.
+- Worth reporting upstream, your call: cache-handler v0.17.0 answers 200 with an empty body to clients that waited on a fetch it did not store (docs/benchmarks.md note (a)).
 - After both: say so and HRD-18 runs the release (docs/release.md from step 1).
 - A pull request in `../ashwin-portfolio` updates the Weir write-up; it says "v1.1 (in review)" until the tag exists. Hold it until the tag, then it gets the released wording.
 

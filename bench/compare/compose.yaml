@@ -1,0 +1,87 @@
+# Subjects of docs/11 §2. Every cache listens on 8080 under its service name
+# and fetches from origin:9000. run.sh starts one subject at a time; TIER
+# picks its config directory. Limits that are plumbing, not cache policy
+# (file descriptors, listen backlog), are raised the same way for everyone.
+x-plumbing: &plumbing
+  ulimits:
+    nofile: { soft: 65536, hard: 65536 }
+  sysctls:
+    net.core.somaxconn: 65535
+    # A proxy that opens a connection to the origin per request ran out of
+    # local ports after a few bursts ("cannot assign requested address"):
+    # ports in TIME_WAIT are not reusable for 60 s. The first full run
+    # showed 502s from nginx and from the control that were this, not cache
+    # behavior. Plumbing, so it is the same for every subject (docs/11 R1).
+    net.ipv4.ip_local_port_range: "1024 65535"
+    net.ipv4.tcp_tw_reuse: 1
+
+services:
+  origin:
+    build: { context: ., dockerfile: docker/tools.Dockerfile }
+    command: ["origin", "-listen", ":9000", "-control", ":9001"]
+    <<: *plumbing
+
+  run:
+    build: { context: ., dockerfile: docker/tools.Dockerfile }
+    profiles: ["tools"]
+    volumes: ["./results:/results"]
+    <<: *plumbing
+
+  caddy-nocache:
+    image: caddy:2.11.7@sha256:f2a1290d0463aad60660d4ec134943f183ee2a5f6c3eb7bf32dd984f2f020772
+    volumes: ["./subjects/caddy-nocache/default/Caddyfile:/etc/caddy/Caddyfile:ro"]
+    <<: *plumbing
+
+  weirproxy:
+    build:
+      context: .
+      dockerfile: docker/weirproxy.Dockerfile
+      args: { WEIR_VERSION: "${WEIR_VERSION:-v1.0.1}" }
+    command: ["-listen", ":8080", "-origin", "http://origin:9000"]
+    <<: *plumbing
+
+  caddy-weir:
+    build:
+      context: .
+      dockerfile: docker/caddy.Dockerfile
+      args:
+        WITH: "--with github.com/AshwinSathian/weir@${WEIR_VERSION:-v1.0.1} --with github.com/AshwinSathian/weir/caddy@${WEIR_VERSION:-v1.0.1}"
+    volumes: ["./subjects/caddy-weir/${TIER:-default}/Caddyfile:/etc/caddy/Caddyfile:ro"]
+    <<: *plumbing
+
+  # The "-next" subjects are Weir built from the working tree, for a labeled
+  # run of unreleased code beside the published version (docs/11 §2).
+  # run.sh cross-builds the two binaries into results/bin first.
+  weirproxy-next:
+    image: alpine:3.22@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8
+    volumes: ["./results/bin/weirproxy:/weirproxy:ro"]
+    command: ["/weirproxy", "-listen", ":8080", "-origin", "http://origin:9000"]
+    <<: *plumbing
+
+  caddy-weir-next:
+    image: caddy:2.11.7@sha256:f2a1290d0463aad60660d4ec134943f183ee2a5f6c3eb7bf32dd984f2f020772
+    volumes:
+      - "./results/bin/caddy:/usr/bin/caddy:ro"
+      - "./subjects/caddy-weir/${TIER:-default}/Caddyfile:/etc/caddy/Caddyfile:ro"
+    <<: *plumbing
+
+  caddy-souin:
+    build:
+      context: .
+      dockerfile: docker/caddy.Dockerfile
+      args:
+        WITH: "--with github.com/caddyserver/cache-handler@v0.17.0 --with github.com/darkweak/storages/otter/caddy@v0.0.20"
+    volumes: ["./subjects/caddy-souin/${TIER:-default}/Caddyfile:/etc/caddy/Caddyfile:ro"]
+    <<: *plumbing
+
+  varnish:
+    image: varnish:9.1.0@sha256:842a2874f49d5b9eb7690a8fe0b6d3a66d8045b2d2a96154b4a804e2cbd8ac33
+    environment: { VARNISH_HTTP_PORT: "8080", VARNISH_SIZE: "512M" }
+    volumes: ["./subjects/varnish/${TIER:-default}/default.vcl:/etc/varnish/default.vcl:ro"]
+    tmpfs: ["/var/lib/varnish/varnishd:exec"]
+    <<: *plumbing
+
+  nginx:
+    image: nginx:1.30.5@sha256:9bf97bd7714f5e24c1ccd545ecb9eb5435cb6d109c97cebb15e7e455e0239edb
+    volumes: ["./subjects/nginx/${TIER:-default}/nginx.conf:/etc/nginx/nginx.conf:ro"]
+    <<: *plumbing

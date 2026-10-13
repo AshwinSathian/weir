@@ -2012,3 +2012,20 @@ Entry template:
 - Deviations: default and behavior changes decided in the session at Ashwin's request (D-H25 to D-H28) instead of asked one by one. Letting every fetch pass the partition cap was rejected because it weakens T-11. F3 is not fixed by a default: the object limit is tied to the shard size; sharing one over-size fetch is deferred as HRD-22.
 - Follow-ups: rerun the comparison tables on this branch; HRD-18.
 - Context: continued from the comparison session, with compaction.
+
+## 2026-10-13 · CMP-01 to CMP-05, CMP-08 (partial) · done
+- Branch / PR: card/CMP-01-compare-harness / https://github.com/AshwinSathian/weir/pull/123 (stacked on card/HRD-01-hardening)
+- Done: the first comparison round against Varnish 9.1.0, nginx 1.30.5 and Caddy cache-handler v0.17.0 in Docker: 15 protection scenarios in two tiers, 13 security probes, cache-tests across subjects. `-next` subjects built from the working tree put v1.0.1 and the v1.1 branch side by side. Results as medians in docs/benchmarks.md, included into the site's benchmarks and compare pages; docs/11 is v0.2; image digests pinned.
+- Findings: three v1.0.1 defects confirmed black-box and already fixed on the v1.1 branch (slow-origin herd, breaker opened by one path, entries lost to an invalidation flood). Four open findings as cards CMP-F1 to CMP-F4, all needing the owner's decision. Weir is safe on every probe and passes 284 of 365 cache-tests, equal to its baseline.
+- Tests: `bench/compare` vet, race tests and lint pass with `GOWORK=off`; `make site-check` passes. The card-reviewer agent found a Varnish tuned config omission (fixed, rerun: 400 failed clients became 0), cells that undercount cache-handler's failures (reproduced by hand, footnoted), a latency table that broke 11 §6 (removed) and report notes that were not medians (fixed).
+- Deviations: several cards in one session at Ashwin's request, with context compaction. CMP-03, CMP-04, CMP-05 and CMP-08 stay open with their remainder in CMP-03b and CMP-04b; CMP-06 has not run; publication was decided before a scorecard with marks existed. The published data is stitched from five `run.sh` invocations. The new origin cues and custom scenarios have no tests of their own.
+- Follow-ups: owner decisions on CMP-F1 to CMP-F4; R4 review by the other projects' maintainers; CMP-03b, CMP-04b, CMP-06; retarget the pull request after 122 merges.
+- Context: over one card's budget by design.
+
+## 2026-10-13 · CMP rerun after HRD-21 · done
+- Branch / PR: card/CMP-03-compare-round / https://github.com/AshwinSathian/weir/pull/125 (stacked on card/CMP-F1-limiter-breaker)
+- Done: rebased the comparison work on HRD-21 and reran the Weir v1.1 subjects in both tiers, Varnish tuned (its backend cap mirrors Weir's limiter numbers, R2), the probes and cache-tests. Default tier: `cold-keys` 720 failures to 0, `sync-expiry` 3 848 to 0, `uncacheable-herd` 339 to 0, 200 of 200 served 10 s after an outage where 1 was. Probes and conformance unchanged (all safe, 284 of 365). docs/benchmarks.md has a before and after table; every page with a figure about another project says it is our run, not verified by that project's owners (11 R4a).
+- Tests: `bench/compare` vet, race tests, lint; `make site-check`.
+- Deviations: the earlier pull request 123 was closed by GitHub when its base branch was deleted; this is a new branch and pull request, not a force-push.
+- Follow-ups: CMP-03b, CMP-04b, CMP-06; maintainers' review of the configurations (R4).
+- Context: continued session.

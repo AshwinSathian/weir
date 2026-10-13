@@ -1,0 +1,8 @@
+# Control: Caddy as a plain reverse proxy, no cache.
+{
+	admin off
+	auto_https off
+}
+:8080 {
+	reverse_proxy origin:9000
+}

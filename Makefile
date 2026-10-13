@@ -12,7 +12,7 @@ SUBMODULES := $(patsubst ./%/go.mod,%,$(shell find . -mindepth 2 -name go.mod -n
 
 SITE_PROJECT ?= weir-site
 
-.PHONY: site-check site-build site-deploy release-smoke release-check check fmt-check vet lint test modules test-short trace trace-strict fuzz-short bench load cache-tests vuln card next test-valkey
+.PHONY: site-check site-build site-deploy release-smoke release-check check fmt-check vet lint test modules test-short trace trace-strict fuzz-short bench load cache-tests vuln card next test-valkey compare
 
 ## check: everything a card must pass before handoff (CI runs the same)
 check: fmt-check vet lint test modules trace-strict
@@ -88,6 +88,10 @@ load:
 ## cache-tests: http-tests/cache-tests against examples/weirproxy, compared with the baseline (docs/07 §8); needs node and network
 cache-tests:
 	@scripts/cache-tests.sh
+
+## compare: the head-to-head scenarios against other caches (docs/11); needs a running Docker daemon; results stay in bench/compare/results/ (not committed)
+compare:
+	@bench/compare/run.sh $(ARGS)
 
 vuln:
 	go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
