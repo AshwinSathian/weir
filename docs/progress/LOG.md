@@ -2053,3 +2053,12 @@ Entry template:
 - Deviations: none.
 - Follow-ups: the cache-handler bug report, after Ashwin's review.
 - Context: continued session.
+
+## 2026-10-13 · site results presentation (no card) · done
+- Branch / PR: site/results-presentation / #129
+- Done: the benchmarks and compare pages lead with static inline SVG charts and headline tiles drawn at build time from `docs/benchmarks.md` (`site/lib/results.ts`, `site/components/charts.tsx`): failed clients, origin calls, outage and recovery, before and after for v1.0.1 against v1.1.0, the probe grid, cache-tests bars, the v1.1 hit path. Losses use the same tile style as wins. Full tables are collapsed under each chart. The compare page's project sections became "choose it when" cards.
+- Tests: `scripts/check.mjs` gained `results` (table shape, tile claims, no digit typed in chart copy) and `charts` (every drawn number against its source cell after a build, 654 cells). `make site-check` and `make check` pass in the worktree.
+- Deviations: none. No Go code, no number in `docs/benchmarks.md` and nothing in `bench/compare/` changed.
+- Follow-ups: an independent hostile review found no wrong number; its presentation findings are fixed or answered in the pull request. Not done: an automated contrast or axe run, a screen-reader pass. Another session switched the main checkout to `card/CMP-03b-compare-round-2` mid-work, so the first site commit is also on that local branch; this work moved to the worktree `../weir-site-results`.
+- Context: high; one session, no compaction.
+

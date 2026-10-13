@@ -11,6 +11,7 @@ Next card: none open. Candidates: CMP-03b, CMP-04b, CMP-06 (comparison), HRD-22 
 ## Waiting on Ashwin
 
 - Nothing blocks. Pick the next card when you want one.
+- Pull request 129 (`site/results-presentation`, site work outside a card): charts and headline tiles for the benchmarks and compare pages. Review and merge, then `make site-deploy BRANCH=main`. Delete the branch `site/results-presentation-shots` (screenshots only) afterwards.
 - A bug report to cache-handler (v0.17.0 answers 200 with an empty body to clients that waited on a fetch it did not store, docs/benchmarks.md note (a)) is drafted for your review before it is posted.
 
 ## Notes for the next session
@@ -21,6 +22,8 @@ Next card: none open. Candidates: CMP-03b, CMP-04b, CMP-06 (comparison), HRD-22 
 - Deferred: HRD-20 (coalescing across nodes, a local tier for remote stores).
 - Site work: `make site-check` (Node 24, pnpm) is the gate; `make site-deploy BRANCH=main` uploads with wrangler. `site/README.md` explains the include directives and the claims register. Not done: Lighthouse and axe in CI, per-page OG images, an outside tester on the quickstart.
 - Use a separate worktree for site or doc work when another session is using this checkout.
+- Charts on the site are drawn from `docs/benchmarks.md` by `site/lib/results.ts`. A comparison table that changes its columns, or a rerun that contradicts a headline tile, fails `make site-check` on purpose: update `HEAD` in that file or the tile copy in `site/components/charts.tsx` with the data (`site/README.md`, "Charts").
+- The site worktree for pull request 129 is `../weir-site-results`; remove it with `git worktree remove` after the merge. The first commit of that pull request also sits on the local branch `card/CMP-03b-compare-round-2` with the same SHA, because that session switched the main checkout while the site session was committing.
 
 - The sub-modules require weir v0.0.0 with `replace` on `main`; the pinned `go.mod` files live only on a release branch. `make release-check` fails on `main` by design. The four `v1.0.0-rc.1` modules are on the proxy and work for outsiders (docs/release.md, rehearsal log).
 - `GOTOOLCHAIN=go1.27.2` runs everything on a machine whose installed Go is older.
