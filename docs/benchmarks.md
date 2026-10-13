@@ -337,6 +337,10 @@ The cost is the directive filter, two map reads on the forwarded header for ever
 `TestGCAt1MEntries` passed: 0.93 µs of GC per request at 1M entries (1.08 µs in the first reference run, gate 2 µs), GC share 6.4% runtime-reported and 8.9% projected. Live heap after the fill is 2 099 MiB for 1M entries, the same as in the first reference run.
 
 
+## v1.1.0 release candidate (2026-10-13)
+
+`main` at `0e581b1`, the commit the `release-gate` run of the same day covers, on the reference machine, not idle, Go 1.27.1. `make load` (scale 1, 475 s): all six scenarios pass. Steady hits ran at 1 893 k requests a second (paced to half of the saturated rate) with a p99 of 5.1 µs and no origin call after warming; synchronized expiry refetched 10 000 of 10 000 keys with the origin peak at its configured 32 and no client error. `BenchmarkServeHitSmall`, six runs: 610 to 643 ns, 608 B and 8 allocations a hit, inside the NFR-5 budget and level with the 669 ns recorded for the hardening branch. `make check`, `make vuln` (Go 1.27.2) and `make cache-tests` pass on the same commit.
+
 ## Comparison with other caches, round 1 (2026-10-13)
 
 Specification: [11-comparison-spec.md](11-comparison-spec.md). Harness and every subject's configuration: `bench/compare/`. Each subject ran as a container in Docker Desktop on the reference machine, behind the same origin, with a new container for each tier. Three repetitions per scenario and the median reported, except `large-body-herd` and `post-flood` (one repetition).
