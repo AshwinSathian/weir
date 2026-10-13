@@ -17,6 +17,8 @@ The suite's authors say that passing everything means nothing: many tests check 
 
 A nightly job reruns the suite and fails only when a test that passed in this baseline stops passing. Reproduce it with `make cache-tests`.
 
+The same suite was run once against Varnish, nginx and the Caddy cache-handler. The four results are side by side on the [compare page](/compare/#cache-tests), with what a fail does and does not mean there.
+
 ## RFCs implemented
 
 | RFC | Subject |

@@ -173,6 +173,10 @@ export default async function Home() {
               <span className="what">third-party imports in the root module. A test enforces it.</span>
             </a>
           </div>
+          <p style={{ marginTop: 'var(--s5)' }}>
+            One round of counting tests against Varnish, nginx and the Caddy cache-handler is on the{' '}
+            <Link href="/benchmarks/#results-at-a-glance">benchmarks page</Link>, with the scenarios Weir loses and what was never measured.
+          </p>
         </div>
       </section>
     </>

@@ -63,3 +63,5 @@ Network attackers (TLS is the adapter's job), HTTP request smuggling (the HTTP s
 ## How it is checked
 
 Most threat rows name a test; a few are operator rules or accepted limits and say so. Parsers of request or origin bytes have fuzz targets, 30 in all, and each ran for an hour before the release with no new crasher. The tests for the failure modes ran 100 times under the race detector. The root module imports only the Go standard library, enforced by `deps_test.go`, so its supply chain is the Go toolchain.
+
+One round of poisoning probes ran Weir and three other caches in front of a deliberately broken origin. The grid, and why an unsafe verdict there is not a vulnerability, is on the [compare page](/compare/#poisoning-probes).

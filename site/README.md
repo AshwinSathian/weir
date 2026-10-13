@@ -37,9 +37,20 @@ Hand-written pages are Markdown in `content/docs/` and `content/pages/`, with `t
 {{example example_test.go ExampleEngine_Serve}}           the body of a tested Example function
 {{fenced README.md go}}                                   the first fenced block of that language
 {{figure budget}}                                         a diagram from components/diagrams.tsx
+{{figure results-failed}}                                 a chart from components/charts.tsx
 ```
 
 `{{version}}`, `{{go_min}}`, `{{go_deploy}}` and `{{caddy_version}}` come from `data/release.ts`. Callouts use `> [!NOTE]`, `> [!CAUTION]`, `> [!PROTECTION]` and `> [!LIMITS]`. Requirement, threat and risk IDs in prose (`FR-COA-4`, `T-13`, `R-2`) become links automatically.
+
+## Charts
+
+The charts and headline tiles on the benchmarks and compare pages are static inline SVG, drawn at build time by `components/charts.tsx` from `lib/results.ts`, which parses the comparison tables of `docs/benchmarks.md`. There is no chart library and no data file.
+
+- `lib/results.ts` names the exact header of every table it reads. A table that gains, loses or renames a column fails the build, and so does a sentence in a tile ("Varnish matches it") that the tables stop supporting.
+- `components/charts.tsx` may not contain a digit in its copy. `pnpm check` enforces that, so a number cannot be typed beside a derived one.
+- After a build, `pnpm check charts` reads the tables a second time, without the parser, and compares every number drawn in `out/` with its cell. It also fails when a charted table has a row or column no chart draws, and when a figure that shows another project lacks the "not verified" statement. `pnpm build` runs it.
+- Each chart is drawn twice, for a wide and a narrow column, and CSS shows one. The default and tuned tiers are both in the page; two radio buttons and CSS show one, so nothing needs JavaScript.
+- Encoding: Weir is the accent color and every other cache the muted ink. A filled bar counts something lost, an outlined bar something served or expected, a hatched bar a cell the source marks as an undercount. Every bar starts at zero and is a share of its own row's total; there is no log scale.
 
 ## Rules the checks enforce
 
