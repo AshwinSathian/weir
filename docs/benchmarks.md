@@ -501,7 +501,7 @@ The harness origin has deliberately unsafe routes: it reflects a header no cache
 
 | Probe | Weir v1.1.0 | Varnish | Varnish hardened | nginx | nginx hardened | Souin | Souin hardened |
 |---|---|---|---|---|---|---|---|
-| reflect-host | safe | unsafe | safe | unsafe | safe | safe | safe |
+| origin reflects `X-Forwarded-Host` (b) | safe | unsafe | safe | unsafe | safe | safe | safe |
 | origin routes on `X-Original-URL` | safe | unsafe | safe | unsafe | safe | unsafe | safe |
 | `GET` with a body the origin reads | safe | safe | safe | unsafe | safe | unsafe | unsafe |
 | `X-HTTP-Method-Override` causes an error | safe | safe | safe | unsafe | safe | unsafe | safe |

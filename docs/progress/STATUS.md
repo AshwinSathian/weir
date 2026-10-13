@@ -2,15 +2,16 @@
 
 Updated: 2026-10-13
 Phase: v1.1.0 released and deployed (2026-10-13)
-Current card: HRD-23 (fixes for the round 2 losses), stacked on CMP-03b and CMP-04b
+Current card: none (site work outside a card: the result charts, reworked for round 2)
 Card state: awaiting-merge
-Branch: card/HRD-23-round2-losses (contains card/CMP-03b-compare-round-2)
-PR: https://github.com/AshwinSathian/weir/pull/131 (contains pull request 130)
+Branch: site/results-round2
+PR: opened by this session; it replaces pull request 129
 Next card: none open. Candidates: a v1.2 release with a rerun of the comparison tables, CMP-06 (speed and memory), HRD-22 (share one over-size fetch), HRD-20 (deferred)
 
 ## Waiting on Ashwin
 
-- Merge pull request 131 (HRD-23 and round 2). It contains pull request 130, which can then be closed. It does not deploy the site. Pull request 129 (site charts) needs rework on top of it before it can merge.
+- Review and merge the site charts pull request (it replaces 129, which is closed). Then `make site-deploy BRANCH=main`. The branches `site/results-presentation` and `site/results-presentation-shots` can be deleted afterwards.
+- The deployed site will describe `main` in a few doc pages that are ahead of `v1.1.0`; each such place is marked "next release". Releasing v1.2 removes the need for those notes: grep `site/content` for "next release".
 - HRD-23 changes three defaults you approved on 2026-10-13 (`Breaker.OpenFor` 1 s, `Breaker.MaxOpenFor` equal to it, borrowing past the per-path cap for every client's fetch) and adds two opt-in settings (`Limiter.AdaptiveMax`, `SnapshotKeepFreshness`). They ship in the next release; the changelog's Unreleased section lists them with the way back for each.
 - The published comparison tables still describe v1.1.0. After a v1.2 release, rerun them (11 §2 measures published modules); card HRD-23 holds the working-tree figures to expect.
 - The cache-handler bug report is posted as https://github.com/darkweak/souin/issues/876 (open, no reply on 2026-10-13). Round 2 found a second behavior worth reporting there if you want to: a request for `/%70age` is stored under the key of `/page` and forwarded as spelled (docs/benchmarks.md, probe note (e)). Not reported.
@@ -33,6 +34,8 @@ Next card: none open. Candidates: a v1.2 release with a rerun of the comparison 
 - Deferred: HRD-20 (coalescing across nodes, a local tier for remote stores).
 - Site work: `make site-check` (Node 24, pnpm) is the gate; `make site-deploy BRANCH=main` uploads with wrangler. `site/README.md` explains the include directives and the claims register. Not done: Lighthouse and axe in CI, per-page OG images, an outside tester on the quickstart.
 - Use a separate worktree for site or doc work when another session is using this checkout.
+- Charts on the site are drawn from `docs/benchmarks.md` by `site/lib/results.ts`. A comparison table that changes its columns, or a rerun that contradicts a headline tile, fails `make site-check` on purpose: update `HEAD` in that file or the tile copy in `site/components/charts.tsx` with the data (`site/README.md`, "Charts").
+- The site worktree for pull request 129 is `../weir-site-results`; remove it with `git worktree remove` after the merge. The first commit of that pull request also sits on the local branch `card/CMP-03b-compare-round-2` with the same SHA, because that session switched the main checkout while the site session was committing.
 
 - The sub-modules require weir v0.0.0 with `replace` on `main`; the pinned `go.mod` files live only on a release branch. `make release-check` fails on `main` by design. The four `v1.0.0-rc.1` modules are on the proxy and work for outsiders (docs/release.md, rehearsal log).
 - `GOTOOLCHAIN=go1.27.2` runs everything on a machine whose installed Go is older.

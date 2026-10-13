@@ -8,10 +8,17 @@
 //             plain-language row on the security page; cache-tests numbers equal their source
 //   versions  every install line in the repository's documents names one version
 //   snippet   the README program compiles against this tree
+//   results   the comparison tables in docs/benchmarks.md still have the shape lib/results.ts reads, the
+//             sentences the headline tiles make still hold, and components/charts.tsx types no number
+//   charts    (after a build: `node scripts/check.mjs charts`) every number drawn on a chart in out/
+//             equals its cell in docs/benchmarks.md, no row or column of a charted table is missing, and
+//             every figure that shows another project carries the "not verified" statement
 //   release   with RELEASED=true, all four modules resolve at VERSION from the Go proxy
 import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
+
+import * as results from '../lib/results.ts'
 
 const SITE = path.resolve(import.meta.dirname, '..')
 const ROOT = path.resolve(SITE, '..')
@@ -29,6 +36,7 @@ const rel = (p) => path.relative(ROOT, p)
 const prose = [
   ...walk(path.join(SITE, 'content'), '.md'),
   path.join(SITE, 'app/page.tsx'),
+  path.join(SITE, 'components/charts.tsx'),
   ...['README.md', 'CONTRIBUTING.md', 'SECURITY.md'].map((f) => path.join(ROOT, f)).filter(fs.existsSync),
 ]
 
@@ -137,6 +145,86 @@ function snippet() {
   }
 }
 
+function resultsCheck() {
+  try {
+    results.headlines(results.parseResults(read(path.join(ROOT, results.DOC))))
+  } catch (e) {
+    fail(e.message)
+  }
+  // Rule: a chart draws what the parser gives it. Copy in the chart components may not contain a
+  // digit at all (status classes like 2xx excepted), so no figure can be typed next to a derived one.
+  // ponytail: a regex over quoted strings and JSX text, not a parser. It cannot see a number built
+  // by arithmetic; review covers that, and the `charts` check compares what is drawn with the source.
+  const file = path.join(SITE, 'components/charts.tsx')
+  if (!fs.existsSync(file)) return fail('components/charts.tsx is missing')
+  const code = read(file).replace(/\/\*[\s\S]*?\*\/|^\s*\/\/.*$/gm, '')
+  const copy = [...code.matchAll(/'([^'\n]*)'|"([^"\n]*)"|`([^`]*)`|>([^<>{}]+)</g)].map((m) => m[1] ?? m[2] ?? m[3] ?? m[4])
+  for (const c of copy) {
+    const t = c.replace(/\$\{[^}]*\}/g, '').replace(/\b\dxx\b/g, '')
+    if (/\d/.test(t)) fail(`components/charts.tsx: "${c.trim().slice(0, 60)}" contains a digit; chart copy takes its numbers from lib/results.ts`)
+  }
+}
+
+function charts() {
+  const { SECTION, SUBJECTS, HEAD, NTH, col, probeCol } = results
+  const lines = read(path.join(ROOT, results.DOC)).split('\n')
+  // A second reading of the tables that shares nothing with lib/results.ts but the heading map:
+  // the first table after the heading, split on "|".
+  // ROWKEY: how many leading columns name a row. The conformance table has one row per subject and tier.
+  const ROWKEY = { conformance: 2 }
+  const source = (key) => {
+    const at = lines.findIndex((l) => l.startsWith(SECTION[key]))
+    const end = lines.findIndex((l, i) => i > at && /^#{1,3} /.test(l))
+    // The table's number within its section (lib/results.ts NTH): a table starts where a "|" line follows a line that is not one.
+    const starts = lines.flatMap((l, i) => (i > at && (end < 0 || i < end) && l.startsWith('|') && !lines[i - 1].startsWith('|') ? [i] : []))
+    const first = starts[NTH[key] ?? 0]
+    const split = (l) => l.slice(1, -1).split('|').map((c) => c.trim())
+    const head = split(lines[first])
+    const n = ROWKEY[key] ?? 1
+    const out = new Map()
+    for (let i = first + 2; lines[i]?.startsWith('|'); i++) {
+      const c = split(lines[i])
+      head.forEach((h, j) => j >= n && out.set(`${c.slice(0, n).join(', ')}|${h}`, c[j]))
+    }
+    return out
+  }
+  const norm = (s) => (/\d/.test(s) ? /[\d.,\s]*\d/.exec(s)[0].replace(/[\s,]/g, '') : s)
+  const tiers = SUBJECTS.flatMap((s) => [col(s, 'default'), col(s, 'tuned')])
+  // Per page: the tables its charts may draw from, and the columns of each that some chart must draw.
+  // "vary" is quoted in a caption, not charted, so it has no column that must appear.
+  const pages = {
+    'benchmarks/index.html': { failed: tiers, calls: tiers, recovery: tiers, flood: tiers, changed: HEAD.changed.slice(1), hit: HEAD.hit.slice(1, 4) },
+    'compare/index.html': { probes: SUBJECTS.flatMap((s) => [...new Set([probeCol(s, false), probeCol(s, true)])]), conformance: ['Pass'], vary: [] },
+  }
+  for (const [page, keys] of Object.entries(pages)) {
+    const file = path.join(SITE, 'out', page)
+    if (!fs.existsSync(file)) return fail(`out/${page} is missing: build the site first`)
+    const html = read(file)
+    const seen = new Set()
+    for (const m of html.matchAll(/data-n="([^"]+)"[^>]*>([^<]*)</g)) {
+      const [key, row, column, part] = m[1].replace(/&quot;/g, '"').replace(/&#x27;/g, "'").replace(/&amp;/g, '&').split('|')
+      if (!keys[key]) { fail(`${page}: a chart draws from "${key}", which this page is not checked for`); continue }
+      const raw = source(key).get(`${row}|${column}`)
+      if (raw === undefined) { fail(`${page}: chart cell ${m[1]} has no cell in ${results.DOC}`); continue }
+      const want = norm(raw.split(', ')[Number(part ?? 0)] ?? '')
+      if (norm(m[2]) !== want) fail(`${page}: chart cell ${m[1]} draws "${m[2]}", ${results.DOC} says "${raw}"`)
+      seen.add(`${key}|${row}|${column}`)
+    }
+    for (const [key, columns] of Object.entries(keys)) {
+      const rows = new Set([...source(key).keys()].map((k) => k.split('|')[0]))
+      // The hit-path chart draws one benchmark of the table; every other chart draws every row.
+      for (const row of key === 'hit' ? ['`BenchmarkServeHitSmall`'] : rows) {
+        for (const c of columns) if (!seen.has(`${key}|${row}|${c}`)) fail(`${page}: no chart draws ${key} / ${row} / ${c}`)
+      }
+    }
+    // Rule R4a of docs/11: the statement sits in every figure that shows another project, not once per page.
+    for (const m of html.matchAll(/<figure[^>]*data-others[^>]*>[\s\S]*?<\/figure>/g)) {
+      if (!m[0].includes('not been verified')) fail(`${page}: a figure about other projects lacks the "not been verified" statement`)
+    }
+    if (![...html.matchAll(/<figure[^>]*data-others/g)].length) fail(`${page}: no figure is marked as showing other projects`)
+  }
+}
+
 function release() {
   const src = read(path.join(SITE, 'data/release.ts'))
   if (!/RELEASED = true/.test(src)) return console.log('release: RELEASED is false, nothing to resolve')
@@ -154,7 +242,7 @@ function release() {
 }
 
 const only = process.argv[2]
-const checks = only === 'release' ? { release } : { style, numbers, counts, versions, data, snippet }
+const checks = only === 'release' ? { release } : only === 'charts' ? { charts } : { style, numbers, counts, versions, data, results: resultsCheck, snippet }
 for (const [name, fn] of Object.entries(checks)) {
   const before = errors.length
   fn()

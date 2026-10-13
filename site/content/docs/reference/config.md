@@ -11,6 +11,9 @@ On Caddy the same settings are Caddyfile keys; the [Caddy guide](/docs/guides/ca
 
 <div id="config">
 
+> [!NOTE]
+> The table is the specification on `main`, which is ahead of `{{version}}` in three rows: `Limiter.AdaptiveMax` does not exist in `{{version}}`, and there `Breaker.OpenFor` defaults to 5 s and `Breaker.MaxOpenFor` to 60 s. The [changelog](/changelog/) lists what the next release changes.
+
 {{include docs/01-technical-spec.md "## 6. Configuration"}}
 
 </div>

@@ -6,7 +6,7 @@ import bench from '@/data/benchmarks.json'
 
 type P = { children?: React.ReactNode; title: string; desc: string; w: number; h: number; id: string }
 
-function Svg({ children, title, desc, w, h, id }: P) {
+export function Svg({ children, title, desc, w, h, id }: P) {
   return (
     <svg className="dg" viewBox={`0 0 ${w} ${h}`} role="img" aria-labelledby={`${id}-t ${id}-d`}>
       <title id={`${id}-t`}>{title}</title>
