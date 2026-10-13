@@ -3,12 +3,14 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -97,5 +99,82 @@ func TestReportMedians(t *testing.T) {
 	}
 	if want := "| cold-herd | s | default | 10 | 1 | 2 | 3 | 0 | 0 |"; !strings.Contains(out.String(), want) {
 		t.Fatalf("report:\n%s\nwant a line %q", out.String(), want)
+	}
+}
+
+// naiveCache stores the first 200 response per path and serves it to every
+// later GET: what a cache that keys on the URL alone and stores everything
+// does. The probes must call it unsafe.
+func naiveCache(origin string) http.Handler {
+	type entry struct {
+		status int
+		h      http.Header
+		body   []byte
+	}
+	var mu sync.Mutex
+	m := map[string]entry{}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		e, ok := m[r.URL.Path]
+		mu.Unlock()
+		if !ok {
+			req, _ := http.NewRequestWithContext(r.Context(), r.Method, origin+r.URL.Path, r.Body)
+			req.Header = r.Header.Clone()
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadGateway)
+				return
+			}
+			defer func() { _ = resp.Body.Close() }()
+			b, _ := io.ReadAll(resp.Body)
+			e = entry{resp.StatusCode, resp.Header, b}
+			mu.Lock()
+			m[r.URL.Path] = e
+			mu.Unlock()
+		}
+		for k, v := range e.h {
+			w.Header()[k] = v
+		}
+		w.WriteHeader(e.status)
+		_, _ = w.Write(e.body)
+	})
+}
+
+// docs/11 §5.3: against the origin alone nothing is reused, so every probe
+// is safe; through a cache that keys on the path and stores everything,
+// every probe is unsafe. A probe that cannot tell the two apart measures
+// nothing.
+func TestProbesSeparateOriginFromNaiveCache(t *testing.T) {
+	o := newOrigin()
+	origin := httptest.NewServer(o.data())
+	defer origin.Close()
+	naive := httptest.NewServer(naiveCache(origin.URL))
+	defer naive.Close()
+
+	for _, row := range runProbes(t.Context(), http.DefaultClient, origin.URL, "origin", "default") {
+		switch row.Probe {
+		case "no-cache-amplify":
+			if row.Verdict != "50 of 50" {
+				t.Errorf("origin direct: %s = %q, want every request at the origin", row.Probe, row.Verdict)
+			}
+		default:
+			if row.Verdict != "safe" {
+				t.Errorf("origin direct: %s = %s (%s), want safe", row.Probe, row.Verdict, row.Why)
+			}
+		}
+	}
+	for _, row := range runProbes(t.Context(), http.DefaultClient, naive.URL, "naive", "default") {
+		switch row.Probe {
+		case "no-cache-amplify":
+			if row.Verdict != "0 of 50" {
+				t.Errorf("naive cache: %s = %q, want none at the origin", row.Probe, row.Verdict)
+			}
+		case "error-as-success":
+			// A cache that replays a stored 500 is not serving a success.
+		default:
+			if row.Verdict != "unsafe" {
+				t.Errorf("naive cache: %s = %s (%s), want unsafe", row.Probe, row.Verdict, row.Why)
+			}
+		}
 	}
 }

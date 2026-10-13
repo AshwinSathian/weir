@@ -1,8 +1,10 @@
 # Comparison benchmark cards
 
-Scope: [docs/11-comparison-spec.md](../11-comparison-spec.md). Reading references to `11` mean that document. Results are private until CMP-07 (11 §9): no card commits a file from `bench/compare/results/`.
+Scope: [docs/11-comparison-spec.md](../11-comparison-spec.md). Reading references to `11` mean that document. No card commits a file from `bench/compare/results/`; published tables are medians copied into docs/benchmarks.md (11 §9).
 
-### [ ] CMP-01 Comparison spec, harness and subject configs
+State after the session of 2026-10-13, which ran one round on one branch at the owner's request: CMP-01 and CMP-02 are done. CMP-03, CMP-04, CMP-05 and CMP-08 are partly done and stay open; what each still lacks is in CMP-03b, CMP-04b and the notes below. CMP-07's decision came early: the owner chose to publish the count-based pillars before CMP-06, so no scorecard with marks exists (11 §7). The findings are CMP-F1 to CMP-F4.
+
+### [x] CMP-01 Comparison spec, harness and subject configs
 - Plan: comparison · Size: M · Depends on: none
 - Read: 11 whole; 07 §9; loadtest/harness_test.go (capOrigin)
 - Touch: docs/11-comparison-spec.md (new), docs/cards/21-comparison.md (new), bench/compare/{go.mod,main.go,origin.go,run.go,compare_test.go,compose.yaml,run.sh} (new), bench/compare/docker/ (new), bench/compare/subjects/ (new), Makefile (`compare` target)
@@ -11,7 +13,7 @@ Scope: [docs/11-comparison-spec.md](../11-comparison-spec.md). Reading reference
 - Out of scope: running anything in Docker (CMP-02); scenarios that need an origin failure cue (CMP-03)
 - Notes: written in one session with the spec at the owner's request, without a Docker daemon. The competitor configs are therefore unverified until CMP-02.
 
-### [ ] CMP-02 First Docker run: verify every subject and pin images
+### [x] CMP-02 First Docker run: verify every subject and pin images
 - Plan: comparison · Size: S · Depends on: CMP-01, a running Docker daemon
 - Read: 11 §2, §3, §10
 - Touch: bench/compare/compose.yaml, bench/compare/subjects/, bench/compare/run.sh, docs/11-comparison-spec.md (§10)
@@ -61,6 +63,40 @@ Scope: [docs/11-comparison-spec.md](../11-comparison-spec.md). Reading reference
 - Read: 11 §9; site/README.md (include directives, claims register)
 - Touch: docs/benchmarks.md, site/content/pages/{benchmarks,compare}.md, the claims register, the chosen result files
 - AC: every published number has its config, command, machine and date; the page names every pillar that was run; `make site-check` passes
+
+### [ ] CMP-03b Remaining protection scenarios
+- Plan: comparison · Size: M · Depends on: CMP-03
+- Read: 11 §5.1, §5.2; loadtest/scenarios_test.go
+- Touch: bench/compare/{origin.go,run.go,scenarios.go,compare_test.go}, bench/compare/subjects/ (purge access per subject)
+- AC: `busting-flood`, `brownout`, `purge-herd` and `restart` run for every subject; a subject without a feature reports `not available`, never a zero
+- Also: the runner checks body length as well as status (cache-handler's empty 200s); `post-flood` records the status of its `POST` requests; counters are reset after the priming wait and a second wave shows deferred refreshes; a replaced profile keeps its in-flight count.
+- Notes: CMP-03 ran `slow-origin-herd`, `leader-abort`, `turned-private`, `bad-route`, `origin-down`, `post-flood`, `oversize-herd`, `large-body-herd` and the two capped scenarios instead of these four. The new origin cues have no test of their own against the origin direct; add them here.
+
+### [ ] CMP-04b Remaining probes and a hardened tier
+- Plan: comparison · Size: S · Depends on: CMP-04
+- Read: 11 §5.3
+- Touch: bench/compare/probe.go, bench/compare/compare_test.go, bench/compare/subjects/
+- AC: `probe_test.go` exists as CMP-04 asked; verdicts follow 11 §5.3 (`unsafe`, `safe`); the error-as-success probe is concurrent; parameter cloaking, path normalization, the meta character and `Vary` cardinality are probed; conformance runs in both tiers and reports setup failures apart from assertion failures (CMP-05); each competitor with documented hardening gets a hardened tier and the table of docs/benchmarks.md is rerun with it
+
+### [ ] CMP-F1 Default tier sheds load the origin could carry
+- Plan: comparison finding · Size: S · Depends on: owner decision
+- Read: 01 FR-LIM; runbook 4.8; 06 R-14
+- Notes: `cold-keys` 720 of 2000 and `sync-expiry` about 3850 of 5000 clients get 503 with the default limiter (64 concurrent, 2 s wait) and stale serving off (D6). Options: keep and document louder (quickstart turns stale serving on); raise `MaxQueueWait`; turn `while_revalidate` on by default. The last two change defaults (hard rule 12).
+
+### [ ] CMP-F2 Per-partition cap throttles one hot uncacheable URL
+- Plan: comparison finding · Size: M · Depends on: owner decision
+- Read: 01 FR-LIM; 04 limiter section
+- Notes: `Limiter.MaxPerPartition` 16 applies to pass-through and marker fetches. `uncacheable-herd`: 339 of 500 fail. `turned-private` and `oversize-herd`: each client waits about four times the origin's latency. The cap exists so one path cannot take the whole budget (busting flood). Options: keep; a separate, larger cap for fetches that a marker says cannot be stored; document the knob on the tuning page.
+
+### [ ] CMP-F3 Objects over 1 MiB reach the origin once per client
+- Plan: comparison finding · Size: S · Depends on: owner decision
+- Read: 01 FR-STO-9; 05 §2
+- Notes: `oversize-herd` 150 origin calls, `large-body-herd` 20, where Varnish and cache-handler make 1. By design (bounded memory, T-21). Options: keep and document; coalesce over-size bodies by streaming one fetch to the waiting clients without storing it.
+
+### [ ] CMP-F4 A burst arriving with the breaker's probe fails
+- Plan: comparison finding · Size: S · Depends on: owner decision
+- Read: 04 breaker section; 01 FR-CB-1 onward
+- Notes: `origin-down`, default tier: 10 s after the origin recovered, 1 of 200 simultaneous clients is served and 199 get 503, because half-open admits one probe. Requests after the probe succeed. Options: keep; let requests that arrive during a probe wait for its result, bounded by `MaxQueueWait`.
 
 ### [~] CMP-09 Differential fuzzing across caches
 - Plan: comparison · Size: M · Depends on: CMP-02

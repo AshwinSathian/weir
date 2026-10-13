@@ -24,7 +24,7 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
-		log.Fatal("usage: compare origin|run|report [flags]")
+		log.Fatal("usage: compare origin|run|probe|report [flags]")
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	var err error
@@ -33,6 +33,8 @@ func main() {
 		err = originCmd(ctx, os.Args[2:])
 	case "run":
 		err = runCmd(ctx, os.Args[2:])
+	case "probe":
+		err = probeCmd(ctx, os.Args[2:])
 	case "report":
 		err = reportCmd(os.Args[2:], os.Stdout)
 	default:

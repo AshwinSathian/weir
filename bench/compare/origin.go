@@ -16,13 +16,19 @@ type profile struct {
 	Status       int    `json:"status"` // 0 means 200
 	CacheControl string `json:"cache_control"`
 	BodyBytes    int    `json:"body_bytes"`
+	// Capacity, above zero, is how many requests the origin serves at once
+	// under this profile. One more is refused at once with 503, as an
+	// application server at its worker limit does. Refused requests are
+	// counted apart from calls.
+	Capacity int `json:"capacity"`
 }
 
 // counters is what a scenario reads back: how many requests reached the
 // origin for a profile, and the most that were in flight at once.
 type counters struct {
-	Calls int64 `json:"calls"`
-	Peak  int   `json:"peak"`
+	Calls   int64 `json:"calls"`
+	Peak    int   `json:"peak"`
+	Refused int64 `json:"refused"` // turned away by Capacity
 }
 
 const (
@@ -55,6 +61,7 @@ func newOrigin() *origin {
 func (o *origin) data() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/o/{profile}/{key...}", o.serve)
+	mux.HandleFunc("/p/{probe}/{key...}", probeOrigin) // the unsafe routes of the security probes
 	return mux
 }
 
@@ -64,6 +71,13 @@ func (o *origin) serve(w http.ResponseWriter, r *http.Request) {
 	if s == nil {
 		o.mu.Unlock()
 		http.NotFound(w, r)
+		return
+	}
+	if s.p.Capacity > 0 && s.inflight >= s.p.Capacity {
+		s.c.Refused++
+		o.mu.Unlock()
+		w.Header().Set("Cache-Control", "no-store")
+		http.Error(w, "origin at capacity", http.StatusServiceUnavailable)
 		return
 	}
 	s.c.Calls++
@@ -119,7 +133,7 @@ func (o *origin) putProfile(w http.ResponseWriter, r *http.Request) {
 	if p.Status == 0 {
 		p.Status = http.StatusOK
 	}
-	if p.Status < 200 || p.Status > 599 || p.DelayMS < 0 || p.BodyBytes < 0 || p.BodyBytes > maxBodyBytes {
+	if p.Status < 200 || p.Status > 599 || p.DelayMS < 0 || p.BodyBytes < 0 || p.BodyBytes > maxBodyBytes || p.Capacity < 0 {
 		http.Error(w, "profile out of range", http.StatusBadRequest)
 		return
 	}
@@ -130,7 +144,13 @@ func (o *origin) putProfile(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "too many profiles", http.StatusInsufficientStorage)
 		return
 	}
-	o.slots[name] = &slot{p: p, body: bytes.Repeat([]byte{'x'}, p.BodyBytes)}
+	// A profile that is replaced keeps its counters: a scenario may change
+	// the origin's behavior midway and still read one total.
+	ns := &slot{p: p, body: bytes.Repeat([]byte{'x'}, p.BodyBytes)}
+	if old := o.slots[name]; old != nil {
+		ns.c = old.c
+	}
+	o.slots[name] = ns
 	w.WriteHeader(http.StatusNoContent)
 }
 

@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"maps"
 	"net/http"
 	"os"
 	"slices"
@@ -30,6 +31,12 @@ type scenario struct {
 	Prime   time.Duration // above zero: fetch every key once, zero the counters, wait this long, then measure
 	Waves   int
 	Gap     time.Duration // between waves
+	// Reps, above zero, caps the repetitions of a scenario that is too long
+	// to repeat (its result is a count, not a timing).
+	Reps int
+	// Custom, when set, runs the scenario instead of the burst shape above
+	// and fills the row's requests, status, latencies and notes itself.
+	Custom func(ctx context.Context, r *runner, sc scenario, base string, out *row) error
 }
 
 // scenarios are the count-based cases that need no origin failure cue
@@ -40,6 +47,21 @@ var scenarios = []scenario{
 	{Name: "sync-expiry", Prof: profile{DelayMS: 20, CacheControl: "max-age=5", BodyBytes: 1024}, Keys: 5000, Clients: 1, Prime: 6 * time.Second, Waves: 1},
 	{Name: "uncacheable-herd", Prof: profile{DelayMS: 200, CacheControl: "private", BodyBytes: 1024}, Keys: 1, Clients: 500, Waves: 1},
 	{Name: "error-herd", Prof: profile{DelayMS: 100, Status: 500, BodyBytes: 64}, Keys: 1, Clients: 200, Waves: 3, Gap: time.Second},
+	// The same two bursts against an origin that serves 128 requests at once
+	// and refuses the rest with 503: the limit that the unbounded origin of
+	// the scenarios above never shows.
+	{Name: "cold-keys-capped", Prof: profile{DelayMS: 200, CacheControl: "max-age=60", BodyBytes: 1024, Capacity: 128}, Keys: 1000, Clients: 2, Waves: 1},
+	{Name: "sync-expiry-capped", Prof: profile{DelayMS: 20, CacheControl: "max-age=5", BodyBytes: 1024, Capacity: 128}, Keys: 5000, Clients: 1, Prime: 6 * time.Second, Waves: 1},
+	// A slow origin that still answers: one key, 100 clients, 15 s.
+	{Name: "slow-origin-herd", Prof: profile{DelayMS: 15000, CacheControl: "max-age=60", BodyBytes: 1024}, Keys: 1, Clients: 100, Waves: 1},
+	// An object larger than a default cache entry (2 MiB), three waves.
+	{Name: "oversize-herd", Prof: profile{DelayMS: 200, CacheControl: "max-age=60", BodyBytes: 2 << 20}, Keys: 1, Clients: 50, Waves: 3, Gap: time.Second},
+	{Name: "large-body-herd", Prof: profile{DelayMS: 200, CacheControl: "max-age=60", BodyBytes: 50 << 20}, Keys: 1, Clients: 20, Waves: 1, Reps: 1},
+	{Name: "turned-private", Prof: profile{DelayMS: 200, CacheControl: "max-age=2", BodyBytes: 1024}, Custom: turnedPrivate},
+	{Name: "bad-route", Prof: profile{DelayMS: 20, Status: 504, BodyBytes: 64}, Custom: badRoute},
+	{Name: "origin-down", Prof: profile{DelayMS: 5, CacheControl: "max-age=2", BodyBytes: 1024}, Custom: originDown},
+	{Name: "leader-abort", Prof: profile{DelayMS: 2000, CacheControl: "max-age=60", BodyBytes: 1024}, Custom: leaderAbort},
+	{Name: "post-flood", Prof: profile{CacheControl: "max-age=600", BodyBytes: 1024}, Custom: postFlood, Reps: 1},
 }
 
 // row is one line of the results file: one scenario, one repetition.
@@ -57,6 +79,10 @@ type row struct {
 	P50MS       float64        `json:"p50_ms"`
 	P99MS       float64        `json:"p99_ms"`
 	MaxMS       float64        `json:"max_ms"`
+	// OriginRefused counts requests a capacity-limited origin turned away.
+	OriginRefused int64 `json:"origin_refused,omitempty"`
+	// Notes are a scenario's own figures (for example "bystander_failures").
+	Notes map[string]float64 `json:"notes,omitempty"`
 }
 
 type runner struct {
@@ -157,12 +183,36 @@ func (r *runner) ready(ctx context.Context, wait time.Duration) error {
 
 func (r *runner) run(ctx context.Context, sc scenario) (row, error) {
 	out := row{Scenario: sc.Name, Status: map[string]int{}}
+	// A scenario starts from a cache that answers. One that ended with the
+	// origin failing can leave a circuit breaker open, and the next
+	// scenario's numbers would then be the breaker's, not its own. The first
+	// full run showed exactly that for Weir.
+	if err := r.ready(ctx, 90*time.Second); err != nil {
+		return out, err
+	}
 	if err := r.ctl(ctx, http.MethodPut, "/profile/"+sc.Name, sc.Prof, nil); err != nil {
+		return out, err
+	}
+	// A replaced profile keeps its counters, so each repetition zeroes them.
+	if err := r.ctl(ctx, http.MethodPost, "/reset", nil, nil); err != nil {
 		return out, err
 	}
 	// A fresh key space per repetition, so no cache needs a purge or a
 	// restart between repetitions.
 	nonce := strconv.FormatInt(time.Now().UnixNano(), 36)
+	if sc.Custom != nil {
+		start := time.Now()
+		if err := sc.Custom(ctx, r, sc, r.target+"/o/"+sc.Name+"/"+nonce, &out); err != nil {
+			return out, err
+		}
+		out.WallMS = ms(time.Since(start))
+		var st map[string]counters
+		if err := r.ctl(ctx, http.MethodGet, "/stats", nil, &st); err != nil {
+			return out, err
+		}
+		out.OriginCalls, out.OriginPeak, out.OriginRefused = st[sc.Name].Calls, st[sc.Name].Peak, st[sc.Name].Refused
+		return out, ctx.Err()
+	}
 	keys := make([]string, sc.Keys)
 	for k := range keys {
 		keys[k] = r.target + "/o/" + sc.Name + "/" + nonce + "-" + strconv.Itoa(k)
@@ -194,7 +244,7 @@ func (r *runner) run(ctx context.Context, sc scenario) (row, error) {
 	if err := r.ctl(ctx, http.MethodGet, "/stats", nil, &st); err != nil {
 		return out, err
 	}
-	out.OriginCalls, out.OriginPeak = st[sc.Name].Calls, st[sc.Name].Peak
+	out.OriginCalls, out.OriginPeak, out.OriginRefused = st[sc.Name].Calls, st[sc.Name].Peak, st[sc.Name].Refused
 	slices.Sort(lat)
 	out.Requests = len(lat)
 	out.P50MS, out.P99MS, out.MaxMS = ms(lat[len(lat)/2]), ms(lat[len(lat)*99/100]), ms(lat[len(lat)-1])
@@ -209,7 +259,7 @@ func runCmd(ctx context.Context, args []string) error {
 	control := fs.String("control", "", "base URL of the origin's control API")
 	subject := fs.String("subject", "", "subject name recorded in each row")
 	tier := fs.String("tier", "default", "config tier recorded in each row")
-	only := fs.String("scenario", "", "run one scenario by name (default: all)")
+	only := fs.String("scenario", "", "run only these scenarios, comma-separated (default: all)")
 	reps := fs.Int("reps", 3, "repetitions per scenario")
 	outPath := fs.String("out", "", "append JSON lines to this file (default: stdout)")
 	if err := fs.Parse(args); err != nil {
@@ -240,10 +290,14 @@ func runCmd(ctx context.Context, args []string) error {
 	}
 	enc := json.NewEncoder(out)
 	for _, sc := range scenarios {
-		if *only != "" && sc.Name != *only {
+		if *only != "" && !slices.Contains(strings.Split(*only, ","), sc.Name) {
 			continue
 		}
-		for rep := range *reps {
+		n := *reps
+		if sc.Reps > 0 {
+			n = min(n, sc.Reps)
+		}
+		for rep := range n {
 			res, err := r.run(ctx, sc)
 			if err != nil {
 				return err
@@ -252,8 +306,8 @@ func runCmd(ctx context.Context, args []string) error {
 			if err := enc.Encode(res); err != nil {
 				return err
 			}
-			log.Printf("%s/%s %s rep %d: %d requests, %d origin calls, peak %d, status %v, p99 %.0f ms",
-				*subject, *tier, sc.Name, rep, res.Requests, res.OriginCalls, res.OriginPeak, res.Status, res.P99MS)
+			log.Printf("%s/%s %s rep %d: %d requests, %d origin calls, peak %d, refused %d, status %v, p99 %.0f ms, notes %v",
+				*subject, *tier, sc.Name, rep, res.Requests, res.OriginCalls, res.OriginPeak, res.OriginRefused, res.Status, res.P99MS, res.Notes)
 		}
 	}
 	return nil
@@ -295,12 +349,14 @@ func reportCmd(args []string, w io.Writer) error {
 	slices.SortStableFunc(order, func(a, b string) int { // group by scenario, keep run order inside it
 		return cmp.Compare(strings.SplitN(a, " | ", 2)[0], strings.SplitN(b, " | ", 2)[0])
 	})
-	_, _ = fmt.Fprintln(w, "| scenario | subject | tier | requests | not 2xx | origin calls | origin peak | p99 ms | wall ms |")
-	_, _ = fmt.Fprintln(w, "|---|---|---|---:|---:|---:|---:|---:|---:|")
+	_, _ = fmt.Fprintln(w, "| scenario | subject | tier | requests | not 2xx | origin calls | origin peak | p50 ms | p99 ms | wall ms | status of the median repetition | notes |")
+	_, _ = fmt.Fprintln(w, "|---|---|---|---:|---:|---:|---:|---:|---:|---:|---|---|")
 	for _, k := range order {
 		var calls []int64
 		var peak, bad []int
-		var p99, wall []float64
+		var p50, p99, wall []float64
+		byBad := map[int]string{} // not-2xx count -> that repetition's status codes
+		notes := map[string][]float64{}
 		for _, r := range groups[k] {
 			n := 0
 			for code, c := range r.Status {
@@ -308,11 +364,27 @@ func reportCmd(args []string, w io.Writer) error {
 					n += c
 				}
 			}
+			codes := slices.Sorted(maps.Keys(r.Status))
+			for i, c := range codes {
+				codes[i] = c + ":" + strconv.Itoa(r.Status[c])
+			}
+			byBad[n] = strings.Join(codes, " ")
+			if r.OriginRefused > 0 {
+				notes["origin_refused"] = append(notes["origin_refused"], float64(r.OriginRefused))
+			}
+			for k, v := range r.Notes {
+				notes[k] = append(notes[k], v)
+			}
 			calls, peak, bad = append(calls, r.OriginCalls), append(peak, r.OriginPeak), append(bad, n)
-			p99, wall = append(p99, r.P99MS), append(wall, r.WallMS)
+			p50, p99, wall = append(p50, r.P50MS), append(p99, r.P99MS), append(wall, r.WallMS)
 		}
-		_, _ = fmt.Fprintf(w, "| %s | %d | %d | %d | %d | %.0f | %.0f |\n",
-			k, groups[k][0].Requests, median(bad), median(calls), median(peak), median(p99), median(wall))
+		mb := median(bad)
+		var ns []string
+		for _, k := range slices.Sorted(maps.Keys(notes)) {
+			ns = append(ns, k+"="+strconv.FormatFloat(median(notes[k]), 'f', -1, 64))
+		}
+		_, _ = fmt.Fprintf(w, "| %s | %d | %d | %d | %d | %.0f | %.0f | %.0f | %s | %s |\n",
+			k, groups[k][0].Requests, mb, median(calls), median(peak), median(p50), median(p99), median(wall), byBad[mb], strings.Join(ns, " "))
 	}
 	return nil
 }
