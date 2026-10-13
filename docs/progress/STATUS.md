@@ -5,12 +5,12 @@ Phase: v1.1.0 released and deployed (2026-10-13)
 Current card: HRD-23 (fixes for the round 2 losses), stacked on CMP-03b and CMP-04b
 Card state: awaiting-merge
 Branch: card/HRD-23-round2-losses (contains card/CMP-03b-compare-round-2)
-PR: opened by this session; pull request 130 is its base
+PR: https://github.com/AshwinSathian/weir/pull/131 (contains pull request 130)
 Next card: none open. Candidates: a v1.2 release with a rerun of the comparison tables, CMP-06 (speed and memory), HRD-22 (share one over-size fetch), HRD-20 (deferred)
 
 ## Waiting on Ashwin
 
-- Merge pull request 130 (round 2: CMP-03b, CMP-04b), then the HRD-23 pull request, which is stacked on it. Neither deploys the site.
+- Merge pull request 131 (HRD-23 and round 2). It contains pull request 130, which can then be closed. It does not deploy the site. Pull request 129 (site charts) needs rework on top of it before it can merge.
 - HRD-23 changes three defaults you approved on 2026-10-13 (`Breaker.OpenFor` 1 s, `Breaker.MaxOpenFor` equal to it, borrowing past the per-path cap for every client's fetch) and adds two opt-in settings (`Limiter.AdaptiveMax`, `SnapshotKeepFreshness`). They ship in the next release; the changelog's Unreleased section lists them with the way back for each.
 - The published comparison tables still describe v1.1.0. After a v1.2 release, rerun them (11 §2 measures published modules); card HRD-23 holds the working-tree figures to expect.
 - The cache-handler bug report is posted as https://github.com/darkweak/souin/issues/876 (open, no reply on 2026-10-13). Round 2 found a second behavior worth reporting there if you want to: a request for `/%70age` is stored under the key of `/page` and forwarded as spelled (docs/benchmarks.md, probe note (e)). Not reported.

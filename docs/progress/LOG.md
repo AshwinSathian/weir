@@ -2063,7 +2063,7 @@ Entry template:
 - Context: high; two cards in one session, with compaction, as authorised. This session switched branches in the shared checkout, which put a site commit on its branch; it was rebased off before the push.
 
 ## 2026-10-13 · HRD-23 · done
-- Branch / PR: card/HRD-23-round2-losses / opened by this session, stacked on #130
+- Branch / PR: card/HRD-23-round2-losses / #131, which contains #130
 - Done: fixes for the four losses of comparison round 2, each a requirement or default change the owner approved in the session. Owed refreshes wait for a slot (FR-LIM-4); every client's fetch may borrow idle slots (FR-LIM-3); the breaker probes every second with no doubling and closes on a ramp (FR-CB-3, FR-CB-4); opt-in warm restart (`SnapshotKeepFreshness`, FR-SNP-5); opt-in adaptive limit (`Limiter.AdaptiveMax`, FR-LIM-8, closes D13).
 - Tests: 30 new, named on the card and in 07; `make check` (trace 152/152) and `make site-check` pass; `FuzzSnapshotLoad` 20 s clean with three new seeds.
 - Measured with working-tree builds through the comparison harness: `purge-herd` URLs still stale after 4 s, 904 to 88 of 1,000; `brownout` last failure after recovery, up to 14.8 s to at most 1.5 s; `restart` with the option, 2,000 origin calls to 0; `busting-flood` with `adaptive_max 256`, flood failures 8,520 to about 4,300 of 10,000 with 0 to 17 bystanders failing. Worse and more honest: `origin-down` tuned, origin calls while down 144 to 434.
