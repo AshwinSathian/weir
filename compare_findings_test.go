@@ -1,7 +1,6 @@
 package weir_test
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -132,12 +131,7 @@ func TestProbeWaitersBounded(t *testing.T) {
 		time.Sleep(5*time.Second + time.Millisecond)
 		o.Reset()
 
-		ctx, leave := context.WithCancel(t.Context())
-		probe := make(chan error, 1)
-		go func() {
-			_, err := e.Serve(ctx, getReq("/probe"), o)
-			probe <- err
-		}()
+		probe := serveTimed(t, e, getReq("/probe"), o)
 		synctest.Wait()
 		chs := make([]<-chan timedServe, 10)
 		for i := range chs {
@@ -158,12 +152,10 @@ func TestProbeWaitersBounded(t *testing.T) {
 		if len(refused) != 6 {
 			t.Fatalf("%d of 10 refused at once, want 6 with 4 places to wait", len(refused))
 		}
-		leave() // the probe's client goes away
-		if err := <-probe; !errors.Is(err, context.Canceled) {
-			t.Fatalf("probe: %v", err)
-		}
-		synctest.Wait()
 		close(gate) // the probe succeeds and the waiters follow
+		if r := <-probe; r.err != nil || o.Calls("/probe") != 1 {
+			t.Fatalf("probe: %v after %d calls, want one successful fetch", r.err, o.Calls("/probe"))
+		}
 		for i, ch := range chs {
 			if slices.Contains(refused, i) {
 				continue

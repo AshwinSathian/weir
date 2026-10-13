@@ -195,7 +195,8 @@ func (l *Limiter) canRun(c Class, over bool, part, host uint64) (ok, borrow bool
 	// vouches for, and only while Headroom slots stay free below the
 	// reserve, so a foreground or a background fetch for any other partition
 	// still starts at once. A partition the miss-rate report throttles has
-	// no such allowance (FR-MR-3).
+	// no such allowance (FR-MR-3); the slots it already holds past the cap
+	// run out and are not replaced.
 	if !over || l.cfg.Headroom <= 0 {
 		return false, false
 	}

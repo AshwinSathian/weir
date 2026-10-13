@@ -138,18 +138,21 @@ func TestHeadroomStrictCases(t *testing.T) {
 func TestHeadroomDoesNotStarveOwnPartition(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		ctx := t.Context()
-		l := New(Config{Max: 16, MaxQueue: 64, PerPartition: 2, Headroom: 2, MaxWait: time.Hour})
+		l := New(Config{Max: 8, MaxQueue: 64, PerPartition: 2, Headroom: 2, MaxWait: time.Hour})
 		var hot []*Permit
-		for range 6 {
+		for range 6 { // two under the cap, four past it, up to the headroom
 			hot = append(hot, granted(t, overAsync(ctx, l, 1)))
 		}
 		plain := acquireAsync(ctx, l, Foreground, 1)
 		parked(t, plain) // both capped slots are held
 		later := overAsync(ctx, l, 1)
-		hot[0].Release() // one of the two capped slots
+		parked(t, later) // queued behind plain, no room past the cap either
+		hot[0].Release() // one of the two capped slots: it goes to plain, in turn
 		p := granted(t, plain)
-		q := granted(t, later) // room again past the cap
-		for _, h := range append(hot[1:], p, q) {
+		parked(t, later)
+		hot[5].Release() // room again past the cap
+		q := granted(t, later)
+		for _, h := range append(hot[1:5], p, q) {
 			h.Release()
 		}
 		if in, _ := l.Counts(); in != 0 || l.borrowed != 0 || len(l.byPart) != 0 {
