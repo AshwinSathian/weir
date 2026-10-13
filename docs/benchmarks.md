@@ -341,12 +341,12 @@ The cost is the directive filter, two map reads on the forwarded header for ever
 
 Specification: [11-comparison-spec.md](11-comparison-spec.md). Harness and every subject's configuration: `bench/compare/`. Each subject ran as a container in Docker Desktop on the reference machine, behind the same origin, with a new container for each tier. Three repetitions per scenario and the median reported, except `large-body-herd` and `post-flood` (one repetition).
 
-Subjects: Varnish 9.1.0, nginx 1.30.5, Caddy 2.11.7 with cache-handler v0.17.0 (Souin), Caddy 2.11.7 with Weir, and Caddy 2.11.7 as a plain reverse proxy ("no cache"). "Weir v1.0.1" is the published module. "Weir v1.1" is the hardening branch (the engine of `542768a`), built from the working tree, not a release. `default` is the smallest configuration that turns caching on; `tuned` is each project's documented stampede and stale settings (11 §3). `examples/weirproxy` was measured too and matches the Caddy rows, so it is left out of the tables.
+Subjects: Varnish 9.1.0, nginx 1.30.5, Caddy 2.11.7 with cache-handler v0.17.0 (Souin), Caddy 2.11.7 with Weir, and Caddy 2.11.7 as a plain reverse proxy ("no cache"). "Weir v1.0.1" is the published module. "Weir v1.1" is the unreleased v1.1 code (`main` after the hardening merge plus card HRD-21, built from the working tree at `24d55db`), not a release. `default` is the smallest configuration that turns caching on; `tuned` is each project's documented stampede and stale settings (11 §3). `examples/weirproxy` on v1.0.1 matches the Caddy rows and is left out of the tables.
 
-Read these tables with four limits in mind.
+Every figure about Varnish, nginx and cache-handler below comes from our own runs with configurations we wrote, and has not been verified by the owners of those projects. Read these tables with four limits in mind.
 
 - No maintainer of Varnish, nginx or cache-handler has reviewed the configuration used for their project (11 R4). One mistake of ours was found in review and fixed before publication: the Varnish tuned tier lacked the rule from its grace guide that abandons a failed background fetch, and without it Varnish failed 400 of 600 clients in `origin-down` where it now fails none.
-- The data is stitched from five invocations of `run.sh` on the same day, not one: the main pass for every default tier and the Weir and cache-handler tuned tiers, one each for Varnish tuned and nginx tuned, one for cache-handler's tuned `post-flood` row, and the Varnish tuned rerun above.
+- The data is stitched from several invocations of `run.sh` on the same day, not one: a main pass for every default tier and the cache-handler tuned tier, one each for nginx tuned and cache-handler's tuned `post-flood` row, and later passes for the two Weir v1.1 tiers and Varnish tuned after the fixes described below.
 - Not run in this round: the speed and memory pillar (11 §5.5), `busting-flood`, `brownout`, `purge-herd`, `restart`, four of the probes, and differential fuzzing. Nothing here is a throughput claim, and no latency is published: the runs were not made under the drift gate of 11 §6.
 - Origin calls are read the moment a wave ends. A cache that answers from a stale copy and refreshes in the background has made only part of its refreshes by then.
 
@@ -364,11 +364,11 @@ cd bench/compare
 | `cold-herd` | 1000 | 1000 | 1 | 1 | 1 | 1 | 1 | 1000 | 1 | 1 | 1 |
 | `slow-origin-herd` | 100 | 100 | 16 | 1 | 1 | 1 | 1 | 100 | 100 | 1 | 1 |
 | `leader-abort` | 50 | 51 | 1 | 1 | 1 | 1 | 1 | 51 | 2 | 1 | 1 |
-| `cold-keys` | 2000 | 2000 | 640 | 640 | 640 | 1000 | 640 | 2000 | 1000 | 1000 | 1000 |
-| `cold-keys-capped` | 2000 | 128 | 640 | 640 | 640 | 128 | 640 | 128 | 256 | 128 | 128 |
-| `sync-expiry` | 5000 | 5000 | 1120 | 1152 | 146 | 1701 | 192 | 5000 | 4959 | 5000 | 5000 |
-| `sync-expiry-capped` | 5000 | 570 | 1136 | 1139 | 87 | 438 | 148 | 512 | 661 | 583 | 689 |
-| `uncacheable-herd` | 500 | 500 | 161 | 161 | 161 | 500 | 500 | 500 | 500 | 501 | 501 |
+| `cold-keys` | 2000 | 2000 | 640 | 1000 | 1000 | 1000 | 1000 | 2000 | 1000 | 1000 | 1000 |
+| `cold-keys-capped` | 2000 | 128 | 640 | 1000 | 1000 | 128 | 1000 | 128 | 256 | 128 | 128 |
+| `sync-expiry` | 5000 | 5000 | 1120 | 5000 | 135 | 1701 | 192 | 5000 | 4959 | 5000 | 5000 |
+| `sync-expiry-capped` | 5000 | 570 | 1136 | 5000 | 94 | 438 | 255 | 512 | 661 | 583 | 689 |
+| `uncacheable-herd` | 500 | 500 | 161 | 500 | 500 | 500 | 500 | 500 | 500 | 501 | 501 |
 | `turned-private` | 300 | 300 | 300 | 300 | 201 | 201 | 201 | 300 | 5 | 303 | 303 |
 | `error-herd` | 600 | 600 | 3 | 3 | 3 | 600 | 600 | 600 | 600 | 3 | 3 |
 | `oversize-herd` | 150 | 150 | 150 | 150 | 150 | 1 | 1 | 50 | 1 | 1 | 1 |
@@ -383,11 +383,11 @@ The origin's delay and body per scenario are in the table of 11 §5.1. The two `
 | `cold-herd` | 1000 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
 | `slow-origin-herd` | 100 | 0 | 84 | 0 | 0 | 0 | 0 | 0 | 0 | 100 | 100 |
 | `leader-abort` | 50 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 50 | 50 |
-| `cold-keys` | 2000 | 0 | 720 | 720 | 720 | 0 | 720 | 0 | 0 | 0 | 0 |
-| `cold-keys-capped` | 2000 | 1872 | 720 | 720 | 720 | 1744 | 720 | 1872 | 1616 | 872 (a) | 875 (a) |
-| `sync-expiry` | 5000 | 0 | 3880 | 3848 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
-| `sync-expiry-capped` | 5000 | 4430 | 3864 | 3861 | 0 | 0 | 0 | 4488 | 0 | 4417 | 4311 |
-| `uncacheable-herd` | 500 | 0 | 339 | 339 | 339 | 0 | 0 | 0 | 0 | 0 | 0 |
+| `cold-keys` | 2000 | 0 | 720 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| `cold-keys-capped` | 2000 | 1872 | 720 | 0 | 0 | 1744 | 0 | 1872 | 1616 | 872 (a) | 875 (a) |
+| `sync-expiry` | 5000 | 0 | 3880 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| `sync-expiry-capped` | 5000 | 4430 | 3864 | 0 | 0 | 0 | 0 | 4488 | 0 | 4417 | 4311 |
+| `uncacheable-herd` | 500 | 0 | 339 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
 | `turned-private` | 300 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
 | `error-herd` | 600 | 600 | 600 | 600 | 600 | 600 | 600 | 600 | 600 | 3 (a) | 3 (a) |
 | `oversize-herd` | 150 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
@@ -398,7 +398,7 @@ A 503 that a cache sends to protect the origin counts as a failure here (11 R5).
 - (a) cache-handler answers 200 with an empty body to clients that waited on another client's fetch when that fetch ended in a response it does not store. Reproduced by hand on v0.17.0: 12 simultaneous requests for a URL whose origin answers 500 gave one 500 and eleven empty 200s, with one origin call. The harness counts status codes only, so these cells undercount: in `error-herd` the origin sends nothing but 500, and in `cold-keys-capped` only 128 requests were served by the origin, so at most 256 of the 1,128 responses counted as 2xx can carry a body.
 - `slow-origin-herd`: the origin takes 15 s. cache-handler gave up at its 10 s timeout. Weir v1.0.1 let 16 fetches through and failed the 84 clients behind them, which v1.1 fixes (D-H1).
 - `leader-abort`: cache-handler answered 499 to the 50 followers of a client that disconnected.
-- Varnish's tuned tier sheds exactly as Weir does in `cold-keys` because rule R2 gives its backend Weir's limiter numbers (64 concurrent, 2 s wait). That row compares two configurations of one idea.
+- Varnish's tuned tier has its backend capped with Weir's default limiter numbers (rule R2: 64 concurrent, 8192 queued, 5 s wait), so in `cold-keys` and the capped scenarios the Weir and Varnish tuned columns compare two configurations of one idea.
 - cache-handler's tuned `stale` setting showed no effect in `sync-expiry` or `origin-down`. The harness origin sends no stale directives of its own, and we have not checked whether that setting needs them, so those cells may describe the origin profile more than the cache.
 
 ### Comparison: failure and recovery scenarios
@@ -409,7 +409,7 @@ A 503 that a cache sends to protect the origin counts as a failure here (11 R5).
 | `origin-down`: clients failed while down, of 600 | 600 | 600 | 600 | 0 | 400 | 0 | 600 | 0 | 600 | 600 |
 | `origin-down`: origin calls while down | 600 | 400 | 400 | 144 | 600 | 464 | 600 | 596 | 600 | 600 |
 | `origin-down`: 200s of 200, 1 s after recovery | 200 | 0 | 0 | 200 | 200 | 200 | 200 | 200 | 200 | 200 |
-| `origin-down`: 200s of 200, 10 s after recovery | 200 | 1 | 1 | 200 | 200 | 200 | 200 | 200 | 200 | 200 |
+| `origin-down`: 200s of 200, 10 s after recovery | 200 | 1 | 200 | 200 | 200 | 200 | 200 | 200 | 200 | 200 |
 | `post-flood`: stored entries lost, of 2000 | 2000 | 972 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
 
 `bad-route`: one path answers 504 to 60 requests with distinct queries, then 200 clients ask for healthy paths. `origin-down`: 200 keys with `max-age=2` are stored, the origin answers 503 for three waves of 200, then recovers. `post-flood`: 2,000 stored entries, then 300,000 `POST` requests to other paths, then the 2,000 keys are read again.
@@ -418,20 +418,33 @@ A 503 that a cache sends to protect the origin counts as a failure here (11 R5).
 
 Where Weir is ahead of or level with the best competitor:
 
-- One origin call for a herd on one key, including a 15 s origin and a leader that disconnects (v1.1; Varnish matches it).
+- One origin call for a herd on one key, including a 15 s origin and a leader that disconnects (Varnish matches it).
 - An error is fetched once per wave: 3 origin calls for 600 clients in `error-herd`, with every client told the truth.
-- With stale serving on, no client fails when 5,000 keys expire together or when the origin is down. During the wave the origin sees 146 and 144 calls: Weir starts at most 48 background refreshes at a time and leaves the other keys stale until they are asked for again. Varnish's tuned tier also fails no client (464 calls while the origin is down), and nginx's fails none with 596.
-- When the origin has a real capacity limit, the default configuration fails 720 of 2,000 clients in `cold-keys-capped` where the Varnish and nginx defaults fail 1,744 and 1,872.
+- No client fails in any herd, expiry or flood scenario, in either tier, and the origin never sees more than 64 requests at once. With an origin that refuses beyond 128 concurrent requests (`cold-keys-capped`, `sync-expiry-capped`), Weir's default serves everyone where the Varnish, nginx and cache-handler defaults fail between 872 and 4,488 clients in at least one of the two.
+- With stale serving on, an origin outage is invisible to clients and costs 144 origin calls: Weir starts at most 48 background refreshes at a time and leaves the other keys stale until they are asked for again. Varnish's tuned tier also fails no client (464 calls), and nginx's fails none with 596.
 
 Where Weir is behind:
 
-- Its defaults shed load that the origin in these tests could have carried. In `cold-keys` and `sync-expiry` the default limiter (64 concurrent, 2 s wait) answers 503 to 720 of 2,000 and 3848 of 5,000 clients while the Varnish, nginx and cache-handler defaults serve everyone by sending the burst to the origin. Stale serving is off by default (D6), and with it on the `sync-expiry` failures go to zero.
-- A hot URL that cannot be stored is held to 16 concurrent origin requests (`Limiter.MaxPerPartition`): 339 of 500 clients fail in `uncacheable-herd`, and clients of a URL that turned `private` or exceeds the object size queue behind that cap.
-- Responses over 1 MiB are not stored by default, so `oversize-herd` and `large-body-herd` reach the origin once per client where Varnish and cache-handler fetch once.
-- After an outage with stale serving off, the breaker admits one probe: of 200 clients arriving together 10 s after recovery, one is served and 199 get 503.
+- Responses over 1 MiB are not stored by default, so `oversize-herd` and `large-body-herd` reach the origin once per client where Varnish and cache-handler fetch once. The limit is tied to the memory store's shard size; `Storable.MaxObjectBytes` (`max_object_bytes` in Caddy) raises it.
+- Stale serving is off by default (D6), so the default tier fails every client while the origin is down, as nginx's and cache-handler's defaults do; Varnish's default serves the first wave from grace. After the outage the breaker stays open for its period: 1 s after recovery Weir's default still refuses, and 10 s after it serves all 200.
+- A cold start costs latency instead of origin load: 2,000 clients on 1,000 cold keys are all served, but through 64 slots, so the last ones wait about 3 s (1,000 fetches of 200 ms each) where a cache with no limit answers in one origin round trip.
 - v1.1 drops a stored response once the origin marks it uncacheable (D-H6), so `turned-private` with stale serving costs 201 origin calls where v1.0.1 kept serving the stale copy with 3. Varnish behaves like v1.1 here and nginx like v1.0.1.
 
-Three v1.0.1 defects showed up black-box and are fixed on the v1.1 branch: the slow-origin herd above (16 origin calls, 84 failures), a breaker that one failing path opened for every path (`bad-route`: 200 of 200 bystanders failed, D-H2), and an invalidation flood that cost 972 of 2,000 stored entries (`post-flood`, D-H9).
+### Comparison: what the round changed in Weir
+
+The first pass ran v1.0.1 and the hardening branch. It confirmed three v1.0.1 defects the hardening had already fixed, and found four more problems, fixed in card HRD-21 before this was published (11 §8). The last column is the rerun.
+
+| Figure | v1.0.1 | v1.1 before HRD-21 | v1.1 |
+|---|---:|---:|---:|
+| `slow-origin-herd`: origin calls, clients failed of 100 | 16, 84 | 1, 0 | 1, 0 |
+| `bad-route`: bystanders failed of 200 | 200 | 0 | 0 |
+| `post-flood`: stored entries lost of 2,000 | 972 | 0 | 0 |
+| `cold-keys`: clients failed of 2,000 | 720 | 720 | 0 |
+| `sync-expiry`: clients failed of 5,000 | 3,880 | 3,848 | 0 |
+| `uncacheable-herd`: clients failed of 500 | 339 | 339 | 0 |
+| `origin-down`: 200s of 200, 10 s after recovery | 1 | 1 | 200 |
+
+What HRD-21 changed: the queue holds 8,192 waiters for 5 s where it held 1,024 for 2 s (FR-LIM-2); clients of a URL that cannot be stored may use idle slots past the per-path cap of 16 (FR-LIM-3); requests that arrive with the breaker's probe wait for it (FR-CB-4). The object limit is unchanged.
 
 ### Comparison: security probes
 

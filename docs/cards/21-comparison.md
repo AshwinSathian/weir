@@ -2,7 +2,7 @@
 
 Scope: [docs/11-comparison-spec.md](../11-comparison-spec.md). Reading references to `11` mean that document. No card commits a file from `bench/compare/results/`; published tables are medians copied into docs/benchmarks.md (11 §9).
 
-State after the session of 2026-10-13, which ran one round on one branch at the owner's request: CMP-01 and CMP-02 are done. CMP-03, CMP-04, CMP-05 and CMP-08 are partly done and stay open; what each still lacks is in CMP-03b, CMP-04b and the notes below. CMP-07's decision came early: the owner chose to publish the count-based pillars before CMP-06, so no scorecard with marks exists (11 §7). The findings are CMP-F1 to CMP-F4.
+State after the session of 2026-10-13, which ran one round on one branch at the owner's request: CMP-01 and CMP-02 are done. CMP-03, CMP-04, CMP-05 and CMP-08 are partly done and stay open; what each still lacks is in CMP-03b, CMP-04b and the notes below. CMP-07's decision came early: the owner chose to publish the count-based pillars before CMP-06, so no scorecard with marks exists (11 §7). The findings are CMP-F1 to CMP-F4, resolved in card HRD-21.
 
 ### [x] CMP-01 Comparison spec, harness and subject configs
 - Plan: comparison · Size: M · Depends on: none
@@ -78,22 +78,26 @@ State after the session of 2026-10-13, which ran one round on one branch at the 
 - Touch: bench/compare/probe.go, bench/compare/compare_test.go, bench/compare/subjects/
 - AC: `probe_test.go` exists as CMP-04 asked; verdicts follow 11 §5.3 (`unsafe`, `safe`); the error-as-success probe is concurrent; parameter cloaking, path normalization, the meta character and `Vary` cardinality are probed; conformance runs in both tiers and reports setup failures apart from assertion failures (CMP-05); each competitor with documented hardening gets a hardened tier and the table of docs/benchmarks.md is rerun with it
 
-### [ ] CMP-F1 Default tier sheds load the origin could carry
+### [x] CMP-F1 Default tier sheds load the origin could carry
+- Resolved: card HRD-21 (22-hardening.md), D-H25: `MaxQueue` 8192, `MaxQueueWait` 5 s. Rerun: 0 failures in `cold-keys` and `sync-expiry`.
 - Plan: comparison finding · Size: S · Depends on: owner decision
 - Read: 01 FR-LIM; runbook 4.8; 06 R-14
 - Notes: `cold-keys` 720 of 2000 and `sync-expiry` about 3850 of 5000 clients get 503 with the default limiter (64 concurrent, 2 s wait) and stale serving off (D6). Options: keep and document louder (quickstart turns stale serving on); raise `MaxQueueWait`; turn `while_revalidate` on by default. The last two change defaults (hard rule 12).
 
-### [ ] CMP-F2 Per-partition cap throttles one hot uncacheable URL
+### [x] CMP-F2 Per-partition cap throttles one hot uncacheable URL
+- Resolved: card HRD-21 (22-hardening.md), D-H26: `Limiter.PartitionHeadroom`. Rerun: 0 failures in `uncacheable-herd`.
 - Plan: comparison finding · Size: M · Depends on: owner decision
 - Read: 01 FR-LIM; 04 limiter section
 - Notes: `Limiter.MaxPerPartition` 16 applies to pass-through and marker fetches. `uncacheable-herd`: 339 of 500 fail. `turned-private` and `oversize-herd`: each client waits about four times the origin's latency. The cap exists so one path cannot take the whole budget (busting flood). Options: keep; a separate, larger cap for fetches that a marker says cannot be stored; document the knob on the tuning page.
 
-### [ ] CMP-F3 Objects over 1 MiB reach the origin once per client
+### [x] CMP-F3 Objects over 1 MiB reach the origin once per client
+- Resolved: card HRD-21 (22-hardening.md), D-H28: default unchanged, Caddy `max_object_bytes` added; sharing one fetch deferred as HRD-22. Still a loss in the tables.
 - Plan: comparison finding · Size: S · Depends on: owner decision
 - Read: 01 FR-STO-9; 05 §2
 - Notes: `oversize-herd` 150 origin calls, `large-body-herd` 20, where Varnish and cache-handler make 1. By design (bounded memory, T-21). Options: keep and document; coalesce over-size bodies by streaming one fetch to the waiting clients without storing it.
 
-### [ ] CMP-F4 A burst arriving with the breaker's probe fails
+### [x] CMP-F4 A burst arriving with the breaker's probe fails
+- Resolved: card HRD-21 (22-hardening.md), D-H27: requests wait for the probe. Rerun: 200 of 200 served 10 s after recovery.
 - Plan: comparison finding · Size: S · Depends on: owner decision
 - Read: 04 breaker section; 01 FR-CB-1 onward
 - Notes: `origin-down`, default tier: 10 s after the origin recovered, 1 of 200 simultaneous clients is served and 199 get 503, because half-open admits one probe. Requests after the probe succeed. Options: keep; let requests that arrive during a probe wait for its result, bounded by `MaxQueueWait`.

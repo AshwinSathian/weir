@@ -41,9 +41,10 @@ The controls and `weirproxy` have one configuration and run once.
 Rules:
 
 - R1. Limits that are plumbing, not cache policy, are raised the same way for every subject in both tiers: file descriptors, listen backlog, nginx `worker_connections`, the ephemeral port range (`ip_local_port_range` 1024 to 65535) and `tcp_tw_reuse`. The first run without the last two gave nginx and the no-cache control 502 responses from port exhaustion ("cannot assign requested address"), which would have been reported as their behavior.
-- R2. Where a competitor documents an origin concurrency cap with a queue, the tuned tier sets it to Weir's default limiter numbers (64 concurrent, 1024 queued, 2 s wait). Varnish has this since 7.6 (`.max_connections`, `.wait_limit`, `.wait_timeout`). Open source nginx has `max_conns` but no queue (`queue` is commercial), so a cap would turn overflow into 502 responses; its tuned tier leaves the cap off and the report says so.
+- R2. Where a competitor documents an origin concurrency cap with a queue, the tuned tier sets it to Weir's default limiter numbers (64 concurrent, 8192 queued, 5 s wait since HRD-21; 1024 and 2 s in the first pass). Varnish has this since 7.6 (`.max_connections`, `.wait_limit`, `.wait_timeout`). Open source nginx has `max_conns` but no queue (`queue` is commercial), so a cap would turn overflow into 502 responses; its tuned tier leaves the cap off and the report says so.
 - R3. Weir's tuned tier turns on stale serving (`while_revalidate 60s`, `if_error 5m`), which is off by default (D6). Varnish gets `grace 60s` and `keep 5m`, nginx `proxy_cache_use_stale` with `background_update`, Souin `stale 5m`.
 - R3a. cache-handler logs that its default storage is "not optimized and for development purpose", so its tuned tier uses the Otter storage its documentation recommends. The default tier keeps the default storage, because that is what the quickstart gives.
+- R4a. Every published page that shows a figure about another project says that it comes from our own runs and has not been verified by that project's owners.
 - R4. Config files are committed and published with any result. Before publication, each competitor config is checked once more against that project's documentation, and a maintainer's correction is accepted and rerun.
 - R5. A 503 from load shedding is counted as a client-visible failure, for Weir as for anyone else. Protecting the origin by refusing clients is reported as both numbers, never as a win alone.
 
@@ -149,7 +150,7 @@ The first round published no marks. Its tables carry too many caveats for a win 
 
 A finding becomes a card of its own. It is never fixed inside a comparison card. If a fix ships before publication, the page reports the result before and after.
 
-First round: three defects of v1.0.1 were already fixed on the v1.1 branch and are reported before and after (`slow-origin-herd`, `bad-route`, `post-flood`). Four findings are open, as cards CMP-F1 to CMP-F4 in [cards/21-comparison.md](cards/21-comparison.md). All four are about defaults or limiter and breaker behavior, so each needs the owner's decision before any code changes.
+First round: three defects of v1.0.1 were already fixed on the v1.1 branch (`slow-origin-herd`, `bad-route`, `post-flood`). Four more findings, CMP-F1 to CMP-F4 in [cards/21-comparison.md](cards/21-comparison.md), were fixed in card HRD-21 with the owner's go-ahead, and the Weir v1.1 subjects were rerun. All seven are reported before and after in [benchmarks.md](benchmarks.md).
 
 ## 9. What is published
 
@@ -169,4 +170,4 @@ Decided on 2026-10-13: run first, then decide what to publish. After the first r
 - Latency was measured but not published: the first round did not run under the drift gate of §6.
 - Pillar 5.5 (speed and memory) has not run. The open-loop load generator is chosen in CMP-06.
 - The scenarios and probes marked "not run yet" above (CMP-03b, CMP-04b).
-- Varnish's tuned tier sheds exactly as Weir's does in `cold-keys` (R2 gives it Weir's limiter numbers), so that row compares two configurations of the same idea, not two designs.
+- Varnish's tuned tier carries Weir's limiter numbers (R2), so `cold-keys` and the capped scenarios compare two configurations of the same idea there, not two designs.

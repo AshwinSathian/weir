@@ -73,4 +73,4 @@ Each was read in the project's own documentation on 2026-10-12. Versions are the
 
 ## Measured statements about other projects (benchmarks and compare pages)
 
-Every figure and verdict about Varnish, nginx and the Caddy cache-handler on those pages is rendered from `docs/benchmarks.md`, section "Comparison with other caches, round 1 (2026-10-13)", measured with `bench/compare/` on 2026-10-13: Varnish 9.1.0, nginx 1.30.5, Caddy 2.11.7 with cache-handler v0.17.0. The hand-written copy around the tables states no figure of its own. No maintainer of those projects has reviewed the configurations (docs/11 R4).
+Every figure and verdict about Varnish, nginx and the Caddy cache-handler on those pages is rendered from `docs/benchmarks.md`, section "Comparison with other caches, round 1 (2026-10-13)", measured with `bench/compare/` on 2026-10-13: Varnish 9.1.0, nginx 1.30.5, Caddy 2.11.7 with cache-handler v0.17.0. The hand-written copy around the tables states no figure of its own. No maintainer of those projects has reviewed the configurations (docs/11 R4), and each page that shows the figures says they are our runs, not verified by the projects' owners.

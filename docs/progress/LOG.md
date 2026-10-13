@@ -2021,3 +2021,11 @@ Entry template:
 - Deviations: several cards in one session at Ashwin's request, with context compaction. CMP-03, CMP-04, CMP-05 and CMP-08 stay open with their remainder in CMP-03b and CMP-04b; CMP-06 has not run; publication was decided before a scorecard with marks existed. The published data is stitched from five `run.sh` invocations. The new origin cues and custom scenarios have no tests of their own.
 - Follow-ups: owner decisions on CMP-F1 to CMP-F4; R4 review by the other projects' maintainers; CMP-03b, CMP-04b, CMP-06; retarget the pull request after 122 merges.
 - Context: over one card's budget by design.
+
+## 2026-10-13 · CMP rerun after HRD-21 · done
+- Branch / PR: card/CMP-03-compare-round / PRLINK2 (stacked on card/CMP-F1-limiter-breaker)
+- Done: rebased the comparison work on HRD-21 and reran the Weir v1.1 subjects in both tiers, Varnish tuned (its backend cap mirrors Weir's limiter numbers, R2), the probes and cache-tests. Default tier: `cold-keys` 720 failures to 0, `sync-expiry` 3 848 to 0, `uncacheable-herd` 339 to 0, 200 of 200 served 10 s after an outage where 1 was. Probes and conformance unchanged (all safe, 284 of 365). docs/benchmarks.md has a before and after table; every page with a figure about another project says it is our run, not verified by that project's owners (11 R4a).
+- Tests: `bench/compare` vet, race tests, lint; `make site-check`.
+- Deviations: the earlier pull request 123 was closed by GitHub when its base branch was deleted; this is a new branch and pull request, not a force-push.
+- Follow-ups: CMP-03b, CMP-04b, CMP-06; maintainers' review of the configurations (R4).
+- Context: continued session.

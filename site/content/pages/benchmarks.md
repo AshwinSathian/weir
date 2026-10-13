@@ -31,7 +31,7 @@ The same benchmarks on `v1.0.1` and on the v1.1 branch, run interleaved on the r
 
 ## Against other caches
 
-One round of black-box tests against Varnish, nginx `proxy_cache` and the Caddy cache-handler (Souin), each in a container behind the same origin, in a default and a tuned configuration. It counts origin calls and failed clients; it does not measure speed. The notes under each table matter as much as the cells: (a) marks cells that undercount. "Weir v1.1" in these tables is the unreleased hardening branch. The configurations, the harness and the method are in [`bench/compare/`](https://github.com/AshwinSathian/weir/tree/main/bench/compare) and the [comparison specification](https://github.com/AshwinSathian/weir/blob/main/docs/11-comparison-spec.md). No maintainer of the other projects has reviewed their configurations yet, so corrections are welcome.
+One round of black-box tests against Varnish, nginx `proxy_cache` and the Caddy cache-handler (Souin), each in a container behind the same origin, in a default and a tuned configuration. It counts origin calls and failed clients; it does not measure speed. The notes under each table matter as much as the cells: (a) marks cells that undercount. "Weir v1.1" in these tables is the unreleased v1.1 code. The configurations, the harness and the method are in [`bench/compare/`](https://github.com/AshwinSathian/weir/tree/main/bench/compare) and the [comparison specification](https://github.com/AshwinSathian/weir/blob/main/docs/11-comparison-spec.md). Every figure about another project here comes from our own runs with configurations we wrote. None has been verified by that project's owners, so treat them as our measurements, not as statements those projects would sign, and send corrections.
 
 How many requests reached the origin:
 
@@ -46,6 +46,10 @@ Failure and recovery:
 {{include docs/benchmarks.md "### Comparison: failure and recovery scenarios"}}
 
 {{include docs/benchmarks.md "### Comparison: what the numbers say about Weir"}}
+
+The round also changed Weir. Three defects of the last release and four problems with its defaults showed up, and all seven were fixed before this page was written:
+
+{{include docs/benchmarks.md "### Comparison: what the round changed in Weir"}}
 
 ```sh
 cd bench/compare && ./run.sh -reps 3 && ./probes.sh && ./conformance.sh

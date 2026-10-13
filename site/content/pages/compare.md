@@ -3,7 +3,7 @@ title: Compare
 description: Where Varnish, nginx, Souin, Pingora, singleflight or a CDN is the better choice, and where Weir is.
 ---
 
-Most of this page is qualitative. We have not measured speed against any of these projects, so there are no speed claims here. One round of black-box tests against Varnish, nginx and the Caddy cache-handler counted origin calls, failed clients and poisoning verdicts; it is summarized [below](#measured-side-by-side). Every statement about another project comes from that project's own documentation, linked in each section and read on 2026-10-12. If a claim could not be checked there, it was left out. Corrections are welcome: [open an issue](https://github.com/AshwinSathian/weir/issues/new).
+Most of this page is qualitative. We have not measured speed against any of these projects, so there are no speed claims here. One round of black-box tests against Varnish, nginx and the Caddy cache-handler counted origin calls, failed clients and poisoning verdicts; it is summarized [below](#measured-side-by-side). Those measured results are ours alone: we wrote the configurations and ran the tests, and the owners of the other projects have not verified them. Every statement about another project comes from that project's own documentation, linked in each section and read on 2026-10-12. If a claim could not be checked there, it was left out. Corrections are welcome: [open an issue](https://github.com/AshwinSathian/weir/issues/new).
 
 Each technique in Weir exists somewhere else. What Weir adds is the combination in one Go library, with a written threat model and a test for each claim.
 
@@ -74,7 +74,7 @@ They are not alternatives so much as layers. A CDN in front and Weir at the orig
 
 ## Measured side by side
 
-Varnish, nginx `proxy_cache`, the Caddy cache-handler and Weir ran as containers behind one origin with deliberately unsafe routes. Each probe sends an attacker's request and then a victim's. "unsafe" means the victim was served what the attacker caused. That is what a cache does when the origin is wrong, not a vulnerability in the cache: each of these projects documents how to key or strip the input. Weir's result comes from its default of hiding unkeyed request headers, cookies and bodies from the origin on cacheable requests.
+These results are based on our own runs and have not been verified by the owners of the other projects. Varnish, nginx `proxy_cache`, the Caddy cache-handler and Weir ran as containers behind one origin with deliberately unsafe routes. Each probe sends an attacker's request and then a victim's. "unsafe" means the victim was served what the attacker caused. That is what a cache does when the origin is wrong, not a vulnerability in the cache: each of these projects documents how to key or strip the input. Weir's result comes from its default of hiding unkeyed request headers, cookies and bodies from the origin on cacheable requests.
 
 {{include docs/benchmarks.md "### Comparison: security probes"}}
 
@@ -88,7 +88,7 @@ Origin calls and failed clients under herds, expiry and outages are on the [benc
 
 - It is new. `v1.0.0` is the first stable release and there are no public production deployments to point to.
 - It has no speed or memory benchmark against any project above, and the one measured round ran on a single machine with configurations no other project's maintainer has reviewed.
-- Its defaults refuse clients that the other caches serve. See the list on the [benchmarks page](/benchmarks/#against-other-caches).
+- It does not store responses over 1 MiB by default, and nothing is served stale unless you or the origin allow it. See the list on the [benchmarks page](/benchmarks/#against-other-caches).
 - 81 of the 365 cache-tests fail, most by design; read [the reasons](/conformance/) before deciding they suit you.
 - Two store implementations, two adapters, no scripting.
 - The residual risks listed on the [security page](/security/#residual-risks-in-plain-language) are real.
