@@ -602,8 +602,8 @@ func TestThrottledPartitionReturnsProbe(t *testing.T) {
 }
 
 // FR-MR-3, FR-LIM-4, FR-WRM-1: the cap binds every class. With the
-// partition's one slot taken, a background refresh is dropped and the stale
-// entry served; a warm run of that path proceeds one fetch at a time.
+// partition's one slot taken, the stale entry is served and its refresh
+// waits for that slot; a warm run of that path proceeds one fetch at a time.
 func TestThrottleBindsBackgroundAndWarm(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		gate := make(chan struct{})
@@ -630,12 +630,16 @@ func TestThrottleBindsBackgroundAndWarm(t *testing.T) {
 		if body != "w" || resp.Cache.Stale != weir.StaleWhileRevalidate {
 			t.Fatalf("stale key under throttle: %q stale=%v, want the stale entry", body, resp.Cache.Stale)
 		}
-		if n := obs.count("refresh-dropped/no-slot"); n != 1 {
-			t.Fatalf("%d refreshes dropped for no slot, want 1", n)
+		if n, calls := obs.count("refresh-dropped/no-slot"), o.TotalCalls(); n != 0 || calls != 2 {
+			t.Fatalf("%d refreshes dropped, %d origin calls; want the refresh waiting behind the held slot (0 and 2)", n, calls)
 		}
 		close(gate)
 		if s := <-slow; s.err != nil {
 			t.Fatalf("held fetch: %v", s.err)
+		}
+		synctest.Wait()
+		if calls := o.TotalCalls(); calls != 3 {
+			t.Fatalf("%d origin calls after the slot was freed, want 3: the refresh ran", calls)
 		}
 
 		b := cacheable("v")

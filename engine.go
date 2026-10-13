@@ -67,6 +67,12 @@ type Engine struct {
 	bgCtx     context.Context // canceled after Close's grace period
 	bgCancel  context.CancelFunc
 	wg        sync.WaitGroup // every engine-owned goroutine (04 §12)
+	// owed is the keys whose stale-while-revalidate refresh is waiting for
+	// a slot or running, so repeated stale hits queue one (FR-LIM-4). Each
+	// has a goroutine in wg; at most Limiter.MaxQueue wait, plus those
+	// between this map and the limiter.
+	owedMu sync.Mutex
+	owed   map[store.Key]struct{}
 }
 
 // New validates cfg, applies defaults and returns a ready engine. It returns

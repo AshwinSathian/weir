@@ -32,6 +32,11 @@ const (
 	Background
 	// Warm fetches stay out of the reserve and queue until their context ends.
 	Warm
+	// Refresh fetches are the refreshes stale serving owes (FR-STL-1). They
+	// stay out of the reserve and wait until their context ends, in a
+	// backlog of their own that is granted only after every Foreground and
+	// Warm waiter that can run (FR-LIM-4).
+	Refresh
 )
 
 // Config holds the limiter's bounds. The engine fills defaults (04 §5).
@@ -50,9 +55,9 @@ type Config struct {
 }
 
 // Limiter bounds concurrent origin fetches globally and per partition,
-// with a FIFO queue that skips waiters whose partition is full (ADR-8).
-// Its memory is O(Max + MaxQueue) whatever the number of partitions
-// (FR-LIM-6).
+// with a FIFO queue that skips waiters whose partition is full (ADR-8), and
+// a second one of the same bound for Refresh fetches. Its memory is
+// O(Max + MaxQueue) whatever the number of partitions (FR-LIM-6).
 type Limiter struct {
 	mu       sync.Mutex
 	cfg      Config
@@ -65,6 +70,11 @@ type Limiter struct {
 	byHost   map[uint64]int // only hosts with inflight > 0, and only when PerHost > 0; len <= Max
 	queue    []*waiter      // FIFO, len <= MaxQueue
 	queuedBy map[uint64]int // waiters per partition, each <= queueCap(); only partitions with queued > 0; len <= MaxQueue
+	// The Refresh backlog: FIFO, len <= MaxQueue, with the same share per
+	// partition. Apart from queue so that stale entries waiting for a
+	// refresh never take a place a client is waiting in (FR-LIM-4).
+	later   []*waiter
+	laterBy map[uint64]int
 
 	// The newest miss-rate report (FR-MR-3): cap overrides per partition,
 	// at most missrate's TopK of them, in force until thrUntil. thrEnd is
@@ -102,7 +112,7 @@ func (l *Limiter) Counts() (inflight, queued int) {
 
 // New returns a limiter with the given bounds.
 func New(cfg Config) *Limiter {
-	return &Limiter{cfg: cfg, byPart: make(map[uint64]int), byHost: make(map[uint64]int), queuedBy: make(map[uint64]int)}
+	return &Limiter{cfg: cfg, byPart: make(map[uint64]int), byHost: make(map[uint64]int), queuedBy: make(map[uint64]int), laterBy: make(map[uint64]int)}
 }
 
 // limit is the global cap. Every read goes through it so an adaptive policy
@@ -264,13 +274,17 @@ func (l *Limiter) acquire(ctx context.Context, c Class, over bool, part, host ui
 	// other hosts then shed. Upgrade: a per-host queued count like queuedBy.
 	// T-11: a flood on one partition, whose waiters cannot run anyway,
 	// must not fill the queue every other partition shares (FR-LIM-3).
-	if len(l.queue) >= l.cfg.MaxQueue || l.queuedBy[part] >= l.queueCap() {
+	q, by := &l.queue, l.queuedBy
+	if c == Refresh {
+		q, by = &l.later, l.laterBy
+	}
+	if len(*q) >= l.cfg.MaxQueue || by[part] >= l.queueCap() {
 		l.mu.Unlock()
 		return nil, ErrQueueFull
 	}
 	w := &waiter{part: part, host: host, class: c, over: over, ready: make(chan struct{})}
-	l.queue = append(l.queue, w)
-	l.queuedBy[part]++
+	*q = append(*q, w)
+	by[part]++
 	l.mu.Unlock()
 
 	var expired <-chan time.Time
@@ -299,9 +313,9 @@ func (l *Limiter) acquire(ctx context.Context, c Class, over bool, part, host ui
 	if w.granted { // a grant won the race: the slot is ours, keep it.
 		return &Permit{l: l, part: part, host: host, borrow: w.borrow}, nil
 	}
-	if i := slices.Index(l.queue, w); i >= 0 {
-		l.queue = slices.Delete(l.queue, i, i+1)
-		l.unqueue(part)
+	if i := slices.Index(*q, w); i >= 0 {
+		*q = slices.Delete(*q, i, i+1)
+		unqueue(by, part)
 	}
 	return nil, err
 }
@@ -331,38 +345,48 @@ func (p *Permit) Release() {
 	l.grant()
 }
 
-// grant gives a slot, in FIFO order, to every waiter that can now run.
+// grant gives a slot, in FIFO order, to every waiter that can now run:
+// first the clients' queue, then the refresh backlog with what is left.
 // Caller holds l.mu.
 func (l *Limiter) grant() {
+	l.queue = l.grantFrom(l.queue, l.queuedBy)
+	l.later = l.grantFrom(l.later, l.laterBy)
+}
+
+// grantFrom is grant for one queue; it returns the waiters still waiting.
+func (l *Limiter) grantFrom(q []*waiter, by map[uint64]int) []*waiter {
 	// ponytail: the walk passes every waiter whose partition is full before
 	// it finds one that can run, at most MaxQueue (8192 by default) of them,
 	// about 8 ns each: four flooded paths at their queue cap cost a release
-	// some 65 µs under the lock. Per-partition queues if that ever shows.
-	kept := l.queue[:0]
-	for i, w := range l.queue {
+	// some 65 µs under the lock, and a full refresh backlog whose slots
+	// outside the reserve are all taken costs the same again. Per-partition
+	// queues if that ever shows.
+	kept := q[:0]
+	for i, w := range q {
 		if l.inflight >= l.limit() {
 			// No slot is left for any class, so nobody behind w can run
 			// either. The usual Release frees one slot and ends here after
 			// the first waiter that takes it, not after the whole queue.
-			kept = append(kept, l.queue[i:]...)
+			kept = append(kept, q[i:]...)
 			break
 		}
 		if ok, borrow := l.canRun(w.class, w.over, w.part, w.host); ok {
 			l.hold(w.part, w.host, borrow)
 			w.granted, w.borrow = true, borrow
 			close(w.ready)
-			l.unqueue(w.part)
+			unqueue(by, w.part)
 			continue
 		}
 		kept = append(kept, w)
 	}
-	clear(l.queue[len(kept):])
-	l.queue = kept
+	clear(q[len(kept):])
+	return kept
 }
 
-// unqueue drops one waiter of part from queuedBy. Caller holds l.mu.
-func (l *Limiter) unqueue(part uint64) {
-	if l.queuedBy[part]--; l.queuedBy[part] <= 0 {
-		delete(l.queuedBy, part)
+// unqueue drops one waiter of part from a queue's per-partition count.
+// Caller holds l.mu.
+func unqueue(by map[uint64]int, part uint64) {
+	if by[part]--; by[part] <= 0 {
+		delete(by, part)
 	}
 }

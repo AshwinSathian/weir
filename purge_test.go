@@ -591,11 +591,14 @@ func purge5000(t *testing.T, byGroup bool) {
 			t.Fatalf("%d requests took over 1 ms, %d were not served stale-while-revalidate", slow.Load(), notStale.Load())
 		}
 		synctest.Wait()
-		time.Sleep(time.Minute) // the refreshes that got a slot finish; the rest were dropped, not queued
+		time.Sleep(time.Minute) // 5000 refreshes, 48 at a time, 100 ms each: about 10.5 s
 		// 48 = MaxConcurrent (64) - ReserveForeground (16): the herd fills the
 		// background share exactly and never touches the foreground reserve.
-		if got, calls := o.MaxInflight(), o.TotalCalls(); got != 48 || calls != 48 {
-			t.Fatalf("origin max in flight = %d, calls = %d, want 48 and 48", got, calls)
+		// Every purged entry is refreshed (FR-LIM-4 since v1.2, CMP-F6): the
+		// refreshes wait their turn, where before all but the first 48 were
+		// dropped and those entries stayed stale until asked for again.
+		if got, calls := o.MaxInflight(), o.TotalCalls(); got != 48 || calls != n {
+			t.Fatalf("origin max in flight = %d, calls = %d, want 48 and %d", got, calls, n)
 		}
 	})
 }

@@ -394,7 +394,7 @@ func (e *Engine) cacheable(ctx context.Context, c *keys.Classified, origin Origi
 		case httpcc.StaleSWR: // FR-STL-1, 03 §2.3; before only-if-cached and Range, which it answers
 			emit(e.cfg.Observer, Event{Kind: EvStaleServed, Time: now, Partition: c.Partition, Reason: "swr"})
 			if !c.Authorized && !c.ReqCC.NoStore { // the early-refresh gate (T-8, T-31)
-				e.backgroundRefresh(ctx, c, lk, origin)
+				e.owedRefresh(ctx, c, lk, origin)
 			}
 			return e.fromEntry(c, lk.entry, now, CacheInfo{Hit: true, Stale: StaleWhileRevalidate, TTL: -staleness}), nil
 		case httpcc.Unusable: // FR-PRG-3: exactly a miss
