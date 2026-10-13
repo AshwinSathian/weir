@@ -214,6 +214,82 @@ func TestMarkedURLUsesFreeSlots(t *testing.T) {
 	}
 }
 
+// FR-LIM-3 (v1.2), T-11, CMP-F5: a path asked for with many distinct query
+// strings, each storable, runs past its cap of 16 while the rest of the
+// budget is idle, up to MaxConcurrent less ReserveForeground and
+// PartitionHeadroom (32 at the defaults). It cannot be told from a flood, so
+// what protects the others is not the cap but the headroom: another path
+// still starts at once, and while other paths are busy the first is back at
+// its cap.
+func TestBusyPathBorrowsIdleSlots(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		o := testorigin.New()
+		gate := make(chan struct{})
+		held := cacheable("r")
+		held.Gate = gate
+		o.Default(held)
+		e := newEngine(t, cacheCfg)
+		defer closeEngine(t, e)
+		chs := make([]<-chan timedServe, 100)
+		for i := range chs {
+			chs[i] = serveTimed(t, e, floodReq("/search", i), o)
+		}
+		synctest.Wait()
+		if n := o.MaxInflightPartition(); n != 32 {
+			t.Fatalf("%d fetches of /search in flight with the budget idle, want 32", n)
+		}
+		// 20 other paths arrive: every one starts at once.
+		others := make([]<-chan timedServe, 20)
+		for i := range others {
+			others[i] = serveTimed(t, e, getReq(fmt.Sprintf("/page%d", i)), o)
+		}
+		synctest.Wait()
+		if n := o.MaxInflight(); n != 52 {
+			t.Fatalf("%d fetches in flight, want 52: 32 of /search and all 20 other paths", n)
+		}
+		close(gate)
+		for i, ch := range append(chs, others...) {
+			if r := <-ch; r.err != nil {
+				t.Errorf("request %d: %v", i, r.err)
+			}
+		}
+	})
+}
+
+// FR-LIM-3, T-11: while other paths hold the idle slots, a busy path gets
+// its cap and no more, and slots it borrowed earlier are not replaced.
+func TestBusyPathYieldsUnderContention(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		o := testorigin.New()
+		gate := make(chan struct{})
+		held := cacheable("r")
+		held.Gate = gate
+		o.Default(held)
+		e := newEngine(t, cacheCfg)
+		defer closeEngine(t, e)
+		var all []<-chan timedServe
+		for i := range 20 { // 20 other paths first: 20 of 64 in use
+			all = append(all, serveTimed(t, e, getReq(fmt.Sprintf("/page%d", i)), o))
+		}
+		synctest.Wait()
+		for i := range 100 {
+			all = append(all, serveTimed(t, e, floodReq("/search", i), o))
+		}
+		synctest.Wait()
+		// 16 under the cap; borrowing needs fewer than 32 in flight, and
+		// there are 36.
+		if n, total := o.MaxInflightPartition(), o.MaxInflight(); n != 16 || total != 36 {
+			t.Fatalf("%d fetches of one path, %d in all; want 16 of /search and 36 in all", n, total)
+		}
+		close(gate)
+		for i, ch := range all {
+			if r := <-ch; r.err != nil {
+				t.Errorf("request %d: %v", i, r.err)
+			}
+		}
+	})
+}
+
 // FR-LIM-2: the default queue holds a burst the origin can drain inside
 // MaxQueueWait. 5 000 distinct keys against a 20 ms origin take 1.6 s at 64
 // at a time; the 1 024 places of v1.0 shed 3 900 of them.

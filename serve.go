@@ -473,7 +473,7 @@ func (e *Engine) fetchStored(ctx context.Context, sp *fetchSpec, origin Origin) 
 		_, stale := e.staleOK(sp, time.Now())
 		patient = !stale
 	}
-	fo := fetchOpts{buffered: !sp.lk.oversize, patient: patient, marked: sp.lk.marker}
+	fo := fetchOpts{buffered: !sp.lk.oversize, patient: patient}
 	fr := &flightResult{fetchResult: e.fetch(ctx, c, origin, sp.class, fo, prior, sp.permit)}
 	if fr.notMod && e.hardPurgedSince(ctx, prior) {
 		// FR-PRG-3, FR-PRG-7: a hard purge after prior was stored makes it

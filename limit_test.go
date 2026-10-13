@@ -164,14 +164,15 @@ func TestLimiterShedsWithStale(t *testing.T) {
 }
 
 // FR-LIM-3, T-11, T6.3, T6.8: a flood of unique query strings on /search
-// stays within MaxPerPartition in flight and queues at most
+// stays within MaxPerPartition plus the slots it may borrow while the rest
+// are idle (32 in all at the defaults) and queues at most
 // max(MaxPerPartition, MaxQueue/4) more, so it can fill neither the slots
 // nor the queue. 50 requests to other
 // paths, arriving after the flood, complete without shedding.
 func TestPartitionFairness(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		const wait = 2 * time.Second
-		o := testorigin.NewChecked(t, 64, 16)
+		o := testorigin.NewChecked(t, 64, 32)
 		b := cacheable("v")
 		b.Delay = 50 * time.Millisecond
 		o.Default(b)
@@ -207,11 +208,11 @@ func TestPartitionFairness(t *testing.T) {
 				t.Fatalf("/search %d: %v, want success or a shed", i, r.err)
 			}
 		}
-		if ok != 41 {
-			t.Fatalf("/search served %d, want 41 (16 in flight, 25 queued)", ok)
+		if ok != 57 {
+			t.Fatalf("/search served %d, want 57 (32 in flight, 16 of them borrowed, and 25 queued)", ok)
 		}
-		if n := o.MaxInflightPartition(); n > 16 {
-			t.Fatalf("/search max in-flight = %d, want <= 16", n)
+		if n := o.MaxInflightPartition(); n > 32 {
+			t.Fatalf("/search max in-flight = %d, want <= 32", n)
 		}
 	})
 }

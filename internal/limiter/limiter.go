@@ -202,12 +202,13 @@ func (l *Limiter) canRun(c Class, over bool, part, host uint64) (ok, borrow bool
 		return true, false
 	}
 	// FR-LIM-3: past its cap a partition runs only the fetches the caller
-	// vouches for, and only while Headroom slots stay free below the
+	// asks it for (a client's, with AcquireOver) and the refreshes stale
+	// serving owes, and only while Headroom slots stay free below the
 	// reserve, so a foreground or a background fetch for any other partition
 	// still starts at once. A partition the miss-rate report throttles has
 	// no such allowance (FR-MR-3); the slots it already holds past the cap
 	// run out and are not replaced.
-	if !over || l.cfg.Headroom <= 0 {
+	if !over && c != Refresh || l.cfg.Headroom <= 0 {
 		return false, false
 	}
 	if _, thr := l.throttled[part]; thr {
@@ -245,9 +246,11 @@ func (l *Limiter) Acquire(ctx context.Context, c Class, part, host uint64) (*Per
 
 // AcquireOver is Acquire for a Foreground fetch that may run past its
 // partition's cap while Config.Headroom slots stay free (FR-LIM-3). The
-// engine uses it for a URL a marker says cannot be stored: every client of
-// such a URL needs a fetch of its own, and those are not the distinct keys
-// of a cache-busting flood the cap is there for (T-11).
+// engine uses it for every client's fetch (v1.2). The cap cannot tell a
+// cache-busting flood from a search page with many honest queries, and
+// holding either to it while the origin's budget sits idle refuses clients
+// for nothing (CMP-F5). What the flood must not do is take slots another
+// path needs, and Headroom is what guarantees that (T-11).
 func (l *Limiter) AcquireOver(ctx context.Context, part, host uint64) (*Permit, error) {
 	return l.acquire(ctx, Foreground, true, part, host)
 }

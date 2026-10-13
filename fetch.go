@@ -53,9 +53,6 @@ type fetchOpts struct {
 	// behind it (FR-CB-4). False when the caller has a stale response to
 	// serve.
 	patient bool
-	// marked: a hit-for-miss marker covers the URL, so the fetch may run past
-	// its partition's cap while the limiter has headroom (FR-LIM-3).
-	marked bool
 }
 
 // fetch is the only caller of Origin.Fetch (P3, 04 §6.7). It forwards
@@ -105,7 +102,9 @@ func (e *Engine) fetch(ctx context.Context, c *keys.Classified, origin Origin, c
 	defer cancelProbe()
 	permit := held
 	if permit == nil {
-		if fo.marked && class == limiter.Foreground {
+		if class == limiter.Foreground {
+			// FR-LIM-3: any client's fetch may use slots the other
+			// partitions leave idle.
 			permit, err = e.limFor(c).AcquireOver(ctx, c.PartitionH, c.HostH)
 		} else {
 			permit, err = e.limFor(c).Acquire(ctx, class, c.PartitionH, c.HostH)
