@@ -216,7 +216,7 @@ Cards HRD-01 to HRD-20 in [docs/cards/22-hardening.md](docs/cards/22-hardening.m
 - [x] 4.1 High findings (HRD-01 to HRD-07): slow-flight followers, breaker scope, stalled uploads, markers, unread streams, invalidation floods, a cap per client.
 - [x] 4.2 Medium and low findings (HRD-08 to HRD-16): bounded `Close`, hit-path locks, forwarded fields and trailers, Caddy placeholders, key generation, memory store limits, requests with a body, conformance, documents.
 - [x] 4.3 Performance pass and branch review (HRD-19, HRD-17).
-- [ ] 4.4 Release `v1.1.0` (HRD-18), after the pull request is merged.
+- [x] 4.4 Release `v1.1.0` (HRD-18), tagged 2026-10-13.
 
 ## Testing strategy
 

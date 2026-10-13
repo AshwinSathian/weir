@@ -7,7 +7,7 @@ import { render } from '@/lib/md'
 import { readmeMain } from '@/lib/repo'
 import { modelCounts } from '@/lib/tables'
 
-const GATE = `${REPO}/actions/runs/38259811052`
+const GATE = `${REPO}/actions/runs/38369566716`
 
 const caddyfile = `example.com {
 	weir {
@@ -165,7 +165,7 @@ export default async function Home() {
               <span className="what">threats in the model, each with an answer and a test.</span>
             </Link>
             <a href={GATE}>
-              <span className="fig">29 × 60 min</span>
+              <span className="fig">30 × 60 min</span>
               <span className="what">fuzz targets, one hour each, and the failure-mode tests 100 times under the race detector.</span>
             </a>
             <a href={`${REPO}/blob/main/deps_test.go`}>

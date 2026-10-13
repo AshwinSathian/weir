@@ -1,23 +1,23 @@
 # Status
 
 Updated: 2026-10-13
-Phase: v1.1.0 release in progress (released: v1.0.1, 2026-10-12)
-Current card: HRD-18 (release v1.1.0)
-Card state: in-progress
-Branch: docs/v1.1.0-changelog
-PR: https://github.com/AshwinSathian/weir/pull/126
-Next card: none
+Phase: v1.1.0 released (2026-10-13)
+Current card: none
+Card state: awaiting-merge
+Branch: docs/v1.1.0-released
+PR: https://github.com/AshwinSathian/weir/pull/127
+Next card: none open. Candidates: CMP-03b, CMP-04b, CMP-06 (comparison), HRD-22 (share one over-size fetch), HRD-20 (deferred)
 
 ## Waiting on Ashwin
 
-- Merge the pull request that dates the CHANGELOG section (docs/release.md step 1). The tags are cut from `main` after it, once the `release-gate` run on `0e581b1` is green: https://github.com/AshwinSathian/weir/actions/runs/38369566716
-- After the tags: one more pull request moves the site, the README install lines and the `caddy-published` job to `v1.1.0`, then `make site-deploy BRANCH=main`.
-- The pull request in `../ashwin-portfolio` gets the released wording after the tag; merge it then.
+- Merge the pull request that moves the README, the site and the `caddy-published` job to `v1.1.0`. Then say so and the site is deployed with `make site-deploy BRANCH=main`.
+- Merge the `../ashwin-portfolio` pull request once it carries the released wording.
 - Your call: report to cache-handler that v0.17.0 answers 200 with an empty body to clients that waited on a fetch it did not store (docs/benchmarks.md note (a)).
+- The throwaway branch `rc/v1.1.0-rc.1` can be deleted on GitHub; its four rc tags stay.
 
 ## Notes for the next session
 
-- HRD-18: follow docs/release.md from step 1. The CHANGELOG's "Unreleased" heading becomes `v1.1.0 (date)` in the step 1 pull request. `make vuln` needs Go 1.27.2 (`GOTOOLCHAIN=go1.27.2`): 1.27.1 reports nine standard library findings.
+- `make vuln` needs Go 1.27.2 (`GOTOOLCHAIN=go1.27.2`): 1.27.1 reports nine standard library findings.
 - The reference machine was not idle for the v1.1 numbers (docs/benchmarks.md says so). Rerun `benchstat` and `make load` on an idle machine before the tag if the record should replace the 2026-10-11 baseline.
 - A process started in the background by the agent harness ran `make load` at a fraction of its speed (macOS priority). Run load and benchmarks in the foreground.
 - Deferred: HRD-20 (coalescing across nodes, a local tier for remote stores).
