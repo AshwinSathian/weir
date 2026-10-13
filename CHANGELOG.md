@@ -4,7 +4,11 @@ Format: one section per release, newest first. Changes land under "Unreleased" i
 
 ## Unreleased
 
-Hardening after an adversarial review of `v1.0.1` (cards HRD-01 to HRD-18, [docs/cards/22-hardening.md](docs/cards/22-hardening.md)). Several fixes add exported fields, so the next release is `v1.1.0`. Each entry names the requirement it changes.
+Nothing yet.
+
+## v1.1.0 (2026-10-13)
+
+Hardening after an adversarial review of `v1.0.1` (cards HRD-01 to HRD-18, [docs/cards/22-hardening.md](docs/cards/22-hardening.md)). Several fixes add exported fields, so this is a minor release. Each entry names the requirement it changes.
 
 ### Changed behavior
 

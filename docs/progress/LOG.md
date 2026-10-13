@@ -2029,3 +2029,11 @@ Entry template:
 - Deviations: the earlier pull request 123 was closed by GitHub when its base branch was deleted; this is a new branch and pull request, not a force-push.
 - Follow-ups: CMP-03b, CMP-04b, CMP-06; maintainers' review of the configurations (R4).
 - Context: continued session.
+
+## 2026-10-13 · HRD-18 · blocked
+- Branch / PR: docs/v1.1.0-changelog / https://github.com/AshwinSathian/weir/pull/126
+- Done: release step 1. `release-gate` started on `main` at `0e581b1` (run 38369566716). On the same commit, locally: `make check`, `make vuln` on Go 1.27.2, `make cache-tests`, `make load` (six scenarios), the hit benchmark (610 to 643 ns, 8 allocations). CHANGELOG section dated.
+- Tests: none added.
+- Deviations: none.
+- Follow-ups: waiting on Ashwin to merge 126 and on the gate. Then the release branch, the `v1.1.0-rc.1` rehearsal, the four tags, the smoke test, the GitHub release, the version pull request, the site deploy and the portfolio wording.
+- Context: continued session.
