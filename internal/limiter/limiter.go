@@ -41,7 +41,12 @@ const (
 
 // Config holds the limiter's bounds. The engine fills defaults (04 §5).
 type Config struct {
-	Max          int // slots in flight at once (FR-LIM-1)
+	Max int // slots in flight at once (FR-LIM-1)
+	// Ceiling, above Max, makes the limit adaptive (FR-LIM-8): it starts at
+	// Max, grows toward Ceiling while fetches wait for a slot and the origin
+	// answers well, and falls back toward Max when it does not. At or below
+	// Max the limit is Max.
+	Ceiling      int
 	MaxQueue     int // waiters at once (FR-LIM-2)
 	PerPartition int // slots per partition (FR-LIM-3)
 	// Headroom lets a fetch taken with AcquireOver run although its
@@ -82,6 +87,19 @@ type Limiter struct {
 	throttled map[uint64]int
 	thrEnd    time.Time
 	thrUntil  time.Time
+
+	// The adaptive limit (FR-LIM-8); all zero when Ceiling <= Max.
+	cur        int           // the limit now, Max..Ceiling
+	samples    int           // reports in this window
+	timed      int           // those that were answered
+	rttSum     time.Duration // the fetch times of those
+	failed     bool          // one of them was an origin failure
+	limited    bool          // a fetch found every slot taken in this window
+	baseline   time.Duration // fetch time when not overloaded
+	bad        int           // the last level that was too much
+	badUntil   time.Time     // until when bad is remembered
+	cool       int           // reports still to ignore after a cut
+	lastReport time.Time
 }
 
 type waiter struct {
@@ -112,12 +130,114 @@ func (l *Limiter) Counts() (inflight, queued int) {
 
 // New returns a limiter with the given bounds.
 func New(cfg Config) *Limiter {
-	return &Limiter{cfg: cfg, byPart: make(map[uint64]int), byHost: make(map[uint64]int), queuedBy: make(map[uint64]int), laterBy: make(map[uint64]int)}
+	l := &Limiter{cfg: cfg, byPart: make(map[uint64]int), byHost: make(map[uint64]int), queuedBy: make(map[uint64]int), laterBy: make(map[uint64]int)}
+	if cfg.Ceiling > cfg.Max {
+		l.cur, l.lastReport = cfg.Max, time.Now()
+	}
+	return l
 }
 
-// limit is the global cap. Every read goes through it so an adaptive policy
-// can replace the static value (D13, OQ-3).
-func (l *Limiter) limit() int { return l.cfg.Max }
+// limit is the global cap: Max, or the adaptive limit between Max and
+// Ceiling (D13, FR-LIM-8).
+func (l *Limiter) limit() int {
+	if l.cur > 0 {
+		return l.cur
+	}
+	return l.cfg.Max
+}
+
+const (
+	adaptHold = 10 * time.Second // how long a level that failed is remembered
+	adaptIdle = 10 * time.Second // with no fetch reported for this long, back to Max
+)
+
+// adaptStep is how far the limit moves up at a time: an eighth, so a level
+// the origin cannot take is overshot by at most that much.
+func adaptStep(n int) int { return max(1, n/8) }
+
+// Report tells an adaptive limiter how one fetch ended: whether the origin
+// answered (ok is false for a timeout, a transport error or a 502, 503 or
+// 504, the breaker's failures) and how long it took to answer. A limiter
+// with no Ceiling ignores it.
+//
+// The limit is judged once per window of as many reports as the limit:
+//   - a failure in the window, or a mean fetch time over twice the baseline
+//     (the origin slows before it refuses), takes a quarter off, never below
+//     Max, and the level is remembered for adaptHold: until then the limit
+//     grows back only to one step below it. As many reports as that level
+//     are then ignored: they are fetches that started under it;
+//   - otherwise, if some fetch had to wait for a slot in the window, the
+//     limit grows by a step, never past Ceiling. A limit nobody waited on
+//     stays where it is.
+func (l *Limiter) Report(ok bool, rtt time.Duration) {
+	if l.cfg.Ceiling <= l.cfg.Max {
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	now := time.Now()
+	l.lastReport = now
+	if l.cool > 0 {
+		// A fetch that started under the level just cut: its failure is
+		// the same event, not a second one.
+		l.cool--
+		return
+	}
+	l.samples++
+	if ok {
+		// A refusal is fast. Counted in, it would make an overloaded origin
+		// look quick, and every healthy window after it look slow.
+		l.timed++
+		l.rttSum += rtt
+	} else {
+		l.failed = true
+	}
+	if l.samples < l.limit() {
+		return
+	}
+	slow := false
+	if l.timed > 0 {
+		mean := l.rttSum / time.Duration(l.timed)
+		slow = l.baseline > 0 && mean > 2*l.baseline
+		switch {
+		case l.failed:
+			// Not a window to learn the baseline from.
+		case l.baseline == 0 || mean < l.baseline:
+			l.baseline = mean
+		case !slow:
+			// The origin's own latency drifts; follow it slowly, and only
+			// from windows that were not overloaded.
+			l.baseline += (mean - l.baseline) / 64
+		}
+	}
+	cur := l.limit()
+	switch {
+	case l.failed || slow:
+		l.bad, l.badUntil = cur, now.Add(adaptHold)
+		l.cur = max(l.cfg.Max, cur*3/4)
+		l.cool = cur
+	case l.limited:
+		top := l.cfg.Ceiling
+		if now.Before(l.badUntil) {
+			top = min(top, l.bad-adaptStep(l.bad))
+		}
+		l.cur = max(cur, min(top, cur+adaptStep(cur)))
+	}
+	l.samples, l.timed, l.rttSum, l.failed, l.limited = 0, 0, 0, false, false
+	if l.cur > cur {
+		l.grant() // the cap rose: waiters it held back may run
+	}
+}
+
+// settle returns an adaptive limit to Max after adaptIdle without a report:
+// a burst after a quiet spell meets the budget the operator vouched for,
+// not what the origin could take a while ago. Caller holds l.mu.
+func (l *Limiter) settle() {
+	if l.cur > l.cfg.Max && time.Since(l.lastReport) >= adaptIdle {
+		l.cur, l.bad, l.badUntil = l.cfg.Max, 0, time.Time{}
+		l.samples, l.timed, l.rttSum, l.failed, l.limited, l.cool = 0, 0, 0, false, false, 0
+	}
+}
 
 // capFor is the cap for one partition: PerPartition, or a lower override
 // from the miss-rate report in force (FR-MR-3). Caller holds l.mu.
@@ -257,6 +377,7 @@ func (l *Limiter) AcquireOver(ctx context.Context, part, host uint64) (*Permit, 
 
 func (l *Limiter) acquire(ctx context.Context, c Class, over bool, part, host uint64) (*Permit, error) {
 	l.mu.Lock()
+	l.settle()
 	if l.expire() {
 		l.grant() // parked waiters of the freed partitions go first
 	}
@@ -267,6 +388,15 @@ func (l *Limiter) acquire(ctx context.Context, c Class, over bool, part, host ui
 		p := l.take(part, host, borrow)
 		l.mu.Unlock()
 		return p, nil
+	}
+	// FR-LIM-8: what held this fetch back? The global cap, or the margin
+	// the borrow rule keeps below it (a partition over its cap that may
+	// borrow never sees the cap itself), is pressure an adaptive limit
+	// answers. A partition's own cap with nothing to borrow against, or a
+	// throttle, is not.
+	if _, thr := l.throttled[part]; l.inflight >= l.limit() ||
+		(over || c == Refresh) && l.cfg.Headroom > 0 && !thr && l.byPart[part] >= l.capFor(part) {
+		l.limited = true
 	}
 	if c == Background {
 		l.mu.Unlock()

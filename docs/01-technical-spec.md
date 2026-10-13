@@ -62,7 +62,7 @@ These were settled with the project owner on 2026-09-27 and are not reopened by 
 | D10 | Minimum Go version is 1.27 (for `httptest.NewTestServer` and `synctest.Sleep`). |
 | D11 | Single-range 206 from complete stored objects (M11). |
 | D12 | Targeted fields `Weir-Cache-Control` then `CDN-Cache-Control` (M12), with `private`, `no-store` and `no-cache` in `Cache-Control` still binding (stricter than RFC 9213). |
-| D13 | Static origin concurrency limit in Phase 1; opt-in adaptive limit considered after load-test data. |
+| D13 | Static origin concurrency limit by default; an opt-in adaptive limit since v1.2 (FR-LIM-8), built after the second comparison round showed the static one refusing clients an origin could have served. |
 | D14 | Phase order after Phase 1: Caddy adapter (2), then Valkey store (2.5). |
 | D15 | Graceful-shutdown snapshot of the memory store, loaded as soft-stale (M13). |
 | D16 | Per-host fairness: limiter per-host cap and memory-store per-owner byte quota (M14), off by default in the library, on in the Caddy adapter for multi-host sites. |
@@ -427,6 +427,7 @@ All fields are optional. The zero value of `Config` is valid and yields the defa
 | `Coalesce.HitForMissTTL` | 30 s | |
 | `Limiter.MaxConcurrent` / `MaxQueue` / `MaxQueueWait` | 64 / 8192 / 5 s | v1.0: 1024 and 2 s |
 | `Limiter.PartitionHeadroom` | `MaxPerPartition` | FR-LIM-3; `MaxConcurrent` or more: strict cap |
+| `Limiter.AdaptiveMax` | 0 (off) | FR-LIM-8; above `MaxConcurrent`: the ceiling of an adaptive limit |
 | `Limiter.MaxPerPartition` | 16 | |
 | `Limiter.ReserveForeground` | 25% of `MaxConcurrent` | at least 1 from 2 slots; an explicit value at or above `MaxConcurrent` is rejected (FR-LCY-1) |
 | `Breaker.Window` / `MinRequests` / `FailureRatio` | 10 s / 20 / 0.5 | |
@@ -572,7 +573,7 @@ Resolved on 2026-09-27:
 
 - OQ-1 single-range 206: D11, §13.1.
 - OQ-2 targeted fields: D12, §13.2.
-- OQ-3 adaptive limits: D13. Static in Phase 1; revisit with load-test data. The limiter reads its cap through one method so an adaptive policy can replace it.
+- OQ-3 adaptive limits: D13, closed in v1.2 by FR-LIM-8 (opt-in).
 - OQ-4 experiment bucketing: decisions E1 to E9 in [10-experiments-spec.md](10-experiments-spec.md).
 
 Open: none.
@@ -620,6 +621,7 @@ Open: none.
 ### 14.1 Upload pool (D25)
 
 - FR-LIM-7. A request whose body is non-empty or of unknown length (any method) takes its slot from a separate upload pool of `Limiter.MaxUpload` slots with its own queue rules, never from the main pool. Bodyless requests, including bypassed `GET`s from logged-in users, use the main pool. Total origin concurrency is therefore bounded by `MaxConcurrent + MaxUpload`. A slow uploader can exhaust only the upload pool (T-39), and one partition holds at most half of it (at least 1 slot; v1.1), so slow uploads to one URL leave slots for uploads to others. Adapters MUST enforce a request body size limit and a body read timeout (Caddy `request_body max_size` and server `read_body` timeout; `http.Server.ReadTimeout` for weirhttp); the adapter docs say so.
+- FR-LIM-8. Adaptive limit (v1.2, off by default; D13 closed). With `Limiter.AdaptiveMax` above `MaxConcurrent`, the limit of FR-LIM-1 is no longer fixed: it starts at `MaxConcurrent`, never goes below it and never above `AdaptiveMax`. It is judged once per window of as many completed fetches as the limit. A window with an origin-health failure (the breaker's definition, FR-CB-2), or whose answered fetches took more than twice the baseline time on average, takes a quarter off the limit; the level that failed is remembered for 10 s, during which the limit grows back only to one step below it, and as many of the next reports as that level are ignored, being fetches that started under it. Otherwise, if in that window some fetch found no slot (the limit itself, or the margin FR-LIM-3 keeps below it for a partition that wants to borrow), the limit grows by an eighth. A limit nobody waited on does not move. The baseline is the lowest window mean seen, following slow drift upward from windows that were not overloaded; refused fetches are not timed. After 10 s with no fetch reported the limit is `MaxConcurrent` again. The upload pool is not adaptive. With the option off the origin never sees more than `MaxConcurrent` requests at once; with it on, finding the origin's limit means crossing it now and then, so a few clients in a busy spell get the origin's own error. In the second comparison round's `busting-flood` (an origin that serves 128 at once), `AdaptiveMax` 256 cut the flooded path's failures from 8,520 to between 3,856 and 4,793 of 10,000, with 0 to 17 of 1,000 bystanders failing where the other caches failed 280 to 607.
 
 ### 14.2 Timeouts (D26)
 

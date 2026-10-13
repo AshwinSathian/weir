@@ -15,6 +15,7 @@ Fixes for the losses the second comparison round found (card HRD-23, findings CM
 
 ### Added
 
+- `Limiter.AdaptiveMax` and Caddy's `limiter { adaptive_max }`: an adaptive origin concurrency limit between `MaxConcurrent` and this ceiling (FR-LIM-8). It grows by an eighth while requests wait for a slot and the origin answers well, and drops a quarter on an origin failure or when fetch times double. Off by default: with it on, a few clients get the origin's own error when the limit crosses what the origin can take.
 - `memory.Config.SnapshotKeepFreshness` and Caddy's `snapshot_keep_fresh`: entries loaded from a snapshot keep their freshness, so a restart is a warm cache and costs no origin call (FR-SNP-5). Off by default, because a purge sent while the process was down is then not applied to what the snapshot brings back (T-33). A marked snapshot read by a version before this one starts cold.
 
 ## v1.1.0 (2026-10-13)

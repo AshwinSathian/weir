@@ -154,6 +154,16 @@ type CoalesceConfig struct {
 // LimiterConfig bounds origin concurrency (FR-LIM).
 type LimiterConfig struct {
 	MaxConcurrent int // 0: 64
+	// AdaptiveMax, above MaxConcurrent, lets the limit on concurrent origin
+	// fetches grow past MaxConcurrent, up to this, while requests wait for a
+	// slot and the origin answers well, and brings it back when the origin
+	// fails or slows down (FR-LIM-8). MaxConcurrent stays the floor: it is
+	// what the origin is known to take, and the limit returns to it after 10
+	// idle seconds. Zero, the default, keeps the limit at MaxConcurrent, and
+	// then the origin never sees more than MaxConcurrent requests at once.
+	// Finding the origin's limit means crossing it now and then: with this
+	// set, a few clients in a busy spell get the origin's own error.
+	AdaptiveMax int
 	// MaxQueue is the number of fetches that may wait for a slot. Zero means
 	// the default 8192; there is no way to set a zero-length queue today.
 	// MaxQueueWait, not this count, is what protects clients from a long
@@ -449,6 +459,7 @@ func (c *Config) validate() error {
 		{"Coalesce.FollowerMaxWait", int64(c.Coalesce.FollowerMaxWait)},
 		{"Coalesce.HitForMissTTL", int64(c.Coalesce.HitForMissTTL)},
 		{"Limiter.MaxConcurrent", int64(c.Limiter.MaxConcurrent)},
+		{"Limiter.AdaptiveMax", int64(c.Limiter.AdaptiveMax)},
 		{"Limiter.MaxQueue", int64(c.Limiter.MaxQueue)},
 		{"Limiter.MaxQueueWait", int64(c.Limiter.MaxQueueWait)},
 		{"Limiter.MaxPerPartition", int64(c.Limiter.MaxPerPartition)},
@@ -514,6 +525,10 @@ func (c *Config) validate() error {
 	}
 	if err := c.validateExperiments(); err != nil {
 		return err
+	}
+	if l := &c.Limiter; l.AdaptiveMax != 0 && l.AdaptiveMax < l.MaxConcurrent {
+		// A ceiling below the floor (FR-LIM-8).
+		return invalid("Limiter.AdaptiveMax", "below Limiter.MaxConcurrent")
 	}
 	if l := &c.Limiter; l.ReserveForeground > 0 && l.ReserveForeground >= l.MaxConcurrent {
 		// No slot would be left for background refresh or Warm (FR-LIM-4).

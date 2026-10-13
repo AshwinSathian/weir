@@ -106,8 +106,8 @@ State after the second session of 2026-10-13, which ran CMP-03b and CMP-04b on o
 - Read: 04 breaker section; 01 FR-CB-1 onward
 - Notes: `origin-down`, default tier: 10 s after the origin recovered, 1 of 200 simultaneous clients is served and 199 get 503, because half-open admits one probe. Requests after the probe succeed. Options: keep; let requests that arrive during a probe wait for its result, bounded by `MaxQueueWait`.
 
-### [ ] CMP-F5 The per-path cap refuses a busy path while the origin has room
-- Partly resolved: card HRD-23 (22-hardening.md), D-H29: any client's fetch may borrow idle slots. Rerun: 8,260 of 10,000 flood clients still fail, because the global limit is the binding one. Open until the adaptive limit is built.
+### [x] CMP-F5 The per-path cap refuses a busy path while the origin has room
+- Resolved: card HRD-23 (22-hardening.md). D-H29 (any client's fetch may borrow idle slots) alone changes little: 8,260 of 10,000 flood clients still fail, because the bystanders leave little to borrow. D-H34 (opt-in `Limiter.AdaptiveMax`) does: 3,856 to 4,793 fail, and 0 to 17 of 1,000 bystanders. At the defaults this is still a loss.
 - Plan: comparison finding · Size: M · Depends on: owner decision
 - Read: 01 FR-LIM-3; 04 limiter section; D-H26
 - Notes: `busting-flood`, both tiers: 8,520 of 10,000 clients of the flooded path fail, more clients in total (8,520 of 11,000) than any other subject, the no-cache control included (6,535), while the origin has about 50 of its 128 slots in use and Weir 14 of its own 64 free. Every bystander is served, which is what the cap is for. The cap cannot tell a flood from a search endpoint with many honest queries. Options: keep and say so on the tuning page; extend `PartitionHeadroom` (D-H26) to storable fetches, so a path may borrow slots that are idle, bounded and given back; queue longer for a partition whose misses are being stored. The last two change behavior under a real flood and need the busting-flood load test of 07 §9 to hold.

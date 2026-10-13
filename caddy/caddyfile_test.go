@@ -128,6 +128,7 @@ func TestCaddyfileParse(t *testing.T) {
 			max_queue_wait    2s
 			max_per_partition 16
 			partition_headroom 16
+			adaptive_max 256
 			max_per_client    32
 		}
 		stale {
@@ -155,7 +156,7 @@ func TestCaddyfileParse(t *testing.T) {
 				"accept_encoding": ["br", "gzip"]},
 			"forward": {"allow": ["X-Request-Id"]},
 			"bypass": {"cookies": ["session_id"], "headers": ["X-Admin"]},
-			"limiter": {"max_concurrent": 128, "max_queue": 256, "max_queue_wait": "2s", "max_per_partition": 16, "partition_headroom": 16, "max_per_client": 32},
+			"limiter": {"max_concurrent": 128, "max_queue": 256, "max_queue_wait": "2s", "max_per_partition": 16, "partition_headroom": 16, "adaptive_max": 256, "max_per_client": 32},
 			"stale": {"while_revalidate": "30s", "if_error": "5m"}
 		}`
 		if err := decodeStrict([]byte(raw), &want); err != nil {

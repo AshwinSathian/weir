@@ -175,6 +175,11 @@ func (e *Engine) fetch(ctx context.Context, c *keys.Classified, origin Origin, c
 		} else {
 			settled = true
 			e.cb.RecordFor(probe, c.PartitionH, o)
+			if !c.HasBody { // the upload pool has its own, fixed limit
+				// FR-LIM-8: the same verdict tells an adaptive limit
+				// whether the origin took this level of concurrency.
+				e.lim.Report(o != breaker.Failure, time.Since(reqTime))
+			}
 		}
 	}
 	if err != nil {

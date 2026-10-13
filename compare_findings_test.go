@@ -1,10 +1,15 @@
 package weir_test
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"slices"
+	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -389,4 +394,91 @@ func TestDefaultQueueHoldsExpiryBurst(t *testing.T) {
 			}
 		}
 	})
+}
+
+// capOrigin answers 200 after delay while at most capacity requests are in
+// it, and 503 at once to one more: an origin whose limit is not the one the
+// cache was configured with.
+type capOrigin struct {
+	capacity         int
+	delay            time.Duration
+	mu               sync.Mutex
+	inflight, peak   int
+	served, rejected int
+}
+
+func (o *capOrigin) Fetch(ctx context.Context, _ *weir.Request) (*weir.Response, error) {
+	o.mu.Lock()
+	if o.inflight >= o.capacity {
+		o.rejected++
+		o.mu.Unlock()
+		return &weir.Response{StatusCode: http.StatusServiceUnavailable, Header: http.Header{}, Body: io.NopCloser(strings.NewReader("busy"))}, nil
+	}
+	o.inflight++
+	o.peak = max(o.peak, o.inflight)
+	o.mu.Unlock()
+	defer func() { o.mu.Lock(); o.inflight--; o.served++; o.mu.Unlock() }()
+	select {
+	case <-time.After(o.delay):
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	return &weir.Response{StatusCode: http.StatusOK, Header: http.Header{"Cache-Control": {"max-age=60"}}, Body: io.NopCloser(strings.NewReader("ok"))}, nil
+}
+
+// FR-LIM-8 (v1.2), D13, CMP-F5: an origin that serves 100 requests at once
+// behind a limit of 64. With AdaptiveMax the limit finds the room: the
+// origin is driven well past 64, is asked for more than it can take only
+// now and then, and the breaker never opens. Without it the origin never
+// sees more than 64 (FR-LIM-1).
+func TestAdaptiveLimitFindsOriginCapacity(t *testing.T) {
+	for name, tc := range map[string]struct{ adaptiveMax, wantPeakMin, wantPeakMax int }{
+		"adaptive": {256, 90, 100},
+		"fixed":    {0, 64, 64},
+	} {
+		t.Run(name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				o := &capOrigin{capacity: 100, delay: 20 * time.Millisecond}
+				cfg := cacheCfg
+				cfg.Limiter.AdaptiveMax = tc.adaptiveMax
+				e := newEngine(t, cfg)
+				defer closeEngine(t, e)
+				// 20 s of 4,000 distinct URLs a second, each its own path:
+				// more than 64 slots of 20 ms can serve (3,200), and less
+				// than 100 can (5,000).
+				var wg sync.WaitGroup
+				var failed atomic.Int64
+				for tick := range 2000 {
+					for i := range 40 {
+						wg.Go(func() {
+							resp, err := e.Serve(t.Context(), getReq(fmt.Sprintf("/t%d/%d", tick, i)), o)
+							if err != nil {
+								failed.Add(1)
+								return
+							}
+							if resp.StatusCode != http.StatusOK {
+								failed.Add(1)
+							}
+							resp.Body.Close()
+						})
+					}
+					time.Sleep(10 * time.Millisecond)
+				}
+				wg.Wait()
+				if o.peak < tc.wantPeakMin || o.peak > tc.wantPeakMax {
+					t.Errorf("origin peak %d, want %d to %d", o.peak, tc.wantPeakMin, tc.wantPeakMax)
+				}
+				if s := e.Stats().BreakerState; s != weir.BreakerClosed {
+					t.Errorf("breaker = %v, want closed", s)
+				}
+				t.Logf("served %d, origin refused %d, clients failed %d of 80000, peak %d", o.served, o.rejected, failed.Load(), o.peak)
+				if tc.adaptiveMax > 0 && (o.rejected > 2000 || failed.Load() > 2000) {
+					t.Errorf("origin refused %d and %d clients failed; want the limit to cross the origin's now and then, not ride it", o.rejected, failed.Load())
+				}
+				if tc.adaptiveMax == 0 && o.rejected != 0 {
+					t.Errorf("origin refused %d with a fixed limit of 64", o.rejected)
+				}
+			})
+		})
+	}
 }
