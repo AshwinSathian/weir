@@ -1,19 +1,17 @@
 # Status
 
 Updated: 2026-10-13
-Phase: v1.1.0 released (2026-10-13)
+Phase: v1.1.0 released and deployed (2026-10-13)
 Current card: none
-Card state: awaiting-merge
-Branch: docs/v1.1.0-released
-PR: https://github.com/AshwinSathian/weir/pull/127
+Card state: ready
+Branch: main
+PR: none
 Next card: none open. Candidates: CMP-03b, CMP-04b, CMP-06 (comparison), HRD-22 (share one over-size fetch), HRD-20 (deferred)
 
 ## Waiting on Ashwin
 
-- Merge the pull request that moves the README, the site and the `caddy-published` job to `v1.1.0`. Then say so and the site is deployed with `make site-deploy BRANCH=main`.
-- Merge the `../ashwin-portfolio` pull request once it carries the released wording.
-- Your call: report to cache-handler that v0.17.0 answers 200 with an empty body to clients that waited on a fetch it did not store (docs/benchmarks.md note (a)).
-- The throwaway branch `rc/v1.1.0-rc.1` can be deleted on GitHub; its four rc tags stay.
+- Nothing blocks. Pick the next card when you want one.
+- A bug report to cache-handler (v0.17.0 answers 200 with an empty body to clients that waited on a fetch it did not store, docs/benchmarks.md note (a)) is drafted for your review before it is posted.
 
 ## Notes for the next session
 

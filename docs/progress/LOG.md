@@ -2045,3 +2045,11 @@ Entry template:
 - Deviations: none from docs/release.md. pkg.go.dev had fetched two of the four module pages when this was written; the other two were requested.
 - Follow-ups: deploy the site after the merge; the portfolio write-up; delete `rc/v1.1.0-rc.1`.
 - Context: continued session.
+
+## 2026-10-13 · after v1.1.0 · done
+- Branch / PR: docs/status-after-v1.1.0 / opened by this session
+- Done: pull request 127 merged; the site deployed from `main` with `make site-deploy BRANCH=main` and checked live (`v1.1.0` on the home page, the comparison section on the benchmarks page). The portfolio write-up says 1.1.0 is released and is deployed. The throwaway branch `rc/v1.1.0-rc.1` is deleted; its tags stay. STATUS moved to `ready`.
+- Tests: none.
+- Deviations: none.
+- Follow-ups: the cache-handler bug report, after Ashwin's review.
+- Context: continued session.
