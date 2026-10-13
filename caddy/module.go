@@ -43,13 +43,19 @@ type Handler struct {
 	// larger response is passed through to every client that asks. Up to
 	// max_concurrent fetches buffer a body of this size at once, so the
 	// process needs that much memory beside the store.
-	MaxObjectBytes ByteSize      `json:"max_object_bytes,omitempty"`
-	SnapshotDir    string        `json:"snapshot_dir,omitempty"`
-	Key            KeyConfig     `json:"key,omitempty"`
-	Forward        ForwardConfig `json:"forward,omitempty"`
-	Bypass         BypassConfig  `json:"bypass,omitempty"`
-	Limiter        LimiterConfig `json:"limiter,omitempty"`
-	Stale          StaleConfig   `json:"stale,omitempty"`
+	MaxObjectBytes ByteSize `json:"max_object_bytes,omitempty"`
+	SnapshotDir    string   `json:"snapshot_dir,omitempty"`
+	// SnapshotKeepFresh keeps the cache warm across a restart: entries
+	// loaded from the snapshot keep their freshness, where without it each
+	// is revalidated on first use (memory.Config.SnapshotKeepFreshness,
+	// FR-SNP-5). A purge sent while Caddy was down is then not applied to
+	// what the snapshot brings back (T-33). It needs snapshot_dir.
+	SnapshotKeepFresh bool          `json:"snapshot_keep_fresh,omitempty"`
+	Key               KeyConfig     `json:"key,omitempty"`
+	Forward           ForwardConfig `json:"forward,omitempty"`
+	Bypass            BypassConfig  `json:"bypass,omitempty"`
+	Limiter           LimiterConfig `json:"limiter,omitempty"`
+	Stale             StaleConfig   `json:"stale,omitempty"`
 	// Experiments is the A/B block (docs/10 §3). It changes which key a
 	// request maps to, so it is not part of the key-generation hash (08 §3).
 	Experiments *ExperimentsConfig `json:"experiments,omitempty"`
@@ -251,6 +257,9 @@ func (h *Handler) Validate() error {
 	}
 	if h.MaxBytes != 0 && h.MaxObjectBytes*10 > h.MaxBytes {
 		return errors.New("weir: max_object_bytes must be at most a tenth of max_bytes (an object has to fit a shard's small queue)")
+	}
+	if h.SnapshotKeepFresh && h.SnapshotDir == "" {
+		return errors.New("weir: snapshot_keep_fresh needs snapshot_dir")
 	}
 	return validateSnapshotDir(h.SnapshotDir)
 }

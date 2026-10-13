@@ -35,6 +35,7 @@ func parseCaddyfile(h httpcaddyfile.Helper) (caddyhttp.MiddlewareHandler, error)
 //	    max_bytes <size>
 //	    max_object_bytes <size>
 //	    snapshot_dir <dir>
+//	    snapshot_keep_fresh
 //	    multi_host
 //	    client_placeholders
 //	    store valkey {
@@ -100,6 +101,8 @@ func (h *Handler) blockKey(d *caddyfile.Dispenser, key string, seen map[string]b
 		return oneArg(d, &h.Name)
 	case "snapshot_dir":
 		return oneArg(d, &h.SnapshotDir)
+	case "snapshot_keep_fresh":
+		return flag(d, &h.SnapshotKeepFresh)
 	case "multi_host":
 		return flag(d, &h.MultiHost)
 	case "client_placeholders":

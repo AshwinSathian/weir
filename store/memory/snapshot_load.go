@@ -31,6 +31,7 @@ type snapLoadStats struct {
 	// records than the trailer counts). The loader then fails closed.
 	lost bool
 	seen uint64 // framed records read, including skipped ones
+	kept bool   // the file carries the mark of SnapshotKeepFreshness
 }
 
 // loadSnapshot reads the snapshot at snapPath, if any, and removes it
@@ -73,6 +74,14 @@ func (s *Store) loadSnapshot() {
 		s.snapLoad.lost = true
 	}
 	now := time.Now()
+	// FR-SNP-5: the entries keep their freshness only when this store asks
+	// for it, the writer vouched for the file, nothing was lost, and the
+	// clock is not behind the one that wrote it (an entry's freshness is a
+	// wall-clock time, and a clock set back would stretch it).
+	written := time.Unix(0, int64(binary.BigEndian.Uint64(hdr[len(snapMagic)+1:]))) //nolint:gosec // bit pattern
+	if s.snapKeep && s.snapLoad.kept && !s.snapLoad.lost && !written.After(now) {
+		return
+	}
 	// Everything loaded is stale as of now, and never servable stale: the
 	// writer does not persist soft or invalid epochs, so an entry that was
 	// invalidated before the restart cannot be told from one that was not
@@ -207,6 +216,13 @@ func (s *Store) loadRecord(kind byte, p []byte) {
 			st.skipped++
 			st.lost = true
 		}
+	case snapKindKept:
+		if len(p) != 1 || p[0] != 1 {
+			st.skipped++
+			st.lost = true
+			return
+		}
+		st.kept = true
 	default:
 		st.skipped++
 		st.lost = true

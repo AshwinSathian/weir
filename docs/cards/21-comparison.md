@@ -124,7 +124,8 @@ State after the second session of 2026-10-13, which ran CMP-03b and CMP-04b on o
 - Read: 01 FR-CB-3, FR-CB-4; 04 breaker section
 - Notes: `brownout`, default tier (no stale serving): after two 10 s bursts of 503, requests keep failing once the origin is healthy, 120 in the median repetition and 1,980 in the worst on Caddy (last failure 9.6 s after recovery); on `weirproxy` 2,280 in the median and 3,980 in the worst (last failure 11.3 s and 14.8 s). No other subject fails a client after recovery. `OpenFor` doubles on each failed probe (5 s, 10 s, up to 60 s), so the wait after recovery depends on where the burst ended. With stale serving on nobody fails. Options: keep and document the worst case (`MaxOpenFor`) beside D6; a lower default `MaxOpenFor` (a default change, hard rule 12); probe on a fixed short period once open, and keep the backoff for the closing decision only.
 
-### [ ] CMP-F8 A snapshot does not save origin calls after a restart
+### [x] CMP-F8 A snapshot does not save origin calls after a restart
+- Resolved: card HRD-23 (22-hardening.md), D-H33: opt-in `snapshot_keep_fresh`. Rerun with it: 0 origin calls of 2,000. The default is unchanged and still refetches every URL.
 - Plan: comparison finding · Size: S · Depends on: owner decision
 - Read: 01 §13.3 (FR-SNP), D15; runbook 7.2
 - Notes: `restart`, tuned tier with `snapshot_dir`: all 2,000 stored URLs are fetched again on first use, as with no snapshot, where nginx's disk cache makes no origin call. By design (D15 loads entries as stale), and the first request for each waits for the origin (`fwd=stale`) even with `while_revalidate` on. The harness origin sends no validator; with one, each call would be a 304. Options: keep, and say on the Caddy guide that the snapshot buys 304s and outage cover, not a warm cache; serve loaded entries stale-while-revalidate when that window is configured; an opt-in to trust remaining freshness after a clean shutdown.

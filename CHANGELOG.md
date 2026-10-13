@@ -13,6 +13,10 @@ Fixes for the losses the second comparison round found (card HRD-23, findings CM
 - Breaker: `Breaker.OpenFor` defaults to 1 s (was 5 s) and `Breaker.MaxOpenFor` to `OpenFor` (was 60 s), so the breaker probes about once a second and no longer doubles the period per failed probe (FR-CB-3). Way back: `OpenFor: 5 * time.Second, MaxOpenFor: time.Minute`.
 - Breaker: closing is gradual. Each probe that succeeds doubles the fetches admitted at a time; the breaker closes when that reaches `MaxConcurrent` (FR-CB-4). `Stats().BreakerState` reads half-open during the ramp.
 
+### Added
+
+- `memory.Config.SnapshotKeepFreshness` and Caddy's `snapshot_keep_fresh`: entries loaded from a snapshot keep their freshness, so a restart is a warm cache and costs no origin call (FR-SNP-5). Off by default, because a purge sent while the process was down is then not applied to what the snapshot brings back (T-33). A marked snapshot read by a version before this one starts cold.
+
 ## v1.1.0 (2026-10-13)
 
 Hardening after an adversarial review of `v1.0.1` (cards HRD-01 to HRD-18, [docs/cards/22-hardening.md](docs/cards/22-hardening.md)). Several fixes add exported fields, so this is a minor release. Each entry names the requirement it changes.

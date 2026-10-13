@@ -272,13 +272,24 @@ func FuzzSnapshotLoad(f *testing.F) {
 	f.Add(append(bytes.Clone(good.b), frame(snapKindTrailer, binary.BigEndian.AppendUint64(nil, 1))...))
 	f.Add([]byte(snapMagic))
 	f.Add([]byte{})
+	// FR-SNP-5: a file marked as written with SnapshotKeepFreshness, and one
+	// whose mark has the wrong payload.
+	kept := newSnapFile()
+	kept.b = append(kept.b, frame(snapKindEntry, make([]byte, 40))...)
+	f.Add(append(append(bytes.Clone(kept.b), frame(snapKindKept, []byte{1})...), frame(snapKindTrailer, binary.BigEndian.AppendUint64(nil, 2))...))
+	f.Add(append(append(bytes.Clone(kept.b), frame(snapKindKept, []byte{2, 0})...), frame(snapKindTrailer, binary.BigEndian.AppendUint64(nil, 2))...))
 	f.Fuzz(func(t *testing.T, b []byte) {
 		path := filepath.Join(t.TempDir(), "weir.snap")
 		if err := os.WriteFile(path, b, 0o600); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := New(Config{SnapshotPath: path, MaxBytes: 1 << 20, Shards: 1}); err != nil {
-			t.Fatal(err)
+		for _, keep := range []bool{false, true} { // the second load finds no file, which is also a path
+			if _, err := New(Config{SnapshotPath: path, MaxBytes: 1 << 20, Shards: 1, SnapshotKeepFreshness: keep}); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, b, 0o600); err != nil {
+				t.Fatal(err)
+			}
 		}
 	})
 }

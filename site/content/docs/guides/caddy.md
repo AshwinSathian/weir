@@ -26,7 +26,8 @@ Every key is optional except `name`. Unset keys take the engine default from the
 |---|---|
 | `name` | Required. 1 to 64 characters of `A-Z a-z 0-9 . _ -`. Store identity across reloads, metrics label, admin URL segment, snapshot file name |
 | `max_bytes` | Memory store size, for example `512MiB`. At least 160 MiB when set. Unset: sized from `GOMEMLIMIT` |
-| `snapshot_dir` | Absolute directory for the snapshot file. Unset: every restart is a cold cache |
+| `snapshot_dir` | Absolute directory for the snapshot file. Unset: every restart is a cold cache. Set: entries come back, and each is checked with the origin on first use |
+| `snapshot_keep_fresh` | With `snapshot_dir`: entries come back as fresh as they were, so a restart costs the origin nothing. A purge sent while Caddy was down is not applied to them; purge again after a restart if one may have been missed |
 | `multi_host` | Set it when the site serves more than one host. Turns on the per-host limiter cap and store quota at 25% |
 | `store valkey { ... }` | Shared store for several nodes: `addrs`, `username`, `password`, `tls`, `cluster`, `prefix` |
 | `key { ... }` | `query_drop`, `query_keep`, `query_sort`, `normalize_path`, `headers`, `cookies`, `accept_encoding` |
