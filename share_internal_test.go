@@ -23,8 +23,12 @@ type closeCount struct {
 func (c *closeCount) Close() error { c.closed.Add(1); return nil }
 
 func newTestShare(body []byte, window int64, waiters int) (*sharedStream, *closeCount) {
+	return newTestShareResume(body, window, waiters, nil)
+}
+
+func newTestShareResume(body []byte, window int64, waiters int, resume resumeFunc) (*sharedStream, *closeCount) {
 	src := &closeCount{Reader: bytes.NewReader(body)}
-	s := newSharedStream(&Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: src}, http.Header{}, nil, store.Key{}, window)
+	s := newSharedStream(&Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: src}, http.Header{}, nil, store.Key{}, window, resume)
 	s.setPending(waiters)
 	return s, src
 }
@@ -52,7 +56,7 @@ func TestSharedStreamReadersGetWholeBody(t *testing.T) {
 					n, err := r.Read(p)
 					got.Write(p[:n])
 					s.mu.Lock()
-					maxHeld.Store(max(maxHeld.Load(), int64(len(s.buf))))
+					maxHeld.Store(max(maxHeld.Load(), int64(cap(s.ring)), s.end-s.base))
 					s.mu.Unlock()
 					if errors.Is(err, io.EOF) {
 						break
@@ -77,9 +81,9 @@ func TestSharedStreamReadersGetWholeBody(t *testing.T) {
 	})
 }
 
-// FR-COA-10: a reader that falls a full window behind for shareLagGrace is
-// cut off, and the others finish. Without the cut one client that stops
-// reading would hold every other client of the object.
+// FR-COA-10: a reader that holds the window full for shareLagGrace is moved
+// off, and with no way to resume it is cut off; the others finish. Without
+// the cut one client that stops reading would hold every other client.
 func TestSharedStreamDetachesSlowReader(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		body := bytes.Repeat([]byte("x"), 1<<20)
@@ -162,8 +166,8 @@ func TestSharedStreamUnusedIsClosed(t *testing.T) {
 	}
 }
 
-// FR-COA-10, T-18: a reader that keeps the window full by taking a few
-// bytes at a time is cut off too; moving at all is not enough.
+// FR-COA-10, T-18: a reader that keeps the window full by taking a little at
+// a time is moved off too: the waits it causes add up.
 func TestSharedStreamDetachesDrippingReader(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		body := bytes.Repeat([]byte("x"), 1<<20)
@@ -188,5 +192,73 @@ func TestSharedStreamDetachesDrippingReader(t *testing.T) {
 		}
 		fast.Close()
 		drip.Close()
+	})
+}
+
+// FR-COA-10: the waits a steady but slow reader causes add up, so the fast
+// reader loses about shareLagGrace in total, not the slow reader's pace.
+func TestSharedStreamSlowSteadyReaderCostsOneGrace(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		body := bytes.Repeat([]byte("x"), 1<<20)
+		s, _ := newTestShare(body, 64<<10, 2)
+		fast, slow := s.attach(), s.attach()
+		exited := make(chan struct{})
+		go func() {
+			defer close(exited)
+			p := make([]byte, 32<<10)
+			for {
+				if _, err := slow.Read(p); err != nil {
+					return
+				}
+				time.Sleep(900 * time.Millisecond)
+			}
+		}()
+		start := time.Now()
+		if n, err := io.Copy(io.Discard, fast); err != nil || n != int64(len(body)) {
+			t.Fatalf("fast reader: %d bytes, %v", n, err)
+		}
+		if d := time.Since(start); d > 2*shareLagGrace {
+			t.Fatalf("fast reader took %v, want about one grace", d)
+		}
+		fast.Close()
+		slow.Close()
+		<-exited
+	})
+}
+
+// FR-COA-10: a reader moved off resumes from its own offset on a fetch of
+// its own and still gets every byte, in order.
+func TestSharedStreamMovedOffReaderResumes(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		body := make([]byte, 1<<20)
+		for i := range body {
+			body[i] = byte(i % 251)
+		}
+		var resumedAt atomic.Int64
+		resumedAt.Store(-1)
+		resume := func(off int64) (io.ReadCloser, error) {
+			resumedAt.Store(off)
+			return io.NopCloser(bytes.NewReader(body[off:])), nil
+		}
+		s, _ := newTestShareResume(body, 64<<10, 2, resume)
+		fast, slow := s.attach(), s.attach()
+		var got bytes.Buffer
+		p := make([]byte, 1000)
+		n, _ := slow.Read(p) // a little, then it stalls
+		got.Write(p[:n])
+		if m, err := io.Copy(io.Discard, fast); err != nil || m != int64(len(body)) {
+			t.Fatalf("fast reader: %d bytes, %v", m, err)
+		}
+		if _, err := io.Copy(&got, slow); err != nil {
+			t.Fatalf("slow reader: %v", err)
+		}
+		if !bytes.Equal(got.Bytes(), body) {
+			t.Fatalf("slow reader got %d bytes, not the body", got.Len())
+		}
+		if resumedAt.Load() != int64(n) {
+			t.Fatalf("resumed at %d, want %d", resumedAt.Load(), n)
+		}
+		fast.Close()
+		slow.Close()
 	})
 }

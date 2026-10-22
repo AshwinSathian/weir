@@ -1,11 +1,16 @@
 package weir_test
 
 import (
+	"bytes"
+	"context"
+	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"sync/atomic"
 	"testing"
 	"testing/synctest"
+	"time"
 
 	"github.com/AshwinSathian/weir"
 	"github.com/AshwinSathian/weir/internal/testorigin"
@@ -184,6 +189,124 @@ func TestSharedStreamStripsSetCookieForFollowers(t *testing.T) {
 			if !r.collapsed && r.cookie != "session=creator" {
 				t.Fatalf("the creator lost its Set-Cookie: %q", r.cookie)
 			}
+		}
+	})
+}
+
+// closeFlagBody is an origin body that records whether it was closed.
+type closeFlagBody struct {
+	io.Reader
+	closed *atomic.Bool
+}
+
+func (b closeFlagBody) Close() error { b.closed.Store(true); return nil }
+
+// FR-COA-10: a warm request that joins the flight takes itself out of the
+// count, so when the only client closes its body unread the origin body is
+// closed too, not held for a reader that will never come.
+func TestSharedStreamWarmJoinerDoesNotHoldBody(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		gate := make(chan struct{})
+		var closed atomic.Bool
+		o := weir.OriginFunc(func(context.Context, *weir.Request) (*weir.Response, error) {
+			<-gate
+			return &weir.Response{StatusCode: http.StatusOK, Header: http.Header{"Cache-Control": {"max-age=60"}},
+				Body: closeFlagBody{io.LimitReader(zeros{}, 3<<20), &closed}}, nil
+		})
+		e := newEngine(t, cacheCfg)
+		defer closeEngine(t, e)
+		got := make(chan *weir.Response, 1)
+		go func() {
+			resp, err := e.Serve(t.Context(), getReq("/big"), o)
+			if err != nil {
+				t.Error(err)
+			}
+			got <- resp
+		}()
+		synctest.Wait()
+		warmed := make(chan struct{})
+		go func() {
+			defer close(warmed)
+			_, _ = e.Warm(t.Context(), slices.Values([]*weir.Request{getReq("/big")}), o)
+		}()
+		synctest.Wait()
+		close(gate)
+		resp := <-got
+		<-warmed
+		resp.Body.Close()
+		synctest.Wait()
+		if !closed.Load() {
+			t.Fatal("origin body still open after the only reader closed")
+		}
+	})
+}
+
+// FR-COA-10: a slow client moved off a shared stream continues on a range
+// request of its own when the origin offers byte ranges and a strong
+// entity-tag, and gets the whole body; the fast client is not held.
+func TestSharedStreamSlowClientResumesWithRange(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		const size = 4 << 20
+		body := make([]byte, size)
+		for i := range body {
+			body[i] = byte(i % 251)
+		}
+		gate := make(chan struct{})
+		var full, ranged atomic.Int32
+		o := weir.OriginFunc(func(_ context.Context, r *weir.Request) (*weir.Response, error) {
+			h := http.Header{"Cache-Control": {"max-age=60"}, "Etag": {`"v1"`}, "Accept-Ranges": {"bytes"}}
+			if rg := r.Header.Get("Range"); rg != "" {
+				ranged.Add(1)
+				if r.Header.Get("If-Range") != `"v1"` {
+					t.Errorf("resume without If-Range: %v", r.Header)
+				}
+				var off int
+				if _, err := fmt.Sscanf(rg, "bytes=%d-", &off); err != nil {
+					t.Errorf("Range %q: %v", rg, err)
+				}
+				h.Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", off, size-1, size))
+				return &weir.Response{StatusCode: http.StatusPartialContent, Header: h, Body: io.NopCloser(bytes.NewReader(body[off:]))}, nil
+			}
+			full.Add(1)
+			<-gate
+			return &weir.Response{StatusCode: http.StatusOK, Header: h, Body: io.NopCloser(bytes.NewReader(body))}, nil
+		})
+		e := newEngine(t, cacheCfg)
+		defer closeEngine(t, e)
+		resps := make(chan *weir.Response, 2)
+		for range 2 {
+			go func() {
+				resp, err := e.Serve(t.Context(), getReq("/big"), o)
+				if err != nil {
+					t.Error(err)
+				}
+				resps <- resp
+			}()
+		}
+		synctest.Wait()
+		close(gate)
+		a, b := <-resps, <-resps
+		var slowGot bytes.Buffer
+		p := make([]byte, 4096)
+		n, _ := b.Body.Read(p) // the slow client reads a little, then stalls
+		slowGot.Write(p[:n])
+		start := time.Now()
+		if m, err := io.Copy(io.Discard, a.Body); err != nil || m != size {
+			t.Fatalf("fast client: %d bytes, %v", m, err)
+		}
+		if d := time.Since(start); d > 2*time.Second {
+			t.Fatalf("fast client held %v by the slow one", d)
+		}
+		if _, err := io.Copy(&slowGot, b.Body); err != nil {
+			t.Fatalf("slow client: %v", err)
+		}
+		if !bytes.Equal(slowGot.Bytes(), body) {
+			t.Fatalf("slow client got %d bytes, not the body", slowGot.Len())
+		}
+		a.Body.Close()
+		b.Body.Close()
+		if full.Load() != 1 || ranged.Load() != 1 {
+			t.Fatalf("origin: %d full, %d ranged; want 1 and 1", full.Load(), ranged.Load())
 		}
 	})
 }

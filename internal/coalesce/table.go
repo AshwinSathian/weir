@@ -50,7 +50,8 @@ type Flight struct {
 }
 
 // Join returns the joinable flight for k, or creates one and reports
-// created. A flight at least maxAge old is aged (FR-COA-3): it keeps
+// created. Every Join counts a request that takes the result: it must read
+// Result after Done, or call Leave (CreatorGone for a creator). A flight at least maxAge old is aged (FR-COA-3): it keeps
 // running but is replaced in the table and no longer joined.
 func (t *Table) Join(k store.Key, now time.Time, maxAge time.Duration) (f *Flight, created bool) {
 	sh := &t.shards[k[0]&63]

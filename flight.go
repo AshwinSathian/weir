@@ -8,6 +8,8 @@ import (
 	"io"
 	"maps"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/AshwinSathian/weir/internal/coalesce"
@@ -283,7 +285,8 @@ func (e *Engine) runFlight(bg, reqCtx context.Context, f *coalesce.Flight, sp *f
 		// out means a waiter may have asked after it, so nobody shares.
 		if fr.shareable && !e.purgedSince(ctx, &store.Entry{Tags: fr.shareTags, RequestTime: fr.reqTime}) {
 			vk := keys.VariantKey(sp.c.Primary, fr.shareVary, sp.c.Forwarded.Header)
-			fr.share = newSharedStream(fr.resp, storedHeader(fr.resp.Header, e.cfg.Storable.StripSetCookie), fr.shareVary, vk, e.cfg.Storable.MaxObjectBytes)
+			fr.share = newSharedStream(fr.resp, storedHeader(fr.resp.Header, e.cfg.Storable.StripSetCookie), fr.shareVary, vk,
+				e.cfg.Storable.MaxObjectBytes, e.resumer(bg, reqCtx, sp.c, origin, fr.resp.Header))
 		}
 	}
 }
@@ -316,6 +319,38 @@ func (e *Engine) leaveFlight(f *coalesce.Flight) {
 		case fr.live() && f.AbandonStream():
 			closeBody(fr.resp)
 		}
+	}
+}
+
+// resumer returns how a reader moved off a shared stream fetches the rest of
+// the body on its own (FR-COA-10): a range request from its offset with
+// If-Range, through fetch like every origin call (P3). Nil unless the origin
+// advertised byte ranges and gave a strong entity-tag, which is what makes
+// "the rest of the same body" checkable; the reader is cut off then. The
+// fetch takes the creator context's values and ends at Close (FR-COA-9).
+func (e *Engine) resumer(bg, reqCtx context.Context, c *keys.Classified, origin Origin, h http.Header) resumeFunc {
+	etag := h.Get("Etag")
+	if !strings.Contains(strings.ToLower(h.Get("Accept-Ranges")), "bytes") || etag == "" || strings.HasPrefix(etag, "W/") {
+		return nil
+	}
+	return func(off int64) (io.ReadCloser, error) {
+		ctx, cancel := context.WithCancel(context.WithoutCancel(reqCtx))
+		stop := context.AfterFunc(bg, cancel)
+		end := func() { stop(); cancel() }
+		res := e.fetch(ctx, c.AsResume(off, etag), origin, limiter.Foreground, fetchOpts{}, nil, nil)
+		if res.err != nil {
+			end()
+			return nil, res.err
+		}
+		// Anything but the rest of this body (a 200 after If-Range failed, a
+		// range starting elsewhere) would be spliced onto bytes already sent.
+		if res.resp.StatusCode != http.StatusPartialContent ||
+			!strings.HasPrefix(res.resp.Header.Get("Content-Range"), "bytes "+strconv.FormatInt(off, 10)+"-") {
+			closeBody(res.resp)
+			end()
+			return nil, errSharedTooSlow
+		}
+		return &cancelOnClose{ReadCloser: res.resp.Body, cancel: end}, nil
 	}
 }
 

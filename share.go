@@ -10,30 +10,30 @@ import (
 	"github.com/AshwinSathian/weir/store"
 )
 
-// shareLagGrace is how long the readers of a shared stream wait on a full
-// window before they judge the slowest (FR-COA-10). Short next to
-// StreamIdle, so one slow or hostile client stalls the others for about a
-// second at a time.
+// shareLagGrace is the total time the readers of a shared stream may spend
+// waiting for the slowest one before it is moved off the stream (FR-COA-10).
+// The waits add up across pauses, so a client that drips a few bytes at a
+// time cannot hold the others longer than one that stops.
 const shareLagGrace = time.Second
 
-// shareMinProgress is the share of the window the slowest readers must take
-// in each shareLagGrace while the others wait: an eighth of 1 MiB per second,
-// about 1 Mbit/s. A client that drips one byte at a time would otherwise
-// hold every other reader of the object (T-18).
-const shareMinProgress = 8
-
-// errSharedTooSlow ends the read of a client that fell a full window behind
-// the others on a shared stream for shareLagGrace (FR-COA-10). Its
+// errSharedTooSlow ends the read of a client that was moved off a shared
+// stream and could not resume on a fetch of its own (FR-COA-10). Its
 // connection is cut, as with a stream idle timeout (FR-TMO-2).
 var errSharedTooSlow = errors.New("weir: client too slow for a shared stream")
 
+// resumeFunc fetches the rest of the body from off, on a request of its own,
+// for a reader moved off the stream. Nil when the response cannot be resumed.
+type resumeFunc func(off int64) (io.ReadCloser, error)
+
 // sharedStream gives one over-size origin body to every request that waited
-// on its flight (FR-COA-10, T-18). Readers pull: whichever reader needs the
-// next bytes reads the origin, at most window bytes ahead of the slowest
-// reader, so memory per stream is bounded by window (Storable.MaxObjectBytes,
-// the same amount a buffered fetch holds before it finds a body over-size).
-// The origin body is closed when the last reader closes, or at once when no
-// counted request takes it.
+// on its flight (FR-COA-10, T-18). Readers pull: the reader that needs bytes
+// past what was read reads the origin, at most window bytes ahead of the
+// slowest reader, into a ring of exactly window bytes. When the faster
+// readers have waited shareLagGrace in total on a full window, the slowest
+// readers are moved off: each resumes the body from its offset on a range
+// request of its own when the response allows it, or is cut off. The origin
+// body is closed when the last reader closes, or at once when no counted
+// request takes it.
 type sharedStream struct {
 	src    io.ReadCloser
 	status int
@@ -45,26 +45,29 @@ type sharedStream struct {
 	vary   []string  // the response's Vary names; a follower shares only its own variant (FR-KEY-7)
 	vk     store.Key // the variant key the response answers
 	window int64
+	resume resumeFunc
 
 	mu      sync.Mutex
 	cond    sync.Cond
-	buf     []byte // bytes [base, end) of the body
-	base    int64
-	end     int64
-	err     error // how src ended: io.EOF, or the read error
-	reading bool  // a reader is in src.Read
+	ring    []byte // window bytes, allocated on the first read
+	base    int64  // the oldest offset the ring still holds
+	end     int64  // bytes read from src
+	err     error  // how src ended: io.EOF, or the read error
+	reading bool   // a reader is in src.Read
 	// readers attached and not closed; bounded by the flight's waiter count,
 	// itself bounded by the limiter queue (04 §8.3).
-	readers map[*sharedReader]struct{}
-	pending int  // counted requests that have neither attached nor released
-	closed  bool // src was closed
-	lag     *time.Timer
-	tmp     []byte
+	readers   map[*sharedReader]struct{}
+	pending   int  // counted requests that have neither attached nor released
+	closed    bool // src was closed
+	waitSince time.Time
+	waited    time.Duration // time readers waited on a full window since the last move-off
+	wake      *time.Timer   // wakes waiting readers when the budget runs out; only broadcasts
+	tmp       []byte
 }
 
-func newSharedStream(resp *Response, shared http.Header, vary []string, vk store.Key, window int64) *sharedStream {
-	s := &sharedStream{src: resp.Body, status: resp.StatusCode, header: resp.Header, shared: shared, vary: vary, vk: vk, window: window,
-		readers: make(map[*sharedReader]struct{})}
+func newSharedStream(resp *Response, shared http.Header, vary []string, vk store.Key, window int64, resume resumeFunc) *sharedStream {
+	s := &sharedStream{src: resp.Body, status: resp.StatusCode, header: resp.Header, shared: shared, vary: vary, vk: vk,
+		window: window, resume: resume, readers: make(map[*sharedReader]struct{})}
 	s.cond.L = &s.mu
 	return s
 }
@@ -78,7 +81,7 @@ func (s *sharedStream) setPending(n int) {
 }
 
 // release is a counted request that will not read the stream: a HEAD, a
-// request for another variant, or one that left.
+// request for another variant, a warm or background joiner, or one that left.
 func (s *sharedStream) release() {
 	s.mu.Lock()
 	s.pending--
@@ -112,12 +115,13 @@ func (s *sharedStream) unlockAndMaybeClose() {
 	closeNow := !s.closed && s.pending <= 0 && len(s.readers) == 0
 	if closeNow {
 		s.closed = true
-		if s.lag != nil {
-			s.lag.Stop()
-			s.lag = nil
+		if s.wake != nil {
+			s.wake.Stop()
+			s.wake = nil
 		}
+		s.ring = nil
 	}
-	s.trim()
+	s.advance()
 	s.cond.Broadcast()
 	s.mu.Unlock()
 	if closeNow {
@@ -140,68 +144,64 @@ func (s *sharedStream) low() int64 {
 	return low
 }
 
-// trim drops the bytes every reader has read.
-func (s *sharedStream) trim() {
-	if l := s.low(); l > s.base {
-		s.buf = s.buf[l-s.base:]
-		s.base = l
-		if len(s.buf) == 0 {
-			s.buf = nil // let a drained window's array go
-		}
+// advance drops what every reader has read, and ends a wait on a full
+// window, adding it to the budget.
+func (s *sharedStream) advance() {
+	s.base = max(s.base, s.low())
+	if !s.waitSince.IsZero() && s.end-s.base < s.window {
+		s.waited += time.Since(s.waitSince)
+		s.waitSince = time.Time{}
 	}
 }
 
-// waitForSlow arms the lag timer when the window is full: after
-// shareLagGrace, if the window is still full, every reader that has not
-// moved shareMinProgress past where the slowest stood is detached.
-func (s *sharedStream) waitForSlow() {
-	if s.lag != nil {
-		return
-	}
-	mark := s.low()
-	s.lag = time.AfterFunc(shareLagGrace, func() {
-		s.mu.Lock()
-		s.lag = nil
-		need := mark + max(s.window/shareMinProgress, 1)
-		if s.end-s.low() >= s.window && s.low() < need {
-			s.pending = 0 // a request that has not attached in a second never will in time
-			for r := range s.readers {
-				if r.off < need {
-					r.detached = true
-					delete(s.readers, r)
-				}
-			}
+// moveOffSlowest takes the readers at the low offset off the stream: they
+// are what holds the window full. The budget starts again.
+func (s *sharedStream) moveOffSlowest() {
+	low := s.low()
+	s.pending = 0 // a request that has not attached by now never will in time
+	for r := range s.readers {
+		if r.off == low {
+			r.movedOff = true
+			delete(s.readers, r)
 		}
-		s.unlockAndMaybeClose()
-	})
+	}
+	s.waited, s.waitSince = 0, time.Time{}
+	s.advance()
 }
 
-// sharedReader is one request's view of a sharedStream.
+// sharedReader is one request's view of a sharedStream. After it is moved
+// off, own carries the rest of the body when it could resume.
 type sharedReader struct {
 	s        *sharedStream
 	off      int64
-	detached bool
+	movedOff bool
 	done     bool
+	own      io.ReadCloser
 }
 
 func (r *sharedReader) Read(p []byte) (int, error) {
 	if len(p) == 0 {
 		return 0, nil
 	}
+	if r.own != nil {
+		n, err := r.own.Read(p)
+		r.off += int64(n)
+		return n, err
+	}
 	s := r.s
 	s.mu.Lock()
 	for {
 		switch {
-		case r.detached:
-			s.mu.Unlock()
-			return 0, errSharedTooSlow
+		case r.movedOff:
+			s.unlockAndMaybeClose()
+			return r.resumeOwn(p)
 		case r.done:
 			s.mu.Unlock()
 			return 0, io.ErrClosedPipe
 		case r.off < s.end:
-			n := copy(p, s.buf[r.off-s.base:])
+			n := s.copyOut(p, r.off)
 			r.off += int64(n)
-			s.trim()
+			s.advance()
 			s.cond.Broadcast()
 			s.mu.Unlock()
 			return n, nil
@@ -209,38 +209,80 @@ func (r *sharedReader) Read(p []byte) (int, error) {
 			err := s.err
 			s.mu.Unlock()
 			return 0, err
-		case !s.reading && s.end-s.low() < s.window:
+		case s.reading:
+			s.cond.Wait()
+		case s.end-s.low() < s.window:
 			s.fill()
-		default:
-			if !s.reading {
-				s.waitForSlow()
+		default: // the window is full: the slowest reader holds everyone
+			now := time.Now()
+			if s.waitSince.IsZero() {
+				s.waitSince = now
+			}
+			left := shareLagGrace - s.waited - now.Sub(s.waitSince)
+			if left <= 0 {
+				s.moveOffSlowest()
+				s.cond.Broadcast()
+				continue
+			}
+			if s.wake == nil {
+				s.wake = time.AfterFunc(left, func() {
+					s.mu.Lock()
+					s.wake = nil
+					s.cond.Broadcast()
+					s.mu.Unlock()
+				})
 			}
 			s.cond.Wait()
 		}
 	}
 }
 
+// resumeOwn continues a reader that was moved off on a fetch of its own.
+func (r *sharedReader) resumeOwn(p []byte) (int, error) {
+	if r.s.resume == nil {
+		return 0, errSharedTooSlow
+	}
+	own, err := r.s.resume(r.off)
+	if err != nil {
+		return 0, errSharedTooSlow
+	}
+	r.own = own
+	return r.Read(p)
+}
+
+// copyOut copies bytes from offset off into p and returns how many.
+func (s *sharedStream) copyOut(p []byte, off int64) int {
+	n := int(min(int64(len(p)), s.end-off))
+	i := int(off % s.window)
+	first := min(n, len(s.ring)-i)
+	copy(p, s.ring[i:i+first])
+	copy(p[first:n], s.ring[:n-first])
+	return n
+}
+
 // fill reads the next bytes from src for every reader. Called with mu held;
 // the read itself runs unlocked, and no other reader starts one meanwhile.
 func (s *sharedStream) fill() {
 	s.reading = true
-	room := s.window - (s.end - s.low())
-	if s.tmp == nil {
-		s.tmp = make([]byte, 32<<10)
+	if s.ring == nil {
+		s.ring = make([]byte, s.window)
+		s.tmp = make([]byte, min(32<<10, s.window))
 	}
+	room := s.window - (s.end - s.low())
 	buf := s.tmp[:min(int64(len(s.tmp)), room)]
 	s.mu.Unlock()
 	n, err := s.src.Read(buf)
 	s.mu.Lock()
 	s.reading = false
-	s.buf = append(s.buf, buf[:n]...)
+	if s.ring != nil { // nil: closed while the read ran
+		i := int(s.end % s.window)
+		first := min(n, len(s.ring)-i)
+		copy(s.ring[i:], buf[:first])
+		copy(s.ring, buf[first:n])
+	}
 	s.end += int64(n)
 	if err != nil {
 		s.err = err
-	}
-	if s.lag != nil && s.end-s.low() < s.window {
-		s.lag.Stop()
-		s.lag = nil
 	}
 	s.cond.Broadcast()
 }
@@ -255,7 +297,11 @@ func (r *sharedReader) Close() error {
 	}
 	r.done = true
 	delete(s.readers, r)
+	own := r.own
 	s.unlockAndMaybeClose()
+	if own != nil {
+		return own.Close()
+	}
 	return nil
 }
 
@@ -271,6 +317,9 @@ func (r *sharedReader) StreamIdle() time.Duration {
 // Trailer returns the origin's trailers once this reader has seen the end
 // (FR-FWD-8).
 func (r *sharedReader) Trailer() http.Header {
+	if r.own != nil {
+		return trailerOf(r.own)
+	}
 	s := r.s
 	s.mu.Lock()
 	ended := r.off == s.end && errors.Is(s.err, io.EOF)

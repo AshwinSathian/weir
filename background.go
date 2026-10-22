@@ -55,6 +55,7 @@ func (e *Engine) backgroundRefresh(ctx context.Context, c *keys.Classified, lk l
 func (e *Engine) background(ctx context.Context, c *keys.Classified, lk lookupResult, origin Origin, rangeFill bool) {
 	f, created := e.flights.Join(lk.ck, time.Now(), e.cfg.Coalesce.LeaderMaxAge)
 	if !created {
+		leaveAsFollower(f) // Join counted it; it never takes the result (FR-COA-10)
 		return
 	}
 	f.CreatorGone() // no requester claims an over-size stream; runFlight closes it
@@ -147,6 +148,7 @@ func (e *Engine) owedRefresh(ctx context.Context, c *keys.Classified, lk lookupR
 		}
 		f, created := e.flights.Join(cur.ck, now, e.cfg.Coalesce.LeaderMaxAge)
 		if !created { // someone is fetching it now
+			leaveAsFollower(f) // Join counted it; it never takes the result (FR-COA-10)
 			permit.Release()
 			return
 		}
