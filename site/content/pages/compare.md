@@ -47,7 +47,7 @@ nginx has `proxy_cache_lock`: "only one request at a time will be allowed to pop
 
 **What nginx does that Weir does not.** It is a full web server and proxy, and caching is one module among many that you may already rely on.
 
-What Weir does that the module page does not describe: the cache lock is per cache element, and the page documents no randomization of cache lifetimes, no circuit breaker and no global limit on concurrent cache-miss requests to the upstream. The default cache key is built from scheme, proxy host and request URI; which request headers reach the upstream is a separate setting you manage. `proxy_cache_purge` is documented as part of the commercial subscription.
+What Weir does that the module page does not describe: the cache lock is per cache element, and the page documents no randomization of cache lifetimes, no circuit breaker and no global limit on concurrent cache-miss requests to the upstream. The upstream module's `server ... max_conns=` caps connections per upstream server, which bounds cache misses as well, but without `queue` (part of the commercial version) it queues nothing and answers the excess with 502. The default cache key is built from scheme, proxy host and request URI; which request headers reach the upstream is a separate setting you manage. `proxy_cache_purge` is documented as part of the commercial subscription.
 
 Choose nginx when it is already your proxy and same-key locking is the problem you have. Choose Weir when the origin needs protecting across keys, or when you want the forwarded request tied to the key.
 

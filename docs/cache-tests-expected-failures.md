@@ -15,7 +15,7 @@ Passing everything means nothing (the suite's own words). Rows with a requiremen
 |---|---|---|
 | `ccreq-ma0`, `ccreq-ma1`, `ccreq-magreaterage`, `ccreq-max-stale`, `ccreq-max-stale-age`, `ccreq-min-fresh`, `ccreq-min-fresh-age`, `ccreq-no-cache`, `ccreq-no-cache-etag`, `ccreq-no-cache-lm` | Client request directives that force revalidation are ignored unless `Client.HonorRevalidation` is set | D5, FR-SRV-8 |
 | `ccreq-no-store` | Request `no-store` stops the response being stored; it does not bypass a stored entry | FR-SRV-7 |
-| `stale-503`, `stale-close` | Stale is served only when the origin permits it (`stale-if-error`), and only for the error conditions in FR-STL-2 (a 503 or a closed connection with `max-age=2` alone is not one) | D6, FR-STL-2 |
+| `stale-503`, `stale-close` | Stale is served only when the origin permits it (`stale-if-error`), and only for the error conditions Weir counts as errors (a 503 or a closed connection with `max-age=2` alone is not one) | D6, FR-STL-2 |
 | `stale-warning-become`, `stale-warning-stored` | The setup needs a stale reuse the origin did not permit; `Warning` is also obsolete in RFC 9111 | D6, D7 |
 | `status-299-fresh`, `status-303-fresh`, `status-400-fresh`, `status-499-fresh`, `status-500-fresh`, `status-502-fresh`, `status-503-fresh`, `status-504-fresh`, `status-599-fresh`, `heuristic-599-cached` | Only the statuses in `Storable.Statuses` are stored | FR-STO-2, D39 |
 | `method-POST`, `head-200-freshness-update`, `head-200-retain`, `head-200-update`, `head-410-update`, `head-writethrough` | Only a forwarded `GET` response is stored, so a `POST` or `HEAD` response never updates an entry | FR-STO-1 |
@@ -35,7 +35,7 @@ Passing everything means nothing (the suite's own words). Rows with a requiremen
 | `interim-102`, `interim-103`, `interim-no-header-reuse`, `interim-not-cached` | 1xx responses are not relayed to the client (the final response is cached correctly). Relaying is not a Phase 1 goal | D43 |
 | `headers-store-Transfer-Encoding` | The suite sends an invalid `Transfer-Encoding` value and Go's HTTP client rejects the response, so Weir answers 502 for a malformed origin response | FR-FWD-7, `ErrOrigin` |
 | `304-etag-update-response-ETag` | The suite reports a retry (`↻`), which its authors say needs manual interpretation; nothing is asserted | no assertion to decide (suite limitation) |
-| `conditional-lm-fresh-no-lm` | The suite sends `If-Modified-Since` 3000 s before the response's `Date` and the response has no `Last-Modified`. FR-SRV-2 compares the stored `Date`, which is 3000 s later than the client's `If-Modified-Since`, so the resource counts as modified and the answer is 200 (RFC 9110 §13.1.3). The test expects 304 | FR-SRV-2 |
+| `conditional-lm-fresh-no-lm` | The suite sends `If-Modified-Since` 3000 s before the response's `Date` and the response has no `Last-Modified`. Weir compares the stored `Date`, which is 3000 s later than the client's `If-Modified-Since`, so the resource counts as modified and the answer is 200 (RFC 9110 §13.1.3). The test expects 304 | FR-SRV-2 |
 | `pragma-response-no-cache-heuristic` | Go's `net/http` client rewrites a response `Pragma: no-cache` without `Cache-Control` into `Cache-Control: no-cache` before Weir sees it (`fixPragmaCacheControl`), so the engine reads a real `no-cache` and validates. The error is on the safe side, and telling the two apart would mean parsing responses outside the standard library | FR-FRS-3, RFC 9111 §5.4 |
 
 ## Targeted fields and partial content

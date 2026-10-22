@@ -70,7 +70,7 @@ export function Footer() {
     <footer className="site-footer">
       <div className="wrap">
         <div>
-          Weir {SHOWN_VERSION}. Code and documentation under{' '}
+          Weir {SHOWN_VERSION}, by <Link href="/about/">Ashwin Sathian</Link>. Code and documentation under{' '}
           <a href={`${REPO}/blob/main/LICENSE`}>Apache-2.0</a>. No cookies, no analytics.
         </div>
         <nav aria-label="Footer">

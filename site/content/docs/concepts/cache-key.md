@@ -20,7 +20,7 @@ On a `GET` or `HEAD` that is not bypassed, the origin receives only (FR-FWD-1):
 - `Authorization`, `Cache-Control` and `Pragma`, which HTTP requires and which get their own handling;
 - the trace headers `traceparent`, `tracestate` and `X-Request-Id`, validated and bounded.
 
-Everything else is dropped before the fetch. An attacker can send `X-Forwarded-Host: evil.example` all day; the origin never sees it, so it cannot reflect it into a response that gets stored. The same applies to the path and query: normalization rewrites the request, never only the key (FR-FWD-5). This is invariant INV-1, and a fuzz target (`FuzzForwardEqualsKey`) checks it on generated requests.
+Everything else is dropped before the fetch. An attacker can send `X-Forwarded-Host: evil.example` all day; the origin never sees it, so it cannot reflect it into a response that gets stored. The same applies to the path and query: normalization rewrites the request, never only the key (FR-FWD-5). This is the cache's central invariant, and a fuzz target (`FuzzForwardEqualsKey`) checks it on generated requests.
 
 ## What this costs you
 

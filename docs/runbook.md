@@ -53,7 +53,7 @@ The breaker counts origin-health failures over a 10 s window (500 and 4xx are no
 
 If entries have no stale-if-error window and you want to ride out the outage: `Engine.SetMode(weir.ModeStaleOnError, ttl)` serves any stored entry stale (up to 24 h past expiry, but see the retention note below), except hard-purged, invalidated and `must-revalidate`, `proxy-revalidate`, `no-cache` or `s-maxage` ones (an `s-maxage` entry with an explicit `stale-if-error` is served within that window). `ttl` is required, at most 24 h, and the mode reverts by itself. Entries are kept only for their stale windows plus `Freshness.Keep` (5 min) after expiry, and only when they carry `ETag` or `Last-Modified`, so the practical reach is minutes unless you raised `Freshness.Keep` or `DefaultStaleIfError` before the incident. Modes are not persisted across restarts. Set it from an admin handler, not from request data.
 
-A slow origin that still answers costs one fetch per key: requests for a key wait for the fetch in progress up to `Timeouts.Origin` plus `Limiter.MaxQueueWait` (v1.1; before it they gave up at `Coalesce.FollowerMaxWait`, fetched for themselves and were mostly shed). If your clients give up sooner than that, lower `Timeouts.Origin`, or grant stale-if-error so they get the stale copy at `FollowerMaxWait`.
+A slow origin that still answers costs one fetch per key: requests for a key wait for the fetch in progress up to `Timeouts.Origin` plus twice `Limiter.MaxQueueWait` (v1.1; before it they gave up at `Coalesce.FollowerMaxWait`, fetched for themselves and were mostly shed). If your clients give up sooner than that, lower `Timeouts.Origin`, or grant stale-if-error so they get the stale copy at `FollowerMaxWait`.
 
 ### 4.2 The cache itself is suspect
 
@@ -87,7 +87,7 @@ The log line `weir: miss-rate anomaly` and `weir_miss_rate_anomalies_total` mean
 
 ### 4.5 Memory
 
-`weir_store_bytes` should sit near the configured size once the cache is warm. If the process nears `GOMEMLIMIT`, look at `Storable.MaxObjectBytes` (1 MiB, headers included) and at large streamed bodies before you blame the cache: buffering for storage is bounded by `MaxConcurrent × MaxObjectBytes` (NFR-4, 64 MiB at defaults). A stream that exceeds `MaxObjectBytes` is not stored, but it holds up to `MaxObjectBytes + 1` bytes of read-ahead after its fetch slot is released, until the client reads it. Many slow clients on large responses therefore cost about one `MaxObjectBytes` each (1 MiB at defaults), beyond the bound above. The hit path's GC cost at 1M entries is in [benchmarks.md](benchmarks.md).
+`weir_store_bytes` should sit near the configured size once the cache is warm. If the process nears `GOMEMLIMIT`, look at `Storable.MaxObjectBytes` (1 MiB, headers included) and at large streamed bodies before you blame the cache: buffering for storage is bounded by `MaxConcurrent × MaxObjectBytes` (64 MiB at defaults). A stream that exceeds `MaxObjectBytes` is not stored, but it holds up to `MaxObjectBytes + 1` bytes of read-ahead after its fetch slot is released, until the client reads it. Many slow clients on large responses therefore cost about one `MaxObjectBytes` each (1 MiB at defaults), beyond the bound above. The hit path's GC cost at 1M entries is in [benchmarks.md](benchmarks.md).
 
 ### 4.6 A remote store fails
 

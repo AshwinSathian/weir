@@ -53,12 +53,14 @@ The first request went to the origin and was stored. The second, 13 seconds late
 
 ## What you get
 
-- Coalescing. Concurrent requests for one key share one origin fetch, with a bound on how long followers wait and on how long a slow leader keeps the flight (FR-COA-1). [Coalescing](https://weir.ashwinsathian.com/docs/concepts/coalescing/)
-- Jitter and early refresh. Each lifetime is shortened by up to 10%, and a hot entry is refreshed in the background shortly before it expires (FR-FRS-5, FR-FRS-6). [Freshness and staleness](https://weir.ashwinsathian.com/docs/concepts/freshness-and-staleness/)
-- An origin budget. Every fetch holds a slot from a limiter (64 by default) with a per-path share, so 10,000 keys expiring at once reach the origin 64 at a time (FR-LIM-1). [Origin protection](https://weir.ashwinsathian.com/docs/concepts/origin-protection/)
-- Stale serving and a breaker. Stale-while-revalidate, stale-if-error and a circuit breaker turn an origin outage into stale content or a fast 503 (FR-STL-1, FR-CB-1). Same page.
-- Purges that do not stampede. A soft purge marks entries stale and lets them revalidate through the limiter; a hard purge removes them. By URL, by RFC 9875 group, or everything (FR-PRG-1). [Purging](https://weir.ashwinsathian.com/docs/concepts/purging/)
-- A cache key that is a security boundary. On a cacheable request the origin receives only keyed, allowed and protocol headers (FR-FWD-1, INV-1). [The cache key](https://weir.ashwinsathian.com/docs/concepts/cache-key/)
+- Coalescing. Concurrent requests for one key share one origin fetch, with a bound on how long followers wait and on how long a slow leader keeps the flight. [Coalescing](https://weir.ashwinsathian.com/docs/concepts/coalescing/)
+- Jitter and early refresh. Each lifetime is shortened by up to 10%, and a hot entry is refreshed in the background shortly before it expires. [Freshness and staleness](https://weir.ashwinsathian.com/docs/concepts/freshness-and-staleness/)
+- An origin budget. Every fetch holds a slot from a limiter (64 by default) with a per-path share, so 10,000 keys expiring at once reach the origin 64 at a time. [Origin protection](https://weir.ashwinsathian.com/docs/concepts/origin-protection/)
+- Stale serving and a breaker. Stale-while-revalidate, stale-if-error and a circuit breaker turn an origin outage into stale content or a fast 503. Same page.
+- Purges that do not stampede. A soft purge marks entries stale and lets them revalidate through the limiter; a hard purge removes them. By URL, by RFC 9875 group, or everything. [Purging](https://weir.ashwinsathian.com/docs/concepts/purging/)
+- A cache key that is a security boundary. On a cacheable request the origin receives only keyed, allowed and protocol headers. [The cache key](https://weir.ashwinsathian.com/docs/concepts/cache-key/)
+- Large objects fetched once. Clients waiting for the same object over the size limit read one origin download together, and a slow client cannot hold the others. [Coalescing](https://weir.ashwinsathian.com/docs/concepts/coalescing/)
+- Several nodes, one fetch. With the Valkey store, nodes can fetch a missing key once among them and keep an in-process copy in front of the server. [Stores](https://weir.ashwinsathian.com/docs/concepts/stores/)
 
 ## What Weir is not
 
@@ -81,15 +83,15 @@ The minimum is Go 1.26.0, and CI tests Go 1.26 and 1.27, the two supported relea
 
 Strict forwarding. If your origin reads `Accept-Language`, a device header or a cookie to build a page, it will not see it until you say so. Key it (`Key.Headers`, `Key.Cookies`: one entry per value), allow it (`Forward.Allow`: the origin sees it, the key does not, so only for a header that cannot change the response), or lose it. For the first five minutes Weir counts the cookie names it dropped and logs the common ones once.
 
-Settings that take a protection back. `Forward.Mode: weir.ForwardAll` returns every header to the origin unkeyed. `Storable.StripSetCookie` stores responses that set cookies. `Freshness.DefaultStaleIfError` serves stale content the origin never allowed. Each is right for some site, and each returns a risk the defaults remove. The [tuning page](https://weir.ashwinsathian.com/docs/tuning/) lists all of them with what you give up and the threat ID.
+Settings that take a protection back. `Forward.Mode: weir.ForwardAll` returns every header to the origin unkeyed. `Storable.StripSetCookie` stores responses that set cookies. `Freshness.DefaultStaleIfError` serves stale content the origin never allowed. Each is right for some site, and each returns a risk the defaults remove. The [tuning page](https://weir.ashwinsathian.com/docs/tuning/) lists all of them with what you give up.
 
 Set `GOMEMLIMIT` (the memory store takes 40% of it) and read the [production guide](https://weir.ashwinsathian.com/docs/guides/production/) first.
 
 ## Status and stability
 
-Everything planned for v1 is implemented: the engine, single-range responses, targeted cache-control (RFC 9213), snapshots across restarts, the Caddy module, the Valkey store and experiment-aware keys. A pointer-light memory layout (M16-02) is deferred until a deployment exceeds the GC budget at 1M entries.
+Everything planned for v1 is implemented: the engine, single-range responses, targeted cache-control (RFC 9213), snapshots across restarts, the Caddy module, the Valkey store and experiment-aware keys. A pointer-light memory layout is deferred until a deployment exceeds the GC budget at 1M entries.
 
-From `v1.0.0` the exported Go API of the root module, `store`, `store/memory`, `store/storetest`, `weirhttp` and `observe/prom` follows semantic versioning. So do the metric families and labels, the `Cache-Status` parameter names, the Caddyfile directives and the Caddy JSON field names. Free-text values (`detail` and `fwd` strings, `Event.Reason`) and event kinds may gain values in a minor release, so match on them with a default case. Construct structs with field names: fields can be added in a minor release. Defaults that protect (strict forwarding, `Vary` handling, stale serving) change only in a major release.
+From `v1.0.0` the exported Go API of the root module, `store`, `store/memory`, `store/storetest`, `weirhttp` and `observe/prom` follows semantic versioning. So do the metric families and labels, the `Cache-Status` parameter names, the Caddyfile directives and the Caddy JSON field names. Free-text values (`detail` and `fwd` strings, `Event.Reason`) and event kinds may gain values in a minor release, so match on them with a default case. Construct structs with field names: fields can be added in a minor release. Defaults that decide what is shared and how safely (strict forwarding, `Vary` handling, which responses are stored, how long stale content may be served) change only in a major release. Tuning defaults (limits, timeouts, breaker timing) may change in a minor release; the changelog lists each such change with the way back.
 
 ## Security
 

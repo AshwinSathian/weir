@@ -27,7 +27,7 @@ func main() {
 }
 ```
 
-Save it as `origin/main.go` and run `go run ./origin`.
+Save it as `origin.go` in an empty directory and run `go run origin.go`.
 
 ## 2. Put Weir in front
 
@@ -40,10 +40,10 @@ Save it as `origin/main.go` and run `go run ./origin`.
 go run github.com/AshwinSathian/weir/examples/weirproxy@{{version}} -listen :8080 -origin http://127.0.0.1:9000
 ```
 
-It logs one line and waits:
+It logs one line, after a timestamp, and waits:
 
 ```console
-weirproxy: :8080 -> http://127.0.0.1:9000
+2026/10/22 09:00:00 weirproxy: :8080 -> http://127.0.0.1:9000
 ```
 
 </section>
@@ -92,7 +92,7 @@ Content-Type: text/plain; charset=utf-8
 hello from the origin
 ```
 
-`fwd=uri-miss` says nothing was stored for this URL, so Weir forwarded the request. `stored` says the response is now in the cache. The origin's log shows one call. Ask again:
+The real response also carries a `Date` header, left out here. `fwd=uri-miss` says nothing was stored for this URL, so Weir forwarded the request. `stored` says the response is now in the cache. The origin's log shows one call. Ask again:
 
 ```console
 $ curl -si localhost:8080/
@@ -108,7 +108,7 @@ hello from the origin
 
 `hit` means the origin was not asked, and its log shows no new line. `Age` is how long ago the entry was fetched. `ttl` is how many seconds of freshness remain.
 
-Your `ttl` will not be exactly 60 minus `Age`. Here it is 43 where you might expect 47: Weir shortened this entry's lifetime by four seconds. That is jitter (FR-FRS-5), up to 10% by default, and it is the reason entries stored in the same second do not all expire in the same second. Every value the header can carry is in the [Cache-Status reference](/docs/reference/cache-status/).
+Your `ttl` will not be exactly 60 minus `Age`. Here it is 43 where you might expect 47: Weir shortened this entry's lifetime by four seconds. That is jitter, up to 10% by default, and it is the reason entries stored in the same second do not all expire in the same second. Every value the header can carry is in the [Cache-Status reference](/docs/reference/cache-status/).
 
 ## 4. See a stampede not happen
 
@@ -118,15 +118,15 @@ Ask for a URL nothing has cached yet, fifty times at once:
 seq 50 | xargs -P 50 -I{} curl -s -o /dev/null localhost:8080/cold
 ```
 
-The origin logs `origin call /cold` once. The other 49 requests joined the first one's fetch and got its response; their `Cache-Status` carries `collapsed`. That is [coalescing](/docs/concepts/coalescing/).
+The origin logs `origin call /cold` once. Requests that arrived while that fetch was on its way joined it and got its response, and their `Cache-Status` carries `collapsed`; requests that arrived after it was stored are plain hits. Against this local origin, which answers in well under a millisecond, most of the fifty are hits. Either way the origin was asked once. That is [coalescing](/docs/concepts/coalescing/).
 
 ## 5. Before real traffic
 
 Three things bite people who skip them:
 
 1. **Strict forwarding.** On a cacheable request the origin receives only the headers that are part of the cache key, plus a short fixed list. If your pages depend on `Accept-Language` or a cookie, the origin stops seeing it until you [key it or allow it](/docs/concepts/cache-key/).
-2. Set `GOMEMLIMIT`. The memory store takes 40% of it. Without it the store takes 256 MiB and logs a warning.
-3. Weir bounds what reaches the origin. It does not rate-limit clients, so a flood of distinct paths still needs a rate limiter in front (R-2).
+2. Set `GOMEMLIMIT`. The memory store takes 40% of it. Without it the store takes 256 MiB (the Caddy module logs a warning; a Go program logs one only if you set `Config.Logger`).
+3. Weir bounds what reaches the origin. It does not rate-limit clients, so a flood of distinct paths still needs a rate limiter in front.
 
 The [production checklist](/docs/guides/production/) has the rest.
 

@@ -20,7 +20,22 @@ export function Svg({ children, title, desc, w, h, id }: P) {
  * The home page figure. The shape is a schematic; the labelled numbers are
  * from the synchronized-expiry load scenario in docs/benchmarks.md.
  */
-export function Hydrograph() {
+export function Hydrograph({ slim = false }: { slim?: boolean }) {
+  if (slim) {
+    // A phone gets the same picture at a third of the width, so it keeps the
+    // shape and drops all but the two numbers that matter, at a legible size.
+    return (
+      <Svg id="hydro-s" w={360} h={230} title="Demand against origin load during a synchronized expiry" desc="Demand rises to a sharp peak as 10,000 entries expire within seconds; origin fetches in flight stay flat at the limit of 32.">
+        <line className="axis" x1="8" y1="180" x2="352" y2="180" />
+        <path className="f-water" d="M8 180 L8 168 C50 166 70 160 85 136 C98 112 102 52 116 50 C131 48 136 106 150 128 C161 144 172 148 186 148 L186 180 Z" />
+        <path className="ink" d="M186 124 h8 v56 h-8 z" />
+        <path className="f-acc" d="M194 150 H352 V180 H194 Z" />
+        <text className="ink big" x="8" y="22">10,000 keys expire</text>
+        <text className="ink big" x="200" y="120">origin: 32 at once</text>
+        <text className="mut" x="8" y="206">all refetched, 0 client errors</text>
+      </Svg>
+    )
+  }
   return (
     <Svg id="hydro" w={760} h={250} title="Demand against origin load during a synchronized expiry" desc="On the left, demand rises to a sharp peak as 10,000 entries expire within seconds. On the right of the weir, origin fetches in flight stay flat at the limit of 32.">
       <line className="axis" x1="24" y1="212" x2="736" y2="212" />
@@ -168,6 +183,6 @@ export const figures: Record<string, () => React.ReactNode> = {
   'request-flow': RequestFlow,
   'freshness-timeline': FreshnessTimeline,
   budget: Budget,
-  hydrograph: Hydrograph,
+  hydrograph: () => Hydrograph({}),
   'hit-path': HitPathChart,
 }

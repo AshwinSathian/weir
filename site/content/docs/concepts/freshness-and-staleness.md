@@ -43,9 +43,6 @@ Jitter spreads expiries. Early refresh removes some of them. On a fresh hit, Wei
 
 The refresh a stale hit starts is owed, so it waits for a slot outside the foreground reserve, behind every client that is waiting (FR-LIM-4). An early refresh of an entry that is still fresh is not owed: if there is no room it is dropped and a later request tries again.
 
-> [!NOTE]
-> The waiting is in the next release. In `{{version}}` a refresh that finds no room is dropped whether it is owed or not, so after a purge or a mass expiry an entry stays stale until a later request for it finds a slot.
-
 ## Stale serving is the origin's call
 
 By default Weir serves stale content only inside windows the origin granted with `stale-while-revalidate` or `stale-if-error` (RFC 5861). An origin that sends neither gets neither.

@@ -15,17 +15,48 @@ type Node = { type: string; tagName?: string; value?: string; properties?: Recor
 
 const blob = (path: string) => `${REPO}/blob/main/${path}`
 
-// Where a requirement, threat or risk ID points. Threats and residual risks
-// have pages here; everything else lives in a normative document on GitHub.
-function idHref(id: string): string {
-  if (/^T-\d+$/.test(id)) return `/security/threats/#${id.toLowerCase()}`
-  if (/^R-\d+$/.test(id)) return `/security/#${id.toLowerCase()}`
-  if (/^INV-\d+$/.test(id)) return blob('docs/06-threat-model.md#4-security-invariants')
-  if (/^D\d+$/.test(id)) return blob('docs/01-technical-spec.md#2-decisions-locked-before-this-spec')
-  return blob('docs/01-technical-spec.md')
+// Requirement, threat, decision and card IDs, and section references to the
+// design documents, are how the repository cross-references itself; a reader
+// of the site gets nothing from them. A parenthesis that holds only such
+// references is dropped from prose, and an ID left in running text is plain
+// text. The threat table keeps its row labels (idRows).
+const IDTOK = String.raw`(?:FR-[A-Z]+-\d+|NFR-\d+|INV-\d+|T6\.\d+[a-z]?|T-\d+|R-\d{1,2}|D-H\d+|D\d{1,2}|E-\d+|S-\d+|V-\d+|P[1-8]|OQ-[A-Z0-9]+(?:-\d+)?|HRD-\d+[a-z]?|CMP-[A-Z0-9-]+|M\d+-\d+[a-z]?|P2-\d+[a-z]?|P25-\d+[a-z]?|(?:docs\/)?\d\d §[\d.]+[a-z]?|§\d+(?:\.\d+)*[a-z]?)`
+const REF = String.raw`(?:\d\d )?${IDTOK}` // "06 R-2": a risk in document 06
+const LIST = String.raw`(?:(?:decisions?|cards?|see|threat|requirement|per) )?${REF}(?:(?:, |; | and | to )${REF})*`
+const PAREN = new RegExp(String.raw`\s*\(${LIST}\)`, 'g')
+const WHOLE = new RegExp(String.raw`^\s*${LIST}\s*$`) // a table cell that is only references
+const LEAD = new RegExp(String.raw`^\s*${LIST}[;:]\s*`) // "FR-LIM-3; MaxConcurrent or more: ..."
+const TAIL = new RegExp(String.raw`(?:, |; )${LIST}(?=\))`, 'g') // "(XForwardedSet, FR-FWD-8)"
+const HEAD = new RegExp(String.raw`\(${LIST}(?:, |; )`, 'g') // "(FR-FWD-10, v1.1; ...)"
+
+/** stripRefs removes reference-only parentheses, and a cell's leading references. */
+export function stripRefs(v: string): string {
+  if (WHOLE.test(v)) return ''
+  return v.replace(LEAD, '').replace(PAREN, '').replace(TAIL, '').replace(HEAD, '(')
 }
 
-const ID = /\b(FR-[A-Z]+-\d+|NFR-\d+|INV-\d+|T-\d+|R-\d{1,2}|D\d{1,2})\b/g
+// Columns that only cross-reference the repository: decisions, requirement
+// IDs and Go test names. A site table drops them.
+const REF_COLUMNS = new Set(['Decision', 'Decisions', 'Refs', 'Requirements', 'Test', 'Tests (Go)'])
+
+/** dropRefColumns removes REF_COLUMNS from a table element in place. */
+function dropRefColumns(table: Node) {
+  const rows: Node[] = []
+  const collect = (n: Node) => {
+    for (const c of n.children ?? []) {
+      if (c.tagName === 'tr') rows.push(c)
+      else if (c.tagName === 'thead' || c.tagName === 'tbody') collect(c)
+    }
+  }
+  collect(table)
+  const head = rows[0]?.children?.filter((c) => c.tagName === 'th' || c.tagName === 'td') ?? []
+  const drop = new Set(head.flatMap((c, i) => (REF_COLUMNS.has(text(c).trim()) ? [i] : [])))
+  if (drop.size === 0 || drop.size === head.length) return
+  for (const r of rows) {
+    let i = 0
+    r.children = r.children?.filter((c) => (c.tagName === 'th' || c.tagName === 'td' ? !drop.has(i++) : true))
+  }
+}
 
 const text = (n: Node): string => (n.type === 'text' ? (n.value ?? '') : (n.children ?? []).map(text).join(''))
 
@@ -45,21 +76,9 @@ function weirRehype(opts: { base: string; headings: Heading[]; idRows: boolean }
     if (!node.children) return
     const next: Node[] = []
     for (const child of node.children) {
-      if (child.type === 'text' && !inside.some((t) => ['a', 'pre', 'code', 'h1', 'h2', 'h3', 'h4'].includes(t))) {
-        const v = child.value ?? ''
-        let last = 0
-        for (const m of v.matchAll(ID)) {
-          if (m.index > last) next.push({ type: 'text', value: v.slice(last, m.index) })
-          next.push({
-            type: 'element',
-            tagName: 'a',
-            properties: { className: ['id'], href: idHref(m[0]) },
-            children: [{ type: 'text', value: m[0] }],
-          })
-          last = m.index + m[0].length
-        }
-        if (last === 0) next.push(child)
-        else if (last < v.length) next.push({ type: 'text', value: v.slice(last) })
+      if (child.type === 'text' && !inside.some((t) => ['pre', 'code'].includes(t))) {
+        child.value = stripRefs(child.value ?? '')
+        next.push(child)
         continue
       }
       if (child.type === 'element') {
@@ -91,6 +110,7 @@ function weirRehype(opts: { base: string; headings: Heading[]; idRows: boolean }
         }
         walk(child, [...inside, tag])
         if (tag === 'table') {
+          dropRefColumns(child)
           next.push({ type: 'element', tagName: 'div', properties: { className: ['table-wrap'], tabIndex: 0 }, children: [child] })
           continue
         }

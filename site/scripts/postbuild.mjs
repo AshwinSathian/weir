@@ -46,6 +46,7 @@ for (const file of pages) {
 fs.writeFileSync(
   path.join(OUT, '_headers'),
   `/*
+  Strict-Transport-Security: max-age=31536000
   X-Content-Type-Options: nosniff
   X-Frame-Options: DENY
   Referrer-Policy: strict-origin-when-cross-origin

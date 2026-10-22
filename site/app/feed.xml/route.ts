@@ -6,6 +6,9 @@ export const dynamic = 'force-static'
 
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 
+// Repository-relative Markdown links, absolute so a feed reader can follow them.
+const absolute = (md: string) => md.replace(/\]\((?!https?:|#|\/)([^)]+)\)/g, `](${REPO}/blob/main/$1)`)
+
 // One Atom entry per CHANGELOG section. An undated section ("unreleased") is skipped.
 export function GET() {
   const parts = repoFile('CHANGELOG.md').split(/^## /m).slice(1)
@@ -18,7 +21,7 @@ export function GET() {
     <title>Weir ${version}</title>
     <updated>${date}T00:00:00Z</updated>
     <link href="${SITE}/changelog/#${version.replace(/\./g, '')}-${date}"/>
-    <content type="text">${esc(body.trim())}</content>
+    <content type="text">${esc(absolute(body.trim()))}</content>
   </entry>`]
   })
   const updated = /<updated>(.*?)<\/updated>/.exec(entries[0] ?? '')?.[1] ?? '2026-10-12T00:00:00Z'
