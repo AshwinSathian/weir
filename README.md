@@ -75,7 +75,7 @@ xcaddy build --with github.com/AshwinSathian/weir@v1.1.0 --with github.com/Ashwi
 
 The four modules are tagged together and share a version number, so use the same one for all of them. The Caddy module has the import path `github.com/AshwinSathian/weir/caddy` and the Go package name `weircaddy`; it is tested only against the root module at its own version, which is why xcaddy gets both pinned.
 
-The minimum is Go 1.27.0, and CI tests the two latest Go releases. Deploy with 1.27.2 or later: earlier 1.27 releases carry standard library vulnerabilities (HTTP/2, `net/textproto`, `crypto/tls`) that `govulncheck` reports against the paths `weirhttp` uses. The root module builds for every target Go supports, `js/wasm` and `wasip1/wasm` included.
+The minimum is Go 1.26.0, and CI tests Go 1.26 and 1.27, the two supported releases. Deploy with Go 1.27.3 or 1.26.10 or later: earlier patches carry standard library vulnerabilities (HTTP/2, `net/textproto`, `crypto/tls`, `crypto/x509`) that `govulncheck` reports against the paths `weirhttp` uses. The root module builds for every target Go supports, `js/wasm` and `wasip1/wasm` included.
 
 ## Two things to know before production
 

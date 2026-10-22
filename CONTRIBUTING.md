@@ -17,7 +17,7 @@ make fuzz-short   # every fuzz target for 20 s
 make site-check   # only if you touched site/, README.md or docs/: needs Node 24 and pnpm
 ```
 
-Go 1.27 or later. `make check` must pass at the last commit of a pull request.
+Go 1.26 or later (CI tests 1.26 and 1.27). `make check` must pass at the last commit of a pull request.
 
 ## Rules that are not negotiable
 

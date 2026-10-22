@@ -1,3 +1,9 @@
+// httptest.NewTestServer (an in-memory network that works inside a synctest
+// bubble) arrived in Go 1.27. On Go 1.26 these tests do not build; CI runs
+// them on 1.27 (D42).
+
+//go:build go1.27
+
 package weirhttp_test
 
 import (

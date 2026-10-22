@@ -18,10 +18,10 @@ jobs:
     outputs:
       matrix: ${{ steps.list.outputs.matrix }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: "1.27" # latest patch: 1.27.1 and earlier carry stdlib vulnerabilities (govulncheck)
+          go-version: "1.27" # latest patch: earlier patches carry stdlib vulnerabilities (govulncheck)
           cache: true
       - id: list
         name: list fuzz targets
@@ -46,10 +46,10 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJSON(needs.fuzz-targets.outputs.matrix) }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: "1.27" # latest patch: 1.27.1 and earlier carry stdlib vulnerabilities (govulncheck)
+          go-version: "1.27" # latest patch: earlier patches carry stdlib vulnerabilities (govulncheck)
           cache: true
       - name: fuzz ${{ matrix.target }}
         env:
@@ -61,7 +61,7 @@ jobs:
       # directory. Check it in as a seed together with its fix (docs/07 §5).
       - name: upload crashers
         if: failure()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: crasher-${{ matrix.target }}
           path: "**/testdata/fuzz/${{ matrix.target }}/*"
@@ -71,12 +71,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: "1.27" # latest patch: 1.27.1 and earlier carry stdlib vulnerabilities (govulncheck)
+          go-version: "1.27" # latest patch: earlier patches carry stdlib vulnerabilities (govulncheck)
           cache: true
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
       - name: cache-tests against weirproxy
@@ -85,8 +85,27 @@ jobs:
         run: scripts/cache-tests.sh
       - name: upload logs
         if: failure()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: cache-tests-logs
           path: ${{ runner.temp }}/cache-tests-logs
           if-no-files-found: warn
+
+  # A standard library fix ships without a commit here, so a pull request
+  # never sees it. Running govulncheck daily on the latest patch of each
+  # supported release reports a new finding within a day.
+  govulncheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        go-version: ["1.26", "1.27"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ matrix.go-version }}
+          cache: true
+      - name: govulncheck
+        run: make vuln

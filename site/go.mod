@@ -4,4 +4,4 @@
 // There is no Go code here, nothing imports this path, and it is never tagged.
 module github.com/AshwinSathian/weir/site
 
-go 1.27.0
+go 1.26.0

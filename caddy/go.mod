@@ -1,6 +1,6 @@
 module github.com/AshwinSathian/weir/caddy
 
-go 1.27.0
+go 1.26.0
 
 require (
 	github.com/AshwinSathian/weir v0.0.0

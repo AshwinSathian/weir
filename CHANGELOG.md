@@ -15,6 +15,10 @@ Fixes for the losses the second comparison round found (card HRD-23, findings CM
 - Breaker: a half-open period is given up after one minute, or `Timeouts.Origin` plus `Limiter.MaxQueueWait` when that is longer, whatever `MaxOpenFor` is; before, it lasted `MaxOpenFor`. The partition whose probe failed stands aside for half of `OpenFor` when that is under a second.
 - Events: `refresh-dropped` with reason `no-slot` now means the refresh waited up to a minute first, and a refresh still waiting when `Close` begins is dropped with reason `closed`.
 
+### Toolchain
+
+- The minimum Go version is 1.26.0 (was 1.27.0), and CI tests Go 1.26 and 1.27, the two supported releases. Deploy with Go 1.27.3 or 1.26.10 or later: earlier patches carry a `crypto/x509` vulnerability (GO-2026-6809) that `govulncheck` reports as reachable from `weirhttp`.
+
 ### Added
 
 - `Limiter.AdaptiveMax` and Caddy's `limiter { adaptive_max }`: an adaptive origin concurrency limit between `MaxConcurrent` and this ceiling (FR-LIM-8). It grows by an eighth while requests wait for a slot and the origin answers well, and drops a quarter on an origin failure or when fetch times double. Off by default: with it on, a few clients get the origin's own error when the limit crosses what the origin can take.

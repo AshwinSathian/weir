@@ -96,7 +96,7 @@ Anything under `internal/keys`, the storability rules, forwarding, and the `stor
 
 ## Go conventions
 
-- Go 1.27 minimum; the project supports the two latest Go releases (D42) and CI tests each. Use the standard library's newer APIs where they fit: `slices`, `maps`, `iter`, `errors.AsType`, `math/rand/v2`, `hash/maphash`, `sync.OnceValue`, `context.WithoutCancel`, `context.AfterFunc`, `testing/synctest`, `httptest.NewTestServer`, `b.Loop()`.
+- Go 1.26 minimum; the project supports the two latest Go releases (D42) and CI tests each. A 1.27-only API (such as `httptest.NewTestServer`) is fine in test files behind `//go:build go1.27`; production code must build on 1.26. Use the standard library's newer APIs where they fit: `slices`, `maps`, `iter`, `errors.AsType`, `math/rand/v2`, `hash/maphash`, `sync.OnceValue`, `context.WithoutCancel`, `context.AfterFunc`, `testing/synctest`, `httptest.NewTestServer`, `b.Loop()`.
 - Every exported identifier has a doc comment that starts with its name. Package `doc.go` files summarize the package and link the relevant doc section.
 - Comments explain why, not what. Cite requirement or threat IDs instead of repeating the spec.
 - Table-driven tests with `t.Run` names that read as behavior (`"malformed q falls back to identity"`).

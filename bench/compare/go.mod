@@ -3,4 +3,4 @@
 // library: every cache under test, Weir included, is reached over HTTP.
 module github.com/AshwinSathian/weir/bench/compare
 
-go 1.27.0
+go 1.26.0
