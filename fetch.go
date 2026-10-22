@@ -21,8 +21,9 @@ import (
 )
 
 var (
-	errNilResponse = errors.New("weir: origin returned no response and no error")
-	errBadStatus   = errors.New("weir: origin returned an informational or invalid status")
+	// Causes inside an OriginError, which adds "weir: origin error: ".
+	errNilResponse = errors.New("origin returned no response and no error")
+	errBadStatus   = errors.New("origin returned an informational or invalid status")
 )
 
 // fetchResult is what fetch produced: a response the caller owns, or an
@@ -251,6 +252,19 @@ func (e *Engine) fetch(ctx context.Context, c *keys.Classified, origin Origin, c
 		cancel()
 		return fetchResult{err: timeoutOrOrigin(ctx, tctx, rerr)}
 	}
+	if dl := declaredLength(resp.Header); dl >= 0 && dl != int64(len(body)) && int64(len(body)) <= limit && hasBody(resp.StatusCode) {
+		// FR-STO-9, RFC 9111 §3.3: the body ended before (or ran past) the
+		// length the origin declared, so it is not the complete response.
+		// TransportOrigin and HandlerOrigin already refuse this; a custom
+		// Origin can deliver it with a clean EOF.
+		if ctx.Err() == nil {
+			emit(e.cfg.Observer, Event{Kind: EvNotStored, Time: res.respTime, Partition: c.Partition, Reason: "incomplete"})
+		}
+		record(breaker.Failure)
+		closeBody(resp)
+		cancel()
+		return fetchResult{err: &OriginError{Err: io.ErrUnexpectedEOF}}
+	}
 	record(outcome(resp))
 	if int64(len(body)) > limit {
 		rest := resp.Body
@@ -268,6 +282,13 @@ func (e *Engine) fetch(ctx context.Context, c *keys.Classified, origin Origin, c
 
 // declaredLength returns a response's Content-Length when it has exactly one
 // line of digits, else -1: a length Weir cannot read decides nothing.
+// hasBody reports whether a response with this status carries content whose
+// length Content-Length gives. A 304 and a 204 do not (a 304 may still send
+// the selected representation's length, RFC 9110 §8.6).
+func hasBody(status int) bool {
+	return status >= 200 && status != http.StatusNoContent && status != http.StatusNotModified
+}
+
 func declaredLength(h http.Header) int64 {
 	cl := h["Content-Length"]
 	if len(cl) != 1 {
@@ -447,7 +468,7 @@ func (r readCloser) Trailer() http.Header { return trailerOf(r.Closer) }
 func safeFetch(ctx context.Context, origin Origin, req *Request) (resp *Response, err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			resp, err = nil, fmt.Errorf("weir: origin panic: %v", r)
+			resp, err = nil, fmt.Errorf("origin panic: %v", r)
 		}
 	}()
 	resp, err = origin.Fetch(ctx, req)
@@ -473,7 +494,7 @@ func safeFetch(ctx context.Context, origin Origin, req *Request) (resp *Response
 func readBounded(r io.Reader, n int64) (b []byte, err error) {
 	defer func() {
 		if p := recover(); p != nil {
-			b, err = nil, fmt.Errorf("weir: origin body panic: %v", p)
+			b, err = nil, fmt.Errorf("origin body panic: %v", p)
 		}
 	}()
 	return io.ReadAll(io.LimitReader(r, n))

@@ -32,6 +32,8 @@ A panic inside your `Origin.Fetch` is recovered, turned into an error, and deliv
 
 Sometimes the leader's response is not usable by a follower: it was not storable (`private`, `Set-Cookie`), it was too large to buffer, or its `Vary` does not match the follower's headers. The follower then goes back to lookup once (FR-COA-5). To stop this repeating on every request, Weir remembers for `Coalesce.HitForMissTTL` (30 seconds) that this key produces unshareable responses, and sends requests for it straight to the origin, through the limiter, without coalescing.
 
+A stored response that is stale on arrival (`max-age=0`, or `no-cache` with a validator) is still shared with the followers that waited for it. They asked at the same moment as the leader, and the response is as fresh for them as it is for the leader; the next request after them revalidates it. Most shared caches collapse this way, and the origin otherwise gets one request per waiting client, which is the stampede coalescing exists to prevent.
+
 ## Requests that are never coalesced
 
 A request carrying `Authorization` that finds no stored entry fetches on its own (FR-COA-8). A response fetched with one client's credentials reaches another client only through the store, and only when the origin marked it `public`, gave it `s-maxage` or `must-revalidate`.

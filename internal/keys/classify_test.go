@@ -236,6 +236,36 @@ func TestClassifyConditionalsParsed(t *testing.T) {
 	}
 }
 
+// FR-SRV-2, T-30: If-Modified-Since is read with httpcc.ParseDate, so a date
+// in the obsolete forms that http.ParseTime reads loosely (an RFC 850 zone
+// resolved against the host's time zone) is ignored, never misread.
+func TestClassifyIfModifiedSinceStrict(t *testing.T) {
+	want := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		name, v string
+		ok      bool
+	}{
+		{"IMF-fixdate", "Thu, 01 Oct 2026 12:00:00 GMT", true},
+		{"RFC 850 in GMT", "Thursday, 01-Oct-26 12:00:00 GMT", true},
+		{"asctime", "Thu Oct  1 12:00:00 2026", true},
+		{"RFC 850 with a local zone ignored", "Thursday, 01-Oct-26 12:00:00 PST", false},
+		{"one-digit day ignored", "Thu, 1 Oct 2026 12:00:00 GMT", false},
+		{"asctime with a zero-padded day ignored", "Thu Oct 01 12:00:00 2026", false},
+		{"garbage ignored", "yesterday", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, err := Classify(classifyReq("GET", http.Header{"If-Modified-Since": {tc.v}}), classifyCfg())
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := c.ClientCond.IfModifiedSince
+			if tc.ok && !got.Equal(want) || !tc.ok && !got.IsZero() {
+				t.Fatalf("IfModifiedSince = %v, ok %v", got, tc.ok)
+			}
+		})
+	}
+}
+
 func TestClassifyRequestDirectives(t *testing.T) {
 	// FR-SRV-8; D5
 	h := http.Header{"Cache-Control": {"no-cache, no-store, max-age=5"}}

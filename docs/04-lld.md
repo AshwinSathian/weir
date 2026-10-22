@@ -1,7 +1,7 @@
 # Weir low-level design
 
 Status: v1.0
-Date: 2026-10-13
+Date: 2026-10-22
 Depends on: [01-technical-spec.md](01-technical-spec.md), [02-architecture.md](02-architecture.md), [03-hld.md](03-hld.md)
 
 This document is written for the person (or agent) implementing a milestone. It gives exact type definitions, algorithms, locking rules and pseudo-code. Code may differ in naming of unexported identifiers; exported names, behavior, bounds and locking rules may not change without updating this document in the same commit.
@@ -35,7 +35,7 @@ type Config struct {
 	NoCacheStatus bool   // omit the Cache-Status header (T-27)
 	Observer      Observer
 	Logger        *slog.Logger
-	Rand          func() float64 // [0,1); must be safe for concurrent use; default rand.Float64 (math/rand/v2)
+	Rand          func() float64 // [0,1), values outside clamped; must be safe for concurrent use; default rand.Float64 (math/rand/v2)
 }
 
 type KeyConfig struct {
@@ -78,6 +78,7 @@ type FreshnessConfig struct {
 	EarlyRefreshBeta            float64       // 0: 1.0
 	NoEarlyRefresh              bool
 	HeuristicFraction           float64       // 0: 0.1
+	NoHeuristic                 bool          // the Last-Modified heuristic gives 0 (FR-FRS-3)
 	HeuristicMax                time.Duration // 0: 1h
 	DefaultTTL                  time.Duration // 0: none
 	DefaultStaleWhileRevalidate time.Duration // 0: none

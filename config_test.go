@@ -350,3 +350,30 @@ func TestDependentDefaultsFollow(t *testing.T) {
 		t.Errorf("open for 2m: MaxOpenFor = %v, err %v; want 2m", c.Breaker.MaxOpenFor, err)
 	}
 }
+
+// FR-FRS-6: a caller's Rand outside [0, 1) is clamped, so early refresh never
+// takes the log of zero or a negative number.
+func TestRandClamped(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		u    float64
+		ok   func(float64) bool
+	}{
+		{"in range kept", 0.25, func(v float64) bool { return v == 0.25 }},
+		{"one becomes just below one", 1, func(v float64) bool { return v < 1 && v > 0.99 }},
+		{"above one becomes just below one", 7, func(v float64) bool { return v < 1 && v > 0.99 }},
+		{"negative becomes zero", -3, func(v float64) bool { return v == 0 }},
+		{"NaN becomes zero", math.NaN(), func(v float64) bool { return v == 0 }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			u := tc.u
+			c, err := prepareConfig(Config{Rand: func() float64 { return u }})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if v := c.Rand(); !tc.ok(v) {
+				t.Errorf("Rand() = %v", v)
+			}
+		})
+	}
+}

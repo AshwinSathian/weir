@@ -70,13 +70,13 @@ func retryAfter(v string, now time.Time) time.Duration {
 	if v == "" {
 		return 0
 	}
-	if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+	if n, ok := digits(v); ok { // delay-seconds is 1*DIGIT: no sign
 		if n <= 0 || n > math.MaxInt64/int64(time.Second) {
 			return 0
 		}
 		return time.Duration(n) * time.Second
 	}
-	if t, err := http.ParseTime(v); err == nil && t.After(now) {
+	if t, ok := httpcc.ParseDate(v); ok && t.After(now) {
 		return t.Sub(now).Truncate(time.Second)
 	}
 	return 0

@@ -263,7 +263,9 @@ func clientConditionals(h http.Header, inm []string, c *Config) ClientConditiona
 	// RFC 9110 §13.1.3: If-Modified-Since is ignored whenever If-None-Match
 	// is present, even when that field is malformed or over the limit.
 	if ims := h["If-Modified-Since"]; len(ims) == 1 && inm == nil {
-		if t, err := http.ParseTime(ims[0]); err == nil {
+		// httpcc.ParseDate, not http.ParseTime: the RFC 850 form must not
+		// resolve its zone against the host's TZ.
+		if t, ok := httpcc.ParseDate(ims[0]); ok {
 			cc.IfModifiedSince = t
 		}
 	}

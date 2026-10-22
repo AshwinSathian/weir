@@ -2,10 +2,13 @@ package weir
 
 import (
 	"context"
+	"errors"
+	"io"
 	"net/http"
 	"slices"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/AshwinSathian/weir/internal/keys"
@@ -381,6 +384,79 @@ func TestBuildEntry(t *testing.T) {
 	}
 }
 
+// FR-STO-11: a stored body carries its own length. An Origin that declares
+// a Content-Length its body does not have (a custom Origin or a handler, not
+// TransportOrigin, which checks it) must not plant a wrong length that every
+// hit repeats; net/http would cut those connections short.
+func TestBuildEntryContentLengthIsBodyLength(t *testing.T) {
+	cfg := storableConfig(t, nil)
+	c := classifiedGET("/p", false)
+	for _, tc := range []struct {
+		name   string
+		status int
+		kv     []string
+		want   string
+	}{
+		{"declared length larger than the body is replaced", 200, []string{"Cache-Control", "max-age=60", "Content-Length", "100"}, "4"},
+		{"declared length smaller than the body is replaced", 200, []string{"Cache-Control", "max-age=60", "Content-Length", "1"}, "4"},
+		{"missing length is added", 200, []string{"Cache-Control", "max-age=60"}, "4"},
+		{"a 204 gets none", 204, []string{"Cache-Control", "max-age=60"}, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resp := originResp(tc.status, tc.kv...)
+			body := []byte("body")
+			if tc.status == 204 {
+				body = nil
+			}
+			d := storability(cfg, c, resp, body, testRespTime)
+			if !d.ok {
+				t.Fatalf("not stored: %+v", d)
+			}
+			e := buildEntry(cfg, c, resp, body, testRespTime, testRespTime, d)
+			if got := e.Header.Get("Content-Length"); got != tc.want {
+				t.Errorf("Content-Length = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// FR-FRS-3: NoHeuristic turns the Last-Modified heuristic off. The response
+// is still stored for its validator, with a lifetime of zero, so every use
+// revalidates. DefaultTTL, an explicit operator choice, still applies.
+func TestNoHeuristic(t *testing.T) {
+	lm := testRespTime.Add(-48 * time.Hour).Format(http.TimeFormat)
+	c := classifiedGET("/p", false)
+	for _, tc := range []struct {
+		name string
+		mod  func(*Config)
+		kv   []string
+		want time.Duration
+	}{
+		{"default heuristic is 10% capped at 1h", nil, []string{"Last-Modified", lm}, time.Hour},
+		{"NoHeuristic gives zero", func(c *Config) { c.Freshness.NoHeuristic = true }, []string{"Last-Modified", lm}, 0},
+		{"NoHeuristic wins over a fraction", func(c *Config) {
+			c.Freshness.NoHeuristic = true
+			c.Freshness.HeuristicFraction = 0.5
+		}, []string{"Last-Modified", lm}, 0},
+		{"NoHeuristic leaves explicit max-age alone", func(c *Config) { c.Freshness.NoHeuristic = true }, []string{"Last-Modified", lm, "Cache-Control", "max-age=60"}, time.Minute},
+		{"NoHeuristic leaves DefaultTTL alone", func(c *Config) {
+			c.Freshness.NoHeuristic = true
+			c.Freshness.DefaultTTL = 30 * time.Second
+		}, []string{"ETag", `"a"`}, 30 * time.Second},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := storableConfig(t, tc.mod)
+			d := storability(cfg, c, originResp(200, tc.kv...), []byte("body"), testRespTime)
+			if !d.ok {
+				t.Fatalf("not stored: %+v", d)
+			}
+			if d.lifetime != tc.want {
+				t.Errorf("lifetime = %v, want %v", d.lifetime, tc.want)
+			}
+		})
+	}
+}
+
 func TestRetentionFloorAndSaturation(t *testing.T) {
 	// FR-STL-2, FR-FRS-4, 04 §4.2: retention is at least StoredAt + 1s, and a
 	// huge Keep never wraps it into the past.
@@ -574,6 +650,48 @@ func TestCacheGroupsStorability(t *testing.T) {
 			if !slices.Equal(e.Tags, want) {
 				t.Fatalf("entry has %d tags, want %d: global, URI and one per group", len(e.Tags), len(want))
 			}
+		})
+	}
+}
+
+// FR-STO-9, RFC 9111 §3.3: a body that ends before, or runs past, the length
+// the origin declared is not the complete response. A custom Origin can
+// deliver one with a clean EOF; it is an origin error (the client gets a 502,
+// possibly from the short negative entry, FR-NEG-1), never stored, never
+// served as the 200 it claimed to be.
+func TestDeclaredLengthMismatchNotStored(t *testing.T) {
+	for _, tc := range []struct {
+		name, cl, body string
+	}{
+		{"body shorter than declared", "100", "short"},
+		{"body longer than declared", "2", "longer"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				o := OriginFunc(func(context.Context, *Request) (*Response, error) {
+					return &Response{StatusCode: http.StatusOK,
+						Header: http.Header{"Content-Length": {tc.cl}, "Cache-Control": {"max-age=60"}},
+						Body:   io.NopCloser(strings.NewReader(tc.body))}, nil
+				})
+				e, err := New(Config{})
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer e.Close(context.Background())
+				for i := range 3 {
+					resp, err := e.Serve(t.Context(), &Request{Method: http.MethodGet, Scheme: "http", Host: "example.com", Path: "/cl", Header: http.Header{}}, o)
+					switch {
+					case err != nil && errors.Is(err, ErrOrigin):
+					case err != nil:
+						t.Fatalf("request %d: err = %v, want ErrOrigin", i, err)
+					default:
+						resp.Body.Close()
+						if resp.StatusCode != http.StatusBadGateway || resp.Cache.Stored {
+							t.Fatalf("request %d: %d %+v, want an origin error", i, resp.StatusCode, resp.Cache)
+						}
+					}
+				}
+			})
 		})
 	}
 }

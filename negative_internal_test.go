@@ -20,11 +20,12 @@ func TestParseRetryAfter(t *testing.T) {
 		{"negative records nothing", "-1", 0},
 		{"overflowing delay records nothing", "9223372036854775807", 0},
 		{"too many digits records nothing", "99999999999999999999", 0},
-		{"leading plus is accepted (strconv)", "+7", 7 * time.Second},
+		{"leading plus records nothing (1*DIGIT)", "+7", 0},
 		{"fraction records nothing", "1.5", 0},
 		{"future date in whole seconds", now.Add(90*time.Second + 500*time.Millisecond).Format(http.TimeFormat), 90 * time.Second},
 		{"past date records nothing", now.Add(-time.Minute).Format(http.TimeFormat), 0},
 		{"garbage records nothing", "soon", 0},
+		{"RFC 850 date with a local zone records nothing", "Thursday, 01-Oct-26 12:01:30 PST", 0},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

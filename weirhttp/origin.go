@@ -21,7 +21,12 @@ var errNoTarget = errors.New("weirhttp: TransportOrigin has no Target")
 
 // TransportOrigin sends forwarded requests to Target with Transport.
 type TransportOrigin struct {
-	// Target holds the scheme and host of the origin. Its path is ignored.
+	// Target holds the scheme and host of the origin. Its path and any
+	// user:password are ignored. The connection, and for https the TLS
+	// server name and certificate check, use Target's host; the Host header
+	// is the client's, which the key includes. An origin that routes or
+	// checks by its own name (a virtual host, a CDN) needs Rewrite to set
+	// r.Host to Target.Host.
 	Target *url.URL
 	// Transport sends the requests. Nil means a clone of
 	// http.DefaultTransport with DisableCompression set and no Proxy. A

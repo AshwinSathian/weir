@@ -22,10 +22,13 @@ func buildEntry(cfg *Config, c *keys.Classified, resp *Response, body []byte, re
 		date = respTime
 		h["Date"] = []string{respTime.UTC().Format(http.TimeFormat)}
 	}
-	if len(h["Content-Length"]) == 0 && resp.StatusCode != http.StatusNoContent {
-		// The origin sent the body chunked, but a stored body has a length.
-		// With it a hit is written in one piece instead of flushed chunks, and
-		// a HEAD is answered with the length a GET would have (RFC 9110 §9.3.2).
+	if resp.StatusCode != http.StatusNoContent {
+		// FR-STO-11: a stored body has a length even when the origin sent it
+		// chunked. With it a hit is written in one piece instead of flushed
+		// chunks, and a HEAD is answered with the length a GET would have
+		// (RFC 9110 §9.3.2). The body's own length replaces a declared one:
+		// an Origin other than TransportOrigin can declare a length its body
+		// does not have, and every hit would repeat it.
 		h["Content-Length"] = []string{strconv.Itoa(len(body))}
 	}
 	lm, _ := httpcc.ParseDate(h.Get("Last-Modified"))

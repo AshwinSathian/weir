@@ -21,6 +21,7 @@ import (
 // Serve answers one request. It never returns (nil, nil). On a nil error the
 // caller owns resp.Body and must close it. A non-nil error means no response
 // could be produced; StatusCode(err) gives the status an adapter should send.
+// origin must reach the same upstream on every call (see Engine).
 func (e *Engine) Serve(ctx context.Context, req *Request, origin Origin) (*Response, error) {
 	var c keys.Classified
 	if e.cfg.Observer == nil { // the hit path reads no clock for an event nobody receives
@@ -76,7 +77,7 @@ func (e *Engine) serve(ctx context.Context, req *Request, origin Origin, c *keys
 		return nil, ErrClosed
 	}
 	if req == nil {
-		return nil, &RequestError{Reason: "nil request"}
+		return nil, &RequestError{Reason: "nil-request"}
 	}
 	// The forwarded header is built when a path first needs it (shared):
 	// a hit reads only the key (NFR-5).

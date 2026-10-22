@@ -17,7 +17,7 @@ import (
 	"github.com/AshwinSathian/weir/store"
 )
 
-var errOriginGoexit = errors.New("weir: origin called runtime.Goexit")
+var errOriginGoexit = errors.New("origin called runtime.Goexit") // a cause inside OriginError
 
 // sharedError marks an error returned to a request that ran no fetch of its
 // own: a follower that left while it waited, or one that took its flight's
@@ -233,7 +233,7 @@ func (e *Engine) runFlight(bg, reqCtx context.Context, f *coalesce.Flight, sp *f
 		// runtime.Goexit in the origin leaves fr nil without a panic; the
 		// waiters must still get a result.
 		if r := recover(); r != nil {
-			fr = &flightResult{fetchResult: fetchResult{err: &OriginError{Err: fmt.Errorf("weir: origin panic: %v", r)}}}
+			fr = &flightResult{fetchResult: fetchResult{err: &OriginError{Err: fmt.Errorf("origin panic: %v", r)}}}
 		} else if fr == nil {
 			fr = &flightResult{fetchResult: fetchResult{err: &OriginError{Err: errOriginGoexit}}}
 		}
