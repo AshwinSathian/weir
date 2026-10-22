@@ -121,8 +121,8 @@ func TestErrorsIs(t *testing.T) {
 	}
 }
 
-// Error messages start with "weir:" once (CLAUDE.md rule 9). An origin panic
-// is an error Weir makes, wrapped in OriginError; its prefix is not repeated.
+// FR-COA-6: an origin panic is recovered into an OriginError whose message
+// says "weir:" once (CLAUDE.md rule 9).
 func TestOriginErrorMessageNoStutter(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -130,7 +130,8 @@ func TestOriginErrorMessageNoStutter(t *testing.T) {
 		want string
 	}{
 		{"origin transport error", &OriginError{Err: errors.New("dial tcp: refused")}, "weir: origin error: dial tcp: refused"},
-		{"weir-made error", &OriginError{Err: errors.New("weir: origin panic: boom")}, "weir: origin error: origin panic: boom"},
+		{"recovered panic", &OriginError{Err: errors.New("origin panic: boom")}, "weir: origin error: origin panic: boom"},
+		{"an origin's own weir error keeps its prefix", &OriginError{Err: ErrShed}, "weir: origin error: " + ErrShed.Error()},
 		{"nil cause", &OriginError{}, ErrOrigin.Error()},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

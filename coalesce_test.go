@@ -321,6 +321,9 @@ func TestCoalescePanic(t *testing.T) {
 						if _, ok := errors.AsType[*weir.OriginError](err); !ok {
 							t.Errorf("err = %v, want *OriginError", err)
 						}
+						if err != nil && strings.Count(err.Error(), "weir:") != 1 {
+							t.Errorf("err = %q, want one weir: prefix", err)
+						}
 					})
 				}
 				wg.Wait()

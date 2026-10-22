@@ -2,10 +2,13 @@ package weir
 
 import (
 	"context"
+	"errors"
+	"io"
 	"net/http"
 	"slices"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/AshwinSathian/weir/internal/keys"
@@ -647,6 +650,48 @@ func TestCacheGroupsStorability(t *testing.T) {
 			if !slices.Equal(e.Tags, want) {
 				t.Fatalf("entry has %d tags, want %d: global, URI and one per group", len(e.Tags), len(want))
 			}
+		})
+	}
+}
+
+// FR-STO-9, RFC 9111 §3.3: a body that ends before, or runs past, the length
+// the origin declared is not the complete response. A custom Origin can
+// deliver one with a clean EOF; it is an origin error (the client gets a 502,
+// possibly from the short negative entry, FR-NEG-1), never stored, never
+// served as the 200 it claimed to be.
+func TestDeclaredLengthMismatchNotStored(t *testing.T) {
+	for _, tc := range []struct {
+		name, cl, body string
+	}{
+		{"body shorter than declared", "100", "short"},
+		{"body longer than declared", "2", "longer"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				o := OriginFunc(func(context.Context, *Request) (*Response, error) {
+					return &Response{StatusCode: http.StatusOK,
+						Header: http.Header{"Content-Length": {tc.cl}, "Cache-Control": {"max-age=60"}},
+						Body:   io.NopCloser(strings.NewReader(tc.body))}, nil
+				})
+				e, err := New(Config{})
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer e.Close(context.Background())
+				for i := range 3 {
+					resp, err := e.Serve(t.Context(), &Request{Method: http.MethodGet, Scheme: "http", Host: "example.com", Path: "/cl", Header: http.Header{}}, o)
+					switch {
+					case err != nil && errors.Is(err, ErrOrigin):
+					case err != nil:
+						t.Fatalf("request %d: err = %v, want ErrOrigin", i, err)
+					default:
+						resp.Body.Close()
+						if resp.StatusCode != http.StatusBadGateway || resp.Cache.Stored {
+							t.Fatalf("request %d: %d %+v, want an origin error", i, resp.StatusCode, resp.Cache)
+						}
+					}
+				}
+			})
 		})
 	}
 }

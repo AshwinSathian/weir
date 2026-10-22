@@ -5,7 +5,6 @@ import (
 	"errors"
 	"math"
 	"net/http"
-	"strings"
 	"time"
 )
 
@@ -80,8 +79,7 @@ func (e *OriginError) Error() string {
 	if e.Err == nil {
 		return ErrOrigin.Error()
 	}
-	// An error Weir made itself (an origin panic) already says "weir:".
-	return "weir: origin error: " + strings.TrimPrefix(e.Err.Error(), "weir: ")
+	return "weir: origin error: " + e.Err.Error()
 }
 
 // Unwrap returns the origin's error.

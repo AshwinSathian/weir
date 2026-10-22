@@ -103,9 +103,10 @@ const (
 	// cacheable request (FR-FWD-1, INV-1). The default.
 	ForwardStrict ForwardMode = iota
 	// ForwardAll forwards every request header, cookies included, without
-	// keying them, and logs a warning at New. A per-user response that is
-	// storable (public, s-maxage, or only Last-Modified) is then shared with
-	// every user unless the origin marks it Cache-Control: private.
+	// keying them, and logs a warning at New. Any storable response built
+	// from them (max-age, Expires, s-maxage, public, or a heuristic
+	// lifetime) is then shared with every user, a session cookie's page
+	// included, unless the origin marks it Cache-Control: private.
 	ForwardAll
 )
 
@@ -141,8 +142,8 @@ type FreshnessConfig struct {
 	HeuristicFraction float64
 	// NoHeuristic gives a response whose only freshness information is
 	// Last-Modified a lifetime of zero, so it is stored (it has a validator)
-	// but revalidated before every use. Only explicit freshness (max-age,
-	// s-maxage, Expires) or DefaultTTL then makes a response fresh.
+	// but revalidated before every use. DefaultTTL does not apply to such a
+	// response: it applies only to a response with no Last-Modified either.
 	NoHeuristic                 bool
 	HeuristicMax                time.Duration // 0: 1h
 	DefaultTTL                  time.Duration // 0: none
