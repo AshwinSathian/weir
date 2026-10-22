@@ -86,7 +86,7 @@ These come from the architecture principles. Breaking one is a bug even if tests
 7. Randomness comes from `Config.Rand` (jitter, early refresh, breaker jitter). Never call `math/rand` directly in engine code.
 8. No panics on any input (NFR-2). Parsers of request or origin bytes get a fuzz target with seeds in `testdata/fuzz/`.
 9. Errors: sentinel errors from `errors.go`, wrapped with `%w`; compare with `errors.Is` / `errors.As`. Messages start with `weir:` (or `store:` in the store package), lowercase, no trailing punctuation.
-10. No goroutine without an owner. Engine goroutines are registered in `e.wg` and stop on `Close` (FR-LCY-2). Every test that creates an engine closes it before the synctest bubble ends. The one documented exception: a `weirhttp.HandlerOrigin` handler that ignores its context can outlive `Close`, because Weir cannot stop code it does not own.
+10. No goroutine without an owner. Engine goroutines are registered in `e.wg` and stop on `Close` (FR-LCY-2). Every test that creates an engine closes it before the synctest bubble ends. Documented exceptions: a `weirhttp.HandlerOrigin` handler that ignores its context can outlive `Close`, because Weir cannot stop code it does not own; and the wake-up timer of a shared stream (`share.go`), whose callback only broadcasts on the stream's condition variable and so does nothing after `Close`.
 11. `context.Context` is the first parameter of anything that can block. Never store a request context in a struct beyond the call, except the flight's creator context, used for values only (FR-COA-9).
 12. Defaults stay safe. Never change a default that weakens security or stale-serving behavior (D4, D5, D6, strict Vary handling, storable statuses) without the user's explicit approval.
 

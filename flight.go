@@ -286,7 +286,7 @@ func (e *Engine) runFlight(bg, reqCtx context.Context, f *coalesce.Flight, sp *f
 		if fr.shareable && !e.purgedSince(ctx, &store.Entry{Tags: fr.shareTags, RequestTime: fr.reqTime}) {
 			vk := keys.VariantKey(sp.c.Primary, fr.shareVary, sp.c.Forwarded.Header)
 			fr.share = newSharedStream(fr.resp, storedHeader(fr.resp.Header, e.cfg.Storable.StripSetCookie), fr.shareVary, vk,
-				e.cfg.Storable.MaxObjectBytes, e.resumer(bg, reqCtx, sp.c, origin, fr.resp.Header))
+				e.cfg.Storable.MaxObjectBytes, e.resumer(bg, reqCtx, origin, fr.resp.Header))
 		}
 	}
 }
@@ -324,16 +324,19 @@ func (e *Engine) leaveFlight(f *coalesce.Flight) {
 
 // resumer returns how a reader moved off a shared stream fetches the rest of
 // the body on its own (FR-COA-10): a range request from its offset with
-// If-Range, through fetch like every origin call (P3). Nil unless the origin
-// advertised byte ranges and gave a strong entity-tag, which is what makes
-// "the rest of the same body" checkable; the reader is cut off then. The
-// fetch takes the creator context's values and ends at Close (FR-COA-9).
-func (e *Engine) resumer(bg, reqCtx context.Context, c *keys.Classified, origin Origin, h http.Header) resumeFunc {
-	etag := h.Get("Etag")
-	if !strings.Contains(strings.ToLower(h.Get("Accept-Ranges")), "bytes") || etag == "" || strings.HasPrefix(etag, "W/") {
+// If-Range, through fetch like every origin call (P3), charged to that
+// reader's own request (partition, host, breaker partition). Nil unless the
+// origin advertised byte ranges and gave exactly one strong entity-tag,
+// which is what makes "the rest of the same body" checkable; the reader is
+// cut off then. The fetch takes the creator context's values, since the
+// reader's own request context is not kept, and ends at Close (FR-COA-9).
+func (e *Engine) resumer(bg, reqCtx context.Context, origin Origin, h http.Header) resumeFunc {
+	etags := h["Etag"]
+	if !acceptsByteRanges(h["Accept-Ranges"]) || len(etags) != 1 || etags[0] == "" || strings.HasPrefix(etags[0], "W/") {
 		return nil
 	}
-	return func(off int64) (io.ReadCloser, error) {
+	etag := etags[0]
+	return func(c *keys.Classified, off int64) (io.ReadCloser, error) {
 		ctx, cancel := context.WithCancel(context.WithoutCancel(reqCtx))
 		stop := context.AfterFunc(bg, cancel)
 		end := func() { stop(); cancel() }
@@ -352,6 +355,19 @@ func (e *Engine) resumer(bg, reqCtx context.Context, c *keys.Classified, origin 
 		}
 		return &cancelOnClose{ReadCloser: res.resp.Body, cancel: end}, nil
 	}
+}
+
+// acceptsByteRanges reports an Accept-Ranges field that lists the bytes
+// unit (RFC 9110 §14.3), compared as a token.
+func acceptsByteRanges(lines []string) bool {
+	for _, l := range lines {
+		for tok := range strings.SplitSeq(l, ",") { // origin bytes on the miss path, not the hit path
+			if strings.EqualFold(strings.TrimSpace(tok), "bytes") {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // leaveAsFollower takes a follower that stopped waiting out of the flight's
@@ -389,7 +405,7 @@ func (e *Engine) serveShared(ctx context.Context, sp *fetchSpec, origin Origin, 
 	resp := &Response{StatusCode: s.status, Header: maps.Clone(h), Body: http.NoBody}
 	if c.Head {
 		s.release()
-	} else if r := s.attach(); r != nil {
+	} else if r := s.attach(c); r != nil {
 		resp.Body = r
 	} else {
 		return e.reenter(ctx, sp, origin)

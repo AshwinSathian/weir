@@ -11,6 +11,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/AshwinSathian/weir/internal/keys"
 	"github.com/AshwinSathian/weir/store"
 )
 
@@ -44,7 +45,7 @@ func TestSharedStreamReadersGetWholeBody(t *testing.T) {
 		var wg sync.WaitGroup
 		var maxHeld atomic.Int64
 		for range 3 {
-			r := s.attach()
+			r := s.attach(nil)
 			if r == nil {
 				t.Fatal("attach failed")
 			}
@@ -88,7 +89,7 @@ func TestSharedStreamDetachesSlowReader(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		body := bytes.Repeat([]byte("x"), 1<<20)
 		s, src := newTestShare(body, 64<<10, 2)
-		fast, slow := s.attach(), s.attach()
+		fast, slow := s.attach(nil), s.attach(nil)
 		start := time.Now()
 		n, err := io.Copy(io.Discard, fast)
 		if err != nil || n != int64(len(body)) {
@@ -115,11 +116,11 @@ func TestSharedStreamLateAttach(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		body := bytes.Repeat([]byte("y"), 10_000)
 		s, _ := newTestShare(body, 1<<20, 2)
-		first := s.attach()
+		first := s.attach(nil)
 		if n, err := io.Copy(io.Discard, first); err != nil || n != int64(len(body)) {
 			t.Fatalf("first: %d, %v", n, err)
 		}
-		second := s.attach()
+		second := s.attach(nil)
 		if second == nil {
 			t.Fatal("a counted request could not attach")
 		}
@@ -130,14 +131,14 @@ func TestSharedStreamLateAttach(t *testing.T) {
 		second.Close()
 
 		s2, src2 := newTestShare(body, 1<<20, 1)
-		r := s2.attach()
+		r := s2.attach(nil)
 		if _, err := io.Copy(io.Discard, r); err != nil {
 			t.Fatal(err)
 		}
 		s2.mu.Lock()
 		s2.pending = 1 // an uncounted latecomer
 		s2.mu.Unlock()
-		if s2.attach() != nil {
+		if s2.attach(nil) != nil {
 			t.Fatal("a request attached after the first bytes were dropped")
 		}
 		r.Close()
@@ -172,7 +173,7 @@ func TestSharedStreamDetachesDrippingReader(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		body := bytes.Repeat([]byte("x"), 1<<20)
 		s, _ := newTestShare(body, 64<<10, 2)
-		fast, drip := s.attach(), s.attach()
+		fast, drip := s.attach(nil), s.attach(nil)
 		done := make(chan error, 1)
 		go func() {
 			p := make([]byte, 16)
@@ -201,7 +202,7 @@ func TestSharedStreamSlowSteadyReaderCostsOneGrace(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		body := bytes.Repeat([]byte("x"), 1<<20)
 		s, _ := newTestShare(body, 64<<10, 2)
-		fast, slow := s.attach(), s.attach()
+		fast, slow := s.attach(nil), s.attach(nil)
 		exited := make(chan struct{})
 		go func() {
 			defer close(exited)
@@ -236,12 +237,12 @@ func TestSharedStreamMovedOffReaderResumes(t *testing.T) {
 		}
 		var resumedAt atomic.Int64
 		resumedAt.Store(-1)
-		resume := func(off int64) (io.ReadCloser, error) {
+		resume := func(_ *keys.Classified, off int64) (io.ReadCloser, error) {
 			resumedAt.Store(off)
 			return io.NopCloser(bytes.NewReader(body[off:])), nil
 		}
 		s, _ := newTestShareResume(body, 64<<10, 2, resume)
-		fast, slow := s.attach(), s.attach()
+		fast, slow := s.attach(nil), s.attach(nil)
 		var got bytes.Buffer
 		p := make([]byte, 1000)
 		n, _ := slow.Read(p) // a little, then it stalls
@@ -271,14 +272,14 @@ func TestSharedStreamCloseDuringResume(t *testing.T) {
 		arrived := make(chan struct{})
 		proceed := make(chan struct{})
 		var resumed closeCount
-		resume := func(off int64) (io.ReadCloser, error) {
+		resume := func(_ *keys.Classified, off int64) (io.ReadCloser, error) {
 			close(arrived)
 			<-proceed
 			resumed.Reader = bytes.NewReader(body[off:])
 			return &resumed, nil
 		}
 		s, _ := newTestShareResume(body, 64<<10, 2, resume)
-		fast, slow := s.attach(), s.attach()
+		fast, slow := s.attach(nil), s.attach(nil)
 		if _, err := io.Copy(io.Discard, fast); err != nil {
 			t.Fatal(err)
 		}

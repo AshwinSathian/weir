@@ -242,71 +242,100 @@ func TestSharedStreamWarmJoinerDoesNotHoldBody(t *testing.T) {
 }
 
 // FR-COA-10: a slow client moved off a shared stream continues on a range
-// request of its own when the origin offers byte ranges and a strong
-// entity-tag, and gets the whole body; the fast client is not held.
-func TestSharedStreamSlowClientResumesWithRange(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		const size = 4 << 20
-		body := make([]byte, size)
-		for i := range body {
-			body[i] = byte(i % 251)
-		}
-		gate := make(chan struct{})
-		var full, ranged atomic.Int32
-		o := weir.OriginFunc(func(_ context.Context, r *weir.Request) (*weir.Response, error) {
-			h := http.Header{"Cache-Control": {"max-age=60"}, "Etag": {`"v1"`}, "Accept-Ranges": {"bytes"}}
-			if rg := r.Header.Get("Range"); rg != "" {
-				ranged.Add(1)
-				if r.Header.Get("If-Range") != `"v1"` {
-					t.Errorf("resume without If-Range: %v", r.Header)
+// request of its own only when the origin offers byte ranges and one strong
+// entity-tag, and only when the answer is the rest of the same body; in
+// every other case it is cut off rather than given two bodies spliced
+// together. The fast client is never held.
+func TestSharedStreamSlowClientResume(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		etag, ar    string
+		rangeAnswer func(off int) (int, string) // status and Content-Range of the ranged answer
+		wantRanged  int32
+		wantWhole   bool
+	}{
+		{"resumes with 206 from its offset", `"v1"`, "bytes", func(off int) (int, string) { return 206, fmt.Sprintf("bytes %d-", off) }, 1, true},
+		{"200 after If-Range failed is refused", `"v1"`, "bytes", func(int) (int, string) { return 200, "" }, 1, false},
+		{"206 from another offset is refused", `"v1"`, "bytes", func(off int) (int, string) { return 206, fmt.Sprintf("bytes %d-", off+1) }, 1, false},
+		{"weak entity-tag does not resume", `W/"v1"`, "bytes", nil, 0, false},
+		{"no Accept-Ranges does not resume", `"v1"`, "", nil, 0, false},
+		{"Accept-Ranges none does not resume", `"v1"`, "none", nil, 0, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				const size = 4 << 20
+				body := make([]byte, size)
+				for i := range body {
+					body[i] = byte(i % 251)
 				}
-				var off int
-				if _, err := fmt.Sscanf(rg, "bytes=%d-", &off); err != nil {
-					t.Errorf("Range %q: %v", rg, err)
+				gate := make(chan struct{})
+				var full, ranged atomic.Int32
+				o := weir.OriginFunc(func(_ context.Context, r *weir.Request) (*weir.Response, error) {
+					h := http.Header{"Cache-Control": {"max-age=60"}, "Etag": {tc.etag}}
+					if tc.ar != "" {
+						h.Set("Accept-Ranges", tc.ar)
+					}
+					if rg := r.Header.Get("Range"); rg != "" {
+						ranged.Add(1)
+						if r.Header.Get("If-Range") != tc.etag {
+							t.Errorf("resume without If-Range: %v", r.Header)
+						}
+						var off int
+						if _, err := fmt.Sscanf(rg, "bytes=%d-", &off); err != nil {
+							t.Errorf("Range %q: %v", rg, err)
+						}
+						status, cr := tc.rangeAnswer(off)
+						if status == 200 {
+							return &weir.Response{StatusCode: 200, Header: h, Body: io.NopCloser(bytes.NewReader(body))}, nil
+						}
+						h.Set("Content-Range", fmt.Sprintf("%s%d/%d", cr, size-1, size))
+						return &weir.Response{StatusCode: status, Header: h, Body: io.NopCloser(bytes.NewReader(body[off:]))}, nil
+					}
+					full.Add(1)
+					<-gate
+					return &weir.Response{StatusCode: http.StatusOK, Header: h, Body: io.NopCloser(bytes.NewReader(body))}, nil
+				})
+				e := newEngine(t, cacheCfg)
+				defer closeEngine(t, e)
+				resps := make(chan *weir.Response, 2)
+				for range 2 {
+					go func() {
+						resp, err := e.Serve(t.Context(), getReq("/big"), o)
+						if err != nil {
+							t.Error(err)
+						}
+						resps <- resp
+					}()
 				}
-				h.Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", off, size-1, size))
-				return &weir.Response{StatusCode: http.StatusPartialContent, Header: h, Body: io.NopCloser(bytes.NewReader(body[off:]))}, nil
-			}
-			full.Add(1)
-			<-gate
-			return &weir.Response{StatusCode: http.StatusOK, Header: h, Body: io.NopCloser(bytes.NewReader(body))}, nil
+				synctest.Wait()
+				close(gate)
+				a, b := <-resps, <-resps
+				var slowGot bytes.Buffer
+				p := make([]byte, 4096)
+				n, _ := b.Body.Read(p) // the slow client reads a little, then stalls
+				slowGot.Write(p[:n])
+				start := time.Now()
+				if m, err := io.Copy(io.Discard, a.Body); err != nil || m != size {
+					t.Fatalf("fast client: %d bytes, %v", m, err)
+				}
+				if d := time.Since(start); d > 2*time.Second {
+					t.Fatalf("fast client held %v by the slow one", d)
+				}
+				_, err := io.Copy(&slowGot, b.Body)
+				switch {
+				case tc.wantWhole && (err != nil || !bytes.Equal(slowGot.Bytes(), body)):
+					t.Fatalf("slow client: %d bytes, %v; want the whole body", slowGot.Len(), err)
+				case !tc.wantWhole && err == nil:
+					t.Fatalf("slow client read %d bytes to the end; want it cut off", slowGot.Len())
+				case !tc.wantWhole && !bytes.Equal(slowGot.Bytes(), body[:slowGot.Len()]):
+					t.Fatal("slow client got bytes that are not this body")
+				}
+				a.Body.Close()
+				b.Body.Close()
+				if full.Load() != 1 || ranged.Load() != tc.wantRanged {
+					t.Fatalf("origin: %d full, %d ranged; want 1 and %d", full.Load(), ranged.Load(), tc.wantRanged)
+				}
+			})
 		})
-		e := newEngine(t, cacheCfg)
-		defer closeEngine(t, e)
-		resps := make(chan *weir.Response, 2)
-		for range 2 {
-			go func() {
-				resp, err := e.Serve(t.Context(), getReq("/big"), o)
-				if err != nil {
-					t.Error(err)
-				}
-				resps <- resp
-			}()
-		}
-		synctest.Wait()
-		close(gate)
-		a, b := <-resps, <-resps
-		var slowGot bytes.Buffer
-		p := make([]byte, 4096)
-		n, _ := b.Body.Read(p) // the slow client reads a little, then stalls
-		slowGot.Write(p[:n])
-		start := time.Now()
-		if m, err := io.Copy(io.Discard, a.Body); err != nil || m != size {
-			t.Fatalf("fast client: %d bytes, %v", m, err)
-		}
-		if d := time.Since(start); d > 2*time.Second {
-			t.Fatalf("fast client held %v by the slow one", d)
-		}
-		if _, err := io.Copy(&slowGot, b.Body); err != nil {
-			t.Fatalf("slow client: %v", err)
-		}
-		if !bytes.Equal(slowGot.Bytes(), body) {
-			t.Fatalf("slow client got %d bytes, not the body", slowGot.Len())
-		}
-		a.Body.Close()
-		b.Body.Close()
-		if full.Load() != 1 || ranged.Load() != 1 {
-			t.Fatalf("origin: %d full, %d ranged; want 1 and 1", full.Load(), ranged.Load())
-		}
-	})
+	}
 }

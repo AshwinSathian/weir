@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/AshwinSathian/weir/internal/keys"
 	"github.com/AshwinSathian/weir/store"
 )
 
@@ -22,8 +23,9 @@ const shareLagGrace = time.Second
 var errSharedTooSlow = errors.New("weir: client too slow for a shared stream")
 
 // resumeFunc fetches the rest of the body from off, on a request of its own,
-// for a reader moved off the stream. Nil when the response cannot be resumed.
-type resumeFunc func(off int64) (io.ReadCloser, error)
+// for the reader whose request is c, moved off the stream. Nil when the
+// response cannot be resumed.
+type resumeFunc func(c *keys.Classified, off int64) (io.ReadCloser, error)
 
 // sharedStream gives one over-size origin body to every request that waited
 // on its flight (FR-COA-10, T-18). Readers pull: the reader that needs bytes
@@ -97,14 +99,16 @@ func (s *sharedStream) closeIfUnused() {
 // attach gives a counted request a reader from the first byte, or nil when
 // those bytes are gone because readers went ahead while this one was slow to
 // attach; the caller then fetches for itself.
-func (s *sharedStream) attach() *sharedReader {
+// c is the request the reader serves: a resume is charged to its partition
+// and host, not to the creator's.
+func (s *sharedStream) attach(c *keys.Classified) *sharedReader {
 	s.mu.Lock()
 	s.pending--
 	if s.base > 0 || s.closed {
 		s.unlockAndMaybeClose()
 		return nil
 	}
-	r := &sharedReader{s: s}
+	r := &sharedReader{s: s, c: c}
 	s.readers[r] = struct{}{}
 	s.mu.Unlock()
 	return r
@@ -173,6 +177,7 @@ func (s *sharedStream) moveOffSlowest() {
 // off, own carries the rest of the body when it could resume.
 type sharedReader struct {
 	s        *sharedStream
+	c        *keys.Classified
 	off      int64
 	movedOff bool
 	done     bool
@@ -246,7 +251,7 @@ func (r *sharedReader) resumeOwn(p []byte) (int, error) {
 	if s.resume == nil {
 		return 0, errSharedTooSlow
 	}
-	own, err := s.resume(r.off)
+	own, err := s.resume(r.c, r.off)
 	if err != nil {
 		return 0, errSharedTooSlow
 	}
