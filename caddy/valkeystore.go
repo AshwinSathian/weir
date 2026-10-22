@@ -59,6 +59,13 @@ type StoreConfig struct {
 	CallTimeout     caddy.Duration `json:"call_timeout,omitempty"`
 	HardEpochWait   caddy.Duration `json:"hard_epoch_wait,omitempty"`
 	SkipPolicyCheck bool           `json:"skip_policy_check,omitempty"`
+	// CoalesceAcrossNodes is valkey.Config.CoalesceAcrossNodes: nodes that
+	// share the server fetch a missing key once among them (FR-COA-11).
+	CoalesceAcrossNodes bool `json:"coalesce_across_nodes,omitempty"`
+	// LocalTier, when set, is the size of valkey.Config.LocalTier, the
+	// in-process copy in front of the server; LocalEpochTTL its EpochTTL.
+	LocalTier     ByteSize       `json:"local_tier,omitempty"`
+	LocalEpochTTL caddy.Duration `json:"local_epoch_ttl,omitempty"`
 }
 
 // valkeyConfig maps the block onto valkey.Config. Username and password may
@@ -78,7 +85,10 @@ func (s *StoreConfig) valkeyConfig(name string) (valkey.Config, error) {
 		MaxRetention: time.Duration(s.MaxRetention), MaxClockSkew: time.Duration(s.MaxClockSkew),
 		NoClockSkew: s.NoClockSkew, MaxHardEpochs: s.MaxHardEpochs, CallTimeout: time.Duration(s.CallTimeout),
 		HardEpochWait: time.Duration(s.HardEpochWait), SkipPolicyCheck: s.SkipPolicyCheck,
-		MaxObjectBytes: int64(s.MaxObjectBytes),
+		MaxObjectBytes: int64(s.MaxObjectBytes), CoalesceAcrossNodes: s.CoalesceAcrossNodes,
+	}
+	if s.LocalTier != 0 || s.LocalEpochTTL != 0 {
+		c.LocalTier = &valkey.LocalTierConfig{MaxBytes: int64(s.LocalTier), EpochTTL: time.Duration(s.LocalEpochTTL)}
 	}
 	if s.TLS || s.TLSCAFile != "" || s.TLSServerName != "" {
 		c.TLS = &tls.Config{MinVersion: tls.VersionTLS12, ServerName: s.TLSServerName}
@@ -168,6 +178,12 @@ func (s *StoreConfig) digestFor(name string) (out [sha256.Size]byte) {
 		str(string(ca))
 	}
 	num(vc.MaxObjectBytes)
+	flag(vc.CoalesceAcrossNodes)
+	flag(vc.LocalTier != nil)
+	if vc.LocalTier != nil {
+		num(vc.LocalTier.MaxBytes)
+		num(int64(vc.LocalTier.EpochTTL))
+	}
 	flag(vc.Cluster)
 	flag(vc.CoLocateEntries)
 	flag(vc.NoClockSkew)

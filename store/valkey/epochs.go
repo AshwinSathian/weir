@@ -28,6 +28,10 @@ func (s *Store) SetEpoch(ctx context.Context, t store.Tag, ep store.Epoch) error
 	if ep.Mode < store.EpochSoft || ep.Mode > store.EpochHard {
 		return unavailable("invalid epoch mode %d", ep.Mode)
 	}
+	if s.local != nil {
+		s.local.forget()       // a lookup from before the write must not be reused
+		defer s.local.forget() // nor one that raced it
+	}
 	global := t == store.TagGlobal()
 	cl, err := s.acquire(ctx)
 	if err != nil {
@@ -87,6 +91,23 @@ func (s *Store) NewestEpoch(ctx context.Context, tags []store.Tag, since time.Ti
 }
 
 func (s *Store) newest(ctx context.Context, tags, shared []store.Tag, since time.Time) (store.Epoch, bool, error) {
+	if s.local == nil {
+		return s.newestRemote(ctx, tags, shared, since)
+	}
+	// 05 §7 local tier: the answer is reused for EpochTTL.
+	key, now := s.local.answerKey(tags, shared, since), time.Now()
+	a, gen, hit := s.local.answer(key, now)
+	if hit {
+		return a.ep, a.ok, nil
+	}
+	ep, ok, err := s.newestRemote(ctx, tags, shared, since)
+	if err == nil {
+		s.local.remember(key, epochAnswer{ep: ep, ok: ok, got: now}, gen)
+	}
+	return ep, ok, err
+}
+
+func (s *Store) newestRemote(ctx context.Context, tags, shared []store.Tag, since time.Time) (store.Epoch, bool, error) {
 	cl, err := s.acquire(ctx)
 	if err != nil {
 		return store.Epoch{}, false, err

@@ -159,8 +159,18 @@ redis.call('SET', KEYS[1], ARGV[3], 'PXAT', ARGV[4])
 return 1
 `
 
+// unlockSrc deletes a lock only while it still holds this holder's token, so
+// a holder whose lock expired never removes the next holder's (FR-COA-11).
+const unlockSrc = `
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+  return redis.call('DEL', KEYS[1])
+end
+return 0
+`
+
 // The scripts are immutable once built; valkey-go keeps their SHA-1.
 var (
+	unlockScript     = valkey.NewLuaScript(unlockSrc)
 	writeEpochScript = valkey.NewLuaScript(writeEpochSrc)
 	readEpochScript  = valkey.NewLuaScriptReadOnly(readEpochSrc)
 	varySetScript    = valkey.NewLuaScript(varySetSrc)

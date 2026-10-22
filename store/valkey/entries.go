@@ -27,9 +27,25 @@ func (s *Store) entryKey(k store.Key) string {
 }
 
 // Get returns the record at k. A missing key, a value over MaxObjectBytes
-// and a value that does not decode are ErrNotFound (S-3, T-21). The server expires keys with PXAT, but its clock is not ours, so
-// the engine re-checks Expires (S-4).
+// and a value that does not decode are ErrNotFound (S-3, T-21). The server
+// expires keys with PXAT, but its clock is not ours, so the engine re-checks
+// Expires (S-4). With a local tier a live local copy answers first, and a
+// record read from the server is copied there.
 func (s *Store) Get(ctx context.Context, k store.Key) (*store.Entry, error) {
+	if s.local == nil {
+		return s.getRemote(ctx, k)
+	}
+	if e, ok := s.local.get(ctx, k); ok {
+		return e, nil
+	}
+	e, err := s.getRemote(ctx, k)
+	if err == nil {
+		_ = s.local.m.Set(ctx, k, e) // the memory store may decline it (size); then it is read again
+	}
+	return e, err
+}
+
+func (s *Store) getRemote(ctx context.Context, k store.Key) (*store.Entry, error) {
 	cl, err := s.acquire(ctx)
 	if err != nil {
 		return nil, err
@@ -73,6 +89,18 @@ func (s *Store) Get(ctx context.Context, k store.Key) (*store.Entry, error) {
 // record). The engine builds entries, so a rejection is a bug to find
 // there, and a breaker trip would only hide it.
 func (s *Store) Set(ctx context.Context, k store.Key, e *store.Entry) error {
+	err := s.setRemote(ctx, k, e)
+	if s.local != nil {
+		if err == nil {
+			_ = s.local.m.Set(ctx, k, e)
+		} else {
+			_ = s.local.m.Delete(ctx, k) // never keep a copy the server may not have
+		}
+	}
+	return err
+}
+
+func (s *Store) setRemote(ctx context.Context, k store.Key, e *store.Entry) error {
 	cl, err := s.acquire(ctx)
 	if err != nil {
 		return err
@@ -118,6 +146,9 @@ func (s *Store) expiryMillis(e *store.Entry, now time.Time) (pxat int64, ok bool
 
 // Delete removes the record at k; a missing key is fine.
 func (s *Store) Delete(ctx context.Context, k store.Key) error {
+	if s.local != nil {
+		_ = s.local.m.Delete(ctx, k)
+	}
 	cl, err := s.acquire(ctx)
 	if err != nil {
 		return err

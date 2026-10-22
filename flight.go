@@ -179,6 +179,11 @@ func (e *Engine) fetchCoalesced(ctx context.Context, sp *fetchSpec, origin Origi
 	if fr.share != nil {
 		return e.serveShared(ctx, sp, origin, fr, created)
 	}
+	if fr.fromStore && created { // FR-COA-11: another engine fetched it and stored it
+		now := time.Now()
+		_, staleness, _ := httpcc.Evaluate(fr.entry, store.Epoch{}, false, now)
+		return e.fromEntry(c, fr.entry, now, CacheInfo{Hit: true, TTL: -staleness}), nil
+	}
 	// 04 §6.8: a rule for background work never sheds a request. Each
 	// follower fetches directly, uncoalesced; the limiter bounds them.
 	if fr.bgDropped {
@@ -267,7 +272,7 @@ func (e *Engine) runFlight(bg, reqCtx context.Context, f *coalesce.Flight, sp *f
 			closeBody(fr.resp)
 		}
 	}()
-	fr = e.fetchStored(ctx, sp, origin)
+	fr = e.fetchStoredOnce(ctx, sp, origin)
 	if fr.err != nil && ctx.Err() != nil { // only Close, or a Warm caller leaving, cancels a flight
 		fr.err = ErrClosed
 		// Followers of a warm flight fetch for themselves (04 §6.8).
@@ -289,6 +294,84 @@ func (e *Engine) runFlight(bg, reqCtx context.Context, f *coalesce.Flight, sp *f
 				e.cfg.Storable.MaxObjectBytes, e.resumer(bg, reqCtx, origin, fr.resp.Header))
 		}
 	}
+}
+
+// fetchStoredOnce is fetchStored for a flight. When the store can lock
+// (store.Locker), the engines that share it fetch the key once among them
+// (FR-COA-11): the one that takes the lock fetches and stores, and the others
+// wait for it to release the lock, up to the flight's own bound, then serve
+// what it stored. When nothing fresh was stored (not storable, an error, a
+// lock that expired), or the lock cannot be asked, they fetch for
+// themselves, as without the capability. A fetch behind an over-size marker
+// stores nothing for others to read, and a warm fetch already holds a
+// limiter slot it must not sit on, so neither locks.
+func (e *Engine) fetchStoredOnce(ctx context.Context, sp *fetchSpec, origin Origin) *flightResult {
+	if e.sg.locker == nil || sp.lk.oversize || sp.permit != nil {
+		return e.fetchStored(ctx, sp, origin)
+	}
+	// The flight's bound (FR-COA-4): a wait for a half-open probe, a wait
+	// for a slot, the fetch. A lock outlives it by a second, so a holder
+	// that is still inside its bound keeps it.
+	bound := e.cfg.Timeouts.Origin + 2*e.cfg.Limiter.MaxQueueWait
+	release, ok, err := e.sg.lock(ctx, sp.lk.ck, bound+time.Second)
+	switch {
+	case err != nil: // T-9: a store failure fails open, to a fetch of our own
+		return e.fetchStored(ctx, sp, origin)
+	case ok:
+		defer release()
+		return e.fetchStored(ctx, sp, origin)
+	}
+	if e.waitUnlocked(ctx, sp.lk.ck, time.Now().Add(bound)) {
+		if fr := e.storedByAnother(ctx, sp); fr != nil {
+			return fr
+		}
+	}
+	return e.fetchStored(ctx, sp, origin)
+}
+
+// waitUnlocked polls the store until k's lock is released, and reports
+// whether that happened before deadline. The interval starts at 10 ms and
+// doubles to 200 ms: a lock usually ends with one origin round trip.
+func (e *Engine) waitUnlocked(ctx context.Context, k store.Key, deadline time.Time) bool {
+	// ponytail: polling costs one store call per interval per waiting flight;
+	// the store could publish releases instead if a profile shows the polls.
+	d := 10 * time.Millisecond
+	for {
+		held, err := e.sg.held(ctx, k)
+		if err != nil {
+			return false
+		}
+		if !held {
+			return true
+		}
+		if !time.Now().Add(d).Before(deadline) {
+			return false
+		}
+		t := time.NewTimer(d)
+		select {
+		case <-t.C:
+		case <-ctx.Done():
+			t.Stop()
+			return false
+		}
+		d = min(2*d, 200*time.Millisecond)
+	}
+}
+
+// storedByAnother looks the request's key up after another engine released
+// its lock, and returns a fresh response stored under the same key as a
+// result every waiter serves as a hit (FR-COA-11), or nil.
+func (e *Engine) storedByAnother(ctx context.Context, sp *fetchSpec) *flightResult {
+	now := time.Now()
+	lk := e.lookup(ctx, sp.c, now)
+	if lk.entry == nil || lk.ck != sp.lk.ck {
+		return nil
+	}
+	st, staleness, _ := httpcc.Evaluate(lk.entry, lk.epoch, lk.epochOK, now)
+	if st != httpcc.Fresh || forcesValidation(&sp.c.ReqCC, httpcc.CurrentAge(lk.entry, now), -staleness) {
+		return nil
+	}
+	return &flightResult{entry: lk.entry, vk: lk.ck, fromStore: true}
 }
 
 // purgedSince reports whether an epoch newer than ent's request time
