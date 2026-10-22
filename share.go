@@ -10,12 +10,17 @@ import (
 	"github.com/AshwinSathian/weir/store"
 )
 
-// shareLagGrace is how long the readers of a shared stream wait for one
-// that is a full window behind before they leave it (FR-COA-10). Long
-// enough for a client whose connection hiccups, short next to StreamIdle,
-// so one slow or hostile client stalls the others for about a second at
-// most.
+// shareLagGrace is how long the readers of a shared stream wait on a full
+// window before they judge the slowest (FR-COA-10). Short next to
+// StreamIdle, so one slow or hostile client stalls the others for about a
+// second at a time.
 const shareLagGrace = time.Second
+
+// shareMinProgress is the share of the window the slowest readers must take
+// in each shareLagGrace while the others wait: an eighth of 1 MiB per second,
+// about 1 Mbit/s. A client that drips one byte at a time would otherwise
+// hold every other reader of the object (T-18).
+const shareMinProgress = 8
 
 // errSharedTooSlow ends the read of a client that fell a full window behind
 // the others on a shared stream for shareLagGrace (FR-COA-10). Its
@@ -32,9 +37,13 @@ var errSharedTooSlow = errors.New("weir: client too slow for a shared stream")
 type sharedStream struct {
 	src    io.ReadCloser
 	status int
-	header http.Header // the fetch's header; every reader's response clones it
-	vary   []string    // the response's Vary names; a follower shares only its own variant (FR-KEY-7)
-	vk     store.Key   // the variant key the response answers
+	header http.Header // the fetch's header, for the creator's response
+	// shared is the header a follower gets: the fields a stored entry keeps
+	// (FR-STO-11), so a Set-Cookie that StripSetCookie lets through to the
+	// creator never reaches another client (FR-STO-6, T-8).
+	shared http.Header
+	vary   []string  // the response's Vary names; a follower shares only its own variant (FR-KEY-7)
+	vk     store.Key // the variant key the response answers
 	window int64
 
 	mu      sync.Mutex
@@ -53,8 +62,8 @@ type sharedStream struct {
 	tmp     []byte
 }
 
-func newSharedStream(resp *Response, vary []string, vk store.Key, window int64) *sharedStream {
-	s := &sharedStream{src: resp.Body, status: resp.StatusCode, header: resp.Header, vary: vary, vk: vk, window: window,
+func newSharedStream(resp *Response, shared http.Header, vary []string, vk store.Key, window int64) *sharedStream {
+	s := &sharedStream{src: resp.Body, status: resp.StatusCode, header: resp.Header, shared: shared, vary: vary, vk: vk, window: window,
 		readers: make(map[*sharedReader]struct{})}
 	s.cond.L = &s.mu
 	return s
@@ -143,7 +152,8 @@ func (s *sharedStream) trim() {
 }
 
 // waitForSlow arms the lag timer when the window is full: after
-// shareLagGrace, readers still at the low offset are detached.
+// shareLagGrace, if the window is still full, every reader that has not
+// moved shareMinProgress past where the slowest stood is detached.
 func (s *sharedStream) waitForSlow() {
 	if s.lag != nil {
 		return
@@ -152,10 +162,11 @@ func (s *sharedStream) waitForSlow() {
 	s.lag = time.AfterFunc(shareLagGrace, func() {
 		s.mu.Lock()
 		s.lag = nil
-		if s.low() == mark && s.end-mark >= s.window {
+		need := mark + max(s.window/shareMinProgress, 1)
+		if s.end-s.low() >= s.window && s.low() < need {
 			s.pending = 0 // a request that has not attached in a second never will in time
 			for r := range s.readers {
-				if r.off == mark {
+				if r.off < need {
 					r.detached = true
 					delete(s.readers, r)
 				}

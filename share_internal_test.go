@@ -24,7 +24,7 @@ func (c *closeCount) Close() error { c.closed.Add(1); return nil }
 
 func newTestShare(body []byte, window int64, waiters int) (*sharedStream, *closeCount) {
 	src := &closeCount{Reader: bytes.NewReader(body)}
-	s := newSharedStream(&Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: src}, nil, store.Key{}, window)
+	s := newSharedStream(&Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: src}, http.Header{}, nil, store.Key{}, window)
 	s.setPending(waiters)
 	return s, src
 }
@@ -160,4 +160,33 @@ func TestSharedStreamUnusedIsClosed(t *testing.T) {
 	if src0.closed.Load() != 1 {
 		t.Fatal("not closed with no waiter")
 	}
+}
+
+// FR-COA-10, T-18: a reader that keeps the window full by taking a few
+// bytes at a time is cut off too; moving at all is not enough.
+func TestSharedStreamDetachesDrippingReader(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		body := bytes.Repeat([]byte("x"), 1<<20)
+		s, _ := newTestShare(body, 64<<10, 2)
+		fast, drip := s.attach(), s.attach()
+		done := make(chan error, 1)
+		go func() {
+			p := make([]byte, 16)
+			for {
+				if _, err := drip.Read(p); err != nil {
+					done <- err
+					return
+				}
+				time.Sleep(100 * time.Millisecond)
+			}
+		}()
+		if n, err := io.Copy(io.Discard, fast); err != nil || n != int64(len(body)) {
+			t.Fatalf("fast reader: %d bytes, %v", n, err)
+		}
+		if err := <-done; !errors.Is(err, errSharedTooSlow) {
+			t.Fatalf("dripping reader: %v, want errSharedTooSlow", err)
+		}
+		fast.Close()
+		drip.Close()
+	})
 }

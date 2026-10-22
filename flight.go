@@ -283,7 +283,7 @@ func (e *Engine) runFlight(bg, reqCtx context.Context, f *coalesce.Flight, sp *f
 		// out means a waiter may have asked after it, so nobody shares.
 		if fr.shareable && !e.purgedSince(ctx, &store.Entry{Tags: fr.shareTags, RequestTime: fr.reqTime}) {
 			vk := keys.VariantKey(sp.c.Primary, fr.shareVary, sp.c.Forwarded.Header)
-			fr.share = newSharedStream(fr.resp, fr.shareVary, vk, e.cfg.Storable.MaxObjectBytes)
+			fr.share = newSharedStream(fr.resp, storedHeader(fr.resp.Header, e.cfg.Storable.StripSetCookie), fr.shareVary, vk, e.cfg.Storable.MaxObjectBytes)
 		}
 	}
 }
@@ -347,7 +347,11 @@ func (e *Engine) serveShared(ctx context.Context, sp *fetchSpec, origin Origin, 
 		s.release()
 		return e.reenter(ctx, sp, origin)
 	}
-	resp := &Response{StatusCode: s.status, Header: maps.Clone(s.header), Body: http.NoBody}
+	h := s.header
+	if !created {
+		h = s.shared
+	}
+	resp := &Response{StatusCode: s.status, Header: maps.Clone(h), Body: http.NoBody}
 	if c.Head {
 		s.release()
 	} else if r := s.attach(); r != nil {

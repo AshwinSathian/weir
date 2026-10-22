@@ -138,3 +138,52 @@ func TestSharedStreamHeadFollower(t *testing.T) {
 		}
 	})
 }
+
+// FR-COA-10, FR-STO-6, T-8: with StripSetCookie the creator keeps its own
+// Set-Cookie, and a follower reading the shared stream never gets it.
+func TestSharedStreamStripsSetCookieForFollowers(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		gate := make(chan struct{})
+		o := testorigin.NewChecked(t, 64, 16)
+		o.Default(testorigin.Behavior{Func: func(*weir.Request) (*weir.Response, error) {
+			<-gate
+			return &weir.Response{StatusCode: http.StatusOK,
+				Header: http.Header{"Cache-Control": {"max-age=60"}, "Set-Cookie": {"session=creator"}},
+				Body:   io.NopCloser(io.LimitReader(zeros{}, 3<<20))}, nil
+		}})
+		cfg := cacheCfg
+		cfg.Storable.StripSetCookie = true
+		e := newEngine(t, cfg)
+		defer closeEngine(t, e)
+		type res struct {
+			cookie    string
+			collapsed bool
+		}
+		chs := make([]chan res, 3)
+		for i := range chs {
+			chs[i] = make(chan res, 1)
+			go func() {
+				resp, err := e.Serve(t.Context(), getReq("/big"), o)
+				if err != nil {
+					t.Error(err)
+					chs[i] <- res{}
+					return
+				}
+				_, _ = io.Copy(io.Discard, resp.Body)
+				resp.Body.Close()
+				chs[i] <- res{resp.Header.Get("Set-Cookie"), resp.Cache.Collapsed}
+			}()
+		}
+		synctest.Wait()
+		close(gate)
+		for _, ch := range chs {
+			r := <-ch
+			if r.collapsed && r.cookie != "" {
+				t.Fatalf("a follower got Set-Cookie %q", r.cookie)
+			}
+			if !r.collapsed && r.cookie != "session=creator" {
+				t.Fatalf("the creator lost its Set-Cookie: %q", r.cookie)
+			}
+		}
+	})
+}
