@@ -225,7 +225,11 @@ func (e *Engine) warmFollow(ctx context.Context, f *coalesce.Flight, c *keys.Cla
 	select {
 	case <-f.Done():
 	case <-ctx.Done():
+		leaveAsFollower(f)
 		return false
+	}
+	if fr := f.Result().(*flightResult); fr.share != nil {
+		fr.share.release() // Warm reads no body (FR-COA-10)
 	}
 	switch fr := f.Result().(*flightResult); {
 	case fr.bgDropped, fr.entry != nil && keys.VariantKey(c.Primary, fr.entry.VaryNames, c.Forwarded.Header) != fr.vk:

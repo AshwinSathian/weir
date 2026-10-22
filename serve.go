@@ -443,7 +443,9 @@ func (e *Engine) miss(ctx context.Context, c *keys.Classified, origin Origin, lk
 	// (T-31: one client must not disable coalescing for everyone).
 	// FR-COA-5: a re-entering follower coalesces again only under a new
 	// key, so followers never wait on each other serially.
-	if c.Authorized || c.ReqCC.NoStore || lk.marker || prevCK != nil && *prevCK == lk.ck {
+	// FR-COA-10: behind an over-size marker the response is shareable as a
+	// stream, so those requests coalesce on an unbuffered flight.
+	if c.Authorized || c.ReqCC.NoStore || lk.marker && !lk.oversize || prevCK != nil && *prevCK == lk.ck {
 		return e.fetchDirect(ctx, sp, origin)
 	}
 	return e.fetchCoalesced(ctx, sp, origin)
@@ -513,8 +515,10 @@ func (e *Engine) fetchStored(ctx context.Context, sp *fetchSpec, origin Origin) 
 		emit(e.cfg.Observer, Event{Kind: EvNotStored, Time: res.respTime, Partition: c.Partition, Reason: "stream"})
 	case res.unbuffered: // fetched behind an over-size marker: nothing to store
 		emit(e.cfg.Observer, Event{Kind: EvNotStored, Time: res.respTime, Partition: c.Partition, Reason: "too-large"})
+		e.markShareable(c, fr)
 	case res.over:
 		emit(e.cfg.Observer, Event{Kind: EvNotStored, Time: res.respTime, Partition: c.Partition, Reason: "too-large"})
+		e.markShareable(c, fr)
 		// FR-STO-12, T-37: without a marker every later request would wait
 		// for a flight to read MaxObjectBytes and then fetch again. T-31: the
 		// response's size is the response's own, unless an unkeyed input
@@ -536,6 +540,26 @@ func (e *Engine) fetchStored(ctx context.Context, sp *fetchSpec, origin Origin) 
 		}
 	}
 	return fr
+}
+
+// markShareable records whether an over-size response may be read by every
+// waiter of its flight (FR-COA-10): it must be storable in every respect but
+// its size, under the same rules (FR-STO-1 to FR-STO-10), so sharing it can
+// never give a waiter what the store would refuse to give it.
+func (e *Engine) markShareable(c *keys.Classified, fr *flightResult) {
+	res := &fr.fetchResult
+	if serverError(res.resp.StatusCode) {
+		return
+	}
+	d := storability(&e.cfg, c, res.received(), nil, res.respTime)
+	if !d.ok {
+		return
+	}
+	fr.shareable, fr.shareVary = true, d.varyNames
+	fr.shareTags = []store.Tag{store.TagGlobal(), c.URITag()}
+	for _, g := range d.groups {
+		fr.shareTags = append(fr.shareTags, keys.TagGroup(c.Origin, g))
+	}
 }
 
 // respond builds the response for the request whose fetch produced fr.

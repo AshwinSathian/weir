@@ -644,9 +644,8 @@ func (zeros) Read(p []byte) (int, error) {
 	return len(p), nil
 }
 
-// FR-COA-5, FR-STO-9, NFR-3: a body over MaxObjectBytes streams to the
-// creator without being buffered, and followers re-enter and fetch it
-// themselves instead of sharing the single-consumer stream.
+// FR-COA-10, FR-STO-9, NFR-3: a body over MaxObjectBytes streams without
+// being buffered whole, and the flight's followers read the same stream.
 func TestOversizedStreamedNotBuffered(t *testing.T) {
 	const size = 50 << 20
 	// big serves the body; the first call waits for first, later ones for rest.
@@ -695,7 +694,9 @@ func TestOversizedStreamedNotBuffered(t *testing.T) {
 		})
 	})
 
-	t.Run("followers re-enter and fetch themselves", func(t *testing.T) {
+	// FR-COA-10: the followers read the flight's own stream; the origin is
+	// asked once. Before v1.2 each re-entered and fetched the object again.
+	t.Run("followers share the flight's stream", func(t *testing.T) {
 		synctest.Test(t, func(t *testing.T) {
 			first, rest := make(chan struct{}), make(chan struct{})
 			o := testorigin.NewChecked(t, 64, 16)
@@ -728,16 +729,22 @@ func TestOversizedStreamedNotBuffered(t *testing.T) {
 			}
 			close(first)
 			synctest.Wait()
-			// Followers never wait on each other serially: all three are at
-			// the origin at once.
-			if n := o.TotalCalls(); n != 4 {
-				t.Fatalf("origin calls after the flight = %d, want 4 (one flight, three re-entries)", n)
+			if n := o.TotalCalls(); n != 1 {
+				t.Fatalf("origin calls after the flight = %d, want 1", n)
 			}
 			close(rest)
+			collapsed := 0
 			for _, ch := range chs {
-				if r := <-ch; r.err != nil || r.n != size || r.collapsed {
-					t.Fatalf("got %d bytes, %v, collapsed=%v; want %d of its own", r.n, r.err, r.collapsed, size)
+				r := <-ch
+				if r.err != nil || r.n != size {
+					t.Fatalf("got %d bytes, %v; want all %d", r.n, r.err, size)
 				}
+				if r.collapsed {
+					collapsed++
+				}
+			}
+			if collapsed != 3 {
+				t.Fatalf("%d responses collapsed, want the 3 followers", collapsed)
 			}
 		})
 	})

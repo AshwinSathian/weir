@@ -29,6 +29,7 @@ Fixes for the losses the second comparison round found (card HRD-23, findings CM
 
 ### Added
 
+- Over-size responses are shared. Requests that wait for the same object over `Storable.MaxObjectBytes` read one origin download together instead of each downloading it, holding at most `MaxObjectBytes` between the slowest and the fastest reader. When the others have waited a second in total for the slowest client, it continues on a range request of its own (if the origin offers byte ranges and a strong `ETag`) or is cut off. Only a response the store would accept but for its size is shared.
 - `Freshness.NoHeuristic`: a response whose only freshness information is `Last-Modified` gets a lifetime of zero, so it is stored for its validator and revalidated before every use. Before, the heuristic could only be bounded with `HeuristicMax`.
 - Caddy: `store valkey { tls_ca_file, tls_server_name, max_object_bytes }`. A Valkey server with a private CA, or whose certificate names another host, can be used from Caddy, and the store's record limit can be set.
 - `Limiter.AdaptiveMax` and Caddy's `limiter { adaptive_max }`: an adaptive origin concurrency limit between `MaxConcurrent` and this ceiling (FR-LIM-8). It grows by an eighth while requests wait for a slot and the origin answers well, and drops a quarter on an origin failure or when fetch times double. Off by default: with it on, a few clients get the origin's own error when the limit crosses what the origin can take.

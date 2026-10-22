@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/netip"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -287,6 +288,23 @@ func (c *Classified) AsRangePass() *Classified {
 	if len(c.ifRange) > 0 {
 		out.Forwarded.Header["If-Range"] = slices.Clone(c.ifRange)
 	}
+	return &out
+}
+
+// AsResume is the range pass-through that continues an over-size response
+// from byte off for a reader moved off a shared stream (FR-COA-10): the
+// cacheable forward plus Range from off and If-Range with the response's
+// strong entity-tag, so the origin sends the rest of the same representation
+// or the whole of another, which the caller refuses. Nothing is stored from
+// it (T-7).
+func (c *Classified) AsResume(off int64, etag string) *Classified {
+	c.Forward()
+	out := *c
+	out.Class, out.FwdReason = ClassPass, FwdNone
+	out.Forwarded.PassThrough = true
+	out.Forwarded.Header = c.Forwarded.Header.Clone()
+	out.Forwarded.Header["Range"] = []string{"bytes=" + strconv.FormatInt(off, 10) + "-"}
+	out.Forwarded.Header["If-Range"] = []string{etag}
 	return &out
 }
 
