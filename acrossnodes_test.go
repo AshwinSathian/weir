@@ -2,6 +2,7 @@ package weir_test
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -157,14 +158,18 @@ func TestAcrossNodesUnstorableFetchesAgain(t *testing.T) {
 	})
 }
 
-// FR-COA-11, FR-COA-4: a lock holder that never answers does not hold the
-// other node past the flight's own bound; then it fetches for itself.
+// FR-COA-11, FR-COA-4, T-19: a lock holder that never answers (a hanging
+// origin, or a node that died holding it) ends the waiting flight as a
+// timeout at the flight's own bound, so its waiters do not each fetch past
+// it; once the dead holder's lock expires, the next request fetches.
 func TestAcrossNodesLockHolderBounded(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
+		st := &deadHolder{lockStore: newLockStore(t)}
 		cfg := cacheCfg
-		cfg.Store = &deadHolder{newLockStore(t)}
+		cfg.Store = st
 		cfg.Timeouts.Origin = 2 * time.Second
 		cfg.Limiter.MaxQueueWait = time.Second
+		cfg.Negative.Disable = true
 		e := newEngine(t, cfg)
 		defer closeEngine(t, e)
 		var calls atomic.Int32
@@ -172,30 +177,46 @@ func TestAcrossNodesLockHolderBounded(t *testing.T) {
 			calls.Add(1)
 			return &weir.Response{StatusCode: http.StatusOK, Header: http.Header{"Cache-Control": {"max-age=60"}}, Body: io.NopCloser(strings.NewReader("hi"))}, nil
 		})
+		bound := cfg.Timeouts.Origin + 2*cfg.Limiter.MaxQueueWait
 		start := time.Now()
+		var wg sync.WaitGroup
+		for range 5 {
+			wg.Go(func() {
+				if _, err := e.Serve(t.Context(), getReq("/x"), o); !errors.Is(err, weir.ErrOriginTimeout) {
+					t.Errorf("err = %v, want ErrOriginTimeout", err)
+				}
+			})
+		}
+		wg.Wait()
+		if d := time.Since(start); d > bound {
+			t.Fatalf("waited %v on a dead holder, bound %v", d, bound)
+		}
+		if calls.Load() != 0 {
+			t.Fatalf("origin calls = %d while another node held the lock, want 0", calls.Load())
+		}
+		time.Sleep(2 * time.Second) // the dead holder's lock (bound + 1 s) expires
 		resp, err := e.Serve(t.Context(), getReq("/x"), o)
 		if err != nil {
 			t.Fatal(err)
 		}
 		resp.Body.Close()
-		bound := cfg.Timeouts.Origin + 2*cfg.Limiter.MaxQueueWait
-		if d := time.Since(start); d > bound {
-			t.Fatalf("waited %v on a dead holder, bound %v", d, bound)
-		}
 		if calls.Load() != 1 {
-			t.Fatalf("origin calls = %d, want 1 of its own", calls.Load())
+			t.Fatalf("origin calls = %d after the lock expired, want 1", calls.Load())
 		}
 	})
 }
 
-// deadHolder is a lockStore whose every lock is already held by a node that
-// never releases it.
-type deadHolder struct{ *lockStore }
-
-func (d *deadHolder) Lock(context.Context, store.Key, time.Duration) (func(), bool, error) {
-	return nil, false, nil
+// deadHolder is a lockStore whose first lock request finds the lock already
+// taken by a node that will never release it; the lock still expires.
+type deadHolder struct {
+	*lockStore
+	once sync.Once
 }
-func (d *deadHolder) Held(context.Context, store.Key) (bool, error) { return true, nil }
+
+func (d *deadHolder) Lock(ctx context.Context, k store.Key, ttl time.Duration) (func(), bool, error) {
+	d.once.Do(func() { _, _, _ = d.lockStore.Lock(ctx, k, ttl) }) // the dead node took it
+	return d.lockStore.Lock(ctx, k, ttl)
+}
 
 // optimistic is a lock that always grants without asking anything, as the
 // Valkey store's does when CoalesceAcrossNodes is off.
@@ -258,4 +279,117 @@ func (c storeErrCount) Observe(ev weir.Event) {
 	if ev.Kind == weir.EvStoreError {
 		c.n.Add(1)
 	}
+}
+
+// node is one engine's view of a shared lockStore, so a test can change what
+// a single node's store calls answer.
+type node struct {
+	*lockStore
+	epochCalls atomic.Int32
+	epochs     func(n int32) (store.Epoch, bool, error) // nil: the shared store's
+}
+
+func (n *node) NewestEpoch(ctx context.Context, tags []store.Tag, since time.Time) (store.Epoch, bool, error) {
+	c := n.epochCalls.Add(1)
+	if n.epochs != nil {
+		return n.epochs(c)
+	}
+	return n.lockStore.NewestEpoch(ctx, tags, since)
+}
+
+// FR-COA-11, FR-PRG-7, NFR-2: a purge that the waiting node's last check
+// sees, after its lookup did not (a failed epoch read is "no epoch", T-9),
+// makes it fetch for itself; it never serves the purged entry and never
+// panics on the dropped one.
+func TestAcrossNodesPurgedWhileWaiting(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		shared := newLockStore(t)
+		a := &node{lockStore: shared}
+		b := &node{lockStore: shared, epochs: func(n int32) (store.Epoch, bool, error) {
+			if n == 1 {
+				return store.Epoch{}, false, store.ErrUnavailable // the lookup's read fails
+			}
+			return store.Epoch{Mode: store.EpochSoft, At: time.Now()}, true, nil // purged since
+		}}
+		var calls atomic.Int32
+		o := weir.OriginFunc(func(context.Context, *weir.Request) (*weir.Response, error) {
+			calls.Add(1)
+			time.Sleep(300 * time.Millisecond)
+			return &weir.Response{StatusCode: http.StatusOK, Header: http.Header{"Cache-Control": {"max-age=60"}}, Body: io.NopCloser(strings.NewReader("hello"))}, nil
+		})
+		cfg := cacheCfg
+		cfg.Store = a
+		ea := newEngine(t, cfg)
+		defer closeEngine(t, ea)
+		cfg.Store = b
+		eb := newEngine(t, cfg)
+		defer closeEngine(t, eb)
+		var wg sync.WaitGroup
+		for _, e := range []*weir.Engine{ea, eb} {
+			wg.Go(func() {
+				resp, err := e.Serve(t.Context(), getReq("/x"), o)
+				if err != nil {
+					t.Error(err)
+					return
+				}
+				resp.Body.Close()
+			})
+			time.Sleep(time.Millisecond)
+		}
+		wg.Wait()
+		if calls.Load() != 2 {
+			t.Fatalf("origin calls = %d, want 2: the purged node fetched for itself", calls.Load())
+		}
+	})
+}
+
+// FR-COA-11, T-19: when the origin hangs, the followers on the waiting node
+// do not each fetch past the flight's bound; they get the other node's
+// recorded failure (FR-NEG-1) or the timeout.
+func TestAcrossNodesHangingOriginNoHerd(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		shared := newLockStore(t)
+		var calls atomic.Int32
+		o := weir.OriginFunc(func(ctx context.Context, _ *weir.Request) (*weir.Response, error) {
+			calls.Add(1)
+			<-ctx.Done()
+			return nil, ctx.Err()
+		})
+		cfg := cacheCfg
+		cfg.Store = shared
+		cfg.Timeouts.Origin = 2 * time.Second
+		cfg.Limiter.MaxQueueWait = time.Second
+		ea, eb := newEngine(t, cfg), newEngine(t, cfg)
+		defer closeEngine(t, ea)
+		defer closeEngine(t, eb)
+		var wg sync.WaitGroup
+		wg.Go(func() { _, _ = ea.Serve(t.Context(), getReq("/x"), o) })
+		time.Sleep(time.Millisecond)
+		for range 5 {
+			wg.Go(func() {
+				resp, err := eb.Serve(t.Context(), getReq("/x"), o)
+				if err == nil {
+					resp.Body.Close()
+					if resp.StatusCode < 500 {
+						t.Errorf("status %d from a hanging origin", resp.StatusCode)
+					}
+				}
+			})
+		}
+		wg.Wait()
+		if n := calls.Load(); n > 2 {
+			t.Fatalf("origin calls = %d, want at most 2 (one per node)", n)
+		}
+	})
+}
+
+// FR-COA-11, FR-KEY-7: a response with Vary is shared across nodes too,
+// under the variant the waiting node's own request selects.
+func TestAcrossNodesVary(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		calls, got := twoNodes(t, newLockStore(t), http.Header{"Vary": {"Accept-Encoding"}}, 300*time.Millisecond)
+		if calls != 1 || got[1] == nil || !got[1].Cache.Hit {
+			t.Fatalf("calls %d, second node %+v; want 1 call and a hit", calls, got[1])
+		}
+	})
 }

@@ -38,9 +38,13 @@ func (s *Store) Get(ctx context.Context, k store.Key) (*store.Entry, error) {
 	if e, ok := s.local.get(ctx, k); ok {
 		return e, nil
 	}
+	writes := s.local.writes.Load()
 	e, err := s.getRemote(ctx, k)
-	if err == nil {
-		_ = s.local.m.Set(ctx, k, e) // the memory store may decline it (size); then it is read again
+	// A write or delete of this node since the read was sent is newer than
+	// what the read returned: keep that, not this (the memory store may
+	// also decline the copy for its size; then it is read again).
+	if err == nil && s.local.writes.Load() == writes {
+		_ = s.local.m.Set(ctx, k, e)
 	}
 	return e, err
 }
@@ -89,25 +93,31 @@ func (s *Store) getRemote(ctx context.Context, k store.Key) (*store.Entry, error
 // record). The engine builds entries, so a rejection is a bug to find
 // there, and a breaker trip would only hide it.
 func (s *Store) Set(ctx context.Context, k store.Key, e *store.Entry) error {
-	err := s.setRemote(ctx, k, e)
-	if s.local != nil {
-		if err == nil {
-			_ = s.local.m.Set(ctx, k, e)
-		} else {
-			_ = s.local.m.Delete(ctx, k) // never keep a copy the server may not have
-		}
+	if s.local == nil {
+		_, err := s.setRemote(ctx, k, e)
+		return err
+	}
+	s.local.writes.Add(1)
+	stored, err := s.setRemote(ctx, k, e)
+	if stored {
+		_ = s.local.m.Set(ctx, k, e)
+	} else {
+		_ = s.local.m.Delete(ctx, k) // never keep a copy the server does not have
 	}
 	return err
 }
 
-func (s *Store) setRemote(ctx context.Context, k store.Key, e *store.Entry) error {
+// setRemote writes the record and reports whether the server now holds it:
+// false for an error and for a record declined as past its expiry,
+// unencodable or over MaxObjectBytes.
+func (s *Store) setRemote(ctx context.Context, k store.Key, e *store.Entry) (bool, error) {
 	cl, err := s.acquire(ctx)
 	if err != nil {
-		return err
+		return false, err
 	}
 	pxat, ok := s.expiryMillis(e, time.Now())
 	if !ok {
-		return nil
+		return false, nil
 	}
 	val, err := store.Encode(e)
 	ctx, cancel := s.callCtx(ctx)
@@ -115,9 +125,10 @@ func (s *Store) setRemote(ctx context.Context, k store.Key, e *store.Entry) erro
 	if err != nil || int64(len(val)) > s.cfg.MaxObjectBytes {
 		// Best effort: a failed DEL leaves the old record, which S-4 allows.
 		_ = cl.del(ctx, s.entryKey(k))
-		return nil
+		return false, nil
 	}
-	return mapError(cl.set(ctx, s.entryKey(k), val, pxat))
+	err = mapError(cl.set(ctx, s.entryKey(k), val, pxat))
+	return err == nil, err
 }
 
 // expiryMillis is the PXAT for e: its Expires clamped to MaxRetention after
@@ -147,6 +158,7 @@ func (s *Store) expiryMillis(e *store.Entry, now time.Time) (pxat int64, ok bool
 // Delete removes the record at k; a missing key is fine.
 func (s *Store) Delete(ctx context.Context, k store.Key) error {
 	if s.local != nil {
+		s.local.writes.Add(1)
 		_ = s.local.m.Delete(ctx, k)
 	}
 	cl, err := s.acquire(ctx)

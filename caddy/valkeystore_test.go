@@ -45,7 +45,8 @@ func TestStoreValkeyJSONMapsEveryField(t *testing.T) {
 	raw := `{"name":"a","store":{"type":"valkey","addrs":["10.0.0.1:6379","10.0.0.2:6379"],"username":"weir",
 		"password":"` + secretPW + `","tls":true,"cluster":true,"prefix":"site","hash_tag":"tag","co_locate_entries":true,
 		"max_retention":"2h","max_clock_skew":"2s","max_hard_epochs":5,"call_timeout":"3s","hard_epoch_wait":"100ms",
-		"skip_policy_check":true,"tls_server_name":"vk.internal","max_object_bytes":"1MiB"}}`
+		"skip_policy_check":true,"tls_server_name":"vk.internal","max_object_bytes":"1MiB",
+		"coalesce_across_nodes":true,"local_tier":"32MiB","local_epoch_ttl":"2s"}}`
 	var h Handler
 	if err := decodeStrict([]byte(raw), &h); err != nil {
 		t.Fatal(err)
@@ -58,7 +59,8 @@ func TestStoreValkeyJSONMapsEveryField(t *testing.T) {
 		vc.Prefix != "site" || vc.HashTag != "tag" || !vc.CoLocateEntries || vc.MaxRetention != 2*time.Hour ||
 		vc.MaxClockSkew != 2*time.Second || vc.MaxHardEpochs != 5 || vc.CallTimeout != 3*time.Second ||
 		vc.HardEpochWait != 100*time.Millisecond || !vc.SkipPolicyCheck || vc.TLS.ServerName != "vk.internal" ||
-		vc.MaxObjectBytes != 1<<20 {
+		vc.MaxObjectBytes != 1<<20 || !vc.CoalesceAcrossNodes || vc.LocalTier == nil ||
+		vc.LocalTier.MaxBytes != 32<<20 || vc.LocalTier.EpochTTL != 2*time.Second {
 		t.Fatalf("not every field mapped: %v", vc)
 	}
 	if _, err := vc.Validate(); err != nil {
@@ -218,6 +220,9 @@ func TestCaddyfileStoreValkey(t *testing.T) {
 			tls_ca_file ` + ca + `
 			tls_server_name vk.internal
 			max_object_bytes 1MiB
+			coalesce_across_nodes
+			local_tier 32MiB
+			local_epoch_ttl 2s
 			cluster
 			prefix site
 			hash_tag tag
@@ -244,6 +249,7 @@ func TestCaddyfileStoreValkey(t *testing.T) {
 	want := Handler{Name: "site-a", Store: &StoreConfig{
 		Type: "valkey", Addrs: []string{"10.0.0.1:6379", "10.0.0.2:6379"}, Username: "weir", Password: "{env.WEIR_TEST_VK_PW}",
 		TLS: true, TLSCAFile: ca, TLSServerName: "vk.internal", MaxObjectBytes: 1 << 20,
+		CoalesceAcrossNodes: true, LocalTier: 32 << 20, LocalEpochTTL: caddy.Duration(2 * time.Second),
 		Cluster: true, Prefix: "site", HashTag: "tag", CoLocateEntries: true,
 		MaxRetention: caddy.Duration(2 * time.Hour), MaxClockSkew: caddy.Duration(2 * time.Second), MaxHardEpochs: 5,
 		CallTimeout: caddy.Duration(3 * time.Second), HardEpochWait: caddy.Duration(100 * time.Millisecond), SkipPolicyCheck: true,
@@ -254,6 +260,7 @@ func TestCaddyfileStoreValkey(t *testing.T) {
 	}
 
 	errCases := map[string]struct{ src, want string }{
+		"bad local tier size": {"store valkey {\n addrs a:1\n local_tier lots\n}", "store local_tier"},
 		"unknown store type":  {"store memory {\n addrs a:1\n}", `unknown store type "memory"`},
 		"no type":             {"store", "wrong argument count"},
 		"no block":            {"store valkey", "requires a block"},

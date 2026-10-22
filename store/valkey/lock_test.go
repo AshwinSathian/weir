@@ -135,3 +135,67 @@ func TestLocalTierConfig(t *testing.T) {
 		t.Fatalf("defaults: %+v, %v", c.LocalTier, err)
 	}
 }
+
+// P5, 05 §7: the purge-check answers are bounded (past the bound the cache
+// starts over), and an answer read before a forget is not remembered after.
+func TestLocalTierAnswers(t *testing.T) {
+	l, err := newLocalTier(&LocalTierConfig{MaxBytes: defaultLocalBytes, EpochTTL: time.Minute}, 1<<20, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.m.Close()
+	now := time.Now()
+	for i := range maxEpochAnswers + 10 {
+		_, gen, _ := l.answer(uint64(i), now)
+		l.remember(uint64(i), epochAnswer{got: now}, gen)
+	}
+	if n := len(l.answers); n > maxEpochAnswers {
+		t.Fatalf("%d answers held, bound %d", n, maxEpochAnswers)
+	}
+	_, gen, _ := l.answer(1<<40, now)
+	l.forget()
+	l.remember(1<<40, epochAnswer{ok: true, got: now}, gen)
+	if _, _, hit := l.answer(1<<40, now); hit {
+		t.Fatal("an answer read before a forget was remembered after it")
+	}
+}
+
+// FR-STF-5: a record the server declined (here: already past its expiry)
+// leaves no local copy; and a Get whose server read raced a write of this
+// node does not put the older record back in the local tier.
+func TestLocalTierNeverAheadOfServer(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		s, cl := connected(t, func(c *Config) { c.LocalTier = &LocalTierConfig{} })
+		var k store.Key
+		k[0] = 3
+		now := time.Now()
+		old := testEntry(now)
+		old.Expires = now.Add(-time.Second)
+		if err := s.Set(t.Context(), k, old); err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := s.local.get(t.Context(), k); ok {
+			t.Fatal("a declined record was kept locally")
+		}
+
+		r1 := testEntry(now)
+		r1.Body = []byte("r1")
+		if _, err := s.setRemote(t.Context(), k, r1); err != nil { // another node wrote r1
+			t.Fatal(err)
+		}
+		r2 := testEntry(now)
+		r2.Body = []byte("r2")
+		cl.vary.afterGet = func() { // this node writes r2 while its Get of r1 is on the wire
+			cl.vary.afterGet = nil
+			if err := s.Set(t.Context(), k, r2); err != nil {
+				t.Error(err)
+			}
+		}
+		if e, err := s.Get(t.Context(), k); err != nil || string(e.Body) != "r1" {
+			t.Fatalf("Get = %v, %v", e, err)
+		}
+		if e, ok := s.local.get(t.Context(), k); !ok || string(e.Body) != "r2" {
+			t.Fatalf("local copy %v, want r2, the newer write", e)
+		}
+	})
+}

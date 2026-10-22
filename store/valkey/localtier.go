@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"hash/maphash"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/AshwinSathian/weir/store"
@@ -39,6 +40,9 @@ type localTier struct {
 	// must not be remembered after it, or a lookup racing this node's own
 	// purge would cache the answer from before the purge.
 	gen uint64
+	// writes counts this node's record writes and deletes, so a Get that
+	// read the server before one of them does not put back the older copy.
+	writes atomic.Uint64
 }
 
 type epochAnswer struct {
@@ -47,8 +51,10 @@ type epochAnswer struct {
 	got time.Time
 }
 
-func newLocalTier(c *LocalTierConfig, maxObject int64) (*localTier, error) {
-	m, err := memory.New(memory.Config{MaxBytes: c.MaxBytes, Shards: memory.Shards(c.MaxBytes, min(maxObject, 1<<20))})
+func newLocalTier(c *LocalTierConfig, maxObject int64, maxRetention time.Duration) (*localTier, error) {
+	// MaxRetention as on the server: a copy must not outlive the hard epoch
+	// that could purge it, which the server prunes after MaxRetention (E-11).
+	m, err := memory.New(memory.Config{MaxBytes: c.MaxBytes, Shards: memory.Shards(c.MaxBytes, min(maxObject, 1<<20)), MaxRetention: maxRetention})
 	if err != nil {
 		return nil, err
 	}

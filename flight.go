@@ -57,6 +57,9 @@ type flightResult struct {
 	// the flight before it (storedMeanwhile), and every waiter serves it as
 	// a hit.
 	fromStore bool
+	// neg is a negative entry another engine wrote while this flight waited
+	// for its lock (FR-COA-11, FR-NEG-1): every waiter serves it.
+	neg *store.Entry
 	// shareable: an over-size response that is storable but for its size,
 	// so the flight's waiters may read it together (FR-COA-10); share is
 	// that stream once runFlight has made it.
@@ -179,7 +182,10 @@ func (e *Engine) fetchCoalesced(ctx context.Context, sp *fetchSpec, origin Origi
 	if fr.share != nil {
 		return e.serveShared(ctx, sp, origin, fr, created)
 	}
-	if fr.fromStore && created { // FR-COA-11: another engine fetched it and stored it
+	if fr.neg != nil { // FR-COA-11: another engine's fetch failed, and it recorded so
+		return e.fromNegative(c, fr.neg, time.Now()), nil
+	}
+	if fr.fromStore && created && fr.entry != nil { // FR-COA-11: another engine fetched it and stored it
 		now := time.Now()
 		_, staleness, _ := httpcc.Evaluate(fr.entry, store.Epoch{}, false, now)
 		return e.fromEntry(c, fr.entry, now, CacheInfo{Hit: true, TTL: -staleness}), nil
@@ -282,7 +288,11 @@ func (e *Engine) runFlight(bg, reqCtx context.Context, f *coalesce.Flight, sp *f
 		// FR-PRG-7, T-10: a follower may have arrived after the purge. Every
 		// follower arrived before Publish, so checking once here covers
 		// them all, up to this one store round trip.
-		fr.entry = nil
+		if fr.fromStore { // FR-COA-11: nothing was fetched here, so fetch now
+			fr = e.fetchStored(ctx, sp, origin)
+		} else {
+			fr.entry = nil
+		}
 	}
 	if fr.live() { // the body streams past this goroutine; Close still cancels it
 		fr.resp.Body = &cancelOnClose{ReadCloser: fr.resp.Body, cancel: release}
@@ -306,13 +316,16 @@ func (e *Engine) runFlight(bg, reqCtx context.Context, f *coalesce.Flight, sp *f
 // stores nothing for others to read, and a warm fetch already holds a
 // limiter slot it must not sit on, so neither locks.
 func (e *Engine) fetchStoredOnce(ctx context.Context, sp *fetchSpec, origin Origin) *flightResult {
-	if e.sg.locker == nil || sp.lk.oversize || sp.permit != nil {
+	// A request that asked to validate (no-cache, max-age=0) cannot be
+	// answered by what another engine stores, so it does not wait for one.
+	if e.sg.locker == nil || sp.lk.oversize || sp.permit != nil || sp.lk.fwd == FwdRequest {
 		return e.fetchStored(ctx, sp, origin)
 	}
 	// The flight's bound (FR-COA-4): a wait for a half-open probe, a wait
 	// for a slot, the fetch. A lock outlives it by a second, so a holder
 	// that is still inside its bound keeps it.
 	bound := e.cfg.Timeouts.Origin + 2*e.cfg.Limiter.MaxQueueWait
+	deadline := time.Now().Add(bound)
 	release, ok, err := e.sg.lock(ctx, sp.lk.ck, bound+time.Second)
 	switch {
 	case err != nil: // T-9: a store failure fails open, to a fetch of our own
@@ -321,10 +334,18 @@ func (e *Engine) fetchStoredOnce(ctx context.Context, sp *fetchSpec, origin Orig
 		defer release()
 		return e.fetchStored(ctx, sp, origin)
 	}
-	if e.waitUnlocked(ctx, sp.lk.ck, time.Now().Add(bound)) {
-		if fr := e.storedByAnother(ctx, sp); fr != nil {
-			return fr
+	if !e.waitUnlocked(ctx, sp.lk.ck, deadline) {
+		// The holder's fetch outlived the flight's bound, which is the
+		// origin hanging, or the store failing us. A fetch of our own now
+		// would run past the bound its followers wait for, and each of
+		// them would then fetch too (T-19): the flight ends as a timeout.
+		if ctx.Err() != nil {
+			return &flightResult{fetchResult: fetchResult{err: ctx.Err()}}
 		}
+		return &flightResult{fetchResult: fetchResult{err: ErrOriginTimeout}}
+	}
+	if fr := e.storedByAnother(ctx, sp); fr != nil {
+		return fr
 	}
 	return e.fetchStored(ctx, sp, origin)
 }
@@ -359,12 +380,18 @@ func (e *Engine) waitUnlocked(ctx context.Context, k store.Key, deadline time.Ti
 }
 
 // storedByAnother looks the request's key up after another engine released
-// its lock, and returns a fresh response stored under the same key as a
-// result every waiter serves as a hit (FR-COA-11), or nil.
+// its lock (FR-COA-11). A fresh response becomes a result every waiter
+// serves as a hit, under the variant key the lookup selected, which
+// followers compare with their own (FR-KEY-7). A negative entry the other
+// engine wrote for a failed fetch is served to every waiter. Anything else
+// returns nil: the caller fetches.
 func (e *Engine) storedByAnother(ctx context.Context, sp *fetchSpec) *flightResult {
 	now := time.Now()
 	lk := e.lookup(ctx, sp.c, now)
-	if lk.entry == nil || lk.ck != sp.lk.ck {
+	if lk.neg != nil {
+		return &flightResult{neg: lk.neg}
+	}
+	if lk.entry == nil {
 		return nil
 	}
 	st, staleness, _ := httpcc.Evaluate(lk.entry, lk.epoch, lk.epochOK, now)

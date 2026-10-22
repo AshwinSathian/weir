@@ -47,10 +47,16 @@ func (s *Store) Lock(ctx context.Context, k store.Key, ttl time.Duration) (func(
 }
 
 // Held reports whether any engine holds k's lock. Always false without
-// Config.CoalesceAcrossNodes.
+// Config.CoalesceAcrossNodes. Only an engine waiting for another's fetch
+// asks, and it reads the key next, so a local copy of k is dropped here:
+// the read must see what the other node stored, not this node's older copy.
 func (s *Store) Held(ctx context.Context, k store.Key) (bool, error) {
 	if !s.cfg.CoalesceAcrossNodes {
 		return false, nil
+	}
+	if s.local != nil {
+		s.local.writes.Add(1)
+		_ = s.local.m.Delete(ctx, k)
 	}
 	cl, err := s.acquire(ctx)
 	if err != nil {

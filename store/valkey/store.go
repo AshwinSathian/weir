@@ -74,7 +74,7 @@ func newStore(cfg Config, dial dialFunc) (*Store, error) {
 	}
 	s := &Store{cfg: cfg, dial: dial, ekeys: epochKeys(cfg.Prefix, cfg.HashTag), eprfx: eprfx, closing: make(chan struct{})}
 	if cfg.LocalTier != nil {
-		if s.local, err = newLocalTier(cfg.LocalTier, cfg.MaxObjectBytes); err != nil {
+		if s.local, err = newLocalTier(cfg.LocalTier, cfg.MaxObjectBytes, cfg.MaxRetention); err != nil {
 			return nil, err
 		}
 	}
