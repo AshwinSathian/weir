@@ -1,7 +1,7 @@
 # Weir testing strategy
 
 Status: v1.0
-Date: 2026-10-13
+Date: 2026-10-22
 Depends on: [01-technical-spec.md](01-technical-spec.md), [06-threat-model.md](06-threat-model.md)
 Seed name: `03-testing-strategy.md` (renumbered, see [docs/README.md](README.md))
 
@@ -342,7 +342,7 @@ Nightly: fuzzing (§5), cache-tests (§8), load tests (§9).
 
 ## 12. Definition of done for Phase 1
 
-- Every T6.x test in §6 passes, under `-race`, 100 consecutive times (`-count=100`) in CI for the engine-level ones.
+- Every T6.x test in §6 passes, under `-race`, 100 consecutive times in CI for the engine-level ones (the `release-gate` workflow, two runs per `go test -count=2` process so the race detector's memory stays within the runner).
 - `scripts/trace.sh` reports zero untested requirement IDs.
 - Every fuzz target has run at least 1 hour cumulatively without a new crasher.
 - Load scenarios in §9 pass on the reference machine.

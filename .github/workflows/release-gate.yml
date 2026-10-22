@@ -46,13 +46,22 @@ jobs:
           go-version: "1.27" # latest patch: earlier patches carry stdlib vulnerabilities (govulncheck)
           check-latest: true # the runner cache can hold an older patch with known vulnerabilities
           cache: true
-      # -count=N reruns each test N times in one process, shuffled, under the
-      # race detector. A single failure fails the job, as §12 requires.
+      # COUNT runs of each test, shuffled, under the race detector, two runs
+      # per process. The race detector keeps the state of every goroutine a
+      # process has started, so one process with -count=100 grows by about
+      # 1.5 GB a run on the root package and outgrows the runner's 16 GB.
+      # A single failure fails the job, as §12 requires.
       - name: engine-level tests, repeated
         env:
           COUNT: ${{ inputs.count }}
           PKGS: ${{ matrix.pkgs }}
-        run: go test -race -shuffle=on -count="$COUNT" -timeout 230m $PKGS
+        run: |
+          left="$COUNT"
+          while [ "$left" -gt 0 ]; do
+            n=$(( left < 2 ? left : 2 ))
+            go test -race -shuffle=on -count="$n" -timeout 30m $PKGS
+            left=$(( left - n ))
+          done
 
   fuzz-targets:
     if: inputs.fuzz
