@@ -22,6 +22,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.27" # latest patch: earlier patches carry stdlib vulnerabilities (govulncheck)
+          check-latest: true # the runner cache can hold an older patch with known vulnerabilities
           cache: true
       - id: list
         name: list fuzz targets
@@ -50,6 +51,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.27" # latest patch: earlier patches carry stdlib vulnerabilities (govulncheck)
+          check-latest: true # the runner cache can hold an older patch with known vulnerabilities
           cache: true
       - name: fuzz ${{ matrix.target }}
         env:
@@ -75,6 +77,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.27" # latest patch: earlier patches carry stdlib vulnerabilities (govulncheck)
+          check-latest: true # the runner cache can hold an older patch with known vulnerabilities
           cache: true
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -106,6 +109,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: ${{ matrix.go-version }}
+          check-latest: true # the runner cache can hold an older patch with known vulnerabilities
           cache: true
       - name: govulncheck
         run: make vuln

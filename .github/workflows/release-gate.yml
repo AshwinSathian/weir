@@ -44,6 +44,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.27" # latest patch: earlier patches carry stdlib vulnerabilities (govulncheck)
+          check-latest: true # the runner cache can hold an older patch with known vulnerabilities
           cache: true
       # -count=N reruns each test N times in one process, shuffled, under the
       # race detector. A single failure fails the job, as §12 requires.
@@ -63,6 +64,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.27" # latest patch: earlier patches carry stdlib vulnerabilities (govulncheck)
+          check-latest: true # the runner cache can hold an older patch with known vulnerabilities
           cache: true
       - id: list
         name: list fuzz targets
@@ -90,6 +92,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.27" # latest patch: earlier patches carry stdlib vulnerabilities (govulncheck)
+          check-latest: true # the runner cache can hold an older patch with known vulnerabilities
           cache: true
       - name: fuzz ${{ matrix.target }}
         env:
@@ -113,6 +116,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.27" # latest patch: earlier patches carry stdlib vulnerabilities (govulncheck)
+          check-latest: true # the runner cache can hold an older patch with known vulnerabilities
           cache: true
       # NFR-5: the allocation bound holds on any machine; ns/op is judged on
       # the reference machine, so it is printed here and not gated.
