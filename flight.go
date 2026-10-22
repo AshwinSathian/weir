@@ -55,6 +55,13 @@ type flightResult struct {
 	// the flight before it (storedMeanwhile), and every waiter serves it as
 	// a hit.
 	fromStore bool
+	// shareable: an over-size response that is storable but for its size,
+	// so the flight's waiters may read it together (FR-COA-10); share is
+	// that stream once runFlight has made it.
+	shareable bool
+	shareVary []string
+	shareTags []store.Tag
+	share     *sharedStream
 }
 
 // storedMeanwhile looks the request's key up once more, for a request that
@@ -131,6 +138,7 @@ func (e *Engine) fetchCoalesced(ctx context.Context, sp *fetchSpec, origin Origi
 				// The flight outlived its own bound: its origin ignores the
 				// context, so this follower stops trusting it (T6.2a).
 				emit(e.cfg.Observer, Event{Kind: EvCoalesceTimeout, Time: time.Now(), Partition: c.Partition, Reason: "direct"})
+				leaveAsFollower(f) // only followers get here: the creator stops its timer
 				return e.fetchDirect(ctx, sp, origin)
 			}
 			waited = true
@@ -138,6 +146,8 @@ func (e *Engine) fetchCoalesced(ctx context.Context, sp *fetchSpec, origin Origi
 				emit(e.cfg.Observer, Event{Kind: EvCoalesceTimeout, Time: time.Now(), Partition: c.Partition, Reason: "stale"})
 				if created {
 					e.leaveFlight(f)
+				} else {
+					leaveAsFollower(f)
 				}
 				return r, nil
 			}
@@ -156,12 +166,17 @@ func (e *Engine) fetchCoalesced(ctx context.Context, sp *fetchSpec, origin Origi
 		case <-ctx.Done():
 			if created {
 				e.leaveFlight(f)
+			} else {
+				leaveAsFollower(f)
 			}
 			return nil, shared(ctx.Err())
 		}
 	}
 
 	fr := f.Result().(*flightResult)
+	if fr.share != nil {
+		return e.serveShared(ctx, sp, origin, fr, created)
+	}
 	// 04 §6.8: a rule for background work never sheds a request. Each
 	// follower fetches directly, uncoalesced; the limiter bounds them.
 	if fr.bgDropped {
@@ -240,6 +255,11 @@ func (e *Engine) runFlight(bg, reqCtx context.Context, f *coalesce.Flight, sp *f
 		if !fr.live() {
 			release()
 		}
+		if s := fr.share; s != nil { // FR-COA-10: every counted waiter attaches or releases
+			f.PublishCounted(fr, s.setPending)
+			s.closeIfUnused()
+			return
+		}
 		f.Publish(fr)
 		if fr.live() && f.CreatorIsGone() && f.AbandonStream() {
 			closeBody(fr.resp)
@@ -259,6 +279,12 @@ func (e *Engine) runFlight(bg, reqCtx context.Context, f *coalesce.Flight, sp *f
 	}
 	if fr.live() { // the body streams past this goroutine; Close still cancels it
 		fr.resp.Body = &cancelOnClose{ReadCloser: fr.resp.Body, cancel: release}
+		// FR-COA-10, FR-PRG-7: as for an entry, a purge since the request went
+		// out means a waiter may have asked after it, so nobody shares.
+		if fr.shareable && !e.purgedSince(ctx, &store.Entry{Tags: fr.shareTags, RequestTime: fr.reqTime}) {
+			vk := keys.VariantKey(sp.c.Primary, fr.shareVary, sp.c.Forwarded.Header)
+			fr.share = newSharedStream(fr.resp, fr.shareVary, vk, e.cfg.Storable.MaxObjectBytes)
+		}
 	}
 }
 
@@ -283,10 +309,57 @@ func (e *Engine) hardPurgedSince(ctx context.Context, ent *store.Entry) bool {
 // stream itself (04 §6.4).
 func (e *Engine) leaveFlight(f *coalesce.Flight) {
 	if f.CreatorGone() {
-		if fr := f.Result().(*flightResult); fr.live() && f.AbandonStream() {
+		fr := f.Result().(*flightResult)
+		switch {
+		case fr.share != nil:
+			fr.share.release()
+		case fr.live() && f.AbandonStream():
 			closeBody(fr.resp)
 		}
 	}
+}
+
+// leaveAsFollower takes a follower that stopped waiting out of the flight's
+// count, and releases its place on a shared stream when it was counted
+// (FR-COA-10).
+func leaveAsFollower(f *coalesce.Flight) {
+	if res, published := f.Leave(); published {
+		if fr := res.(*flightResult); fr.share != nil {
+			fr.share.release()
+		}
+	}
+}
+
+// serveShared answers a waiter of a flight whose over-size response is
+// shared (FR-COA-10): a reader from the first byte, or headers only for a
+// HEAD. A follower that asked for another variant, or came too late to read
+// from the first byte, fetches again.
+func (e *Engine) serveShared(ctx context.Context, sp *fetchSpec, origin Origin, fr *flightResult, created bool) (*Response, error) {
+	c, s := sp.c, fr.share
+	if err := ctx.Err(); err != nil {
+		s.release()
+		if created {
+			return nil, err
+		}
+		return nil, sharedError{err}
+	}
+	if !created && keys.VariantKey(c.Primary, s.vary, c.Forwarded.Header) != s.vk {
+		s.release()
+		return e.reenter(ctx, sp, origin)
+	}
+	resp := &Response{StatusCode: s.status, Header: maps.Clone(s.header), Body: http.NoBody}
+	if c.Head {
+		s.release()
+	} else if r := s.attach(); r != nil {
+		resp.Body = r
+	} else {
+		return e.reenter(ctx, sp, origin)
+	}
+	ci := fr.ci
+	if !created {
+		ci = CacheInfo{Fwd: sp.lk.fwd, FwdStatus: fr.ci.FwdStatus, Detail: fr.ci.Detail, Collapsed: true}
+	}
+	return e.finish(resp, ci), nil
 }
 
 // staleOnTimeout serves the stale entry when stale-if-error permits it at

@@ -205,3 +205,88 @@ func TestStreamClosedWhenCreatorLeavesDuringPublish(t *testing.T) {
 		}
 	})
 }
+
+// FR-COA-10: PublishCounted reports exactly the requests that will
+// take the result. A request that leaves before it is published is not
+// counted; one that leaves after gets the result back to release it.
+func TestPublishCountsWaiters(t *testing.T) {
+	var tb Table
+	k := key(7)
+	f, created := tb.Join(k, time.Now(), maxAge)
+	if !created {
+		t.Fatal("first Join did not create")
+	}
+	for range 3 {
+		if g, c := tb.Join(k, time.Now(), maxAge); c || g != f {
+			t.Fatal("Join did not return the flight")
+		}
+	}
+	if res, published := f.Leave(); published || res != nil {
+		t.Fatal("Leave before Publish reported a result")
+	}
+	got := -1
+	f.PublishCounted("r", func(n int) { got = n })
+	if got != 3 {
+		t.Fatalf("counted %d waiters, want 3 (creator and three joins, less one that left)", got)
+	}
+	if res, published := f.Leave(); !published || res != "r" {
+		t.Fatalf("Leave after Publish = %v, %v", res, published)
+	}
+	if g, c := tb.Join(k, time.Now(), maxAge); !c || g == f {
+		t.Fatal("a published flight was joined")
+	}
+}
+
+// FR-COA-10: CreatorGone takes the creator out of the count, so a background
+// flight whose creator never waits counts only its followers.
+func TestCreatorGoneLeavesCount(t *testing.T) {
+	var tb Table
+	f, _ := tb.Join(key(8), time.Now(), maxAge)
+	if f.CreatorGone() {
+		t.Fatal("published before Publish")
+	}
+	tb.Join(key(8), time.Now(), maxAge)
+	got := -1
+	f.PublishCounted(nil, func(n int) { got = n })
+	if got != 1 {
+		t.Fatalf("counted %d, want 1", got)
+	}
+}
+
+// FR-COA-10: Join, Leave and Publish racing never lose or double a count.
+func TestPublishCountRace(t *testing.T) {
+	for range 200 {
+		var tb Table
+		k := key(9)
+		f, _ := tb.Join(k, time.Now(), maxAge)
+		var joined, left, gotBack atomic.Int64
+		var wg sync.WaitGroup
+		for range 16 {
+			wg.Go(func() {
+				g, created := tb.Join(k, time.Now(), maxAge)
+				if created {
+					g.Publish(nil) // a new flight after the first published
+					return
+				}
+				if g != f { // a follower of that new flight
+					g.Leave()
+					return
+				}
+				joined.Add(1)
+				if _, published := g.Leave(); published {
+					gotBack.Add(1)
+				} else {
+					left.Add(1)
+				}
+			})
+		}
+		var counted int
+		f.PublishCounted(nil, func(n int) { counted = n })
+		wg.Wait()
+		// The creator never left, so it is counted; every follower that was
+		// counted got the result back from Leave.
+		if int64(counted) != 1+gotBack.Load() {
+			t.Fatalf("counted %d, creator plus %d got back, %d left, %d joined", counted, gotBack.Load(), left.Load(), joined.Load())
+		}
+	}
+}

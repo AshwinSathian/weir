@@ -32,8 +32,14 @@ type shard struct {
 // Flight is one shared origin fetch. Waiters block on Done and read Result
 // after it closes.
 type Flight struct {
-	done        chan struct{}
-	res         any // set before done is closed; read only after <-done
+	done chan struct{}
+	// mu orders Join, Leave and Publish, so the waiter count a Publish
+	// hands its result is exact: every request it counts later either
+	// takes the result or calls Leave and gets it back (FR-COA-10).
+	mu          sync.Mutex
+	res         any // set under mu before done is closed; read only after <-done or from Leave
+	waiters     int // requests that will take the result: the creator, then each Join
+	sealed      bool
 	started     time.Time
 	stream      atomic.Uint32
 	creatorGone atomic.Bool
@@ -51,19 +57,22 @@ func (t *Table) Join(k store.Key, now time.Time, maxAge time.Duration) (f *Fligh
 	sh.mu.Lock()
 	defer sh.mu.Unlock()
 	if f := sh.m[k]; f != nil && now.Sub(f.started) < maxAge {
+		f.mu.Lock()
+		f.waiters++
+		f.mu.Unlock()
 		return f, false
 	}
 	if sh.m == nil {
 		sh.m = make(map[store.Key]*Flight)
 	}
-	f = &Flight{done: make(chan struct{}), started: now, sh: sh, key: k}
+	f = &Flight{done: make(chan struct{}), started: now, sh: sh, key: k, waiters: 1}
 	sh.m[k] = f
 	return f, true
 }
 
 // NewFlight returns a flight outside any table, for a fetch no one may
 // join that still needs runFlight's publishing and recovery.
-func NewFlight() *Flight { return &Flight{done: make(chan struct{})} }
+func NewFlight() *Flight { return &Flight{done: make(chan struct{}), waiters: 1} }
 
 // Len returns the number of joinable flights in the table.
 func (t *Table) Len() int {
@@ -86,9 +95,12 @@ func (f *Flight) Result() any { return f.res }
 // Publish stores res, removes the flight from the table if it is still the
 // current entry for its key, and closes Done. The flight's owner calls it
 // exactly once.
-func (f *Flight) Publish(res any) {
-	f.res = res
-	f.published.Store(true)
+func (f *Flight) Publish(res any) { f.PublishCounted(res, nil) }
+
+// PublishCounted is Publish that first calls counted, when not nil, with the
+// number of requests that will take res: each either reads Result after
+// Done or gets res back from Leave. No request joins after it is called.
+func (f *Flight) PublishCounted(res any, counted func(waiters int)) {
 	if f.sh != nil {
 		f.sh.mu.Lock()
 		if f.sh.m[f.key] == f {
@@ -96,7 +108,27 @@ func (f *Flight) Publish(res any) {
 		}
 		f.sh.mu.Unlock()
 	}
+	f.mu.Lock()
+	if counted != nil {
+		counted(f.waiters)
+	}
+	f.res, f.sealed = res, true
+	f.mu.Unlock()
+	f.published.Store(true)
 	close(f.done)
+}
+
+// Leave takes a request that has stopped waiting out of the count. When the
+// flight has already published, the request was counted and gets the result
+// back, to release what it holds (a shared stream).
+func (f *Flight) Leave() (res any, published bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.sealed {
+		return f.res, true
+	}
+	f.waiters--
+	return nil, false
 }
 
 // ClaimStream reports whether the creator won an oversized response stream.
@@ -119,7 +151,8 @@ func (f *Flight) AbandonStream() bool {
 // one of them sees both set.
 func (f *Flight) CreatorGone() (published bool) {
 	f.creatorGone.Store(true)
-	return f.published.Load()
+	_, published = f.Leave()
+	return published
 }
 
 // CreatorIsGone reports whether CreatorGone was called.

@@ -61,9 +61,10 @@ func slowest(rs []timedResp) time.Duration {
 	return d
 }
 
-// FR-STO-12, FR-COA-5, T-37: an object over MaxObjectBytes leaves a marker,
-// so later requests neither wait for a flight nor fetch twice. Before v1.1
-// every wave waited for the first MaxObjectBytes and then fetched again.
+// FR-STO-12, FR-COA-10, T-37: an object over MaxObjectBytes leaves a marker,
+// so later requests do not buffer it, and each wave shares one unbuffered
+// fetch. Before v1.1 every wave waited for the first MaxObjectBytes and then
+// fetched again; before v1.2 every request of a wave fetched.
 func TestOversizeWritesMarker(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		big := bytes.Repeat([]byte("x"), 2<<20)
@@ -79,8 +80,8 @@ func TestOversizeWritesMarker(t *testing.T) {
 			if d := slowest(rs); d != time.Second {
 				t.Fatalf("wave %d: slowest request took %v, want one origin delay: no wait on a flight", w, d)
 			}
-			if n := o.TotalCalls() - before; n != 10 {
-				t.Fatalf("wave %d: %d origin calls, want 10", w, n)
+			if n := o.TotalCalls() - before; n != 1 {
+				t.Fatalf("wave %d: %d origin calls, want 1", w, n)
 			}
 			for i, r := range rs {
 				if r.cache.Detail != "hit-for-miss" || r.n != int64(len(big)) {
