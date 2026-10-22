@@ -21,10 +21,10 @@ jobs:
         with:
           go-version: "1.27"
           check-latest: true # the runner cache can hold an older patch with known vulnerabilities
-      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with:
           package_json_file: site/package.json
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: site/.nvmrc
           cache: pnpm
@@ -33,7 +33,7 @@ jobs:
       # type check and the static build with its internal link check.
       - name: make site-check
         run: make site-check
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: site
           path: site/out
@@ -49,7 +49,7 @@ jobs:
         with:
           go-version: "1.27"
           check-latest: true # the runner cache can hold an older patch with known vulnerabilities
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: site/.nvmrc
       - run: node site/scripts/check.mjs release
