@@ -17,6 +17,21 @@ import (
 // A next the store would decline (past its expiry, or the codec rejects it)
 // is reported as swapped with the record at k left alone, like Set (S-4).
 func (s *Store) SetVarySpec(ctx context.Context, k store.Key, prev, next *store.Entry) (bool, error) {
+	if s.local != nil {
+		s.local.writes[k[0]].Add(1)
+	}
+	swapped, err := s.setVarySpecRemote(ctx, k, prev, next)
+	if s.local != nil {
+		if err == nil && swapped {
+			_ = s.local.m.Set(ctx, k, next)
+		} else {
+			_ = s.local.m.Delete(ctx, k) // read the server's spec next time
+		}
+	}
+	return swapped, err
+}
+
+func (s *Store) setVarySpecRemote(ctx context.Context, k store.Key, prev, next *store.Entry) (bool, error) {
 	cl, err := s.acquire(ctx)
 	if err != nil {
 		return false, err

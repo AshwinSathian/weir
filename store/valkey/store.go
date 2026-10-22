@@ -40,6 +40,7 @@ func (s *Store) LogValue() slog.Value { return slog.StringValue(s.String()) }
 type Store struct {
 	cfg   Config
 	dial  dialFunc
+	local *localTier                    // nil unless Config.LocalTier
 	ekeys []string                      // epoch keys in KEYS order (meta.go)
 	eprfx string                        // every entry key starts with this (entryKey, scrub.go)
 	seed  atomic.Pointer[[seedLen]byte] // cached sketch seed; nil until fetched (sketch.go)
@@ -71,7 +72,13 @@ func newStore(cfg Config, dial dialFunc) (*Store, error) {
 	if cfg.CoLocateEntries {
 		eprfx += "{" + cfg.HashTag + "}:"
 	}
-	return &Store{cfg: cfg, dial: dial, ekeys: epochKeys(cfg.Prefix, cfg.HashTag), eprfx: eprfx, closing: make(chan struct{})}, nil
+	s := &Store{cfg: cfg, dial: dial, ekeys: epochKeys(cfg.Prefix, cfg.HashTag), eprfx: eprfx, closing: make(chan struct{})}
+	if cfg.LocalTier != nil {
+		if s.local, err = newLocalTier(cfg.LocalTier, cfg.MaxObjectBytes, cfg.MaxRetention); err != nil {
+			return nil, err
+		}
+	}
+	return s, nil
 }
 
 // Bytes returns -1: the server holds the records, and the store does not
@@ -107,6 +114,9 @@ func (s *Store) Close() error {
 		cl.close()
 	}
 	s.wg.Wait()
+	if s.local != nil {
+		return s.local.m.Close()
+	}
 	return nil
 }
 

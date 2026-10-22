@@ -63,6 +63,15 @@ type client interface {
 	// same connection: WAIT only covers writes made on its own connection,
 	// and the shared multiplexed one gives no such guarantee.
 	evalWriteWait(ctx context.Context, keys, args []string, replicas, ms int64) error
+	// setNX stores val at key for px milliseconds unless the key exists, and
+	// reports whether it did (SET NX PX).
+	setNX(ctx context.Context, key string, val []byte, px int64) (bool, error)
+	// delIfEqual deletes key only while its value is val, in one
+	// server-side step, so a lock is released only by its holder.
+	delIfEqual(ctx context.Context, key string, val []byte) error
+	// renewIfEqual sets key's expiry to px milliseconds from now only while
+	// its value is val, and reports whether it did.
+	renewIfEqual(ctx context.Context, key string, val []byte, px int64) (bool, error)
 	close()
 }
 
@@ -229,6 +238,23 @@ func (v valkeyClient) evalVarySet(ctx context.Context, key string, prev []byte, 
 	}
 	n, err := varySetScript.Exec(ctx, v.c, []string{key},
 		[]string{flag, string(prev), string(val), strconv.FormatInt(pxat, 10)}).AsInt64()
+	return n == 1, err
+}
+
+func (v valkeyClient) setNX(ctx context.Context, key string, val []byte, px int64) (bool, error) {
+	err := v.c.Do(ctx, v.c.B().Set().Key(key).Value(string(val)).Nx().PxMilliseconds(px).Build()).Error()
+	if valkey.IsValkeyNil(err) { // NX refused: the key exists
+		return false, nil
+	}
+	return err == nil, err
+}
+
+func (v valkeyClient) delIfEqual(ctx context.Context, key string, val []byte) error {
+	return unlockScript.Exec(ctx, v.c, []string{key}, []string{string(val)}).Error()
+}
+
+func (v valkeyClient) renewIfEqual(ctx context.Context, key string, val []byte, px int64) (bool, error) {
+	n, err := renewScript.Exec(ctx, v.c, []string{key}, []string{string(val), strconv.FormatInt(px, 10)}).AsInt64()
 	return n == 1, err
 }
 

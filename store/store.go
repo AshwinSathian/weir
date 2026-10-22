@@ -210,6 +210,19 @@ type FetchTracker interface {
 	FetchInProgress(k Key) bool
 }
 
+// Locker is an optional Store capability: a lock per key that the engines
+// sharing a store use to fetch a missing response once among them (01
+// FR-COA-11). Lock either takes k's lock and returns the func that releases
+// it, or reports that another holder has it. The store keeps the lock while
+// its holder holds it (renewing it as needed), and a lock whose holder dies
+// without releasing it ends within ttl. Held reports whether anyone holds
+// k's lock. release bounds its own call and never blocks past the store's
+// call timeout; only the holder's release removes the lock.
+type Locker interface {
+	Lock(ctx context.Context, k Key, ttl time.Duration) (release func(), ok bool, err error)
+	Held(ctx context.Context, k Key) (bool, error)
+}
+
 // Sizer is an optional Store capability reporting current bytes and the
 // largest record the store accepts (FR-LCY-1).
 type Sizer interface {

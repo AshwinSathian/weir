@@ -52,6 +52,24 @@ func TestStoreConformance(t *testing.T) {
 	}, storetest.HardEpochCap(maxHardForConformance), storetest.Parallel(64))
 }
 
+// 05 §7, S-1..S-4: the conformance suite again with the local tier and
+// cross-node locks on. A single store must answer exactly as without them:
+// its own writes and epochs apply to its own reads at once.
+func TestStoreConformanceLocalTier(t *testing.T) {
+	addr := serverAddr(t)
+	run := strconv.FormatInt(time.Now().UnixNano(), 36)
+	n := 0
+	storetest.Run(t, func(t *testing.T) store.Store {
+		n++
+		s, err := New(Config{Addrs: []string{addr}, Prefix: "l" + run + "x" + strconv.Itoa(n), MaxHardEpochs: maxHardForConformance,
+			LocalTier: &LocalTierConfig{}, CoalesceAcrossNodes: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}, storetest.HardEpochCap(maxHardForConformance), storetest.Parallel(64))
+}
+
 // E-11: the clamped expiry reaches the server as a TTL no longer than
 // MaxRetention (the fake client cannot show what PXAT does).
 func TestSetTTLIsClamped(t *testing.T) {

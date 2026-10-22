@@ -68,6 +68,25 @@ type Config struct {
 	// managed services that disable CONFIG (false). The operator then owns
 	// the guarantee that epoch keys are never evicted.
 	SkipPolicyCheck bool
+	// CoalesceAcrossNodes makes the engines that share the server fetch a
+	// missing key once among them (false; 01 FR-COA-11): one takes a lock on
+	// the server and fetches, the others wait for what it stores. It costs
+	// a lock round trip per miss.
+	CoalesceAcrossNodes bool
+	// LocalTier, when non-nil, keeps a copy of the records this node reads
+	// in process memory, and the answers to purge checks for
+	// LocalTier.EpochTTL, so a hit costs no round trip (nil, off; 05 §7).
+	LocalTier *LocalTierConfig
+}
+
+// LocalTierConfig sizes the in-process tier in front of the server.
+type LocalTierConfig struct {
+	// MaxBytes bounds the copies held in memory (64 MiB; 16 MiB to 4 GiB).
+	MaxBytes int64
+	// EpochTTL is how long a purge check's answer is reused (1s; at most a
+	// minute). A purge or invalidation that another node writes reaches
+	// this node's copies within it; one this node writes applies at once.
+	EpochTTL time.Duration
 }
 
 const (
@@ -136,6 +155,16 @@ func (c Config) Validate() (Config, error) {
 	if c.HardEpochWait >= c.CallTimeout && c.HardEpochWait != 0 {
 		return Config{}, cfgErr("HardEpochWait must be shorter than CallTimeout")
 	}
+	if c.LocalTier != nil {
+		lt := *c.LocalTier
+		if lt.MaxBytes == 0 {
+			lt.MaxBytes = defaultLocalBytes
+		}
+		if lt.EpochTTL == 0 {
+			lt.EpochTTL = defaultLocalEpochTTL
+		}
+		c.LocalTier = &lt
+	}
 	return c, nil
 }
 
@@ -191,6 +220,14 @@ func (c Config) check() error {
 	if c.NoClockSkew && c.MaxClockSkew != 0 {
 		return cfgErr("NoClockSkew conflicts with MaxClockSkew")
 	}
+	if lt := c.LocalTier; lt != nil {
+		if lt.MaxBytes != 0 && (lt.MaxBytes < minLocalBytes || lt.MaxBytes > maxLocalBytes) {
+			return cfgErr("LocalTier.MaxBytes %d must be between %d and %d", lt.MaxBytes, minLocalBytes, maxLocalBytes)
+		}
+		if lt.EpochTTL < 0 || lt.EpochTTL > maxLocalEpochTTL {
+			return cfgErr("LocalTier.EpochTTL must be 0 to %v", maxLocalEpochTTL)
+		}
+	}
 	return nil
 }
 
@@ -240,7 +277,12 @@ func (c Config) String() string {
 	}
 	fmt.Fprintf(&b, " Cluster:%t Prefix:%q HashTag:%q CoLocateEntries:%t", c.Cluster, c.Prefix, c.HashTag, c.CoLocateEntries)
 	fmt.Fprintf(&b, " MaxRetention:%v MaxClockSkew:%v NoClockSkew:%t MaxHardEpochs:%d", c.MaxRetention, c.MaxClockSkew, c.NoClockSkew, c.MaxHardEpochs)
-	fmt.Fprintf(&b, " CallTimeout:%v HardEpochWait:%v MaxObjectBytes:%d SkipPolicyCheck:%t}", c.CallTimeout, c.HardEpochWait, c.MaxObjectBytes, c.SkipPolicyCheck)
+	fmt.Fprintf(&b, " CallTimeout:%v HardEpochWait:%v MaxObjectBytes:%d SkipPolicyCheck:%t", c.CallTimeout, c.HardEpochWait, c.MaxObjectBytes, c.SkipPolicyCheck)
+	fmt.Fprintf(&b, " CoalesceAcrossNodes:%t", c.CoalesceAcrossNodes)
+	if c.LocalTier != nil {
+		fmt.Fprintf(&b, " LocalTier:{MaxBytes:%d EpochTTL:%v}", c.LocalTier.MaxBytes, c.LocalTier.EpochTTL)
+	}
+	b.WriteString("}")
 	return b.String()
 }
 

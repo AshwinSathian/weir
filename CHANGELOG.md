@@ -29,6 +29,8 @@ Fixes for the losses the second comparison round found (card HRD-23, findings CM
 
 ### Added
 
+- Coalescing across nodes: with the Valkey store's `CoalesceAcrossNodes` (Caddy: `coalesce_across_nodes`), nodes that share a server fetch a missing key once among them instead of once each. New optional store capability `store.Locker`.
+- A local tier for the Valkey store: `LocalTier` (Caddy: `local_tier <size>`, `local_epoch_ttl`) keeps an in-process copy in front of the server, so a hit costs no round trip. A purge sent to another node reaches this node's copies within `EpochTTL` (1 s by default).
 - Over-size responses are shared. Requests that wait for the same object over `Storable.MaxObjectBytes` read one origin download together instead of each downloading it, holding at most `MaxObjectBytes` between the slowest and the fastest reader. When the others have waited a second in total for the slowest client, it continues on a range request of its own (if the origin offers byte ranges and a strong `ETag`) or is cut off. Only a response the store would accept but for its size is shared.
 - `Freshness.NoHeuristic`: a response whose only freshness information is `Last-Modified` gets a lifetime of zero, so it is stored for its validator and revalidated before every use. Before, the heuristic could only be bounded with `HeuristicMax`.
 - Caddy: `store valkey { tls_ca_file, tls_server_name, max_object_bytes }`. A Valkey server with a private CA, or whose certificate names another host, can be used from Caddy, and the store's record limit can be set.

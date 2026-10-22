@@ -37,6 +37,13 @@ const scrubChunk = 100
 // scrubChunk values are held at once (P5). With no primary node it fails with
 // ErrUnavailable rather than report an empty success.
 func (s *Store) Scrub(ctx context.Context, tags []store.Tag) (int, error) {
+	if s.local != nil {
+		_, _ = s.local.m.Scrub(ctx, tags) // the local copies of the records the scrub deletes
+	}
+	return s.scrubRemote(ctx, tags)
+}
+
+func (s *Store) scrubRemote(ctx context.Context, tags []store.Tag) (int, error) {
 	if len(tags) == 0 {
 		if err := ctx.Err(); err != nil {
 			return 0, mapError(err)

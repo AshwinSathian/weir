@@ -33,6 +33,7 @@ type storeGuard struct {
 	shared  store.SharedTagEpochs // nil when the store lacks the capability
 	vary    store.VarySetter      // nil when the store lacks the capability
 	fetches store.FetchTracker    // nil when the store lacks the capability (FR-INV-1)
+	locker  store.Locker          // nil when the store lacks the capability (FR-COA-11)
 	remote  bool
 	timeout time.Duration
 	obs     Observer
@@ -47,7 +48,8 @@ func newStoreGuard(s store.Store, timeout time.Duration, obs Observer) *storeGua
 	sh, _ := s.(store.SharedTagEpochs)
 	vs, _ := s.(store.VarySetter)
 	ft, _ := s.(store.FetchTracker)
-	return &storeGuard{s: s, shared: sh, vary: vs, fetches: ft, remote: s.Info().Remote, timeout: timeout, obs: obs, backoff: storeBackoffFirst}
+	lk, _ := s.(store.Locker)
+	return &storeGuard{s: s, shared: sh, vary: vs, fetches: ft, locker: lk, remote: s.Info().Remote, timeout: timeout, obs: obs, backoff: storeBackoffFirst}
 }
 
 func (g *storeGuard) get(ctx context.Context, k store.Key) (*store.Entry, error) {
@@ -93,6 +95,40 @@ func (g *storeGuard) del(ctx context.Context, k store.Key) error {
 	}
 	defer cancel()
 	return g.exit(ctx, "delete", g.s.Delete(ctx, k))
+}
+
+// lock is store.Locker.Lock under the same gate. The caller has checked
+// g.locker.
+func (g *storeGuard) lock(ctx context.Context, k store.Key, ttl time.Duration) (func(), bool, error) {
+	ctx, cancel, err := g.enter(ctx)
+	if err != nil {
+		return nil, false, err
+	}
+	defer cancel()
+	release, ok, err := g.locker.Lock(ctx, k, ttl)
+	return release, ok, g.exitFailOnly(ctx, err)
+}
+
+// held is store.Locker.Held under the same gate.
+func (g *storeGuard) held(ctx context.Context, k store.Key) (bool, error) {
+	ctx, cancel, err := g.enter(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer cancel()
+	ok, err := g.locker.Held(ctx, k)
+	return ok, g.exitFailOnly(ctx, err)
+}
+
+// exitFailOnly is exit for the lock calls: a failure counts toward the store
+// breaker, a success does not reset it. A store whose lock is off answers
+// without asking the server, and that answer says nothing about the server's
+// health (FR-STF-2).
+func (g *storeGuard) exitFailOnly(ctx context.Context, err error) error {
+	if err == nil || errors.Is(err, store.ErrNotFound) {
+		return err
+	}
+	return g.exit(ctx, "lock", err)
 }
 
 // setVarySpec is store.VarySetter.SetVarySpec under the same gate. The

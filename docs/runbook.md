@@ -296,6 +296,8 @@ For the settings that do purge, see 7.6.
 
 ## 8. Deploying on Caddy (several nodes, one Valkey)
 
+Two options change what several nodes cost. `coalesce_across_nodes` makes the nodes fetch a missing key once among them (a lock on the server per miss; without it each node fetches once, so N nodes cost the origin up to N fetches per key). `local_tier 64MiB` keeps an in-process copy in front of Valkey, so a hit costs no round trip, at the price that a purge sent to another node takes up to `local_epoch_ttl` (1 s by default) to reach this node's copies. Both are off by default and go in the `store valkey` block on every node.
+
 Several Caddy nodes share one cache when each site has a `store valkey` block ([08](08-caddy-adapter-spec.md) §2) pointing at the same server and the same `prefix`. Entries and purge epochs live on the server, so a purge sent to any node is seen by all of them. `TestE2ETwoNodePurge` runs two Caddy processes against one Valkey and checks exactly that. Section 7 still applies to every node; this section adds what sharing changes. Setting names for the store are in 05 §7.
 
 ```

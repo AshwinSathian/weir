@@ -17,11 +17,13 @@ import (
 // fakeKV is an in-memory stand-in for the three entry commands. It records
 // the expiry each SET carried and never expires anything itself.
 type fakeKV struct {
-	mu   sync.Mutex
-	vals map[string][]byte
-	pxat map[string]int64
-	sets int
-	err  error // returned by every command when set
+	mu     sync.Mutex
+	vals   map[string][]byte
+	pxat   map[string]int64
+	sets   int
+	gets   int
+	renews int
+	err    error // returned by every command when set
 	// maxRead is the longest value getEntry handed back.
 	maxRead int
 }
@@ -44,6 +46,7 @@ func (f *fakeClient) getEntry(ctx context.Context, key string, limit int64) ([]b
 
 func (f *fakeClient) get(_ context.Context, key string) ([]byte, error) {
 	f.kv.mu.Lock()
+	f.kv.gets++
 	err, v, ok := f.kv.err, f.kv.vals[key], false
 	if err == nil {
 		_, ok = f.kv.vals[key]
@@ -368,4 +371,43 @@ func TestStoreIsSizer(t *testing.T) {
 	if sz.MaxObjectBytes() != defaultMaxObjectBytes || sz.Bytes() != -1 {
 		t.Fatalf("MaxObjectBytes = %d, Bytes = %d", sz.MaxObjectBytes(), sz.Bytes())
 	}
+}
+
+func (f *fakeClient) setNX(_ context.Context, key string, val []byte, px int64) (bool, error) {
+	f.kv.mu.Lock()
+	defer f.kv.mu.Unlock()
+	if f.kv.err != nil {
+		return false, f.kv.err
+	}
+	if _, ok := f.kv.vals[key]; ok {
+		return false, nil
+	}
+	if f.kv.vals == nil {
+		f.kv.vals, f.kv.pxat = map[string][]byte{}, map[string]int64{}
+	}
+	f.kv.vals[key], f.kv.pxat[key] = val, px
+	return true, nil
+}
+
+func (f *fakeClient) delIfEqual(_ context.Context, key string, val []byte) error {
+	f.kv.mu.Lock()
+	defer f.kv.mu.Unlock()
+	if string(f.kv.vals[key]) == string(val) {
+		delete(f.kv.vals, key)
+	}
+	return f.kv.err
+}
+
+func (f *fakeClient) renewIfEqual(_ context.Context, key string, val []byte, px int64) (bool, error) {
+	f.kv.mu.Lock()
+	defer f.kv.mu.Unlock()
+	if f.kv.err != nil {
+		return false, f.kv.err
+	}
+	if string(f.kv.vals[key]) != string(val) {
+		return false, nil
+	}
+	f.kv.pxat[key] = px
+	f.kv.renews++
+	return true, nil
 }
