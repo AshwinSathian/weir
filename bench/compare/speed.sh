@@ -67,6 +67,10 @@ cpu() { cgroup "$1" cpu.stat '/^usage_usec/ {print $2}' || true; }
 # shellcheck disable=SC2016
 mem() { cgroup "$1" memory.stat '/^anon / {print $2}' || true; }
 
+# secs <requests> <rate>: the duration that sends that many requests at the
+# rate, in whole seconds and at least one: vegeta reads 0s as "forever".
+secs() { echo "$(( ($1 + $2 - 1) / $2 ))s"; }
+
 # load <script>: run a shell script in the load generator container.
 load() { compose --profile tools run --rm -T load sh -c "$1"; }
 
@@ -180,8 +184,8 @@ for rep in $(seq "$REPS"); do
       # Twice: a cache with an admission filter (S3-FIFO in Weir's memory
       # store) keeps an object seen once on probation, so the hit rows
       # would start with misses.
-      attack "$sdir" "warm-$size" "-base http://$s:8080/o/$p/ -mode fill -keys $k" 50 "$(( k / 50 ))s"
-      attack "$sdir" "warm2-$size" "-base http://$s:8080/o/$p/ -mode fill -keys $k" 50 "$(( k / 50 ))s"
+      attack "$sdir" "warm-$size" "-base http://$s:8080/o/$p/ -mode fill -keys $k" 50 "$(secs "$k" 50)"
+      attack "$sdir" "warm2-$size" "-base http://$s:8080/o/$p/ -mode fill -keys $k" 50 "$(secs "$k" 50)"
       last=0
       for r in $(rates "$size"); do
         measure "$sdir" "hit-$size-$r" "-base http://$s:8080/o/$p/ -keys $k -n 200000" "$r" "$size" "$p"
@@ -209,7 +213,7 @@ for rep in $(seq "$REPS"); do
         up "$s" mem
         profile "fill-$n" 100 "max-age=3600"
         before="$(mem "$s")"
-        attack "$sdir" "fill-$n" "-base http://$s:8080/o/fill-$n/ -mode fill -keys $n" 5000 "$(( n / 5000 ))s"
+        attack "$sdir" "fill-$n" "-base http://$s:8080/o/fill-$n/ -mode fill -keys $n" 5000 "$(secs "$n" 5000)"
         sleep 5 # let the cache settle after the last write before reading memory
         echo "$before $(mem "$s")" > "$sdir/fill-$n.mem"
         echo 100 > "$sdir/fill-$n.size"
