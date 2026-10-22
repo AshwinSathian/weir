@@ -38,12 +38,12 @@ func (s *Store) Get(ctx context.Context, k store.Key) (*store.Entry, error) {
 	if e, ok := s.local.get(ctx, k); ok {
 		return e, nil
 	}
-	writes := s.local.writes.Load()
+	writes := s.local.writes[k[0]].Load()
 	e, err := s.getRemote(ctx, k)
 	// A write or delete of this node since the read was sent is newer than
 	// what the read returned: keep that, not this (the memory store may
 	// also decline the copy for its size; then it is read again).
-	if err == nil && s.local.writes.Load() == writes {
+	if err == nil && s.local.writes[k[0]].Load() == writes {
 		_ = s.local.m.Set(ctx, k, e)
 	}
 	return e, err
@@ -97,7 +97,7 @@ func (s *Store) Set(ctx context.Context, k store.Key, e *store.Entry) error {
 		_, err := s.setRemote(ctx, k, e)
 		return err
 	}
-	s.local.writes.Add(1)
+	s.local.writes[k[0]].Add(1)
 	stored, err := s.setRemote(ctx, k, e)
 	if stored {
 		_ = s.local.m.Set(ctx, k, e)
@@ -158,7 +158,7 @@ func (s *Store) expiryMillis(e *store.Entry, now time.Time) (pxat int64, ok bool
 // Delete removes the record at k; a missing key is fine.
 func (s *Store) Delete(ctx context.Context, k store.Key) error {
 	if s.local != nil {
-		s.local.writes.Add(1)
+		s.local.writes[k[0]].Add(1)
 		_ = s.local.m.Delete(ctx, k)
 	}
 	cl, err := s.acquire(ctx)

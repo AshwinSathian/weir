@@ -2,7 +2,6 @@ package weir_test
 
 import (
 	"context"
-	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -19,12 +18,16 @@ import (
 
 // lockStore is a store two engines share, as two nodes share a Valkey
 // server, with the store.Locker capability. Only the store.Store methods of
-// the memory store show through, so the engines see a remote store.
+// the memory store show through, so the engines see a remote store. A lock
+// taken through Lock is renewed for as long as it is held, as the Valkey
+// store's is: it ends at its release. A zero expiry means renewed.
 type lockStore struct {
 	store.Store
 	mu    sync.Mutex
-	locks map[store.Key]time.Time // key -> lock expiry
+	locks map[store.Key]time.Time // key -> expiry, zero while its holder renews it
+	owner map[store.Key]int       // key -> the Lock call that holds it
 	fail  bool
+	gen   int
 }
 
 func newLockStore(t *testing.T) *lockStore {
@@ -33,27 +36,29 @@ func newLockStore(t *testing.T) *lockStore {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &lockStore{Store: m, locks: map[store.Key]time.Time{}}
+	return &lockStore{Store: m, locks: map[store.Key]time.Time{}, owner: map[store.Key]int{}}
 }
 
 func (s *lockStore) Info() store.Info { return store.Info{Name: "shared", Remote: true} }
 
-func (s *lockStore) Lock(_ context.Context, k store.Key, ttl time.Duration) (func(), bool, error) {
+func (s *lockStore) Lock(_ context.Context, k store.Key, _ time.Duration) (func(), bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.fail {
 		return nil, false, store.ErrUnavailable
 	}
-	if exp, ok := s.locks[k]; ok && time.Now().Before(exp) {
+	if exp, ok := s.locks[k]; ok && (exp.IsZero() || time.Now().Before(exp)) {
 		return nil, false, nil
 	}
-	exp := time.Now().Add(ttl)
-	s.locks[k] = exp
+	s.gen++
+	mine := s.gen
+	s.locks[k], s.owner[k] = time.Time{}, mine
 	return func() {
 		s.mu.Lock()
 		defer s.mu.Unlock()
-		if s.locks[k].Equal(exp) { // only the holder's own lock
+		if s.owner[k] == mine { // only the holder's own lock
 			delete(s.locks, k)
+			delete(s.owner, k)
 		}
 	}, true, nil
 }
@@ -65,7 +70,7 @@ func (s *lockStore) Held(_ context.Context, k store.Key) (bool, error) {
 		return false, store.ErrUnavailable
 	}
 	exp, ok := s.locks[k]
-	return ok && time.Now().Before(exp), nil
+	return ok && (exp.IsZero() || time.Now().Before(exp)), nil
 }
 
 // twoNodes runs one request on each of two engines that share st, while
@@ -158,18 +163,16 @@ func TestAcrossNodesUnstorableFetchesAgain(t *testing.T) {
 	})
 }
 
-// FR-COA-11, FR-COA-4, T-19: a lock holder that never answers (a hanging
-// origin, or a node that died holding it) ends the waiting flight as a
-// timeout at the flight's own bound, so its waiters do not each fetch past
-// it; once the dead holder's lock expires, the next request fetches.
-func TestAcrossNodesLockHolderBounded(t *testing.T) {
+// FR-COA-11, T-19: a node that dies holding the lock blocks the key only
+// until the lock's TTL ends (no one renews it); the waiting flight then
+// fetches for itself, once for all its waiters.
+func TestAcrossNodesDeadHolder(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		st := &deadHolder{lockStore: newLockStore(t)}
 		cfg := cacheCfg
 		cfg.Store = st
 		cfg.Timeouts.Origin = 2 * time.Second
 		cfg.Limiter.MaxQueueWait = time.Second
-		cfg.Negative.Disable = true
 		e := newEngine(t, cfg)
 		defer closeEngine(t, e)
 		var calls atomic.Int32
@@ -177,44 +180,93 @@ func TestAcrossNodesLockHolderBounded(t *testing.T) {
 			calls.Add(1)
 			return &weir.Response{StatusCode: http.StatusOK, Header: http.Header{"Cache-Control": {"max-age=60"}}, Body: io.NopCloser(strings.NewReader("hi"))}, nil
 		})
-		bound := cfg.Timeouts.Origin + 2*cfg.Limiter.MaxQueueWait
 		start := time.Now()
 		var wg sync.WaitGroup
 		for range 5 {
 			wg.Go(func() {
-				if _, err := e.Serve(t.Context(), getReq("/x"), o); !errors.Is(err, weir.ErrOriginTimeout) {
-					t.Errorf("err = %v, want ErrOriginTimeout", err)
+				resp, err := e.Serve(t.Context(), getReq("/x"), o)
+				if err != nil {
+					t.Errorf("err = %v", err)
+					return
 				}
+				resp.Body.Close()
 			})
 		}
 		wg.Wait()
-		if d := time.Since(start); d > bound {
-			t.Fatalf("waited %v on a dead holder, bound %v", d, bound)
+		if d := time.Since(start); d > 4*time.Second {
+			t.Fatalf("a dead holder blocked the key for %v", d)
 		}
-		if calls.Load() != 0 {
-			t.Fatalf("origin calls = %d while another node held the lock, want 0", calls.Load())
-		}
-		time.Sleep(2 * time.Second) // the dead holder's lock (bound + 1 s) expires
-		resp, err := e.Serve(t.Context(), getReq("/x"), o)
-		if err != nil {
-			t.Fatal(err)
-		}
-		resp.Body.Close()
 		if calls.Load() != 1 {
-			t.Fatalf("origin calls = %d after the lock expired, want 1", calls.Load())
+			t.Fatalf("origin calls = %d, want 1 once the dead lock ended", calls.Load())
 		}
 	})
 }
 
+// FR-COA-11, T-9: a store that fails while a flight waits for another
+// node's lock makes the flight fetch for itself, not fail.
+func TestAcrossNodesStoreErrorWhileWaiting(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		shared := newLockStore(t)
+		var bFails atomic.Bool
+		b := &flakyHeld{lockStore: shared, fail: &bFails}
+		var calls atomic.Int32
+		o := weir.OriginFunc(func(context.Context, *weir.Request) (*weir.Response, error) {
+			calls.Add(1)
+			time.Sleep(time.Second)
+			return &weir.Response{StatusCode: http.StatusOK, Header: http.Header{"Cache-Control": {"max-age=60"}}, Body: io.NopCloser(strings.NewReader("hi"))}, nil
+		})
+		cfg := cacheCfg
+		cfg.Store = shared
+		ea := newEngine(t, cfg)
+		defer closeEngine(t, ea)
+		cfg.Store = b
+		eb := newEngine(t, cfg)
+		defer closeEngine(t, eb)
+		var wg sync.WaitGroup
+		wg.Go(func() { _, _ = ea.Serve(t.Context(), getReq("/x"), o) })
+		time.Sleep(time.Millisecond)
+		wg.Go(func() {
+			time.Sleep(100 * time.Millisecond)
+			bFails.Store(true)
+		})
+		resp, err := eb.Serve(t.Context(), getReq("/x"), o)
+		if err != nil {
+			t.Fatalf("node b: %v, want a fetch of its own", err)
+		}
+		resp.Body.Close()
+		wg.Wait()
+		if calls.Load() != 2 {
+			t.Fatalf("origin calls = %d, want 2", calls.Load())
+		}
+	})
+}
+
+// flakyHeld is a node whose Held calls fail once fail is set.
+type flakyHeld struct {
+	*lockStore
+	fail *atomic.Bool
+}
+
+func (f *flakyHeld) Held(ctx context.Context, k store.Key) (bool, error) {
+	if f.fail.Load() {
+		return false, store.ErrUnavailable
+	}
+	return f.lockStore.Held(ctx, k)
+}
+
 // deadHolder is a lockStore whose first lock request finds the lock already
-// taken by a node that will never release it; the lock still expires.
+// taken by a node that died: nobody renews it, so it ends after its TTL.
 type deadHolder struct {
 	*lockStore
 	once sync.Once
 }
 
 func (d *deadHolder) Lock(ctx context.Context, k store.Key, ttl time.Duration) (func(), bool, error) {
-	d.once.Do(func() { _, _, _ = d.lockStore.Lock(ctx, k, ttl) }) // the dead node took it
+	d.once.Do(func() {
+		d.mu.Lock()
+		d.locks[k] = time.Now().Add(ttl)
+		d.mu.Unlock()
+	})
 	return d.lockStore.Lock(ctx, k, ttl)
 }
 

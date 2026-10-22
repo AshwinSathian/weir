@@ -17,12 +17,13 @@ import (
 // fakeKV is an in-memory stand-in for the three entry commands. It records
 // the expiry each SET carried and never expires anything itself.
 type fakeKV struct {
-	mu   sync.Mutex
-	vals map[string][]byte
-	pxat map[string]int64
-	sets int
-	gets int
-	err  error // returned by every command when set
+	mu     sync.Mutex
+	vals   map[string][]byte
+	pxat   map[string]int64
+	sets   int
+	gets   int
+	renews int
+	err    error // returned by every command when set
 	// maxRead is the longest value getEntry handed back.
 	maxRead int
 }
@@ -395,4 +396,18 @@ func (f *fakeClient) delIfEqual(_ context.Context, key string, val []byte) error
 		delete(f.kv.vals, key)
 	}
 	return f.kv.err
+}
+
+func (f *fakeClient) renewIfEqual(_ context.Context, key string, val []byte, px int64) (bool, error) {
+	f.kv.mu.Lock()
+	defer f.kv.mu.Unlock()
+	if f.kv.err != nil {
+		return false, f.kv.err
+	}
+	if string(f.kv.vals[key]) != string(val) {
+		return false, nil
+	}
+	f.kv.pxat[key] = px
+	f.kv.renews++
+	return true, nil
 }

@@ -18,7 +18,7 @@ import (
 // is reported as swapped with the record at k left alone, like Set (S-4).
 func (s *Store) SetVarySpec(ctx context.Context, k store.Key, prev, next *store.Entry) (bool, error) {
 	if s.local != nil {
-		s.local.writes.Add(1)
+		s.local.writes[k[0]].Add(1)
 	}
 	swapped, err := s.setVarySpecRemote(ctx, k, prev, next)
 	if s.local != nil {

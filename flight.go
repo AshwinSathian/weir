@@ -326,7 +326,7 @@ func (e *Engine) fetchStoredOnce(ctx context.Context, sp *fetchSpec, origin Orig
 	// that is still inside its bound keeps it.
 	bound := e.cfg.Timeouts.Origin + 2*e.cfg.Limiter.MaxQueueWait
 	deadline := time.Now().Add(bound)
-	release, ok, err := e.sg.lock(ctx, sp.lk.ck, bound+time.Second)
+	release, ok, err := e.sg.lock(ctx, sp.lk.ck, lockTTL)
 	switch {
 	case err != nil: // T-9: a store failure fails open, to a fetch of our own
 		return e.fetchStored(ctx, sp, origin)
@@ -334,15 +334,17 @@ func (e *Engine) fetchStoredOnce(ctx context.Context, sp *fetchSpec, origin Orig
 		defer release()
 		return e.fetchStored(ctx, sp, origin)
 	}
-	if !e.waitUnlocked(ctx, sp.lk.ck, deadline) {
-		// The holder's fetch outlived the flight's bound, which is the
-		// origin hanging, or the store failing us. A fetch of our own now
+	switch e.waitUnlocked(ctx, sp.lk.ck, deadline) {
+	case waitBound:
+		// The holder is alive (it keeps its lock) but its fetch outlived the
+		// flight's bound: the origin is hanging. A fetch of our own now
 		// would run past the bound its followers wait for, and each of
-		// them would then fetch too (T-19): the flight ends as a timeout.
-		if ctx.Err() != nil {
-			return &flightResult{fetchResult: fetchResult{err: ctx.Err()}}
-		}
+		// them would then fetch too (T-19), so the flight ends as a timeout.
 		return &flightResult{fetchResult: fetchResult{err: ErrOriginTimeout}}
+	case waitCanceled:
+		return &flightResult{fetchResult: fetchResult{err: ctx.Err()}}
+	case waitStoreError: // T-9: the store failed us, not the origin
+		return e.fetchStored(ctx, sp, origin)
 	}
 	if fr := e.storedByAnother(ctx, sp); fr != nil {
 		return fr
@@ -350,30 +352,46 @@ func (e *Engine) fetchStoredOnce(ctx context.Context, sp *fetchSpec, origin Orig
 	return e.fetchStored(ctx, sp, origin)
 }
 
-// waitUnlocked polls the store until k's lock is released, and reports
-// whether that happened before deadline. The interval starts at 10 ms and
-// doubles to 200 ms: a lock usually ends with one origin round trip.
-func (e *Engine) waitUnlocked(ctx context.Context, k store.Key, deadline time.Time) bool {
+// lockTTL is how long a lock outlives a holder that stops renewing it: the
+// store renews a live holder's lock (store.Locker), so this bounds only how
+// long the key stays blocked when a node dies holding it (FR-COA-11).
+const lockTTL = 3 * time.Second
+
+// waitOutcome is how a wait for another engine's lock ended.
+type waitOutcome uint8
+
+const (
+	waitReleased   waitOutcome = iota // the lock is gone: look the key up
+	waitBound                         // still held at the flight's bound
+	waitCanceled                      // the flight's context ended (Close)
+	waitStoreError                    // the store could not answer
+)
+
+// waitUnlocked polls the store until k's lock is released, the deadline
+// passes, the context ends or the store fails. The interval starts at 10 ms
+// and doubles to 200 ms: a lock usually ends with one origin round trip.
+func (e *Engine) waitUnlocked(ctx context.Context, k store.Key, deadline time.Time) waitOutcome {
 	// ponytail: polling costs one store call per interval per waiting flight;
 	// the store could publish releases instead if a profile shows the polls.
 	d := 10 * time.Millisecond
 	for {
 		held, err := e.sg.held(ctx, k)
-		if err != nil {
-			return false
-		}
-		if !held {
-			return true
-		}
-		if !time.Now().Add(d).Before(deadline) {
-			return false
+		switch {
+		case ctx.Err() != nil:
+			return waitCanceled
+		case err != nil:
+			return waitStoreError
+		case !held:
+			return waitReleased
+		case !time.Now().Add(d).Before(deadline):
+			return waitBound
 		}
 		t := time.NewTimer(d)
 		select {
 		case <-t.C:
 		case <-ctx.Done():
 			t.Stop()
-			return false
+			return waitCanceled
 		}
 		d = min(2*d, 200*time.Millisecond)
 	}

@@ -199,3 +199,43 @@ func TestLocalTierNeverAheadOfServer(t *testing.T) {
 		}
 	})
 }
+
+// FR-COA-11: a held lock is renewed every ttl/3 for as long as its holder
+// holds it, so a fetch longer than ttl keeps it; the release stops the
+// renewal. Close stops it too.
+func TestLockRenewedWhileHeld(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		s, cl := connected(t, func(c *Config) { c.CoalesceAcrossNodes = true })
+		var k store.Key
+		k[0] = 9
+		release, ok, err := s.Lock(t.Context(), k, 3*time.Second)
+		if !ok || err != nil {
+			t.Fatal(ok, err)
+		}
+		time.Sleep(10*time.Second + 500*time.Millisecond) // between ticks, so the count is settled
+		cl.kv.mu.Lock()
+		n := cl.kv.renews
+		cl.kv.mu.Unlock()
+		if n != 10 {
+			t.Fatalf("renewed %d times in 10.5 s at a 1 s interval, want 10", n)
+		}
+		release()
+		time.Sleep(5 * time.Second)
+		cl.kv.mu.Lock()
+		after := cl.kv.renews
+		cl.kv.mu.Unlock()
+		if after != n {
+			t.Fatalf("renewed after release: %d then %d", n, after)
+		}
+		if held, _ := s.Held(t.Context(), k); held {
+			t.Fatal("still held after release")
+		}
+		// A lock still held when the store closes stops renewing too.
+		if _, ok, _ := s.Lock(t.Context(), k, 3*time.Second); !ok {
+			t.Fatal("second Lock failed")
+		}
+		if err := s.Close(); err != nil {
+			t.Fatal(err)
+		}
+	})
+}

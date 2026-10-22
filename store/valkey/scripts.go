@@ -168,9 +168,18 @@ end
 return 0
 `
 
+// renewSrc extends a lock only while it still holds this holder's token.
+const renewSrc = `
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+  return redis.call('PEXPIRE', KEYS[1], ARGV[2])
+end
+return 0
+`
+
 // The scripts are immutable once built; valkey-go keeps their SHA-1.
 var (
 	unlockScript     = valkey.NewLuaScript(unlockSrc)
+	renewScript      = valkey.NewLuaScript(renewSrc)
 	writeEpochScript = valkey.NewLuaScript(writeEpochSrc)
 	readEpochScript  = valkey.NewLuaScriptReadOnly(readEpochSrc)
 	varySetScript    = valkey.NewLuaScript(varySetSrc)

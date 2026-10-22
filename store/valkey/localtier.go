@@ -40,9 +40,11 @@ type localTier struct {
 	// must not be remembered after it, or a lookup racing this node's own
 	// purge would cache the answer from before the purge.
 	gen uint64
-	// writes counts this node's record writes and deletes, so a Get that
-	// read the server before one of them does not put back the older copy.
-	writes atomic.Uint64
+	// writes counts this node's record writes and deletes, striped by the
+	// key's first byte, so a Get that read the server before one of them
+	// does not put back the older copy, and a write to one key rarely holds
+	// back the copies of others.
+	writes [256]atomic.Uint64
 }
 
 type epochAnswer struct {
