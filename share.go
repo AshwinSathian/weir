@@ -183,21 +183,22 @@ func (r *sharedReader) Read(p []byte) (int, error) {
 	if len(p) == 0 {
 		return 0, nil
 	}
-	if r.own != nil {
-		n, err := r.own.Read(p)
-		r.off += int64(n)
-		return n, err
-	}
 	s := r.s
 	s.mu.Lock()
+	if own := r.own; own != nil {
+		s.mu.Unlock()
+		n, err := own.Read(p)
+		r.off += int64(n) // only the reading goroutine touches off once moved off
+		return n, err
+	}
 	for {
 		switch {
+		case r.done: // before movedOff: a closed reader never resumes
+			s.mu.Unlock()
+			return 0, io.ErrClosedPipe
 		case r.movedOff:
 			s.unlockAndMaybeClose()
 			return r.resumeOwn(p)
-		case r.done:
-			s.mu.Unlock()
-			return 0, io.ErrClosedPipe
 		case r.off < s.end:
 			n := s.copyOut(p, r.off)
 			r.off += int64(n)
@@ -237,16 +238,26 @@ func (r *sharedReader) Read(p []byte) (int, error) {
 	}
 }
 
-// resumeOwn continues a reader that was moved off on a fetch of its own.
+// resumeOwn continues a reader that was moved off on a fetch of its own. A
+// Close that ran while the fetch was on its way finds no body to close, so
+// the body is closed here instead of being kept.
 func (r *sharedReader) resumeOwn(p []byte) (int, error) {
-	if r.s.resume == nil {
+	s := r.s
+	if s.resume == nil {
 		return 0, errSharedTooSlow
 	}
-	own, err := r.s.resume(r.off)
+	own, err := s.resume(r.off)
 	if err != nil {
 		return 0, errSharedTooSlow
 	}
+	s.mu.Lock()
+	if r.done {
+		s.mu.Unlock()
+		_ = own.Close()
+		return 0, io.ErrClosedPipe
+	}
 	r.own = own
+	s.mu.Unlock()
 	return r.Read(p)
 }
 
@@ -317,13 +328,14 @@ func (r *sharedReader) StreamIdle() time.Duration {
 // Trailer returns the origin's trailers once this reader has seen the end
 // (FR-FWD-8).
 func (r *sharedReader) Trailer() http.Header {
-	if r.own != nil {
-		return trailerOf(r.own)
-	}
 	s := r.s
 	s.mu.Lock()
+	own := r.own
 	ended := r.off == s.end && errors.Is(s.err, io.EOF)
 	s.mu.Unlock()
+	if own != nil {
+		return trailerOf(own)
+	}
 	if !ended {
 		return nil
 	}

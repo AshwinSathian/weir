@@ -262,3 +262,40 @@ func TestSharedStreamMovedOffReaderResumes(t *testing.T) {
 		slow.Close()
 	})
 }
+
+// FR-COA-10, T-18: a Close that runs while a moved-off reader's resume fetch
+// is on its way leaves no body open: resumeOwn closes the one that arrives.
+func TestSharedStreamCloseDuringResume(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		body := bytes.Repeat([]byte("q"), 1<<20)
+		arrived := make(chan struct{})
+		proceed := make(chan struct{})
+		var resumed closeCount
+		resume := func(off int64) (io.ReadCloser, error) {
+			close(arrived)
+			<-proceed
+			resumed.Reader = bytes.NewReader(body[off:])
+			return &resumed, nil
+		}
+		s, _ := newTestShareResume(body, 64<<10, 2, resume)
+		fast, slow := s.attach(), s.attach()
+		if _, err := io.Copy(io.Discard, fast); err != nil {
+			t.Fatal(err)
+		}
+		done := make(chan error, 1)
+		go func() {
+			_, err := slow.Read(make([]byte, 10))
+			done <- err
+		}()
+		<-arrived
+		slow.Close()
+		close(proceed)
+		if err := <-done; !errors.Is(err, io.ErrClosedPipe) {
+			t.Fatalf("read after close during resume: %v", err)
+		}
+		if resumed.closed.Load() != 1 {
+			t.Fatal("the resumed body was not closed")
+		}
+		fast.Close()
+	})
+}
