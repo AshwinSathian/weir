@@ -1,6 +1,8 @@
 package valkey
 
 import (
+	"context"
+	"sync"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -238,4 +240,25 @@ func TestLockRenewedWhileHeld(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
+}
+
+// FR-LCY-2, NFR-2: Lock calls racing Close never reuse the store's wait
+// group while Close waits on it (a Caddy reload closes a store that is
+// still taking locks).
+func TestLockRacesClose(t *testing.T) {
+	for range 300 {
+		s, _ := connected(t, func(c *Config) { c.CoalesceAcrossNodes = true })
+		var wg sync.WaitGroup
+		for i := range 4 {
+			wg.Go(func() {
+				var k store.Key
+				k[0] = byte(i)
+				if release, ok, _ := s.Lock(context.Background(), k, time.Second); ok {
+					release()
+				}
+			})
+		}
+		wg.Go(func() { _ = s.Close() })
+		wg.Wait()
+	}
 }

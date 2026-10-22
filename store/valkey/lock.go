@@ -43,7 +43,16 @@ func (s *Store) Lock(ctx context.Context, k store.Key, ttl time.Duration) (func(
 	}
 	stop := make(chan struct{})
 	done := make(chan struct{})
+	// Under mu, so Close cannot Wait first (as for a dial): a lock taken as
+	// the store closes is released at once and reported as not taken.
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		_ = cl.delIfEqual(ctx, key, token)
+		return nil, false, errClosed
+	}
 	s.wg.Add(1) // stopped by the release or by Close (FR-LCY-2)
+	s.mu.Unlock()
 	// The renewals outlive Lock's context, which carries only the engine's
 	// store deadline for this one call; each renewal bounds itself.
 	go func() { //nolint:gosec,contextcheck // see above
