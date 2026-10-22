@@ -124,7 +124,7 @@ The `caddy` module ([08](08-caddy-adapter-spec.md)) puts the `weir` directive in
 
 ### 7.0 Install
 
-Build Caddy with the module: `xcaddy build --with github.com/AshwinSathian/weir@v1.1.0 --with github.com/AshwinSathian/weir/caddy@v1.1.0`. Name the root module too: the `caddy` module is tested only with the root version it was released with. Check it with `./caddy list-modules | grep weir`, which should show `http.handlers.weir`. Upgrade by rebuilding with the new version; all weir modules share one version number, so never mix versions.
+Build Caddy with the module: `xcaddy build --with github.com/AshwinSathian/weir@v1.2.0 --with github.com/AshwinSathian/weir/caddy@v1.2.0`. Name the root module too: the `caddy` module is tested only with the root version it was released with. Check it with `./caddy list-modules | grep weir`, which should show `http.handlers.weir`. Upgrade by rebuilding with the new version; all weir modules share one version number, so never mix versions.
 
 ### 7.1 One node per cache
 
