@@ -1,7 +1,7 @@
 # Weir comparison benchmark specification
 
-Status: v0.3. Design approved by the project owner on 2026-10-13. Two rounds ran the same day; the results of the second are in [benchmarks.md](benchmarks.md) and this version records what it added and changed (cards CMP-03b and CMP-04b).
-Date: 2026-10-13 (v0.3)
+Status: v0.4. Design approved by the project owner on 2026-10-13; the 160 MiB store of §5.5 on 2026-10-22. Two rounds ran the same day; the results of the second are in [benchmarks.md](benchmarks.md) and this version records what it added and changed (cards CMP-03b and CMP-04b).
+Date: 2026-10-22 (v0.4: the speed pillar's harness, CMP-06)
 Depends on: [07-testing-strategy.md §9](07-testing-strategy.md) (the in-process load scenarios this mirrors over HTTP), [06-threat-model.md](06-threat-model.md) (the threats the security probes exercise)
 
 ## 1. What this is for
@@ -71,7 +71,7 @@ Rules:
 
 With no cache in between, the origin must count exactly the requests the runner sent. Every row records both numbers (`sent`, `seen`). `TestRunCountsAgainstOriginDirect` runs every scenario the origin can run against the origin alone, in a synctest bubble over an in-memory transport, and holds each to that and to its request counts (`purge-herd` needs a cache and has its own test against one that purges and one that only says so); the `origin` control row repeats the check in every real run, and `compare report` fails when one of its rows disagrees.
 
-Timing runs (pillar 5) use an established open-loop load generator, chosen and verified in CMP-06, so that latency numbers do not rest on a load tool we wrote.
+Timing runs (pillar 5) use an established open-loop load generator, so that latency numbers do not rest on a load tool we wrote: vegeta v12.13.0 (`github.com/tsenart/vegeta`), built into the `load` image (`docker/load.Dockerfile`). Its `attack` sends at a fixed rate and starts more workers when responses are slow, so a slow subject does not lower the offered load while vegeta keeps up; a run whose achieved rate is under 95% of the rate asked for does not count as sustained, because a lagging generator would hide queueing again. Its reports give p50 and p99, and p99.9 comes from its `hdrplot` output (t-digest quantiles printed in HDR-plot form), printed only for runs of 10 000 requests or more. `compare targets` writes the request lists (uniform, Zipf, Zipf with a scan, fill) from a fixed seed, so every subject gets the same one, and `compare speed` reads the reports back. `speed.sh` runs the whole pillar from a plain terminal.
 
 ## 5. Pillars
 
@@ -143,10 +143,12 @@ The cache-tests revision pinned in `scripts/cache-tests.sh`, run against every s
 Run last, on a quiet machine, and reported with the caveats of §6.
 
 - CPU time per request, from each container's cgroup `cpu.stat`, is the primary speed figure.
-- Latency at fixed open-loop rates (p50, p99, p99.9) and the saturation rate, for 1 KiB, 64 KiB and 1 MiB bodies, with the cache held to 2 cores.
+- Latency at fixed open-loop rates (p50, p99, p99.9) and the saturation rate, for 1 KiB, 64 KiB and 960 KiB bodies, with the cache held to 2 cores.
 - Added latency on a miss, against the origin direct.
-- Resident memory per object at 100 000 and 1 000 000 entries.
-- Hit ratio at a fixed 64 MiB store under a Zipf workload and under a scan that pollutes the cache.
+- Memory per object (anonymous plus shared memory) at 100 000 and 1 000 000 entries.
+- Hit ratio at a fixed 160 MiB store under a Zipf workload (200 000 keys of 3 000 bytes, exponent 1.1) and under a scan that pollutes the cache (one never-seen key in five). The spec first said 64 MiB; the owner chose 160 MiB for every subject on 2026-10-22, because the Caddy adapter accepts no smaller `max_bytes`. 3 000-byte bodies because nginx's `max_size` counts file-system blocks: with key and headers such an object still fits one 4 KiB block, so the stores hold about the same number of objects; Varnish's and Weir's byte accounting differ in smaller ways (Weir charges 48 bytes per header name), which the page states. cache-handler's default storage has no verified size setting, so it has no hit-ratio or memory rows.
+
+How `speed.sh` measures (CMP-06): the subject runs pinned to virtual CPUs 0 and 1 of the Docker Desktop VM, the load generator to 2 to 5 and the origin to 6 and 7 (`speed.compose.yaml`; 8 CPUs or more). These are the VM's CPUs, not particular performance or efficiency cores of the M4 Pro. Bodies are 1 KiB, 64 KiB and 960 KiB, the largest every subject stores at its defaults (Weir's 1 MiB limit counts headers), over 1 000 keys, or 50 for the largest, so the working set fits the 160 MiB store and no shard of Weir's store (16 of 10 MiB, about ten such objects each) comes near full. Every key is fetched twice before the hit runs, because a cache with an admission filter (Weir's S3-FIFO) keeps an object seen once on probation and the hit rows would otherwise begin with misses. Every timed run records the origin's calls, so a hit run that reached the origin shows it, and the body size every response must have: a run with responses of another size is a failure (`bad body`), as in §4. CPU time per request is the difference in the container's cgroup `cpu.stat` `usage_usec` over a run, divided by the requests sent, read through a helper container with the host's cgroup namespace. Memory per object is the difference in `memory.stat` `anon` plus `shmem` across a fill of N entries of 100 bytes in a tier sized so nothing is evicted (`mem`), divided by N: anonymous and shared memory (nginx keeps its keys in a shared `keys_zone`), without the page cache that `memory.current` adds. nginx keeps its bodies in files on disk, which this does not count, and the page says so beside its row; for Go subjects the figure includes heap not yet collected. Hit ratio is one minus the origin's calls over the requests sent. Rates per body size: 2 000 and 8 000 per second for 1 KiB, 1 000 and 4 000 for 64 KiB, 100 and 400 for 960 KiB, then the rate is raised by half for up to four more steps while the run is sustained: 99.9% successes, every success of the right size (errors such as timeouts count against the 99.9%, not as wrong bodies), p99 within ten times the first rate's, and at least 95% of the rate asked for. The report gives the highest sustained rate per subject and size, with "≥" when the climb never failed. Those rates belong to this machine: per §6 they are published only as a comparison between subjects of the same run, never as a throughput claim. Latency ratios compare each subject with the control measured just before it, percentile to percentile. Memory and hit ratio are counts, so they run in the first repetition only and the drift gate does not apply to them.
 
 ### 5.6 Differential fuzzing
 
@@ -158,8 +160,8 @@ Everything runs in Docker Desktop on the reference machine (Apple M4 Pro, 12 cor
 
 - Counts and verdicts (5.1 to 5.4) do not depend on timing precision and can be published as measured.
 - Latency is published only as a ratio to the `caddy-nocache` control from the same run. The control is measured again between subjects, and a run whose control moved by more than 10% is discarded.
-- Five repetitions for timing runs, subject order randomized.
-- No absolute throughput claim is made from this machine.
+- Five repetitions for timing runs, subject order randomized. `compare speed` prints medians over the repetitions the drift gate kept and names each one it discarded; the gate checks the control's p50 and p99.
+- No absolute throughput claim is made from this machine. The speed pillar's highest sustained rates are shown only beside each other, subject against subject from one run, with the machine named.
 
 ## 7. Scorecard
 
@@ -190,7 +192,7 @@ Decided on 2026-10-13: run first, then decide what to publish. After the first r
 - The published data of round 2 comes from two harness commits that differ in one subject's configuration and one probe's verdict logic. A single clean pass would be tidier and is not expected to change a cell.
 - cache-handler: the `stale` setting has no visible effect in our tuned tier, with or without stale directives from the origin; a `GET` with a body, a cached `Set-Cookie` and a percent-encoded path stay unsafe in its hardened tier because we found no documented option for them; its Otter storage grew by more than 1 GiB for 10 000 small objects. Each may be our configuration. They need its maintainers' reading (R4) before more is said. The empty 200 is reported upstream as darkweak/souin#876 (open, no reply on 2026-10-13); the percent-encoded path is not reported yet.
 - Latency was measured but not published: neither round ran under the drift gate of §6.
-- Pillar 5.5 (speed and memory) has not run. The open-loop load generator is chosen in CMP-06. The memory reading of the `Vary` probe is not a substitute for it.
+- Pillar 5.5 (speed and memory) has a harness (CMP-06, `speed.sh`) and had not run on a quiet machine when this was written. The memory reading of the `Vary` probe is not a substitute for it.
 - Differential fuzzing (§5.6) has not run.
 - Varnish's tuned tier carries Weir's limiter numbers (R2), so `cold-keys` and the capped scenarios compare two configurations of the same idea there, not two designs.
 - `restart` does not show what Weir's snapshot is for. An origin profile with a validator, and a restart while the origin is down, would.

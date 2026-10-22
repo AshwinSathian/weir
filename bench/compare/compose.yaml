@@ -76,7 +76,7 @@ services:
 
   varnish:
     image: varnish:9.1.0@sha256:842a2874f49d5b9eb7690a8fe0b6d3a66d8045b2d2a96154b4a804e2cbd8ac33
-    environment: { VARNISH_HTTP_PORT: "8080", VARNISH_SIZE: "512M" }
+    environment: { VARNISH_HTTP_PORT: "8080", VARNISH_SIZE: "${VARNISH_SIZE:-512M}" }
     volumes: ["./subjects/varnish/${TIER:-default}/default.vcl:/etc/varnish/default.vcl:ro"]
     tmpfs: ["/var/lib/varnish/varnishd:exec"]
     <<: *plumbing

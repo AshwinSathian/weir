@@ -1,0 +1,14 @@
+# Speed pillar (docs/11 §5.5): the default tier with a 160 MiB store, the
+# size every subject gets for the hit-ratio runs (160 MiB is the smallest
+# max_bytes the adapter accepts).
+{
+	auto_https off
+	admin off
+}
+:8080 {
+	weir {
+		name     bench
+		max_bytes 160MiB
+	}
+	reverse_proxy origin:9000
+}

@@ -1,0 +1,36 @@
+# Overrides for the speed pillar only (speed.sh; docs/11 §5.5, §6). The
+# cache under test is held to 2 cores, and the load generator and the
+# origin get cores of their own, so they do not take time from it. Needs
+# Docker Desktop with 8 CPUs. Store sizes come from the speed and mem tiers.
+x-subject: &subject
+  cpuset: "0-1"
+
+services:
+  origin:
+    cpuset: "6-7"
+  load:
+    build: { context: ., dockerfile: docker/load.Dockerfile }
+    profiles: ["tools"]
+    volumes: ["./results:/results"]
+    cpuset: "2-5"
+    ulimits:
+      nofile: { soft: 65536, hard: 65536 }
+    sysctls:
+      net.ipv4.ip_local_port_range: "1024 65535"
+      net.ipv4.tcp_tw_reuse: 1
+  caddy-nocache: *subject
+  caddy-weir: *subject
+  caddy-weir-next: *subject
+  caddy-souin: *subject
+  varnish: *subject
+  nginx: *subject
+  weirproxy:
+    <<: *subject
+    environment:
+      # The memory store takes 40% of GOMEMLIMIT: 160 MiB (speed) or about
+      # 2 GiB (mem), the sizes the other subjects get.
+      GOMEMLIMIT: "${WEIRPROXY_GOMEMLIMIT:-400MiB}"
+  weirproxy-next:
+    <<: *subject
+    environment:
+      GOMEMLIMIT: "${WEIRPROXY_GOMEMLIMIT:-400MiB}"
