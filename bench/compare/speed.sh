@@ -58,10 +58,14 @@ cgroup() {
   docker run --rm --privileged --cgroupns=host -v /sys/fs/cgroup:/cg:ro "$ALPINE" sh -c \
     "d=\$(find /cg -type d -name '*$id*' | head -1); [ -n \"\$d\" ] && awk '$3' \"\$d/$2\""
 }
+# A failed read gives an empty value, which the report shows as not
+# available; it must not end a two-hour run (set -e).
 # shellcheck disable=SC2016 # the awk programs run in the helper, unexpanded here
-cpu() { cgroup "$1" cpu.stat '/^usage_usec/ {print $2}'; }
+cpu() { cgroup "$1" cpu.stat '/^usage_usec/ {print $2}' || true; }
+# memory.stat anon: what the cache process holds in memory. memory.current
+# would add page cache and kernel memory (nginx's cache files, for one).
 # shellcheck disable=SC2016
-mem() { cgroup "$1" memory.current '{print $1}'; }
+mem() { cgroup "$1" memory.stat '/^anon / {print $2}' || true; }
 
 # load <script>: run a shell script in the load generator container.
 load() { compose --profile tools run --rm -T load sh -c "$1"; }
@@ -72,7 +76,7 @@ profile() {
 }
 
 # origin_calls <profile>
-origin_calls() { load "curl -sf http://origin:9001/stats | jq '.\"$1\".calls // 0'"; }
+origin_calls() { load "curl -sf http://origin:9001/stats | jq '.\"$1\".calls // 0'" || true; }
 
 # attack <dir> <test> <targets args> <rate> <duration>: one vegeta run, its
 # JSON and hdrplot reports kept as <dir>/<test>.json and .hdr.
@@ -91,14 +95,19 @@ ready() {
   return 1
 }
 
-# up <service> <tier>: a fresh container of the service in the tier.
+# up <service> <kind>: a fresh container of the service for kind (speed:
+# the 160 MiB store of the hit-ratio runs; mem: a store no fill evicts;
+# default). Stores sized by environment (weirproxy, varnish) get it here; the
+# others use the tier directory of that name.
 up() {
   case "$2" in
     speed) export VARNISH_SIZE=160M WEIRPROXY_GOMEMLIMIT=400MiB ;;
     mem) export VARNISH_SIZE=2G WEIRPROXY_GOMEMLIMIT=5GiB ;;
     *) export VARNISH_SIZE=512M WEIRPROXY_GOMEMLIMIT=400MiB ;;
   esac
-  TIER="$2" compose up -d --force-recreate "$1" >/dev/null
+  local tier="$2"
+  [ -d "subjects/${1%-next}/$tier" ] || tier=default
+  TIER="$tier" compose up -d --force-recreate "$1" >/dev/null
   ready "http://$1:8080"
 }
 down() { compose rm -sfv "$1" >/dev/null; }
@@ -114,74 +123,112 @@ control() {
   down caddy-nocache
 }
 
+# Body sizes: 1 KiB, 64 KiB, and 960 KiB, the largest every subject stores
+# at its defaults (Weir's 1 MiB limit counts headers too). Keys per size
+# keep the working set inside the 160 MiB store.
+SIZES="1024 65536 983040"
+keys() { case "$1" in 983040) echo 100 ;; *) echo 1000 ;; esac; }
 rates() {
   case "$1" in
     1024) echo "2000 8000" ;;
     65536) echo "1000 4000" ;;
-    1048576) echo "100 400" ;;
+    983040) echo "100 400" ;;
   esac
 }
+
+# measure <dir> <test> <targets args> <rate> <size> <profile>: one timed
+# run with what the report checks beside it: CPU, origin calls (a hit run
+# must not reach the origin), the rate asked for and the body size expected.
+measure() {
+  local b o
+  b="$(cpu "$s")"
+  o="$(origin_calls "$6")"
+  attack "$1" "$2" "$3" "$4" "$DURATION"
+  echo "$b $(cpu "$s")" > "$1/$2.cpu"
+  echo "$o $(origin_calls "$6")" > "$1/$2.origin"
+  echo "$4" > "$1/$2.rate"
+  echo "$5" > "$1/$2.size"
+}
+
+# Hit-ratio and memory runs need a store of a stated size. cache-handler's
+# default storage has no verified size setting (docs/11 §5.5), so it has no
+# rows for them.
+MEMSIZED="$SIZED"
 
 for rep in $(seq "$REPS"); do
   dir="$out/$rep"
   control_n=0
   # shellcheck disable=SC2086 # one subject per word
   order="$(printf '%s\n' $SUBJECTS | awk 'BEGIN{srand()} {print rand() "\t" $0}' | sort | cut -f2-)" # docs/11 §6: random order
+  if [ "$rep" = 1 ]; then # the origin direct, once: the miss baseline
+    mkdir -p "$dir/origin"
+    profile "miss-$rep" 1024 "no-store"
+    attack "$dir/origin" miss-1024 "-base http://origin:9000/o/miss-$rep/ -keys 1000000 -n 100000" 500 "$DURATION"
+    echo 1024 > "$dir/origin/miss-1024.size"
+  fi
   for s in $order; do
     control "$dir"
     sdir="$dir/$s"
     mkdir -p "$sdir"
-    tier=speed
-    [ -d "subjects/${s%-next}/speed" ] || tier=default
+    echo "$((control_n - 1))" > "$sdir/control.idx" # the control measured just before
     echo "== rep $rep: $s" >&2
-    up "$s" "$tier"
-    for size in 1024 65536 1048576; do
+    up "$s" speed
+    for size in $SIZES; do
       p="s$size-$rep"
+      k="$(keys "$size")"
       profile "$p" "$size" "max-age=3600"
-      attack "$sdir" "warm-$size" "-base http://$s:8080/o/$p/ -mode fill -keys 1000" 500 "$(( 1000 / 500 ))s"
+      # Twice: a cache with an admission filter (S3-FIFO in Weir's memory
+      # store) keeps an object seen once on probation, so the hit rows
+      # would start with misses.
+      attack "$sdir" "warm-$size" "-base http://$s:8080/o/$p/ -mode fill -keys $k" 50 "$(( k / 50 ))s"
+      attack "$sdir" "warm2-$size" "-base http://$s:8080/o/$p/ -mode fill -keys $k" 50 "$(( k / 50 ))s"
       last=0
       for r in $(rates "$size"); do
-        before="$(cpu "$s")"
-        attack "$sdir" "hit-$size-$r" "-base http://$s:8080/o/$p/ -keys 1000 -n 200000" "$r" "$DURATION"
-        echo "$before $(cpu "$s")" > "$sdir/hit-$size-$r.cpu"
+        measure "$sdir" "hit-$size-$r" "-base http://$s:8080/o/$p/ -keys $k -n 200000" "$r" "$size" "$p"
         last="$r"
       done
+      # Rising rates until the subject stops keeping up: errors or wrong
+      # bodies over 0.1%, p99 ten times the first rate's, or a rate vegeta
+      # could not hold (95%), which would hide queueing.
+      base99="$(load "jq '.latencies[\"99th\"]' /$sdir/hit-$size-$(rates "$size" | cut -d' ' -f1).json")"
       r="$last"
       for _ in $(seq "$SAT_STEPS"); do
         r=$(( r * 3 / 2 ))
-        attack "$sdir" "sat-$size-$r" "-base http://$s:8080/o/$p/ -keys 1000 -n 400000" "$r" "$DURATION"
-        ok="$(load "jq '.success >= 0.999' /$sdir/sat-$size-$r.json")"
+        measure "$sdir" "sat-$size-$r" "-base http://$s:8080/o/$p/ -keys $k -n 400000" "$r" "$size" "$p"
+        ok="$(load "jq --argjson b '$base99' --argjson r '$r' --argjson n '$size' '.success >= 0.999 and .bytes_in.mean == \$n and .latencies[\"99th\"] <= 10 * \$b and .rate >= 0.95 * \$r' /$sdir/sat-$size-$r.json")"
         [ "$ok" = true ] || break
       done
     done
     profile "miss-$rep" 1024 "no-store"
     attack "$sdir" miss-1024 "-base http://$s:8080/o/miss-$rep/ -keys 1000000 -n 100000" 500 "$DURATION"
+    echo 1024 > "$sdir/miss-1024.size"
     down "$s"
 
-    if [ "$rep" = 1 ]; then
-      mkdir -p "$dir/origin"
-      attack "$dir/origin" miss-1024 "-base http://origin:9000/o/miss-$rep/ -keys 1000000 -n 100000" 500 "$DURATION"
+    if [ "$rep" = 1 ] && [[ " $MEMSIZED " == *" $s "* ]]; then
       for n in $FILLS; do
-        mtier=mem
-        [ -d "subjects/${s%-next}/mem" ] || mtier=default
-        up "$s" "$mtier"
+        up "$s" mem
         profile "fill-$n" 100 "max-age=3600"
         before="$(mem "$s")"
         attack "$sdir" "fill-$n" "-base http://$s:8080/o/fill-$n/ -mode fill -keys $n" 5000 "$(( n / 5000 ))s"
         sleep 5 # let the cache settle after the last write before reading memory
         echo "$before $(mem "$s")" > "$sdir/fill-$n.mem"
+        echo 100 > "$sdir/fill-$n.size"
         down "$s"
       done
-      if [[ " $SIZED " == *" $s "* ]]; then
-        for w in zipf scan; do
-          up "$s" speed
-          profile "$w" 4096 "max-age=3600"
-          before="$(origin_calls "$w")"
-          attack "$sdir" "$w" "-base http://$s:8080/o/$w/ -mode $w -keys 200000 -n 300000 -seed 7" 5000 "$RATIO_DURATION"
-          echo "$before $(origin_calls "$w")" > "$sdir/$w.origin"
-          down "$s"
-        done
-      fi
+    fi
+    if [ "$rep" = 1 ] && [[ " $SIZED " == *" $s "* ]]; then
+      for w in zipf scan; do
+        up "$s" speed
+        # 3 000-byte bodies: with key and headers each object still fits
+        # one 4 KiB file-system block in nginx's disk cache, whose max_size
+        # counts blocks, so the stores hold about the same object count.
+        profile "$w" 3000 "max-age=3600"
+        before="$(origin_calls "$w")"
+        attack "$sdir" "$w" "-base http://$s:8080/o/$w/ -mode $w -keys 200000 -n 300000 -seed 7" 5000 "$RATIO_DURATION"
+        echo "$before $(origin_calls "$w")" > "$sdir/$w.origin"
+        echo 3000 > "$sdir/$w.size"
+        down "$s"
+      done
     fi
   done
   control "$dir"

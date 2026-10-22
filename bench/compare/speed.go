@@ -11,12 +11,12 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"maps"
 	"math"
 	"math/rand/v2"
 	"os"
 	"path/filepath"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 )
@@ -84,24 +84,51 @@ type vegetaReport struct {
 	Latencies struct {
 		P50 int64 `json:"50th"`
 		P99 int64 `json:"99th"`
-		Max int64 `json:"max"`
 	} `json:"latencies"`
+	BytesIn struct {
+		Mean float64 `json:"mean"`
+	} `json:"bytes_in"`
 }
 
 // measurement is one run of one test against one subject, as speed.sh left
-// it in the results directory: <rep>/<subject>/<test>.json (vegeta),
-// <test>.hdr (vegeta hdrplot, for p99.9), <test>.cpu (cgroup usage_usec
-// before and after), and for fills <test>.mem (memory.current before and
-// after).
+// it in the results directory: <rep>/<subject>/<test>.json (vegeta), and
+// beside it .hdr (vegeta's hdrplot quantiles, for p99.9), .cpu (cgroup
+// usage_usec before and after), .mem (memory.stat anon before and after),
+// .origin (origin calls before and after), .rate (the rate asked for) and
+// .size (the body size every response must have).
 type measurement struct {
 	rep, subject, test string
+	control            int // the control measured just before this subject
 	report             vegetaReport
 	p999               float64 // ms
 	cpuUsec            int64
 	memBytes           int64
 	originCalls        int64
+	rate, size         int64
 	hasCPU, hasMem     bool
 	hasOrigin          bool
+}
+
+// minP999Requests is the fewest requests whose p99.9 the report prints: below
+// it the 99.9th percentile is one of the last few samples.
+const minP999Requests = 10000
+
+// countTest reports a test whose figures are counts (memory, hit ratio), which
+// docs/11 §6 publishes as measured, outside the drift gate.
+func countTest(test string) bool {
+	return strings.HasPrefix(test, "fill-") || test == "zipf" || test == "scan"
+}
+
+// badBody reports a run whose responses were not all the size the origin
+// sends: an empty or cut 200 is a failure, not a fast success (docs/11 §4).
+func (m measurement) badBody() bool {
+	return m.size > 0 && m.report.Requests > 0 && m.report.BytesIn.Mean != float64(m.size)
+}
+
+// sustained reports a run the subject kept up with: 99.9% good responses of
+// the right size at 95% or more of the rate asked for.
+func (m measurement) sustained() bool {
+	return m.report.Success >= 0.999 && !m.badBody() && (m.rate == 0 || m.report.Rate >= 0.95*float64(m.rate))
 }
 
 // speedCmd prints the pillar's report from a speed.sh results directory.
@@ -125,7 +152,7 @@ func loadMeasurements(dir string) ([]measurement, error) {
 	for _, f := range files {
 		rel, _ := filepath.Rel(dir, f)
 		parts := strings.Split(rel, string(filepath.Separator))
-		m := measurement{rep: parts[0], subject: parts[1], test: strings.TrimSuffix(parts[2], ".json")}
+		m := measurement{rep: parts[0], subject: parts[1], test: strings.TrimSuffix(parts[2], ".json"), control: -1}
 		b, err := os.ReadFile(f) //nolint:gosec // the operator names the directory
 		if err != nil {
 			return nil, err
@@ -144,9 +171,24 @@ func loadMeasurements(dir string) ([]measurement, error) {
 		if a, b, ok := twoInts(stem + ".origin"); ok {
 			m.originCalls, m.hasOrigin = b-a, true
 		}
+		m.rate, _ = oneInt(stem + ".rate")
+		m.size, _ = oneInt(stem + ".size")
+		if c, ok := oneInt(filepath.Join(filepath.Dir(f), "control.idx")); ok {
+			m.control = int(c)
+		}
 		out = append(out, m)
 	}
 	return out, nil
+}
+
+// oneInt reads a file holding one integer.
+func oneInt(path string) (int64, bool) {
+	b, err := os.ReadFile(path) //nolint:gosec // inside the operator's results directory
+	if err != nil {
+		return 0, false
+	}
+	n, err := strconv.ParseInt(strings.TrimSpace(string(b)), 10, 64)
+	return n, err == nil
 }
 
 // twoInts reads a file holding two integers (a before and an after).
@@ -165,8 +207,9 @@ func twoInts(path string) (int64, int64, bool) {
 }
 
 // hdrPercentile reads `vegeta report -type=hdrplot` output (columns Value(ms),
-// Percentile, TotalCount, 1/(1-Percentile)) and returns the first value at
-// or above p, in ms; NaN when the file is missing.
+// Percentile, TotalCount, 1/(1-Percentile); vegeta computes the quantiles
+// with a t-digest) and returns the first value at or above p, in ms; NaN when
+// the file is missing.
 func hdrPercentile(path string, p float64) float64 {
 	b, err := os.ReadFile(path) //nolint:gosec // inside the operator's results directory
 	if err != nil {
@@ -187,87 +230,105 @@ func hdrPercentile(path string, p float64) float64 {
 }
 
 // controlTest is the measurement every rep repeats on the caddy-nocache
-// control between subjects (docs/11 §6).
-const controlTest = "control"
+// control between subjects (docs/11 §6): control-0, control-1, ...
+const controlTest = "control-"
 
 // driftLimit is how far a control measurement may move from the rep's
-// first before the rep is discarded (docs/11 §6).
+// first before the rep's timing rows are discarded (docs/11 §6).
 const driftLimit = 0.10
 
-// discarded returns the reps whose control p50 moved by more than
-// driftLimit, with the reason.
+// controls returns each rep's control measurements by index.
+func controls(ms []measurement) map[string]map[int]measurement {
+	out := map[string]map[int]measurement{}
+	for _, m := range ms {
+		n, err := strconv.Atoi(strings.TrimPrefix(m.test, controlTest))
+		if !strings.HasPrefix(m.test, controlTest) || err != nil {
+			continue
+		}
+		if out[m.rep] == nil {
+			out[m.rep] = map[int]measurement{}
+		}
+		out[m.rep][n] = m
+	}
+	return out
+}
+
+// discarded returns the reps whose control p50 or p99 moved by more than
+// driftLimit from the rep's first control, with the reason.
 func discarded(ms []measurement) map[string]string {
-	first := map[string]float64{}
 	out := map[string]string{}
-	sorted := slices.Clone(ms)
-	sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].subject < sorted[j].subject })
-	for _, m := range sorted {
-		if !strings.HasPrefix(m.test, controlTest) {
-			continue
-		}
-		p := float64(m.report.Latencies.P50)
-		f, ok := first[m.rep]
+	for rep, cs := range controls(ms) {
+		first, ok := cs[0]
 		if !ok {
-			first[m.rep] = p
 			continue
 		}
-		if f > 0 && math.Abs(p-f)/f > driftLimit {
-			out[m.rep] = fmt.Sprintf("control p50 moved %.0f%% (%s)", 100*math.Abs(p-f)/f, m.test)
+		idx := slices.Sorted(maps.Keys(cs))
+		for _, i := range idx {
+			c := cs[i]
+			for _, q := range []struct {
+				name     string
+				got, was int64
+			}{{"p50", c.report.Latencies.P50, first.report.Latencies.P50}, {"p99", c.report.Latencies.P99, first.report.Latencies.P99}} {
+				if q.was > 0 && math.Abs(float64(q.got-q.was))/float64(q.was) > driftLimit {
+					if _, seen := out[rep]; !seen {
+						out[rep] = fmt.Sprintf("control %s moved %.0f%% (control-%d)", q.name, 100*math.Abs(float64(q.got-q.was))/float64(q.was), i)
+					}
+				}
+			}
 		}
 	}
 	return out
 }
 
 // speedReport prints, per test and subject, medians over the reps that the
-// drift gate kept: latency as a ratio to the control of the same rep, CPU
-// time per request, success, memory per object and hit ratio.
+// drift gate kept: latency as a ratio to the control measured just before
+// the subject (p50 to its p50, p99 to its p99, p99.9 to its p99.9), CPU
+// time per request, success, memory per object and hit ratio; then the
+// highest rate each subject sustained per body size.
 func speedReport(ms []measurement, w io.Writer) error {
 	gone := discarded(ms)
-	reps := map[string]bool{}
-	for _, m := range ms {
-		reps[m.rep] = true
+	for _, rep := range slices.Sorted(maps.Keys(gone)) {
+		_, _ = fmt.Fprintf(w, "rep %s: timing rows discarded, %s\n", rep, gone[rep])
 	}
-	for rep := range reps {
-		if why, ok := gone[rep]; ok {
-			_, _ = fmt.Fprintf(w, "rep %s discarded: %s\n", rep, why)
-		}
-	}
-	control := map[string]float64{} // rep -> control p50 (ns), the first one of the rep
-	for _, m := range ms {
-		if m.test == controlTest+"-0" {
-			control[m.rep] = float64(m.report.Latencies.P50)
-		}
-	}
+	cs := controls(ms)
 	type key struct{ test, subject string }
 	groups := map[key][]measurement{}
 	for _, m := range ms {
-		if _, bad := gone[m.rep]; bad || strings.HasPrefix(m.test, controlTest) || strings.HasPrefix(m.test, "warm-") {
+		if strings.HasPrefix(m.test, controlTest) || strings.HasPrefix(m.test, "warm") {
+			continue
+		}
+		if _, bad := gone[m.rep]; bad && !countTest(m.test) {
 			continue
 		}
 		groups[key{m.test, m.subject}] = append(groups[key{m.test, m.subject}], m)
 	}
-	keys := make([]key, 0, len(groups))
-	for k := range groups {
-		keys = append(keys, k)
-	}
-	sort.Slice(keys, func(i, j int) bool {
-		if keys[i].test != keys[j].test {
-			return keys[i].test < keys[j].test
+	keys := slices.SortedFunc(maps.Keys(groups), func(a, b key) int {
+		if c := strings.Compare(a.test, b.test); c != 0 {
+			return c
 		}
-		return keys[i].subject < keys[j].subject
+		return strings.Compare(a.subject, b.subject)
 	})
-	_, _ = fmt.Fprintln(w, "| test | subject | reps | p50 / control | p99 / control | p99.9 ms | CPU µs/request | success | memory/object | hit ratio |")
-	_, _ = fmt.Fprintln(w, "|---|---|---|---|---|---|---|---|---|---|")
+	_, _ = fmt.Fprintln(w, "| test | subject | reps | p50 / control | p99 / control | p99.9 / control | CPU µs/request | success | origin calls | memory/object | hit ratio |")
+	_, _ = fmt.Fprintln(w, "|---|---|---|---|---|---|---|---|---|---|---|")
 	for _, k := range keys {
 		g := groups[k]
-		var r50, r99, p999, cpu, succ, mem, hit []float64
+		var r50, r99, r999, cpu, succ, mem, hit, calls []float64
+		bad := 0
 		for _, m := range g {
-			if c := control[m.rep]; c > 0 {
-				r50 = append(r50, float64(m.report.Latencies.P50)/c)
-				r99 = append(r99, float64(m.report.Latencies.P99)/c)
+			if m.badBody() {
+				bad++
+				continue
 			}
-			if !math.IsNaN(m.p999) {
-				p999 = append(p999, m.p999)
+			if c, ok := cs[m.rep][m.control]; ok && !countTest(m.test) {
+				if c.report.Latencies.P50 > 0 {
+					r50 = append(r50, float64(m.report.Latencies.P50)/float64(c.report.Latencies.P50))
+				}
+				if c.report.Latencies.P99 > 0 {
+					r99 = append(r99, float64(m.report.Latencies.P99)/float64(c.report.Latencies.P99))
+				}
+				if m.report.Requests >= minP999Requests && !math.IsNaN(m.p999) && c.p999 > 0 {
+					r999 = append(r999, m.p999/c.p999)
+				}
 			}
 			if m.hasCPU && m.report.Requests > 0 {
 				cpu = append(cpu, float64(m.cpuUsec)/float64(m.report.Requests))
@@ -277,13 +338,60 @@ func speedReport(ms []measurement, w io.Writer) error {
 				mem = append(mem, float64(m.memBytes)/float64(m.report.Requests))
 			}
 			if m.hasOrigin && m.report.Requests > 0 {
-				hit = append(hit, 1-float64(m.originCalls)/float64(m.report.Requests))
+				calls = append(calls, float64(m.originCalls))
+				if countTest(m.test) {
+					hit = append(hit, 1-float64(m.originCalls)/float64(m.report.Requests))
+				}
 			}
 		}
-		_, _ = fmt.Fprintf(w, "| %s | %s | %d | %s | %s | %s | %s | %s | %s | %s |\n", k.test, k.subject, len(g),
-			cell(r50, "%.2f"), cell(r99, "%.2f"), cell(p999, "%.2f"), cell(cpu, "%.1f"), cell(succ, "%.4f"), bytesCell(mem), cell(hit, "%.3f"))
+		succCell := cell(succ, "%.4f")
+		if bad > 0 {
+			succCell = fmt.Sprintf("bad body in %d of %d", bad, len(g))
+		}
+		_, _ = fmt.Fprintf(w, "| %s | %s | %d | %s | %s | %s | %s | %s | %s | %s | %s |\n", k.test, k.subject, len(g),
+			cell(r50, "%.2f"), cell(r99, "%.2f"), cell(r999, "%.2f"), cell(cpu, "%.1f"), succCell, cell(calls, "%.0f"), bytesCell(mem), cell(hit, "%.3f"))
 	}
+	saturation(ms, gone, w)
 	return nil
+}
+
+// saturation prints, per subject and body size, the highest rate the subject
+// sustained in each kept rep (median over reps).
+func saturation(ms []measurement, gone map[string]string, w io.Writer) {
+	type key struct {
+		subject string
+		size    int64
+	}
+	best := map[key]map[string]int64{} // -> rep -> highest sustained rate
+	for _, m := range ms {
+		timed := strings.HasPrefix(m.test, "hit-") || strings.HasPrefix(m.test, "sat-")
+		if _, bad := gone[m.rep]; bad || m.rate == 0 || !timed || !m.sustained() {
+			continue
+		}
+		k := key{m.subject, m.size}
+		if best[k] == nil {
+			best[k] = map[string]int64{}
+		}
+		best[k][m.rep] = max(best[k][m.rep], m.rate)
+	}
+	if len(best) == 0 {
+		return
+	}
+	_, _ = fmt.Fprintln(w, "\n| subject | body bytes | highest rate sustained (requests/s) |")
+	_, _ = fmt.Fprintln(w, "|---|---|---|")
+	ks := slices.SortedFunc(maps.Keys(best), func(a, b key) int {
+		if c := strings.Compare(a.subject, b.subject); c != 0 {
+			return c
+		}
+		return int(a.size - b.size)
+	})
+	for _, k := range ks {
+		var v []float64
+		for _, r := range best[k] {
+			v = append(v, float64(r))
+		}
+		_, _ = fmt.Fprintf(w, "| %s | %d | %s |\n", k.subject, k.size, cell(v, "%.0f"))
+	}
 }
 
 func cell(v []float64, f string) string {

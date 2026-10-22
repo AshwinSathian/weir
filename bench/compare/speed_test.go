@@ -52,39 +52,55 @@ func TestTargets(t *testing.T) {
 	}
 }
 
-// CMP-06, docs/11 §6: a rep whose control moved more than 10% is discarded
-// and said so; latency is a ratio to the rep's control; CPU, memory per
-// object and hit ratio come from the files speed.sh writes.
+// CMP-06, docs/11 §6: a rep whose control moved more than 10% loses its
+// timing rows and the report says so, while its counts stay; latency is a
+// ratio to the control measured just before the subject, percentile to
+// percentile; a wrong body size is a failure; CPU, origin calls, memory per
+// object, hit ratio and the highest sustained rate come from the files
+// speed.sh writes.
 func TestSpeedReport(t *testing.T) {
 	dir := t.TempDir()
-	write := func(rep, subject, test string, p50, p99, reqs int64, extra map[string]string) {
+	write := func(rep, subject, test string, p50, p99, reqs int64, bytesIn float64, rate float64, extra map[string]string) {
 		d := filepath.Join(dir, rep, subject)
 		if err := os.MkdirAll(d, 0o750); err != nil {
 			t.Fatal(err)
 		}
-		r := vegetaReport{Requests: reqs, Success: 1}
+		r := vegetaReport{Requests: reqs, Success: 1, Rate: rate}
 		r.Latencies.P50, r.Latencies.P99 = p50, p99
+		r.BytesIn.Mean = bytesIn
 		b, _ := json.Marshal(r)
 		if err := os.WriteFile(filepath.Join(d, test+".json"), b, 0o600); err != nil {
 			t.Fatal(err)
 		}
-		for ext, v := range extra {
-			if err := os.WriteFile(filepath.Join(d, test+"."+ext), []byte(v), 0o600); err != nil {
+		for name, v := range extra {
+			p := filepath.Join(d, test+"."+name)
+			if name == "control.idx" {
+				p = filepath.Join(d, name)
+			}
+			if err := os.WriteFile(p, []byte(v), 0o600); err != nil {
 				t.Fatal(err)
 			}
 		}
 	}
-	// rep 1: steady control; rep 2: the control moved 50%.
-	write("1", "caddy-nocache", "control-0", 1000, 2000, 100, nil)
-	write("1", "caddy-nocache", "control-1", 1050, 2000, 100, nil)
-	write("1", "weir", "hit-1024-2000", 500, 1500, 1000, map[string]string{
-		"cpu": "100 2100", "hdr": "Value(ms) Percentile TotalCount 1/(1-Percentile)\n0.5 0.99 990 100\n0.9 0.999 999 1000\n",
+	hdr := func(p999 string) string {
+		return "Value(ms) Percentile TotalCount 1/(1-Percentile)\n0.5 0.99 990 100\n" + p999 + " 0.999 999 1000\n"
+	}
+	// rep 1: controls steady; the subject follows control-1.
+	write("1", "caddy-nocache", "control-0", 1000, 2000, 20000, 1024, 2000, map[string]string{"hdr": hdr("4")})
+	write("1", "caddy-nocache", "control-1", 1050, 2100, 20000, 1024, 2000, map[string]string{"hdr": hdr("5")})
+	write("1", "weir", "hit-1024-2000", 525, 1050, 20000, 1024, 2000, map[string]string{
+		"cpu": "100 40100", "hdr": hdr("2.5"), "origin": "7 7", "rate": "2000", "size": "1024", "control.idx": "1",
 	})
-	write("1", "weir", "fill-100000", 0, 0, 1000, map[string]string{"mem": "1000 501000"})
-	write("1", "weir", "zipf", 0, 0, 1000, map[string]string{"origin": "10 210"})
-	write("2", "caddy-nocache", "control-0", 1000, 2000, 100, nil)
-	write("2", "caddy-nocache", "control-1", 1500, 2000, 100, nil)
-	write("2", "weir", "hit-1024-2000", 5000, 9000, 1000, nil)
+	write("1", "weir", "sat-1024-12000", 600, 1500, 120000, 1024, 11900, map[string]string{"rate": "12000", "size": "1024"})
+	write("1", "weir", "sat-1024-18000", 600, 9000, 180000, 1024, 15000, map[string]string{"rate": "18000", "size": "1024"}) // fell behind
+	write("1", "weir", "fill-100000", 0, 0, 1000, 100, 0, map[string]string{"mem": "1000 501000", "size": "100"})
+	write("1", "weir", "zipf", 0, 0, 1000, 3000, 0, map[string]string{"origin": "10 210", "size": "3000"})
+	write("1", "souin", "hit-1024-2000", 100, 200, 20000, 0, 2000, map[string]string{"size": "1024", "rate": "2000", "control.idx": "1"})
+	// rep 2: the control's p99 moved 50%: timing rows go, the fill count stays.
+	write("2", "caddy-nocache", "control-0", 1000, 2000, 20000, 1024, 2000, nil)
+	write("2", "caddy-nocache", "control-1", 1000, 3000, 20000, 1024, 2000, nil)
+	write("2", "weir", "hit-1024-2000", 5000, 9000, 20000, 1024, 2000, map[string]string{"size": "1024", "rate": "2000", "control.idx": "1"})
+	write("2", "weir", "fill-100000", 0, 0, 1000, 100, 0, map[string]string{"mem": "0 700000", "size": "100"})
 	ms, err := loadMeasurements(dir)
 	if err != nil {
 		t.Fatal(err)
@@ -95,10 +111,12 @@ func TestSpeedReport(t *testing.T) {
 	}
 	got := out.String()
 	for _, want := range []string{
-		"rep 2 discarded: control p50 moved 50%",
-		"| hit-1024-2000 | weir | 1 | 0.50 | 1.50 | 0.90 | 2.0 | 1.0000 |",
-		"| fill-100000 | weir | 1 |", "500 B",
+		"rep 2: timing rows discarded, control p99 moved 50% (control-1)",
+		"| hit-1024-2000 | weir | 1 | 0.50 | 0.50 | 0.50 | 2.0 | 1.0000 | 0 |",
+		"| hit-1024-2000 | souin | 1 | not available | not available | not available | not available | bad body in 1 of 1 |",
+		"| fill-100000 | weir | 2 |", "700 B",
 		"| zipf | weir | 1 |", "0.800",
+		"| weir | 1024 | 12000 |",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("report lacks %q:\n%s", want, got)
