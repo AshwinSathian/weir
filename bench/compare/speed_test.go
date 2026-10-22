@@ -67,7 +67,7 @@ func TestSpeedReport(t *testing.T) {
 		}
 		r := vegetaReport{Requests: reqs, Success: 1, Rate: rate}
 		r.Latencies.P50, r.Latencies.P99 = p50, p99
-		r.BytesIn.Mean = bytesIn
+		r.BytesIn.Total = int64(bytesIn * float64(reqs))
 		b, _ := json.Marshal(r)
 		if err := os.WriteFile(filepath.Join(d, test+".json"), b, 0o600); err != nil {
 			t.Fatal(err)
@@ -121,5 +121,59 @@ func TestSpeedReport(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Fatalf("report lacks %q:\n%s", want, got)
 		}
+	}
+}
+
+// CMP-06, docs/11 §4: errors are not bad bodies (a timeout carries no body
+// at all); a climb that never failed reports its top rate as a lower bound.
+func TestSpeedReportErrorsAndLowerBound(t *testing.T) {
+	dir := t.TempDir()
+	put := func(rep, subject, test string, reqs int64, success float64, total int64, p99 int64, rate int64, size int64, ctrl string) {
+		d := filepath.Join(dir, rep, subject)
+		if err := os.MkdirAll(d, 0o750); err != nil {
+			t.Fatal(err)
+		}
+		r := vegetaReport{Requests: reqs, Success: success, Rate: float64(rate)}
+		r.Latencies.P50, r.Latencies.P99 = 100, p99
+		r.BytesIn.Total = total
+		b, _ := json.Marshal(r)
+		files := map[string]string{test + ".json": string(b)}
+		if size > 0 {
+			files[test+".size"], files[test+".rate"] = strconv.FormatInt(size, 10), strconv.FormatInt(rate, 10)
+		}
+		if ctrl != "" {
+			files["control.idx"] = ctrl
+		}
+		for n, v := range files {
+			if err := os.WriteFile(filepath.Join(d, n), []byte(v), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	put("1", "caddy-nocache", "control-0", 1000, 1, 1024000, 200, 2000, 0, "")
+	// 1% timeouts: 19 800 successes of 1024 bytes, no bad body, not sustained.
+	put("1", "varnish", "hit-1024-2000", 20000, 0.99, 19800*1024, 300, 2000, 1024, "0")
+	// weir climbed to its last step without failing.
+	put("1", "weir", "hit-1024-2000", 20000, 1, 20000*1024, 300, 2000, 1024, "0")
+	put("1", "weir", "sat-1024-12000", 120000, 1, 120000*1024, 900, 12000, 1024, "0")
+	ms, err := loadMeasurements(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := speedReport(ms, &out); err != nil {
+		t.Fatal(err)
+	}
+	got := out.String()
+	if strings.Contains(got, "bad body") {
+		t.Fatalf("timeouts reported as bad bodies:\n%s", got)
+	}
+	for _, want := range []string{"| hit-1024-2000 | varnish | 1 |", "0.9900", "| weir | 1024 | ≥ 12000 |"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("report lacks %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "| varnish | 1024 |") {
+		t.Fatalf("a run with 1%% errors counted as sustained:\n%s", got)
 	}
 }

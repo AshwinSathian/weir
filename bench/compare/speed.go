@@ -86,7 +86,7 @@ type vegetaReport struct {
 		P99 int64 `json:"99th"`
 	} `json:"latencies"`
 	BytesIn struct {
-		Mean float64 `json:"mean"`
+		Total int64 `json:"total"`
 	} `json:"bytes_in"`
 }
 
@@ -119,16 +119,22 @@ func countTest(test string) bool {
 	return strings.HasPrefix(test, "fill-") || test == "zipf" || test == "scan"
 }
 
-// badBody reports a run whose responses were not all the size the origin
-// sends: an empty or cut 200 is a failure, not a fast success (docs/11 §4).
+// badBody reports a run whose successful responses were not all the size the
+// origin sends: an empty or cut 200 is a failure, not a fast success (docs/11
+// §4). Errors (a timeout, a 503) carry no body of the profile's size and are
+// counted by Success instead, so only successes are divided in.
 func (m measurement) badBody() bool {
-	return m.size > 0 && m.report.Requests > 0 && m.report.BytesIn.Mean != float64(m.size)
+	ok := float64(m.report.Requests) * m.report.Success
+	return m.size > 0 && ok >= 1 && float64(m.report.BytesIn.Total)/ok != float64(m.size)
 }
 
-// sustained reports a run the subject kept up with: 99.9% good responses of
-// the right size at 95% or more of the rate asked for.
-func (m measurement) sustained() bool {
-	return m.report.Success >= 0.999 && !m.badBody() && (m.rate == 0 || m.report.Rate >= 0.95*float64(m.rate))
+// sustained reports a run the subject kept up with, by the rule speed.sh
+// stops its climb on: 99.9% good responses of the right size, at 95% or
+// more of the rate asked for, with a p99 within ten times basep99 (the
+// subject's first rate for that size; 0 skips the check).
+func (m measurement) sustained(basep99 int64) bool {
+	return m.report.Success >= 0.999 && !m.badBody() && (m.rate == 0 || m.report.Rate >= 0.95*float64(m.rate)) &&
+		(basep99 == 0 || m.report.Latencies.P99 <= 10*basep99)
 }
 
 // speedCmd prints the pillar's report from a speed.sh results directory.
@@ -356,16 +362,39 @@ func speedReport(ms []measurement, w io.Writer) error {
 }
 
 // saturation prints, per subject and body size, the highest rate the subject
-// sustained in each kept rep (median over reps).
+// sustained in each kept rep (median over reps), by the same rule speed.sh
+// stops its climb on. When the climb never failed, the figure is a lower
+// bound and is printed with "≥".
 func saturation(ms []measurement, gone map[string]string, w io.Writer) {
+	type run struct {
+		rep, subject string
+		size         int64
+	}
 	type key struct {
 		subject string
 		size    int64
 	}
-	best := map[key]map[string]int64{} // -> rep -> highest sustained rate
+	timed := func(m measurement) bool {
+		return strings.HasPrefix(m.test, "hit-") || strings.HasPrefix(m.test, "sat-")
+	}
+	// The first (lowest) rate's p99 for each run, and the highest rate tried.
+	base := map[run]measurement{}
+	tried := map[run]int64{}
 	for _, m := range ms {
-		timed := strings.HasPrefix(m.test, "hit-") || strings.HasPrefix(m.test, "sat-")
-		if _, bad := gone[m.rep]; bad || m.rate == 0 || !timed || !m.sustained() {
+		if !timed(m) || m.rate == 0 {
+			continue
+		}
+		r := run{m.rep, m.subject, m.size}
+		if b, ok := base[r]; !ok || m.rate < b.rate {
+			base[r] = m
+		}
+		tried[r] = max(tried[r], m.rate)
+	}
+	best := map[key]map[string]int64{} // -> rep -> highest sustained rate
+	open := map[key]bool{}             // some rep never failed its climb
+	for _, m := range ms {
+		r := run{m.rep, m.subject, m.size}
+		if _, bad := gone[m.rep]; bad || m.rate == 0 || !timed(m) || !m.sustained(base[r].report.Latencies.P99) {
 			continue
 		}
 		k := key{m.subject, m.size}
@@ -373,6 +402,9 @@ func saturation(ms []measurement, gone map[string]string, w io.Writer) {
 			best[k] = map[string]int64{}
 		}
 		best[k][m.rep] = max(best[k][m.rep], m.rate)
+		if m.rate == tried[r] {
+			open[k] = true
+		}
 	}
 	if len(best) == 0 {
 		return
@@ -390,7 +422,11 @@ func saturation(ms []measurement, gone map[string]string, w io.Writer) {
 		for _, r := range best[k] {
 			v = append(v, float64(r))
 		}
-		_, _ = fmt.Fprintf(w, "| %s | %d | %s |\n", k.subject, k.size, cell(v, "%.0f"))
+		c := cell(v, "%.0f")
+		if open[k] {
+			c = "≥ " + c
+		}
+		_, _ = fmt.Fprintf(w, "| %s | %d | %s |\n", k.subject, k.size, c)
 	}
 }
 

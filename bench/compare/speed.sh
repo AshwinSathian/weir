@@ -8,10 +8,10 @@
 #
 # What it measures, per subject, with the cache held to 2 cores
 # (speed.compose.yaml) and vegeta as the open-loop load (docs/11 §4):
-#   hit-<size>-<rate>   cached GETs at fixed rates, for 1 KiB, 64 KiB, 1 MiB
+#   hit-<size>-<rate>   cached GETs at fixed rates, for 1 KiB, 64 KiB, 960 KiB
 #   sat-<size>-<rate>   the same at rising rates, to find where it breaks
 #   miss-1024           uncacheable GETs, and the same against the origin
-#   fill-<n>            n new small entries: memory.current per object (rep 1)
+#   fill-<n>            n new small entries: memory (anon + shmem) per object (rep 1)
 #   zipf, scan          hit ratio in a 160 MiB store (rep 1)
 # and before each subject the caddy-nocache control, whose movement of more
 # than 10% discards the repetition (docs/11 §6). CPU time per request comes
@@ -62,10 +62,11 @@ cgroup() {
 # available; it must not end a two-hour run (set -e).
 # shellcheck disable=SC2016 # the awk programs run in the helper, unexpanded here
 cpu() { cgroup "$1" cpu.stat '/^usage_usec/ {print $2}' || true; }
-# memory.stat anon: what the cache process holds in memory. memory.current
-# would add page cache and kernel memory (nginx's cache files, for one).
+# memory.stat anon plus shmem: what the cache holds in memory, its shared
+# memory included (nginx keeps its keys in a shared keys_zone). Page cache is
+# left out (memory.current would add it): nginx's bodies are files on disk.
 # shellcheck disable=SC2016
-mem() { cgroup "$1" memory.stat '/^anon / {print $2}' || true; }
+mem() { cgroup "$1" memory.stat '/^(anon|shmem) / {n += $2} END {print n}' || true; }
 
 # secs <requests> <rate>: the duration that sends that many requests at the
 # rate, in whole seconds and at least one: vegeta reads 0s as "forever".
@@ -131,7 +132,9 @@ control() {
 # at its defaults (Weir's 1 MiB limit counts headers too). Keys per size
 # keep the working set inside the 160 MiB store.
 SIZES="1024 65536 983040"
-keys() { case "$1" in 983040) echo 100 ;; *) echo 1000 ;; esac; }
+# 50 of the largest: Weir's 160 MiB store is 16 shards of 10 MiB, each of
+# which holds about ten such objects, and 50 keys leave no shard near that.
+keys() { case "$1" in 983040) echo 50 ;; *) echo 1000 ;; esac; }
 rates() {
   case "$1" in
     1024) echo "2000 8000" ;;
@@ -164,12 +167,14 @@ for rep in $(seq "$REPS"); do
   control_n=0
   # shellcheck disable=SC2086 # one subject per word
   order="$(printf '%s\n' $SUBJECTS | awk 'BEGIN{srand()} {print rand() "\t" $0}' | sort | cut -f2-)" # docs/11 §6: random order
-  if [ "$rep" = 1 ]; then # the origin direct, once: the miss baseline
-    mkdir -p "$dir/origin"
-    profile "miss-$rep" 1024 "no-store"
-    attack "$dir/origin" miss-1024 "-base http://origin:9000/o/miss-$rep/ -keys 1000000 -n 100000" 500 "$DURATION"
-    echo 1024 > "$dir/origin/miss-1024.size"
-  fi
+  # The origin direct, the miss baseline, after the rep's first control so
+  # its latency has a ratio like every other row.
+  control "$dir"
+  mkdir -p "$dir/origin"
+  echo 0 > "$dir/origin/control.idx"
+  profile "miss-$rep" 1024 "no-store"
+  attack "$dir/origin" miss-1024 "-base http://origin:9000/o/miss-$rep/ -keys 1000000 -n 100000" 500 "$DURATION"
+  echo 1024 > "$dir/origin/miss-1024.size"
   for s in $order; do
     control "$dir"
     sdir="$dir/$s"
@@ -199,7 +204,7 @@ for rep in $(seq "$REPS"); do
       for _ in $(seq "$SAT_STEPS"); do
         r=$(( r * 3 / 2 ))
         measure "$sdir" "sat-$size-$r" "-base http://$s:8080/o/$p/ -keys $k -n 400000" "$r" "$size" "$p"
-        ok="$(load "jq --argjson b '$base99' --argjson r '$r' --argjson n '$size' '.success >= 0.999 and .bytes_in.mean == \$n and .latencies[\"99th\"] <= 10 * \$b and .rate >= 0.95 * \$r' /$sdir/sat-$size-$r.json")"
+        ok="$(load "jq --argjson b '$base99' --argjson r '$r' --argjson n '$size' '.success >= 0.999 and (.bytes_in.total / (.requests * .success)) == \$n and .latencies[\"99th\"] <= 10 * \$b and .rate >= 0.95 * \$r' /$sdir/sat-$size-$r.json")"
         [ "$ok" = true ] || break
       done
     done
