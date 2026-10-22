@@ -2,6 +2,7 @@ package weircaddy
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"log/slog"
 	"maps"
@@ -34,6 +35,16 @@ type nextOrigin struct {
 // next's own error stays out of the message: it can carry upstream addresses
 // and Caddy internals that {http.error.message} would show to clients.
 var errNextFailed = errors.New("weir: next handler failed")
+
+// errNextStatus is the error handle_errors sees for a 4xx that next returned
+// as an error (D34). Like errNextFailed it hides next's own message.
+var errNextStatus = errors.New("weir: next handler returned an error status")
+
+// nextStatusField marks the response nextOrigin builds for a 4xx error from
+// next, so ServeHTTP hands it back to Caddy as an error and handle_errors
+// runs. The name is random per process, so no upstream response can carry
+// it by accident or on purpose. Never stored: the response is no-store.
+var nextStatusField = http.CanonicalHeaderKey("Weir-Next-Status-" + rand.Text())
 
 func newNextOrigin(next caddyhttp.Handler, base *http.Request, log *slog.Logger, clientPlaceholders bool) nextOrigin {
 	o := nextOrigin{next: next, base: base, log: log, clientPlaceholders: clientPlaceholders}
@@ -101,8 +112,13 @@ func (o nextOrigin) serve(w http.ResponseWriter, hr *http.Request) {
 	}
 	// A 4xx from next (file_server's 404) is a response, not an origin
 	// failure: as a 502 it would trip the breaker for every missing path.
+	// It is marked, so ServeHTTP returns it to Caddy as an error and the
+	// operator's handle_errors page is served, and it is no-store, so a
+	// hit never replays an empty error body.
 	var he caddyhttp.HandlerError
 	if errors.As(err, &he) && he.StatusCode >= 400 && he.StatusCode < 500 {
+		w.Header().Set(nextStatusField, "1")
+		w.Header().Set("Cache-Control", "no-store")
 		w.WriteHeader(he.StatusCode)
 		return
 	}

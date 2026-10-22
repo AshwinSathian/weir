@@ -3,10 +3,13 @@ package weircaddy
 import (
 	"crypto/sha256"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -25,13 +28,26 @@ type StoreConfig struct {
 	// Addrs are "host:port" addresses: exactly one for a standalone server,
 	// seed nodes in cluster mode. A URL is refused (see validate).
 	Addrs []string `json:"addrs,omitempty"`
-	// Username and Password authenticate to the server. In a Caddyfile the
-	// password comes from {$VAR}; String, GoString and LogValue hide both.
+	// Username and Password authenticate to the server. Write them as
+	// {env.VAR}: the placeholder is resolved at Provision, so the adapted
+	// JSON, GET /config/ and Caddy's autosave file hold the name and not the
+	// secret ({$VAR} is expanded into all three). String, GoString and
+	// LogValue hide both.
 	Username string `json:"username,omitempty"`
 	Password string `json:"password,omitempty"`
-	// TLS turns TLS on with default settings: system roots, the server name
-	// taken from the address, TLS 1.2 or later.
-	TLS             bool           `json:"tls,omitempty"`
+	// TLS turns TLS on: system roots, the server name taken from the
+	// address, TLS 1.2 or later. TLSCAFile or TLSServerName turn it on too.
+	TLS bool `json:"tls,omitempty"`
+	// TLSCAFile is a PEM file of the certificate authorities that sign the
+	// server's certificate, for a server with a private CA. It replaces the
+	// system roots. Read at Provision; a changed file is a new store.
+	TLSCAFile string `json:"tls_ca_file,omitempty"`
+	// TLSServerName is the name the server's certificate must carry, when it
+	// differs from the host in Addrs (an IP address, an internal alias).
+	TLSServerName string `json:"tls_server_name,omitempty"`
+	// MaxObjectBytes is valkey.Config.MaxObjectBytes: the largest record
+	// written or read (64 KiB to 256 MiB; unset: 64 MiB).
+	MaxObjectBytes  ByteSize       `json:"max_object_bytes,omitempty"`
 	Cluster         bool           `json:"cluster,omitempty"`
 	Prefix          string         `json:"prefix,omitempty"`
 	HashTag         string         `json:"hash_tag,omitempty"`
@@ -50,7 +66,7 @@ type StoreConfig struct {
 // placeholder instead of the secret. An unset prefix becomes the site name:
 // the library default would put every site on a server into one keyspace, and
 // a purge on one would flush the others.
-func (s *StoreConfig) valkeyConfig(name string) valkey.Config {
+func (s *StoreConfig) valkeyConfig(name string) (valkey.Config, error) {
 	repl := caddy.NewReplacer()
 	prefix := s.Prefix
 	if prefix == "" {
@@ -62,11 +78,23 @@ func (s *StoreConfig) valkeyConfig(name string) valkey.Config {
 		MaxRetention: time.Duration(s.MaxRetention), MaxClockSkew: time.Duration(s.MaxClockSkew),
 		NoClockSkew: s.NoClockSkew, MaxHardEpochs: s.MaxHardEpochs, CallTimeout: time.Duration(s.CallTimeout),
 		HardEpochWait: time.Duration(s.HardEpochWait), SkipPolicyCheck: s.SkipPolicyCheck,
+		MaxObjectBytes: int64(s.MaxObjectBytes),
 	}
-	if s.TLS {
-		c.TLS = &tls.Config{MinVersion: tls.VersionTLS12}
+	if s.TLS || s.TLSCAFile != "" || s.TLSServerName != "" {
+		c.TLS = &tls.Config{MinVersion: tls.VersionTLS12, ServerName: s.TLSServerName}
 	}
-	return c
+	if s.TLSCAFile != "" {
+		pem, err := os.ReadFile(s.TLSCAFile)
+		if err != nil {
+			return c, fmt.Errorf("weir: store tls_ca_file: %w", err)
+		}
+		pool := x509.NewCertPool()
+		if !pool.AppendCertsFromPEM(pem) {
+			return c, errors.New("weir: store tls_ca_file holds no PEM certificate")
+		}
+		c.TLS.RootCAs = pool
+	}
+	return c, nil
 }
 
 // validate checks the block. It never prints the password: the only place a
@@ -87,7 +115,11 @@ func (s *StoreConfig) validate(name string) error {
 			return fmt.Errorf("weir: store addrs[%d] must be host:port (credentials go in username and password)", i)
 		}
 	}
-	_, err := s.valkeyConfig(name).Validate()
+	vc, err := s.valkeyConfig(name)
+	if err != nil {
+		return err
+	}
+	_, err = vc.Validate()
 	return err
 }
 
@@ -101,12 +133,12 @@ func (s *StoreConfig) digestFor(name string) (out [sha256.Size]byte) {
 	if s == nil {
 		return out
 	}
-	vc := s.valkeyConfig(name)
+	vc, _ := s.valkeyConfig(name) // a bad CA file fails validate and the store build
 	if n, err := vc.Validate(); err == nil {
 		vc = n
 	}
 	h := sha256.New()
-	h.Write([]byte("weir/caddy/store/valkey/v2\x00"))
+	h.Write([]byte("weir/caddy/store/valkey/v3\x00"))
 	str := func(v string) {
 		var n [binary.MaxVarintLen64]byte
 		h.Write(n[:binary.PutUvarint(n[:], uint64(len(v)))])
@@ -129,6 +161,13 @@ func (s *StoreConfig) digestFor(name string) (out [sha256.Size]byte) {
 	str(vc.Prefix)
 	str(vc.HashTag)
 	flag(vc.TLS != nil)
+	if vc.TLS != nil {
+		str(vc.TLS.ServerName)
+		str(s.TLSCAFile)
+		ca, _ := os.ReadFile(s.TLSCAFile) // the content too, so a rotated CA is a new store
+		str(string(ca))
+	}
+	num(vc.MaxObjectBytes)
 	flag(vc.Cluster)
 	flag(vc.CoLocateEntries)
 	flag(vc.NoClockSkew)

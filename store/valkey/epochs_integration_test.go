@@ -361,8 +361,8 @@ func TestSkewAddsConservatively(t *testing.T) {
 // 05 §7 (Replication), T-29: HardEpochWait must wait for a replica. WAIT
 // only covers writes on its own connection, so the script and WAIT share
 // one. The test needs a replica of the test server that it can pause:
-// WEIR_VALKEY_REPLICA_ADDR names one. With none set the test skips, since CI
-// runs a single server.
+// WEIR_VALKEY_REPLICA_ADDR names one, started with --enable-debug-command yes
+// (CI runs one). With none set the test skips.
 func TestHardEpochWaitWaitsForReplica(t *testing.T) {
 	ra := os.Getenv("WEIR_VALKEY_REPLICA_ADDR")
 	if ra == "" {
@@ -397,11 +397,12 @@ func TestHardEpochWaitWaitsForReplica(t *testing.T) {
 	if took := time.Since(start); took > wait/2 {
 		t.Fatalf("SetEpoch with a healthy replica took %v, want well under %v", took, wait)
 	}
-	// Pause the replica's command loop so it cannot acknowledge.
-	done := make(chan struct{})
+	// Pause the replica's command loop so it cannot acknowledge. DEBUG is
+	// off by default since Valkey 7: the replica needs
+	// --enable-debug-command yes, or this would test nothing.
+	done := make(chan error, 1)
 	go func() {
-		defer close(done)
-		_ = rc.Do(context.Background(), rc.B().Arbitrary("DEBUG", "SLEEP").Args("1.5").Build()).Error()
+		done <- rc.Do(context.Background(), rc.B().Arbitrary("DEBUG", "SLEEP").Args("1.5").Build()).Error()
 	}()
 	time.Sleep(100 * time.Millisecond) // real clock: the replica is another process
 	start = time.Now()
@@ -411,7 +412,9 @@ func TestHardEpochWaitWaitsForReplica(t *testing.T) {
 	if took := time.Since(start); took < wait-100*time.Millisecond {
 		t.Fatalf("SetEpoch returned after %v with the replica paused, want about %v", took, wait)
 	}
-	<-done
+	if err := <-done; err != nil {
+		t.Fatalf("DEBUG SLEEP on the replica: %v (start it with --enable-debug-command yes)", err)
+	}
 }
 
 // strlen returns the length of the string at key (the sketch planes, E-9).

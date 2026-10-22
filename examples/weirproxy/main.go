@@ -12,6 +12,7 @@ import (
 	"errors"
 	"flag"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -50,13 +51,24 @@ func run(listen, origin string, allow []string) error {
 		// whatever the client claimed.
 		Handler:           weirhttp.Handler(e, &weirhttp.TransportOrigin{Target: target, XForwarded: weirhttp.XForwardedSet}),
 		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       time.Minute,     // the whole request, upload included
+		IdleTimeout:       2 * time.Minute, // a keep-alive connection nobody uses
+		// No WriteTimeout: it would also end event streams. WriteResponse
+		// sets a deadline before each write of a body that still streams
+		// from the origin (FR-TMO-2), so a slow reader cannot hold an origin
+		// connection; a server that must also cut slow readers of stored
+		// bodies can set one here.
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	ln, err := (&net.ListenConfig{}).Listen(ctx, "tcp", listen)
+	if err != nil {
+		return errors.Join(err, e.Close(context.Background()))
+	}
 	errc := make(chan error, 1)
-	go func() { errc <- srv.ListenAndServe() }()
-	log.Printf("weirproxy: %s -> %s", listen, target)
+	go func() { errc <- srv.Serve(ln) }()
+	log.Printf("weirproxy: %s -> %s", listen, target) // after the bind, so a busy port is not announced
 
 	select {
 	case err = <-errc:

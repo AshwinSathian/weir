@@ -149,7 +149,11 @@ func (h *Handler) Provision(ctx caddy.Context) (err error) {
 				// The client connects on first use, so an unreachable server
 				// opens the store breaker instead of failing the load
 				// (FR-STF-2).
-				st, err := valkey.New(h.Store.valkeyConfig(h.Name))
+				vc, err := h.Store.valkeyConfig(h.Name)
+				if err != nil {
+					return nil, 0, err
+				}
+				st, err := valkey.New(vc)
 				if err != nil {
 					return nil, 0, err
 				}
@@ -300,6 +304,21 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 	resp, err := h.engine.Serve(r.Context(), requestFor(r), newNextOrigin(next, r, h.log, h.ClientPlaceholders))
 	if err != nil {
 		return serveError(w, err)
+	}
+	if _, ok := resp.Header[nextStatusField]; ok {
+		_ = resp.Body.Close()
+		// Fields next set with its error (Allow on a 405, WWW-Authenticate,
+		// Retry-After) survive the handle_errors route, as headers on w do
+		// (08 §11). The representation fields describe the empty body, not
+		// the page handle_errors writes, so they stay behind.
+		for k, v := range resp.Header {
+			switch k {
+			case nextStatusField, "Content-Length", "Content-Type", "Content-Encoding", "Etag", "Last-Modified", "Cache-Control":
+			default:
+				w.Header()[k] = v
+			}
+		}
+		return caddyhttp.Error(resp.StatusCode, errNextStatus)
 	}
 	// A client that leaves must not hold the origin stream open until the idle
 	// timeout: closing the body ends the blocked read.

@@ -5,6 +5,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -325,6 +327,30 @@ func TestE2EOriginOutage(t *testing.T) {
 	}
 	if resp := get(t, c, "/sie"); resp.code != http.StatusOK || resp.body != "body /sie" {
 		t.Fatalf("stale entry with the breaker open: %d %q", resp.code, resp.body)
+	}
+}
+
+// D34: a 404 that file_server behind weir returns as an error reaches the
+// operator's handle_errors route (a custom error page), on the miss and on
+// every later request, and a file that exists is still served.
+func TestE2EHandleErrorsFor4xxBehindWeir(t *testing.T) {
+	o := newE2EOrigin(t, cacheableBody)
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "here.txt"), []byte("static"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tester := newTester(t)
+	site := "\thandle /static/* {\n\t\turi strip_prefix /static\n\t\tweir {\n\t\t\tname e2e-404\n\t\t}\n\t\troot * " + dir + "\n\t\tfile_server\n\t}\n" +
+		"\thandle_errors {\n\t\trespond \"custom {http.error.status_code}\" {http.error.status_code}\n\t}\n"
+	tester.InitServer(o.caddyfile(site), "caddyfile")
+
+	for range 3 {
+		if r := get(t, tester.Client, "/static/missing.txt"); r.code != http.StatusNotFound || r.body != "custom 404" {
+			t.Fatalf("missing file: %d %q, want the handle_errors page", r.code, r.body)
+		}
+	}
+	if r := get(t, tester.Client, "/static/here.txt"); r.code != http.StatusOK || r.body != "static" {
+		t.Fatalf("existing file: %d %q", r.code, r.body)
 	}
 }
 

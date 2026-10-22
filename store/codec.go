@@ -43,8 +43,8 @@ const (
 	fOwner
 )
 
-// Decode errors wrap ErrUnavailable: a store reports an undecodable record
-// as unavailable and the engine treats it as a miss (05 §6).
+// Decode errors wrap ErrUnavailable. The memory store's snapshot loader
+// skips such a record; the Valkey store reports one as ErrNotFound (05 S-3).
 var (
 	errDecodeSize      = fmt.Errorf("store: decode entry: larger than the object limit: %w", ErrUnavailable)
 	errDecodePreamble  = fmt.Errorf("store: decode entry: bad magic, version or kind: %w", ErrUnavailable)

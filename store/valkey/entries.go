@@ -26,9 +26,8 @@ func (s *Store) entryKey(k store.Key) string {
 	return string(hex.AppendEncode(b, k[:]))
 }
 
-// Get returns the record at k. A missing key is ErrNotFound; a value that
-// does not decode is ErrUnavailable, which the engine treats as a miss
-// (05 §6). The server expires keys with PXAT, but its clock is not ours, so
+// Get returns the record at k. A missing key, a value over MaxObjectBytes
+// and a value that does not decode are ErrNotFound (S-3, T-21). The server expires keys with PXAT, but its clock is not ours, so
 // the engine re-checks Expires (S-4).
 func (s *Store) Get(ctx context.Context, k store.Key) (*store.Entry, error) {
 	cl, err := s.acquire(ctx)
@@ -44,15 +43,17 @@ func (s *Store) Get(ctx context.Context, k store.Key) (*store.Entry, error) {
 		}
 		return nil, mapError(err)
 	}
-	// T-21: a value over MaxObjectBytes is not a record this store wrote (Set
-	// declines one), so it is a miss, and the next Set replaces it. An
-	// error here would let whoever planted it open the store breaker.
+	// T-21: a value over MaxObjectBytes, or one that does not decode, is not
+	// a record this store wrote (Set declines both), so it is a miss, and the
+	// next Set replaces it. An error here would let whoever planted it open
+	// the store breaker, and would turn a record from a newer codec into an
+	// outage on an older node during a rolling upgrade (S-3).
 	if int64(len(v)) > s.cfg.MaxObjectBytes {
 		return nil, store.ErrNotFound
 	}
 	e, err := store.Decode(v, s.cfg.MaxObjectBytes)
 	if err != nil {
-		return nil, mapError(err)
+		return nil, store.ErrNotFound
 	}
 	// The server expires on its own clock, so a record can arrive slightly
 	// past Expires (05 §2.2); the memory store answers the same way.

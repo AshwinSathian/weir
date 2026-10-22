@@ -4,7 +4,7 @@ Format: one section per release, newest first. Changes land under "Unreleased" i
 
 ## Unreleased
 
-Fixes for the losses the second comparison round found (card HRD-23, findings CMP-F5 to CMP-F8 in [docs/cards/21-comparison.md](docs/cards/21-comparison.md)). Three defaults change.
+Fixes for the losses the second comparison round found (card HRD-23, findings CMP-F5 to CMP-F8 in [docs/cards/21-comparison.md](docs/cards/21-comparison.md)). Four defaults change.
 
 ### Changed behavior
 
@@ -17,6 +17,10 @@ Fixes for the losses the second comparison round found (card HRD-23, findings CM
 - `Retry-After` from the origin is read strictly: a signed number such as `+5` and an RFC 850 date with a local zone are ignored. `If-Modified-Since` uses the same date parser, which never resolves a zone against the host's time zone.
 - A caller's `Config.Rand` that returns values outside [0, 1) is clamped. Before, 1 or more made every fresh hit start an early refresh, or none.
 - The message of an origin panic reads `weir: origin error: origin panic: ...` (was `weir: origin error: weir: origin panic: ...`). The `RequestError` reason for a nil request is `nil-request`, like the others.
+- Caddy: a 4xx that a handler behind `weir` returns as an error (`file_server`'s 404, the `error` directive) goes back to Caddy as an error, so `handle_errors` serves your error page for it. Before, the client got the status with an empty body. It still does not count toward the breaker.
+- Valkey store: a record that does not decode is a miss, as an oversized one already was. Before, it counted as the server being unavailable, so five planted values in a row, or a record from a newer version during a rolling upgrade, could open the store breaker.
+- Valkey store: `MaxHardEpochs` defaults to 100 000 (was 10 000), the memory store's default since v1.1. A site that hard-purges by URL on every publish could reach 10 000 within the 24 hours a purge is remembered, and further hard purges then failed.
+- `weirproxy`: read and idle timeouts, and the listening line is printed only after the port is bound.
 - Events: `refresh-dropped` with reason `no-slot` now means the refresh waited up to a minute first, and a refresh still waiting when `Close` begins is dropped with reason `closed`.
 
 ### Toolchain
@@ -26,6 +30,7 @@ Fixes for the losses the second comparison round found (card HRD-23, findings CM
 ### Added
 
 - `Freshness.NoHeuristic`: a response whose only freshness information is `Last-Modified` gets a lifetime of zero, so it is stored for its validator and revalidated before every use. Before, the heuristic could only be bounded with `HeuristicMax`.
+- Caddy: `store valkey { tls_ca_file, tls_server_name, max_object_bytes }`. A Valkey server with a private CA, or whose certificate names another host, can be used from Caddy, and the store's record limit can be set.
 - `Limiter.AdaptiveMax` and Caddy's `limiter { adaptive_max }`: an adaptive origin concurrency limit between `MaxConcurrent` and this ceiling (FR-LIM-8). It grows by an eighth while requests wait for a slot and the origin answers well, and drops a quarter on an origin failure or when fetch times double. Off by default: with it on, a few clients get the origin's own error when the limit crosses what the origin can take.
 - `memory.Config.SnapshotKeepFreshness` and Caddy's `snapshot_keep_fresh`: entries loaded from a snapshot keep their freshness, so a restart is a warm cache and costs no origin call (FR-SNP-5). Off by default, because a purge sent while the process was down is then not applied to what the snapshot brings back (T-33). A marked snapshot read by a version before this one starts cold.
 

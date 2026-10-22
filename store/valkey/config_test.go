@@ -25,7 +25,7 @@ func TestConfigValidate(t *testing.T) {
 			t.Fatal(err)
 		}
 		if c.Prefix != "weir" || c.HashTag != "e" || c.MaxRetention != 24*time.Hour ||
-			c.MaxClockSkew != time.Second || c.MaxHardEpochs != 10000 ||
+			c.MaxClockSkew != time.Second || c.MaxHardEpochs != 100000 ||
 			c.CallTimeout != 5*time.Second || c.HardEpochWait != 0 ||
 			c.Cluster || c.CoLocateEntries || c.SkipPolicyCheck {
 			t.Fatalf("defaults wrong: %+v", c)

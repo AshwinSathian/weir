@@ -40,7 +40,8 @@ func parseCaddyfile(h httpcaddyfile.Helper) (caddyhttp.MiddlewareHandler, error)
 //	    client_placeholders
 //	    store valkey {
 //	        addrs <host:port>...; username|password|prefix|hash_tag <v>
-//	        tls; cluster; co_locate_entries; no_clock_skew; skip_policy_check
+//	        tls; tls_ca_file <path>; tls_server_name <name>; max_object_bytes <size>
+//	        cluster; co_locate_entries; no_clock_skew; skip_policy_check
 //	        max_retention|max_clock_skew|call_timeout|hard_epoch_wait <duration>; max_hard_epochs <n>
 //	    }
 //	    key { query_drop|query_keep|headers|cookies|accept_encoding <v>...; query_sort; normalize_path }
@@ -182,10 +183,24 @@ func (h *Handler) storeBlock(d *caddyfile.Dispenser) error {
 	}
 	s := &StoreConfig{Type: "valkey"}
 	err := subBlock(d, "store", map[string]func() error{
-		"addrs":             func() error { return listArg(d, &s.Addrs) },
-		"username":          func() error { return secretArg(d, &s.Username) },
-		"password":          func() error { return secretArg(d, &s.Password) },
-		"tls":               func() error { return quietFlag(d, &s.TLS) },
+		"addrs":           func() error { return listArg(d, &s.Addrs) },
+		"username":        func() error { return secretArg(d, &s.Username) },
+		"password":        func() error { return secretArg(d, &s.Password) },
+		"tls":             func() error { return quietFlag(d, &s.TLS) },
+		"tls_ca_file":     func() error { return oneArg(d, &s.TLSCAFile) },
+		"tls_server_name": func() error { return oneArg(d, &s.TLSServerName) },
+		"max_object_bytes": func() error {
+			var v string
+			if err := oneArg(d, &v); err != nil {
+				return err
+			}
+			n, err := parseByteSize(v)
+			if err != nil {
+				return d.Errf("store max_object_bytes: %v", err)
+			}
+			s.MaxObjectBytes = ByteSize(n)
+			return nil
+		},
 		"cluster":           func() error { return quietFlag(d, &s.Cluster) },
 		"prefix":            func() error { return oneArg(d, &s.Prefix) },
 		"hash_tag":          func() error { return oneArg(d, &s.HashTag) },

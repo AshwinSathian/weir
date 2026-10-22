@@ -1,7 +1,9 @@
 # Command surface for humans, Claude Code sessions and CI. See CLAUDE.md.
 
 GOLANGCI_VERSION := v2.14.0
-GOLANGCI := $(shell command -v golangci-lint 2>/dev/null)
+# A golangci-lint on PATH is used only when it is the pinned version; another
+# version can pass code that CI's pinned one rejects, or the reverse.
+GOLANGCI := $(shell [ "$$(golangci-lint version --short 2>/dev/null | sed 's/^v//')" = "$(GOLANGCI_VERSION:v%=%)" ] && command -v golangci-lint)
 ifeq ($(GOLANGCI),)
 GOLANGCI := go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_VERSION)
 endif
@@ -50,12 +52,12 @@ release-check:
 release-smoke:
 	@scripts/release-smoke.sh $(VERSION)
 
-## test-valkey: integration tests (store/valkey, and the two-node Caddy test in caddy/) against a real server (WEIR_VALKEY_ADDR, default 127.0.0.1:6379; start Valkey with --maxmemory-policy volatile-lfu; WEIR_VALKEY_STORM_ADDR, a throwaway server with --maxmemory 16mb, enables the eviction storm)
+## test-valkey: integration tests (store/valkey, and the two-node and key-generation Caddy tests in caddy/) against a real server (WEIR_VALKEY_ADDR, default 127.0.0.1:6379; start Valkey with --maxmemory-policy volatile-lfu; WEIR_VALKEY_STORM_ADDR, a throwaway server with --maxmemory 16mb, enables the eviction storm; WEIR_VALKEY_REPLICA_ADDR, a replica of the first started with --enable-debug-command yes, enables the replication tests)
 test-valkey:
 	cd store/valkey && GOWORK=off go vet -tags integration ./...
 	cd store/valkey && GOWORK=off WEIR_VALKEY_ADDR=$${WEIR_VALKEY_ADDR:-127.0.0.1:6379} WEIR_VALKEY_STORM_ADDR=$${WEIR_VALKEY_STORM_ADDR:-} go test -race -tags integration -count=1 ./...
 	cd caddy && GOWORK=off go vet -tags integration ./...
-	cd caddy && GOWORK=off WEIR_VALKEY_ADDR=$${WEIR_VALKEY_ADDR:-127.0.0.1:6379} go test -race -tags integration -run TestE2ETwoNode -count=1 ./...
+	cd caddy && GOWORK=off WEIR_VALKEY_ADDR=$${WEIR_VALKEY_ADDR:-127.0.0.1:6379} go test -race -tags integration -run 'TestE2ETwoNode|TestValkeyKeyGenRecord' -count=1 ./...
 
 ## test-short: fast loop while writing code
 test-short:
@@ -72,8 +74,9 @@ trace-strict:
 ## fuzz-short: every fuzz target for FUZZTIME (default 20s) each
 FUZZTIME ?= 20s
 fuzz-short:
+	@go test -run '^$$' ./... >/dev/null || exit 1; # a package that does not compile fails here, not by listing no targets
 	@for pkg in $$(go list ./...); do \
-	  for f in $$(go test -list '^Fuzz' $$pkg 2>/dev/null | grep '^Fuzz'); do \
+	  for f in $$(go test -list '^Fuzz' $$pkg | grep '^Fuzz'); do \
 	    echo "== $$pkg $$f"; go test -run '^$$' -fuzz "^$$f$$" -fuzztime $(FUZZTIME) $$pkg || exit 1; \
 	  done; \
 	done

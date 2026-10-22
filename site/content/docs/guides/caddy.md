@@ -29,7 +29,7 @@ Every key is optional except `name`. Unset keys take the engine default from the
 | `snapshot_dir` | Absolute directory for the snapshot file. Unset: every restart is a cold cache. Set: entries come back, and each is checked with the origin on first use |
 | `snapshot_keep_fresh` | Next release, not in `{{version}}`. With `snapshot_dir`: entries come back as fresh as they were, so a restart costs the origin nothing. A purge sent while Caddy was down is not applied to them; purge again after a restart if one may have been missed |
 | `multi_host` | Set it when the site serves more than one host. Turns on the per-host limiter cap and store quota at 25% |
-| `store valkey { ... }` | Shared store for several nodes: `addrs`, `username`, `password`, `tls`, `cluster`, `prefix` |
+| `store valkey { ... }` | Shared store for several nodes: `addrs`, `username`, `password`, `tls`, `tls_ca_file`, `tls_server_name`, `max_object_bytes`, `cluster`, `prefix`. Write credentials as `{env.VAR}`, which stays a placeholder in the adapted JSON and in `GET /config/`; `{$VAR}` is expanded into both |
 | `key { ... }` | `query_drop`, `query_keep`, `query_sort`, `normalize_path`, `headers`, `cookies`, `accept_encoding` |
 | `forward { allow ... }` | Headers the origin may see unkeyed. The mode is always strict: `ForwardAll` has no Caddy form |
 | `bypass { ... }` | `cookies`, `headers`: requests that skip the cache |
@@ -78,6 +78,9 @@ Start with the safe setup, then the commands.
 {{include docs/runbook.md "### 7.7 Admin API and purges"}}
 
 ## Before you go live
+
+> [!CAUTION]
+> `caddy validate` is not a dry run for the `weir` block. It builds the store for real, the way a start does: it reads and rewrites the snapshot in `snapshot_dir`, and when the `forward` block changed it discards that snapshot and, with a `store valkey` block, purges the shared cache on every node. Caddy gives a module no way to tell a validation from a start. Validate a copy of the Caddyfile whose `snapshot_dir` is a scratch directory and whose Valkey `addrs` (or `prefix`) point somewhere else.
 
 {{include docs/runbook.md "### 7.8 Before you go live"}}
 
