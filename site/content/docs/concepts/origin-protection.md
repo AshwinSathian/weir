@@ -41,9 +41,6 @@ One breaker per engine watches all origin fetches over a 10-second window (FR-CB
 
 While open, nothing reaches the origin (FR-CB-5). Requests get a stale entry where allowed (`detail=circuit-open`) and a fast 503 otherwise. After a second, give or take 20%, one probe request is let through. A failure reopens the breaker for another second. A success lets two requests through, then four, and the breaker closes when the whole budget is admitted, so an origin that has just come back is not met by everyone at once (FR-CB-3, FR-CB-4).
 
-> [!NOTE]
-> That is the next release. In `{{version}}` the first probe comes after 5 seconds, each failed probe doubles the wait up to a minute, and one success closes the breaker at once. `Breaker.OpenFor` and `Breaker.MaxOpenFor` set both in either version.
-
 The random 20% is there for the same reason as TTL jitter: several Weir instances that opened together should not all probe in the same instant.
 
 ## Negative caching

@@ -9,7 +9,7 @@ The engine talks to storage through a small interface, `store.Store`: `Get`, `Se
 
 The default. It lives in the engine's process, so a hit costs no network round trip and cannot fail.
 
-**Size.** It takes 40% of `GOMEMLIMIT`, clamped between 16 MiB and 8 GiB. With `GOMEMLIMIT` unset it takes 256 MiB and logs a warning. Weir does not read cgroup limits for you, so in a container set `GOMEMLIMIT` yourself.
+**Size.** It takes 40% of `GOMEMLIMIT`, clamped between 16 MiB and 8 GiB. With `GOMEMLIMIT` unset it takes 256 MiB and logs a warning to `Config.Logger` (which discards by default; the Caddy module logs it). Weir does not read cgroup limits for you, so in a container set `GOMEMLIMIT` yourself.
 
 Eviction is S3-FIFO (Yang et al., SOSP 2023). New entries enter a small queue; an entry requested again before it reaches the end moves to the main queue, and one that was not is dropped. A flood of one-off keys, which is what a cache-busting attack looks like to the store, flows through the small queue and out again without displacing the entries that get hits. The store is split into 16 shards, each with its own lock and budget. An entry's shard is chosen with a per-process random seed, so an attacker cannot work out offline which keys land together.
 

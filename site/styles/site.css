@@ -88,6 +88,7 @@ hr { border: 0; border-top: 1px solid var(--line); margin: var(--s7) 0; }
 .cmd { display: flex; align-items: center; gap: var(--s3); background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 8px 8px 8px 14px; font: 400 0.85rem/1.4 var(--mono); max-width: 100%; }
 .cmd code { background: none; padding: 0; overflow-x: auto; white-space: nowrap; flex: 1; font-size: inherit; }
 .cmd .prompt { color: var(--muted); user-select: none; }
+@media (max-width: 600px) { .cmd code { white-space: normal; overflow-wrap: anywhere; } }
 
 .term { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
 .term-bar { display: flex; align-items: center; justify-content: space-between; padding: var(--s2) var(--s3) var(--s2) var(--s4); border-bottom: 1px solid var(--line); background: var(--sunken); }
@@ -271,7 +272,7 @@ dialog.search::backdrop { background: rgb(0 0 0 / 0.45); }
 @media (max-width: 759px) { .only-slim { display: block; } .only-wide { display: none; } }
 .toggle { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); margin-bottom: var(--s3); }
 .toggle .label { margin-right: var(--s2); }
-.toggle label { font: 500 0.82rem/1 var(--mono); padding: 7px 12px; border: 1px solid var(--line); border-radius: var(--radius); color: var(--muted); cursor: pointer; }
+.toggle label { font: 500 0.82rem/1 var(--mono); padding: 7px 12px; min-height: 44px; display: inline-flex; align-items: center; border: 1px solid var(--line); border-radius: var(--radius); color: var(--muted); cursor: pointer; }
 .tiers > input:nth-of-type(1):checked ~ .toggle label:nth-of-type(1),
 .tiers > input:nth-of-type(2):checked ~ .toggle label:nth-of-type(2) { color: var(--ink); border-color: var(--ink); background: var(--sunken); }
 .tiers > input:nth-of-type(1):focus-visible ~ .toggle label:nth-of-type(1),

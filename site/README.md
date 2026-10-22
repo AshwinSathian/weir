@@ -1,6 +1,6 @@
 # Weir website
 
-The site at [weir.ashwinsathian.com](https://weir.ashwinsathian.com). Static files, built with Next.js and hosted on Cloudflare Pages. It is not a Go module: there are no `.go` files and no `go.mod` here, and nothing in this directory is imported by Weir.
+The site at [weir.ashwinsathian.com](https://weir.ashwinsathian.com). Static files, built with Next.js and hosted on Cloudflare Pages. It is not part of the Go module: its own `go.mod` (a stub with no code) keeps the go command from packing this directory into the module zip, and nothing here is imported by Weir.
 
 ## Run it
 
@@ -63,7 +63,7 @@ The charts and headline tiles on the benchmarks and compare pages are static inl
 
 ## Release state
 
-`data/release.ts` has one switch. `RELEASED = true` shows `v1.0.0` in every install line. `RELEASED = false` shows the release candidate and a banner. The `release-state` CI job runs `node scripts/check.mjs release`, which fails while the site claims a release that the Go module proxy cannot resolve for all four modules.
+`data/release.ts` has one switch. `RELEASED = true` shows `VERSION` in every install line. `RELEASED = false` shows the release candidate and a banner. The `release-state` CI job runs `node scripts/check.mjs release`, which fails while the site claims a release that the Go module proxy cannot resolve for all four modules.
 
 The production domain is attached only when that job is green (the launch gate in `docs/progress/surfaces-and-site-plan.md` §10).
 

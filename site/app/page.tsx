@@ -9,6 +9,8 @@ import { modelCounts } from '@/lib/tables'
 
 const GATE = `${REPO}/actions/runs/38369566716`
 
+export const metadata = { alternates: { canonical: '/' } }
+
 const caddyfile = `example.com {
 	weir {
 		name site-a
@@ -78,13 +80,14 @@ export default async function Home() {
       <section className="band">
         <div className="wrap">
           <div className="label">What a weir does</div>
-          <h2>Ten thousand entries expire within seconds of each other. The origin sees 32 requests at a time.</h2>
+          <h2>Ten thousand entries expire within seconds of each other. With the limit set to 32, the origin sees 32 requests at a time.</h2>
           <p className="intro">
             A weir is a low dam that regulates flow without stopping it. Every origin fetch holds a slot from a limiter,
             whatever caused it: a miss, a refresh, a purge, a cold start.
           </p>
           <figure className="hydro">
-            <Hydrograph />
+            <div className="only-wide"><Hydrograph /></div>
+            <div className="only-slim"><Hydrograph slim /></div>
             <figcaption>
               The shape is a schematic. The numbers are measured: the synchronized-expiry scenario of <code>make load</code>{' '}
               on an Apple M4 Pro with Go 1.27.1, where the busiest second saw 1,485 origin calls.{' '}
