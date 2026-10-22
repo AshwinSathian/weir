@@ -1,0 +1,13 @@
+# Memory pillar (docs/11 §5.5): a store large enough that a million small
+# entries are not evicted, so memory per object is what the cache holds.
+{
+	auto_https off
+	admin off
+}
+:8080 {
+	weir {
+		name     bench
+		max_bytes 2GiB
+	}
+	reverse_proxy origin:9000
+}

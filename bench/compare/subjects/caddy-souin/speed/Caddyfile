@@ -1,0 +1,19 @@
+# Default tier: the cache-handler README quickstart, default storage. The
+# API block (README, "api.souin") is there so purge-herd can send the flush
+# the Souin README documents (PURGE /souin-api/souin/flush).
+# cache-handler serves that API on Caddy's admin endpoint, not on the site
+# (found by trying both; the README does not say), so the admin endpoint
+# listens on the Compose network. Neither changes what is cached.
+{
+	auto_https off
+	admin :2019
+	cache {
+		api {
+			souin
+		}
+	}
+}
+:8080 {
+	cache
+	reverse_proxy origin:9000
+}

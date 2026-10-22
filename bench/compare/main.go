@@ -3,6 +3,8 @@
 //	compare origin -listen :9000 -control :9001
 //	compare run -target http://varnish:8080 -control http://origin:9001 -subject varnish -tier tuned -out results.jsonl
 //	compare report results.jsonl
+//	compare targets -base http://varnish:8080/o/speed/ -mode zipf -keys 100000 -n 500000
+//	compare speed results/speed-STAMP
 //
 // The origin counts what reaches it, the runner drives one cache through the
 // scenarios and reads those counts, and the report prints medians per subject.
@@ -24,7 +26,7 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
-		log.Fatal("usage: compare origin|run|probe|report [flags]")
+		log.Fatal("usage: compare origin|run|probe|report|targets|speed [flags]")
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	var err error
@@ -37,6 +39,10 @@ func main() {
 		err = probeCmd(ctx, os.Args[2:])
 	case "report":
 		err = reportCmd(os.Args[2:], os.Stdout)
+	case "targets":
+		err = targetsCmd(os.Args[2:], os.Stdout)
+	case "speed":
+		err = speedCmd(os.Args[2:], os.Stdout)
 	default:
 		err = fmt.Errorf("compare: unknown command %q", os.Args[1])
 	}
