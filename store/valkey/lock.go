@@ -44,7 +44,9 @@ func (s *Store) Lock(ctx context.Context, k store.Key, ttl time.Duration) (func(
 	stop := make(chan struct{})
 	done := make(chan struct{})
 	s.wg.Add(1) // stopped by the release or by Close (FR-LCY-2)
-	go func() {
+	// The renewals outlive Lock's context, which carries only the engine's
+	// store deadline for this one call; each renewal bounds itself.
+	go func() { //nolint:gosec,contextcheck // see above
 		defer s.wg.Done()
 		defer close(done)
 		t := time.NewTicker(max(ttl/3, time.Millisecond))
