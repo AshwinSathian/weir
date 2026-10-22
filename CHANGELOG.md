@@ -4,7 +4,7 @@ Format: one section per release, newest first. Changes land under "Unreleased" i
 
 ## Unreleased
 
-Fixes for the losses the second comparison round found (card HRD-23, findings CMP-F5 to CMP-F8 in [docs/cards/21-comparison.md](docs/cards/21-comparison.md)). Three defaults change.
+Fixes for the losses the second comparison round found (card HRD-23, findings CMP-F5 to CMP-F8 in [docs/cards/21-comparison.md](docs/cards/21-comparison.md)). Four defaults change.
 
 ### Changed behavior
 

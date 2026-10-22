@@ -26,9 +26,8 @@ func (s *Store) entryKey(k store.Key) string {
 	return string(hex.AppendEncode(b, k[:]))
 }
 
-// Get returns the record at k. A missing key is ErrNotFound; a value that
-// does not decode is ErrUnavailable, which the engine treats as a miss
-// (05 §6). The server expires keys with PXAT, but its clock is not ours, so
+// Get returns the record at k. A missing key, a value over MaxObjectBytes
+// and a value that does not decode are ErrNotFound (S-3, T-21). The server expires keys with PXAT, but its clock is not ours, so
 // the engine re-checks Expires (S-4).
 func (s *Store) Get(ctx context.Context, k store.Key) (*store.Entry, error) {
 	cl, err := s.acquire(ctx)

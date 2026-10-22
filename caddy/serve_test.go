@@ -392,6 +392,7 @@ func TestNextErrors4xxIsResponse(t *testing.T) {
 	h, _ := loadServe(t, "")
 	next := caddyhttp.HandlerFunc(func(w http.ResponseWriter, r *http.Request) error {
 		if strings.HasPrefix(r.URL.Path, "/missing") {
+			w.Header().Set("Allow", "GET, HEAD")
 			return caddyhttp.Error(http.StatusNotFound, errors.New("file does not exist"))
 		}
 		w.Header().Set("Cache-Control", "max-age=60")
@@ -408,6 +409,9 @@ func TestNextErrors4xxIsResponse(t *testing.T) {
 		}
 		if strings.Contains(err.Error(), "file does not exist") {
 			t.Fatalf("next's message leaked: %v", err)
+		}
+		if w.Header().Get("Allow") != "GET, HEAD" || w.Header().Get("Cache-Control") != "" {
+			t.Fatalf("missing%d: header %v, want next's Allow and no Cache-Control", i, w.Header())
 		}
 	}
 	w := httptest.NewRecorder()

@@ -307,6 +307,17 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 	}
 	if _, ok := resp.Header[nextStatusField]; ok {
 		_ = resp.Body.Close()
+		// Fields next set with its error (Allow on a 405, WWW-Authenticate,
+		// Retry-After) survive the handle_errors route, as headers on w do
+		// (08 §11). The representation fields describe the empty body, not
+		// the page handle_errors writes, so they stay behind.
+		for k, v := range resp.Header {
+			switch k {
+			case nextStatusField, "Content-Length", "Content-Type", "Content-Encoding", "Etag", "Last-Modified", "Cache-Control":
+			default:
+				w.Header()[k] = v
+			}
+		}
 		return caddyhttp.Error(resp.StatusCode, errNextStatus)
 	}
 	// A client that leaves must not hold the origin stream open until the idle

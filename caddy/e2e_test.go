@@ -332,7 +332,7 @@ func TestE2EOriginOutage(t *testing.T) {
 
 // D34: a 404 that file_server behind weir returns as an error reaches the
 // operator's handle_errors route (a custom error page), on the miss and on
-// every later request, and a file that exists is still cached.
+// every later request, and a file that exists is still served.
 func TestE2EHandleErrorsFor4xxBehindWeir(t *testing.T) {
 	o := newE2EOrigin(t, cacheableBody)
 	dir := t.TempDir()

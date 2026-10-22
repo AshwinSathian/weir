@@ -133,7 +133,7 @@ func (s *StoreConfig) digestFor(name string) (out [sha256.Size]byte) {
 	if s == nil {
 		return out
 	}
-	vc, _ := s.valkeyConfig(name) // validate already reported a bad CA file
+	vc, _ := s.valkeyConfig(name) // a bad CA file fails validate and the store build
 	if n, err := vc.Validate(); err == nil {
 		vc = n
 	}
