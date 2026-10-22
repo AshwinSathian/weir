@@ -6,7 +6,7 @@
 // is weircaddy. Most users never import it from Go code. Build Caddy with it
 // instead:
 //
-//	xcaddy build --with github.com/AshwinSathian/weir@v1.1.0 --with github.com/AshwinSathian/weir/caddy@v1.1.0
+//	xcaddy build --with github.com/AshwinSathian/weir@v1.2.0 --with github.com/AshwinSathian/weir/caddy@v1.2.0
 //
 // then check that ./caddy list-modules shows http.handlers.weir. All Weir
 // modules share one version number, so do not mix versions.

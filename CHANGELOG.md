@@ -4,6 +4,8 @@ Format: one section per release, newest first. Changes land under "Unreleased" i
 
 ## Unreleased
 
+## v1.2.0 (2026-10-22)
+
 Over-size responses shared among waiting clients, coalescing across nodes and a local tier for the Valkey store, Go 1.26 support, and fixes for the scenarios the second comparison round showed Weir losing. Four defaults change; each entry under "Changed behavior" gives the way back.
 
 ### Changed behavior
