@@ -245,10 +245,10 @@ High findings first, then Medium, then Low, then documents, review and release. 
   - D-H34 (F5): `Limiter.AdaptiveMax` and Caddy's `limiter { adaptive_max }`, off by default (FR-LIM-8; closes D13 and OQ-3). Growth by an eighth per window under pressure, a quarter off on an origin failure or doubled fetch time, the failing level remembered for 10 s, back to `MaxConcurrent` after 10 idle seconds. Two things the first measurement taught: a fetch held back by the borrow margin must count as pressure, or a flooded path never moves the limit (it never fills it); and refused fetches must stay out of the latency baseline, or their speed makes every healthy window after them look slow. Measured, `busting-flood` with `adaptive_max 256` against an origin that serves 128: flood failures 3,856 to 4,793 of 10,000 (8,520 without), bystanders failed 0 to 17 of 1,000 (0 without; other caches 280 to 607), all failed 3,856 to 4,795 of 11,000 (no cache 6,535, Varnish tuned 3,125). `sync-expiry-capped`: 0 to 163 of 10,000 clients get the origin's 503 while the limit finds the cap. Tests: `TestAdaptiveGrowsWhileLimited`, `TestAdaptiveBacksOffAndRemembers`, `TestAdaptiveBacksOffOnLatency`, `TestAdaptiveOffAndIdleReset`, `TestAdaptiveGrowsForABorrowingPartition`, `TestAdaptiveBaselineIgnoresRefusals`, `TestAdaptiveLimitFindsOriginCapacity`.
 - Not done here: the comparison tables still show v1.1.0. They are rerun and republished when v1.2 is released (11 §2 measures published modules); the figures above come from working-tree builds at this branch's commits, with temporary tiers for the two opt-in settings.
 
-### [~] HRD-22 Share one over-size fetch among waiting clients
+### [x] HRD-22 Share one over-size fetch among waiting clients
 - Plan: hardening · Size: L · Depends on: none
-- Notes: deferred. Clients of an object over `MaxObjectBytes` each fetch it (`oversize-herd` and `large-body-herd` in docs/benchmarks.md). Sharing needs a bounded broadcast buffer with a rule for slow readers and late joiners, or a store that streams. Needs a design first.
+- Notes: done in pull request 139 (FR-COA-10). The waiters of a flight read one origin stream through a ring of `MaxObjectBytes`; a reader that holds the others for a second in total is moved off to a range request of its own when the origin supports one.
 
-### [~] HRD-20 Coalescing across nodes and a local tier for remote stores
-- Plan: v1.2 · Size: design first
-- Notes: deferred. Needs its own spec section: a store-side lock with a fencing token and a bounded wait, and a small in-process tier that honors epochs. Trigger: a multi-node deployment reports origin load that scales with node count
+### [x] HRD-20 Coalescing across nodes and a local tier for remote stores
+- Plan: v1.2 · Size: L
+- Notes: done in pull request 140 (FR-COA-11, FR-STF-5). A `store.Locker` capability with a renewed lock in the Valkey store, and an in-process tier in front of it; both opt-in. API approved by the owner on 2026-10-22.

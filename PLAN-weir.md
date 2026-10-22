@@ -1,6 +1,6 @@
 # RFC: Weir build plan
 
-> Status: approved; Phases 0 to 3 implemented, release gate open
+> Status: approved; Phases 0 to 3 implemented and released (v1.0.0 on 2026-10-12, v1.1.0 on 2026-10-13); v1.2.0 in preparation
 > Scale: Epic
 > Target start: 2026-09-28
 > Created: 2026-09-27

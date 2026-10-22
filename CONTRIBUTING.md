@@ -1,6 +1,6 @@
 # Contributing to Weir
 
-Thanks for looking. Weir decides what a shared cache stores and serves, so changes are held to a few rules that most projects do not need. This page is the short version; [CLAUDE.md](CLAUDE.md) is the full one and applies to people as much as to coding agents.
+Thanks for looking. Weir decides what a shared cache stores and serves, so changes are held to a few rules that most projects do not need. This page is the short version. The full rules are in [CLAUDE.md](CLAUDE.md), written for people and coding agents alike, and the reasoning behind them is in [docs/](docs/README.md).
 
 ## Before you write code
 

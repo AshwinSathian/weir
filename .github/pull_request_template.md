@@ -1,29 +1,19 @@
-## Card
-
-<!-- ID and title, e.g. M1-04 Request validation and host normalization -->
-
 ## What changed
 
-## Acceptance criteria
+<!-- What the pull request does and why, in a few sentences. Link the issue or task card if there is one. -->
 
-<!-- Copy the card's AC and Tests lines; tick each. -->
+## Tests
 
-- [ ] 
+<!-- The tests added or changed, and the result of `make check`. -->
 
-## Requirements and threats covered
+## Requirements and threats
 
-<!-- FR-/NFR-/INV-/T- IDs -->
-
-## Review
-
-<!-- card-reviewer findings: fixed / left open with reason -->
+<!-- The requirement and threat IDs from docs/01 and docs/06 this covers, if any. -->
 
 ## Security checklist (docs/06 §6)
 
 <!-- Required when touching internal/keys, storability, forwarding, store/codec.go or snapshot loading; otherwise "not applicable". -->
 
-## Deviations from the docs
+## Documents changed
 
 <!-- none, or which document changed and why -->
-
-🤖 Generated with [Claude Code](https://claude.com/claude-code)
