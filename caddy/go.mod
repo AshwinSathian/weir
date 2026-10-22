@@ -3,9 +3,9 @@ module github.com/AshwinSathian/weir/caddy
 go 1.26.0
 
 require (
-	github.com/AshwinSathian/weir v0.0.0
-	github.com/AshwinSathian/weir/observe/prom v0.0.0
-	github.com/AshwinSathian/weir/store/valkey v0.0.0
+	github.com/AshwinSathian/weir v1.2.0
+	github.com/AshwinSathian/weir/observe/prom v1.2.0
+	github.com/AshwinSathian/weir/store/valkey v1.2.0
 	github.com/caddyserver/caddy/v2 v2.11.7
 	github.com/prometheus/client_golang v1.24.1
 	github.com/prometheus/client_model v0.6.3
@@ -175,12 +175,3 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	howett.net/plist v1.0.1 // indirect
 )
-
-// ponytail: the root v0.1.0 tag predates the APIs this module uses; the
-// release branch pins v1 tags and drops these replaces (docs/release.md; a
-// replace is ignored by importers of this module).
-replace github.com/AshwinSathian/weir => ..
-
-replace github.com/AshwinSathian/weir/observe/prom => ../observe/prom
-
-replace github.com/AshwinSathian/weir/store/valkey => ../store/valkey
