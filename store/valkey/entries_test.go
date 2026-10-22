@@ -227,10 +227,12 @@ func TestSetClampsToMaxRetention(t *testing.T) {
 	})
 }
 
-// T-21, 05 §6: a value another writer left at an entry key that does not
-// decode is a miss for the engine (ErrUnavailable), never a panic or a
-// partial entry.
-func TestGetDecodeFailureIsUnavailable(t *testing.T) {
+// T-21, 05 §6, S-3: a value another writer left at an entry key that does
+// not decode is ErrNotFound, never a panic, a partial entry or
+// ErrUnavailable: five planted values in a row must not open the engine's
+// store breaker, and a node reading a record from a newer codec during a
+// rolling upgrade must see a miss, not an outage.
+func TestGetDecodeFailureIsMiss(t *testing.T) {
 	var k store.Key
 	for name, v := range map[string][]byte{
 		"not a record":  []byte("hello world, not a record"),
@@ -241,8 +243,8 @@ func TestGetDecodeFailureIsUnavailable(t *testing.T) {
 			s, cl := connected(t, nil)
 			_ = cl.set(t.Context(), s.entryKey(k), v, 1)
 			e, err := s.Get(t.Context(), k)
-			if e != nil || !errors.Is(err, store.ErrUnavailable) {
-				t.Fatalf("Get = %v, %v; want nil, ErrUnavailable", e, err)
+			if e != nil || !errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrUnavailable) {
+				t.Fatalf("Get = %v, %v; want nil, ErrNotFound", e, err)
 			}
 		})
 	}

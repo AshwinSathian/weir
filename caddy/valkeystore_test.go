@@ -3,10 +3,14 @@ package weircaddy
 import (
 	"context"
 	"crypto/sha256"
+	"crypto/tls"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync/atomic"
@@ -16,6 +20,7 @@ import (
 	"github.com/caddyserver/caddy/v2"
 
 	"github.com/AshwinSathian/weir/store"
+	"github.com/AshwinSathian/weir/store/valkey"
 )
 
 const secretPW = "s3cr3t-Pw-value"
@@ -40,16 +45,20 @@ func TestStoreValkeyJSONMapsEveryField(t *testing.T) {
 	raw := `{"name":"a","store":{"type":"valkey","addrs":["10.0.0.1:6379","10.0.0.2:6379"],"username":"weir",
 		"password":"` + secretPW + `","tls":true,"cluster":true,"prefix":"site","hash_tag":"tag","co_locate_entries":true,
 		"max_retention":"2h","max_clock_skew":"2s","max_hard_epochs":5,"call_timeout":"3s","hard_epoch_wait":"100ms",
-		"skip_policy_check":true}}`
+		"skip_policy_check":true,"tls_server_name":"vk.internal","max_object_bytes":"1MiB"}}`
 	var h Handler
 	if err := decodeStrict([]byte(raw), &h); err != nil {
 		t.Fatal(err)
 	}
-	vc := h.Store.valkeyConfig(h.Name)
+	vc, err := h.Store.valkeyConfig(h.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(vc.Addrs) != 2 || vc.Username != "weir" || vc.Password != secretPW || vc.TLS == nil || !vc.Cluster ||
 		vc.Prefix != "site" || vc.HashTag != "tag" || !vc.CoLocateEntries || vc.MaxRetention != 2*time.Hour ||
 		vc.MaxClockSkew != 2*time.Second || vc.MaxHardEpochs != 5 || vc.CallTimeout != 3*time.Second ||
-		vc.HardEpochWait != 100*time.Millisecond || !vc.SkipPolicyCheck {
+		vc.HardEpochWait != 100*time.Millisecond || !vc.SkipPolicyCheck || vc.TLS.ServerName != "vk.internal" ||
+		vc.MaxObjectBytes != 1<<20 {
 		t.Fatalf("not every field mapped: %v", vc)
 	}
 	if _, err := vc.Validate(); err != nil {
@@ -194,17 +203,21 @@ func TestValkeyStoreOutageOpensBreaker(t *testing.T) {
 }
 
 // 08 §2: `store valkey { ... }` adapts to the same module JSON as the
-// hand-written store object, and the password comes from {$VAR}.
+// hand-written store object, and a password written as {env.VAR} stays a
+// placeholder in the adapted JSON, so the secret is not in it.
 func TestCaddyfileStoreValkey(t *testing.T) {
-	t.Setenv("WEIR_TEST_VK_PW", secretPW)
-	const src = `example.com {
+	ca := writeTestCA(t)
+	src := `example.com {
 	weir {
 		name site-a
 		store valkey {
 			addrs 10.0.0.1:6379 10.0.0.2:6379
 			username weir
-			password {$WEIR_TEST_VK_PW}
+			password {env.WEIR_TEST_VK_PW}
 			tls
+			tls_ca_file ` + ca + `
+			tls_server_name vk.internal
+			max_object_bytes 1MiB
 			cluster
 			prefix site
 			hash_tag tag
@@ -229,12 +242,16 @@ func TestCaddyfileStoreValkey(t *testing.T) {
 		t.Fatalf("handlers = %d", len(got))
 	}
 	want := Handler{Name: "site-a", Store: &StoreConfig{
-		Type: "valkey", Addrs: []string{"10.0.0.1:6379", "10.0.0.2:6379"}, Username: "weir", Password: secretPW,
-		TLS: true, Cluster: true, Prefix: "site", HashTag: "tag", CoLocateEntries: true,
+		Type: "valkey", Addrs: []string{"10.0.0.1:6379", "10.0.0.2:6379"}, Username: "weir", Password: "{env.WEIR_TEST_VK_PW}",
+		TLS: true, TLSCAFile: ca, TLSServerName: "vk.internal", MaxObjectBytes: 1 << 20,
+		Cluster: true, Prefix: "site", HashTag: "tag", CoLocateEntries: true,
 		MaxRetention: caddy.Duration(2 * time.Hour), MaxClockSkew: caddy.Duration(2 * time.Second), MaxHardEpochs: 5,
 		CallTimeout: caddy.Duration(3 * time.Second), HardEpochWait: caddy.Duration(100 * time.Millisecond), SkipPolicyCheck: true,
 	}}
 	sameJSON(t, got[0], want)
+	if strings.Contains(out, secretPW) {
+		t.Fatal("the adapted JSON holds the secret")
+	}
 
 	errCases := map[string]struct{ src, want string }{
 		"unknown store type":  {"store memory {\n addrs a:1\n}", `unknown store type "memory"`},
@@ -297,7 +314,7 @@ func TestStoreDefaultsNormalizeBeforeDigest(t *testing.T) {
 	unset := &Handler{Name: "n1", Store: &StoreConfig{Type: "valkey", Addrs: []string{"h:1"}}}
 	explicit := &Handler{Name: "n1", Store: &StoreConfig{
 		Type: "valkey", Addrs: []string{"h:1"}, Prefix: "n1", HashTag: "e", CallTimeout: caddy.Duration(5 * time.Second),
-		MaxRetention: caddy.Duration(24 * time.Hour), MaxClockSkew: caddy.Duration(time.Second), MaxHardEpochs: 10000,
+		MaxRetention: caddy.Duration(24 * time.Hour), MaxClockSkew: caddy.Duration(time.Second), MaxHardEpochs: 100000,
 	}}
 	if unset.storeSpec() != explicit.storeSpec() {
 		t.Fatal("explicit defaults build a different store than unset ones")
@@ -306,10 +323,10 @@ func TestStoreDefaultsNormalizeBeforeDigest(t *testing.T) {
 	if other.storeSpec().valkey == unset.storeSpec().valkey {
 		t.Fatal("two site names default to one prefix")
 	}
-	if got := unset.Store.valkeyConfig(unset.Name).Prefix; got != "n1" {
+	if got := mustVK(t, unset.Store, unset.Name).Prefix; got != "n1" {
 		t.Fatalf("default prefix = %q, want the site name", got)
 	}
-	if got := (&StoreConfig{Prefix: "p"}).valkeyConfig("n1").Prefix; got != "p" {
+	if got := mustVK(t, &StoreConfig{Prefix: "p"}, "n1").Prefix; got != "p" {
 		t.Fatalf("explicit prefix = %q", got)
 	}
 }
@@ -352,7 +369,7 @@ func TestStoreDigestCoversEveryField(t *testing.T) {
 func TestStoreSecretsResolveEnvPlaceholders(t *testing.T) {
 	t.Setenv("WEIR_TEST_VK_PW2", secretPW)
 	s := &StoreConfig{Type: "valkey", Addrs: []string{"h:1"}, Username: "{env.WEIR_TEST_VK_PW2}", Password: "{env.WEIR_TEST_VK_PW2}"}
-	vc := s.valkeyConfig("n")
+	vc := mustVK(t, s, "n")
 	if vc.Password != secretPW || vc.Username != secretPW {
 		t.Fatal("placeholders not resolved")
 	}
@@ -443,4 +460,49 @@ func TestValkeyMultiHostWarns(t *testing.T) {
 	if w := (&Handler{Name: "w", Store: h.Store}).storeWarnings(); len(w) != 0 {
 		t.Fatalf("unexpected warnings %v", w)
 	}
+}
+
+func mustVK(t *testing.T, s *StoreConfig, name string) valkey.Config {
+	t.Helper()
+	vc, err := s.valkeyConfig(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return vc
+}
+
+// 08 §2: tls_ca_file replaces the system roots for a server with a private
+// CA, tls_server_name sets the name checked, either turns TLS on, and a
+// missing or empty file fails the load.
+func TestStoreTLSCAFile(t *testing.T) {
+	good := writeTestCA(t)
+	dir := t.TempDir()
+	junk := filepath.Join(dir, "junk.pem")
+	if err := os.WriteFile(junk, []byte("not a certificate"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	vc := mustVK(t, &StoreConfig{Type: "valkey", Addrs: []string{"10.0.0.1:6379"}, TLSCAFile: good, TLSServerName: "vk.internal"}, "n")
+	if vc.TLS == nil || vc.TLS.RootCAs == nil || vc.TLS.ServerName != "vk.internal" || vc.TLS.MinVersion != tls.VersionTLS12 {
+		t.Fatalf("TLS = %+v", vc.TLS)
+	}
+	for name, path := range map[string]string{"missing file": filepath.Join(dir, "nope.pem"), "no certificate": junk} {
+		t.Run(name, func(t *testing.T) {
+			s := &StoreConfig{Type: "valkey", Addrs: []string{"10.0.0.1:6379"}, TLSCAFile: path}
+			if err := s.validate("n"); err == nil || !strings.HasPrefix(err.Error(), "weir: store tls_ca_file") {
+				t.Fatalf("validate = %v", err)
+			}
+		})
+	}
+}
+
+// writeTestCA writes a PEM certificate to a temporary file and returns its path.
+func writeTestCA(t *testing.T) string {
+	t.Helper()
+	srv := httptest.NewTLSServer(http.NotFoundHandler())
+	defer srv.Close()
+	p := filepath.Join(t.TempDir(), "ca.pem")
+	if err := os.WriteFile(p, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: srv.Certificate().Raw}), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return p
 }

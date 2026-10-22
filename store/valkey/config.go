@@ -48,7 +48,8 @@ type Config struct {
 	// NoClockSkew sets the skew to 0 for single-clock deployments. It
 	// cannot be combined with a non-zero MaxClockSkew.
 	NoClockSkew bool
-	// MaxHardEpochs caps distinct tags with a hard epoch (10000, E-6).
+	// MaxHardEpochs caps distinct tags with a hard epoch (100000, E-6; 10000
+	// before v1.2, a tenth of the memory store's cap since v1.1).
 	MaxHardEpochs int
 	// CallTimeout bounds a call whose context has no deadline (5s, S-2).
 	CallTimeout time.Duration
@@ -74,7 +75,7 @@ const (
 	defaultHashTag       = "e"
 	defaultMaxRetention  = 24 * time.Hour
 	defaultMaxClockSkew  = time.Second
-	defaultMaxHardEpochs = 10000
+	defaultMaxHardEpochs = 100000
 	defaultCallTimeout   = 5 * time.Second
 	// defaultMaxObjectBytes is 64 times the engine's default object limit.
 	// The ceiling stays under Valkey's own 512 MiB string limit with room

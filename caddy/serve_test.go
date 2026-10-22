@@ -386,7 +386,8 @@ func TestSecondHostWithoutMultiHostWarnsOnce(t *testing.T) {
 }
 
 // T-47-style abuse check (INV-1, breaker): a 4xx that next chooses is a
-// response. Missing paths must not open the breaker or hide good paths.
+// response. Missing paths must not open the breaker or hide good paths, and
+// the 4xx goes back to Caddy as an error so handle_errors runs (D34).
 func TestNextErrors4xxIsResponse(t *testing.T) {
 	h, _ := loadServe(t, "")
 	next := caddyhttp.HandlerFunc(func(w http.ResponseWriter, r *http.Request) error {
@@ -400,8 +401,13 @@ func TestNextErrors4xxIsResponse(t *testing.T) {
 	for i := range 200 {
 		w := httptest.NewRecorder()
 		r := httptest.NewRequestWithContext(context.Background(), http.MethodGet, fmt.Sprintf("http://example.com/missing%d", i), nil)
-		if err := h.ServeHTTP(w, r, next); err != nil || w.Code != http.StatusNotFound {
-			t.Fatalf("missing%d: err %v, status %d", i, err, w.Code)
+		err := h.ServeHTTP(w, r, next)
+		var he caddyhttp.HandlerError
+		if !errors.As(err, &he) || he.StatusCode != http.StatusNotFound || w.Body.Len() != 0 {
+			t.Fatalf("missing%d: err %v, body %q, want a 404 handler error and nothing written", i, err, w.Body.String())
+		}
+		if strings.Contains(err.Error(), "file does not exist") {
+			t.Fatalf("next's message leaked: %v", err)
 		}
 	}
 	w := httptest.NewRecorder()
