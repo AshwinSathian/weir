@@ -1,12 +1,12 @@
 # Release procedure
 
-Updated: 2026-10-13
+Updated: 2026-10-22
 
 How to cut a release (written for `v1.0.0`; substitute the version). Weir is four Go modules in one repository: the root module, `observe/prom`, `store/valkey` and `caddy`. They are released together under one version number. The order matters because a `replace` directive in a `go.mod` is ignored when another module imports it, so each sub-module must require published versions of its siblings before it is tagged.
 
 ## Toolchain
 
-Build, test and release with Go 1.27.2 or later (`GOTOOLCHAIN=go1.27.2` works when the installed Go is older). `make vuln` on 1.27.1 reports nine reachable standard library vulnerabilities, all fixed in 1.27.2 (GO-2026-6617, 6613, 6612, 6611, 6610, 6608, 6607, 6605, 6603), through `weirhttp`, the memory store's snapshot writer and the example proxy; it must be clean on the release machine. Upgrade with `brew upgrade go` or `go install golang.org/dl/go1.27.2@latest && go1.27.2 download`. The workflows use `go-version: "1.27"`, which resolves to the latest patch. The `release-gate` run of 2026-10-12 used Go 1.27.0, so its results cover this code and not that toolchain; the standard library fixes do not change Weir's own behavior.
+Build, test and release with the latest patch of Go 1.27 (1.27.3 or later; `GOTOOLCHAIN=go1.27.3` works when the installed Go is older). `make vuln` must be clean on the release machine: 1.27.1 reports nine reachable standard library vulnerabilities and 1.27.2 one more (GO-2026-6809, `crypto/x509`), through `weirhttp`, the memory store's snapshot writer and the example proxy. The workflows use `go-version: "1.27"` and `"1.26"`, which resolve to the latest patch, and the nightly workflow runs `govulncheck` on both every day, so a new standard library finding shows up within a day of its publication.
 
 ## Gate before any tag
 

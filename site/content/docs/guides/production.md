@@ -19,7 +19,7 @@ This page is the operator's runbook, rendered from the repository so it cannot d
 
 ## Toolchain
 
-Build with Go {{go_deploy}} or later. Earlier 1.27 releases carry standard library vulnerabilities in HTTP/2, `net/textproto` and `crypto/tls` that `govulncheck` reports against the code paths `weirhttp` uses. The minimum the module accepts is Go {{go_min}}, and CI tests the two latest Go releases.
+Build with Go {{go_deploy}} or later (or 1.26.10 or later on Go 1.26). Earlier patches carry standard library vulnerabilities in HTTP/2, `net/textproto`, `crypto/tls` and `crypto/x509` that `govulncheck` reports against the code paths `weirhttp` uses. The minimum the module accepts is Go {{go_min}}, and CI tests Go 1.26 and 1.27.
 
 ## Settings to leave alone until you have a reason
 

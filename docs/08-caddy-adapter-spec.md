@@ -4,7 +4,7 @@ Status: v1.0. Phase 2. Finalized by P2-00 against the Caddy release current at t
 Date: 2026-10-13
 Depends on: [01-technical-spec.md](01-technical-spec.md), [04-lld.md §10](04-lld.md)
 Seed name: `04-caddy-adapter-spec.md` (renumbered, see [docs/README.md](README.md))
-Verified against: Caddy v2.11.7 (released 2026-10-03, `go 1.26.0` in its `go.mod`). Weir requires Go 1.27, so `xcaddy` builds that include it need a Go 1.27 toolchain; Go's toolchain directive downloads it automatically when `GOTOOLCHAIN=auto`.
+Verified against: Caddy v2.11.7 (released 2026-10-03, `go 1.26.0` in its `go.mod`). Weir requires Go 1.26 too (since v1.2; v1.0 and v1.1 required 1.27).
 
 ## 1. Shape
 

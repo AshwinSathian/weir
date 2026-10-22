@@ -7,7 +7,7 @@
 # Example: scripts/release-smoke.sh v1.0.0
 # It fetches the three library modules, runs their published tests from the
 # module cache, installs weirproxy, and builds Caddy with the README's
-# xcaddy line. Needs network and Go 1.27.2 or later. The runbook 7.8
+# xcaddy line. Needs network and Go 1.27.3 or later. The runbook 7.8
 # checklist and the pkg.go.dev pages stay manual.
 set -euo pipefail
 

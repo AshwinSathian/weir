@@ -13,3 +13,23 @@ updates:
       site:
         patterns: ["*"]
         update-types: [minor, patch]
+  # Go modules with third-party dependencies. The root module has none (P7).
+  # Grouped per module so one pull request carries a module's minor and patch
+  # updates; a major version gets its own.
+  - package-ecosystem: gomod
+    directories: [/caddy, /store/valkey, /observe/prom, /bench/compare]
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      go:
+        patterns: ["*"]
+        update-types: [minor, patch]
+  # Actions are pinned by commit; this keeps the pins current.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]

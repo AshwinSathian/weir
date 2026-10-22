@@ -44,4 +44,4 @@ body:
     id: env
     attributes:
       label: Go version and store
-      placeholder: go1.27.2, memory store
+      placeholder: go1.27.3, memory store
