@@ -101,7 +101,7 @@ Numbered against [00-design-doc.md](00-design-doc.md). None of these change the 
 | §7.2 | `KeyBuilder.Build(req, varyHeaders)` | Vary is unknown until a response is stored; needs a two-level key (ADR-2). |
 | §9 Phase 0 | "controllable `Clock`" | `testing/synctest` (ADR-10). |
 | §9 M1 | key construction "with no adversarial hardening yet" | contradicts §7.3 "from the first line of code"; M1 now includes the structural hardening. |
-| §10 title | "Appendix: Phase 2 — Experiment-aware routing" | the roadmap in §9 calls it Phase 3; Phase 2 is the Caddy adapter. It is Phase 3. |
+| §10 title | "Appendix: Phase 2, Experiment-aware routing" | the roadmap in §9 calls it Phase 3; Phase 2 is the Caddy adapter. It is Phase 3. |
 | §4.5 | "relevant to the Phase 2 appendix, Part 10" | same: Phase 3. |
 | §1 | "no obvious collision in the Go proxy space" | `tidb-incubator/weir` is a Go database proxy, inactive since January 2022. Low risk; noted. |
 | §9 Phase 0 | license MIT | Apache-2.0 (D41), for the explicit patent grant; changed before any outside contribution. |

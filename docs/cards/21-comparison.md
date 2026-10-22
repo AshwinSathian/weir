@@ -46,12 +46,12 @@ State after the second session of 2026-10-13, which ran CMP-03b and CMP-04b on o
 - AC: the pinned cache-tests revision runs against every subject in both tiers; pass counts by category land in the results directory; Weir's row matches `testdata/cache-tests-baseline.json`
 - Notes: closed by CMP-04b. Three tiers ran (default, tuned, hardened); `summary.md` splits failures into assertion and setup and lists passes by test group; the script itself compares Weir's default row with the baseline (equal, on Caddy and `weirproxy`).
 
-### [ ] CMP-06 Speed and memory
+### [x] CMP-06 Speed and memory
 - Plan: comparison · Size: M · Depends on: CMP-02
 - Read: 11 §5.5, §6
 - Touch: bench/compare/speed.sh (new), bench/compare/compose.yaml (cpuset pins, load generator service), bench/compare/run.go (warm and fill helpers)
 - AC: the load generator is an established open-loop tool, named with its version in 11 §4; CPU time per request comes from cgroup `cpu.stat`; the drift gate of 11 §6 discards a run and says so; one command runs the whole pillar from a plain terminal
-- Notes: ask the owner before the run: quiet machine, Docker Desktop at 8 CPUs and 12 GiB, editor closed.
+- Notes: ask the owner before the run: quiet machine, Docker Desktop at 8 CPUs and 12 GiB, editor closed. Harness done in pull request 141 (`speed.sh`, vegeta v12.13.0); the run belongs with the v1.2 comparison rerun.
 
 ### [ ] CMP-07 Private scorecard and the publish decision
 - Plan: comparison · Size: S · Depends on: CMP-03, CMP-04, CMP-05, CMP-06

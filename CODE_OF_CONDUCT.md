@@ -6,7 +6,7 @@ In short: criticize code and ideas as hard as they deserve, and never the person
 
 ## Reporting
 
-Report a problem to the maintainer, [Ashwin Sathian](https://github.com/AshwinSathian), privately, using the contact on that GitHub profile. Reports are kept confidential. If the report concerns the maintainer, say so in a GitHub issue without details and ask for another contact.
+Report a problem to the maintainer, [Ashwin Sathian](https://github.com/AshwinSathian), privately, through the repository's private report form: the Security tab, "Report a vulnerability". It reaches only the maintainer; start the title with "Conduct:". Reports are kept confidential. If the report concerns the maintainer, say so in a GitHub issue without details and ask for another contact.
 
 ## Enforcement
 
