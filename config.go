@@ -23,7 +23,7 @@ import (
 //
 // Every boolean is false by default. A field named Disable turns off a whole
 // subsystem (Breaker.Disable, Negative.Disable, MissRate.Disable), and a No*
-// field turns off one feature inside a subsystem (NoJitter, NoEarlyRefresh,
+// field turns off one feature inside a subsystem (NoJitter, NoEarlyRefresh, NoHeuristic,
 // NoTraceHeaders, NoCacheStatus). Strip* and Ignore change how input is
 // handled (Storable.StripSetCookie, CacheGroups.Ignore). The remaining
 // booleans switch a behavior on: Key.QuerySort, Key.NormalizePath,
@@ -60,7 +60,7 @@ type Config struct {
 	NoCacheStatus bool              // omit the Cache-Status header (T-27)
 	Observer      Observer
 	Logger        *slog.Logger   // nil: discard
-	Rand          func() float64 // [0, 1); safe for concurrent use; nil: rand.Float64
+	Rand          func() float64 // [0, 1), values outside are clamped; safe for concurrent use; nil: rand.Float64
 }
 
 // KeyConfig controls which request parts form the cache key (FR-KEY).
@@ -99,8 +99,14 @@ type ForwardMode uint8
 
 // ForwardMode values.
 const (
+	// ForwardStrict forwards only keyed, allowed and protocol headers on a
+	// cacheable request (FR-FWD-1, INV-1). The default.
 	ForwardStrict ForwardMode = iota
-	ForwardAll                // logs a warning at New
+	// ForwardAll forwards every request header, cookies included, without
+	// keying them, and logs a warning at New. A per-user response that is
+	// storable (public, s-maxage, or only Last-Modified) is then shared with
+	// every user unless the origin marks it Cache-Control: private.
+	ForwardAll
 )
 
 // BypassConfig lists request cookies and headers that skip the cache.
@@ -112,7 +118,11 @@ type BypassConfig struct {
 
 // StorableConfig limits what may be stored (FR-STO).
 type StorableConfig struct {
-	Statuses       []int // nil: default set; never 206, 304, 500, 502, 503, 504
+	// Statuses lists the storable statuses. Nil selects the default set.
+	// An empty list stores nothing: every response then leaves a
+	// hit-for-miss marker, so requests are not coalesced either and only the
+	// limiter and the breaker act. Never 206, 304, 500, 502, 503 or 504.
+	Statuses       []int
 	MaxObjectBytes int64 // 0: 1 MiB, body plus headers
 	StripSetCookie bool
 	StreamTypes    []string // Content-Type media types streamed like text/event-stream (FR-STR-1)
@@ -126,9 +136,14 @@ type FreshnessConfig struct {
 	EarlyRefreshBeta  float64       // 0: 1.0
 	NoEarlyRefresh    bool
 	// HeuristicFraction is the share of the time since Last-Modified used as
-	// heuristic freshness. Zero means the default 0.1; there is no way to
-	// set zero today (use Freshness.HeuristicMax to bound the result).
-	HeuristicFraction           float64
+	// heuristic freshness (FR-FRS-3). Zero means the default 0.1; set
+	// NoHeuristic to turn the heuristic off.
+	HeuristicFraction float64
+	// NoHeuristic gives a response whose only freshness information is
+	// Last-Modified a lifetime of zero, so it is stored (it has a validator)
+	// but revalidated before every use. Only explicit freshness (max-age,
+	// s-maxage, Expires) or DefaultTTL then makes a response fresh.
+	NoHeuristic                 bool
 	HeuristicMax                time.Duration // 0: 1h
 	DefaultTTL                  time.Duration // 0: none
 	DefaultStaleWhileRevalidate time.Duration // 0: none
@@ -335,7 +350,11 @@ func (c *Config) applyDefaults() {
 	}
 	orDur(&f.JitterMinLifetime, 10*time.Second)
 	orFloat(&f.EarlyRefreshBeta, 1.0)
-	orFloat(&f.HeuristicFraction, 0.1)
+	if f.NoHeuristic {
+		f.HeuristicFraction = 0 // httpcc reads the fraction alone
+	} else {
+		orFloat(&f.HeuristicFraction, 0.1)
+	}
 	orDur(&f.HeuristicMax, time.Hour)
 	orDur(&f.Keep, 5*time.Minute)
 
@@ -407,6 +426,8 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Rand == nil {
 		c.Rand = rand.Float64
+	} else {
+		c.Rand = clampRand(c.Rand)
 	}
 }
 
@@ -681,6 +702,22 @@ func orInt(p *int, d int) {
 func orDur(p *time.Duration, d time.Duration) {
 	if *p == 0 {
 		*p = d
+	}
+}
+
+// clampRand keeps a caller's Rand inside [0, 1). Outside it, early refresh
+// takes the log of zero or a negative number (+Inf or NaN): every hit would
+// refresh, or none would.
+func clampRand(r func() float64) func() float64 {
+	return func() float64 {
+		u := r()
+		switch {
+		case u >= 0 && u < 1:
+			return u
+		case u >= 1:
+			return math.Nextafter(1, 0)
+		}
+		return 0 // negative or NaN
 	}
 }
 

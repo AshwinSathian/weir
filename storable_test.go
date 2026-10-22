@@ -381,6 +381,79 @@ func TestBuildEntry(t *testing.T) {
 	}
 }
 
+// FR-STO-11: a stored body carries its own length. An Origin that declares
+// a Content-Length its body does not have (a custom Origin or a handler, not
+// TransportOrigin, which checks it) must not plant a wrong length that every
+// hit repeats; net/http would cut those connections short.
+func TestBuildEntryContentLengthIsBodyLength(t *testing.T) {
+	cfg := storableConfig(t, nil)
+	c := classifiedGET("/p", false)
+	for _, tc := range []struct {
+		name   string
+		status int
+		kv     []string
+		want   string
+	}{
+		{"declared length larger than the body is replaced", 200, []string{"Cache-Control", "max-age=60", "Content-Length", "100"}, "4"},
+		{"declared length smaller than the body is replaced", 200, []string{"Cache-Control", "max-age=60", "Content-Length", "1"}, "4"},
+		{"missing length is added", 200, []string{"Cache-Control", "max-age=60"}, "4"},
+		{"a 204 gets none", 204, []string{"Cache-Control", "max-age=60"}, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resp := originResp(tc.status, tc.kv...)
+			body := []byte("body")
+			if tc.status == 204 {
+				body = nil
+			}
+			d := storability(cfg, c, resp, body, testRespTime)
+			if !d.ok {
+				t.Fatalf("not stored: %+v", d)
+			}
+			e := buildEntry(cfg, c, resp, body, testRespTime, testRespTime, d)
+			if got := e.Header.Get("Content-Length"); got != tc.want {
+				t.Errorf("Content-Length = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// FR-FRS-3: NoHeuristic turns the Last-Modified heuristic off. The response
+// is still stored for its validator, with a lifetime of zero, so every use
+// revalidates. DefaultTTL, an explicit operator choice, still applies.
+func TestNoHeuristic(t *testing.T) {
+	lm := testRespTime.Add(-48 * time.Hour).Format(http.TimeFormat)
+	c := classifiedGET("/p", false)
+	for _, tc := range []struct {
+		name string
+		mod  func(*Config)
+		kv   []string
+		want time.Duration
+	}{
+		{"default heuristic is 10% capped at 1h", nil, []string{"Last-Modified", lm}, time.Hour},
+		{"NoHeuristic gives zero", func(c *Config) { c.Freshness.NoHeuristic = true }, []string{"Last-Modified", lm}, 0},
+		{"NoHeuristic wins over a fraction", func(c *Config) {
+			c.Freshness.NoHeuristic = true
+			c.Freshness.HeuristicFraction = 0.5
+		}, []string{"Last-Modified", lm}, 0},
+		{"NoHeuristic leaves explicit max-age alone", func(c *Config) { c.Freshness.NoHeuristic = true }, []string{"Last-Modified", lm, "Cache-Control", "max-age=60"}, time.Minute},
+		{"NoHeuristic leaves DefaultTTL alone", func(c *Config) {
+			c.Freshness.NoHeuristic = true
+			c.Freshness.DefaultTTL = 30 * time.Second
+		}, []string{"ETag", `"a"`}, 30 * time.Second},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := storableConfig(t, tc.mod)
+			d := storability(cfg, c, originResp(200, tc.kv...), []byte("body"), testRespTime)
+			if !d.ok {
+				t.Fatalf("not stored: %+v", d)
+			}
+			if d.lifetime != tc.want {
+				t.Errorf("lifetime = %v, want %v", d.lifetime, tc.want)
+			}
+		})
+	}
+}
+
 func TestRetentionFloorAndSaturation(t *testing.T) {
 	// FR-STL-2, FR-FRS-4, 04 §4.2: retention is at least StoredAt + 1s, and a
 	// huge Keep never wraps it into the past.

@@ -120,3 +120,23 @@ func TestErrorsIs(t *testing.T) {
 		t.Error("errors.AsType did not find *OriginError")
 	}
 }
+
+// Error messages start with "weir:" once (CLAUDE.md rule 9). An origin panic
+// is an error Weir makes, wrapped in OriginError; its prefix is not repeated.
+func TestOriginErrorMessageNoStutter(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+		want string
+	}{
+		{"origin transport error", &OriginError{Err: errors.New("dial tcp: refused")}, "weir: origin error: dial tcp: refused"},
+		{"weir-made error", &OriginError{Err: errors.New("weir: origin panic: boom")}, "weir: origin error: origin panic: boom"},
+		{"nil cause", &OriginError{}, ErrOrigin.Error()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.err.Error(); got != tc.want {
+				t.Errorf("Error() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

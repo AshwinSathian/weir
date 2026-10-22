@@ -13,6 +13,10 @@ Fixes for the losses the second comparison round found (card HRD-23, findings CM
 - Breaker: `Breaker.OpenFor` defaults to 1 s (was 5 s) and `Breaker.MaxOpenFor` to `OpenFor` (was 60 s), so the breaker probes about once a second and no longer doubles the period per failed probe (FR-CB-3). Way back: `OpenFor: 5 * time.Second, MaxOpenFor: time.Minute`.
 - Breaker: closing is gradual. Each probe that succeeds doubles the fetches admitted at a time; the breaker closes when that reaches `MaxConcurrent` (FR-CB-4). `Stats().BreakerState` reads half-open during the ramp.
 - Breaker: a half-open period is given up after one minute, or `Timeouts.Origin` plus `Limiter.MaxQueueWait` when that is longer, whatever `MaxOpenFor` is; before, it lasted `MaxOpenFor`. The partition whose probe failed stands aside for half of `OpenFor` when that is under a second.
+- A stored response's `Content-Length` is always the length of the stored body. A length the origin declared is replaced, so an `Origin` whose declared length did not match its body (a custom `Origin` or `HandlerOrigin`; `TransportOrigin` already checked) no longer plants a wrong length in every hit.
+- `Retry-After` from the origin is read strictly: a signed number such as `+5` and an RFC 850 date with a local zone are ignored. `If-Modified-Since` uses the same date parser, which never resolves a zone against the host's time zone.
+- A caller's `Config.Rand` that returns values outside [0, 1) is clamped. Before, 1 or more made every fresh hit start an early refresh, or none.
+- The message of an origin panic reads `weir: origin error: origin panic: ...` (was `weir: origin error: weir: origin panic: ...`). The `RequestError` reason for a nil request is `nil-request`, like the others.
 - Events: `refresh-dropped` with reason `no-slot` now means the refresh waited up to a minute first, and a refresh still waiting when `Close` begins is dropped with reason `closed`.
 
 ### Toolchain
@@ -21,6 +25,7 @@ Fixes for the losses the second comparison round found (card HRD-23, findings CM
 
 ### Added
 
+- `Freshness.NoHeuristic`: a response whose only freshness information is `Last-Modified` gets a lifetime of zero, so it is stored for its validator and revalidated before every use. Before, the heuristic could only be bounded with `HeuristicMax`.
 - `Limiter.AdaptiveMax` and Caddy's `limiter { adaptive_max }`: an adaptive origin concurrency limit between `MaxConcurrent` and this ceiling (FR-LIM-8). It grows by an eighth while requests wait for a slot and the origin answers well, and drops a quarter on an origin failure or when fetch times double. Off by default: with it on, a few clients get the origin's own error when the limit crosses what the origin can take.
 - `memory.Config.SnapshotKeepFreshness` and Caddy's `snapshot_keep_fresh`: entries loaded from a snapshot keep their freshness, so a restart is a warm cache and costs no origin call (FR-SNP-5). Off by default, because a purge sent while the process was down is then not applied to what the snapshot brings back (T-33). A marked snapshot read by a version before this one starts cold.
 

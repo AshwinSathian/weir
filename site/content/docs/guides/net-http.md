@@ -33,7 +33,7 @@ Fetch(ctx context.Context, req *weir.Request) (*weir.Response, error)
 origin := &weirhttp.TransportOrigin{Target: target} // target is a *url.URL; its path is ignored
 ```
 
-It sends the forwarded request to `Target` over an `http.RoundTripper`. Leave `Transport` nil and you get a clone of `http.DefaultTransport` with compression disabled and no proxy. If you pass your own `*http.Transport`, set `DisableCompression: true` as well. Go's transport otherwise adds `Accept-Encoding: gzip` to requests that have none, and that is a header the origin sees and the key does not (INV-1).
+It sends the forwarded request to `Target` over an `http.RoundTripper`. The connection goes to `Target`'s host, and for `https` that is also the name TLS checks the certificate against, but the `Host` header is the client's (the key includes it). An origin that routes by its own name, such as a virtual host or a CDN, then answers for the wrong site or with 421; set the header in `Rewrite`: `func(r *http.Request) { r.Host = target.Host }`. The path and any `user:password` in `Target` are ignored; send credentials from `Rewrite` too. Leave `Transport` nil and you get a clone of `http.DefaultTransport` with compression disabled and no proxy. If you pass your own `*http.Transport`, set `DisableCompression: true` as well. Go's transport otherwise adds `Accept-Encoding: gzip` to requests that have none, and that is a header the origin sees and the key does not (INV-1).
 
 On a request that is passed through, `TransportOrigin` removes `Forwarded`, `X-Real-Ip` and every `X-Forwarded-*` field (FR-FWD-8). There they are whatever the client wrote, and an origin that trusts its proxy would believe them. Set `XForwarded: weirhttp.XForwardedSet` when Weir faces the clients itself: a passed-through request then carries the client address, scheme and host that Weir saw. `XForwardedKeep` sends the fields through untouched, for a deployment behind a proxy that overwrites them. A cacheable fetch is sent exactly as the engine built it in every mode: it carries such a field only if you named it in `Forward.Allow` or `Key.Headers`.
 
@@ -111,4 +111,4 @@ Register one of each per engine and per registry. The metric list is in the [obs
 ## Limits
 
 > [!LIMITS]
-> One engine serves one logical origin. `Engine.Close` waits for origin goroutines, so an `Origin` that ignores its context can delay shutdown. An `Observer` runs on the request path and its panics are not recovered: keep `Observe` fast and safe.
+> One engine serves one upstream. The circuit breaker, the negative cache and the origin limit judge that upstream's health, so an engine in front of two independent backends opens its breaker for both when one fails. Create one engine per backend. `Engine.Close` waits for origin goroutines, so an `Origin` that ignores its context can delay shutdown. An `Observer` runs on the request path and its panics are not recovered: keep `Observe` fast and safe.

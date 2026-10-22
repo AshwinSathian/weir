@@ -36,6 +36,12 @@ func (f OriginFunc) Fetch(ctx context.Context, req *Request) (*Response, error) 
 
 // Engine makes shared-cache decisions per request (04 §6.1). It is safe for
 // concurrent use (FR-LCY-3).
+//
+// Use one Engine per upstream. The circuit breaker, the negative cache and
+// the origin limit judge one origin's health (FR-CB-1): an Engine that fronts
+// two independent backends opens its breaker for both when one fails. Serve
+// takes the Origin per call because an adapter's origin can be per request
+// (Caddy's next handler), not so that one Engine can front several backends.
 type Engine struct {
 	cfg       Config      // defaults applied, immutable after New
 	kcfg      keys.Config // compiled from cfg

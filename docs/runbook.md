@@ -1,6 +1,6 @@
 # Runbook
 
-Updated: 2026-10-13
+Updated: 2026-10-22
 
 For the person running Weir in front of an origin. It covers first deployment, the signals to watch and what to do when each one fires. Setting names are in [01 §6](01-technical-spec.md); the reasoning behind the defaults is in [06](06-threat-model.md). This is not a design document: when it disagrees with 01 to 07, they win.
 
@@ -157,7 +157,7 @@ example.com {
 }
 ```
 
-- `name` is required. It is the store identity across reloads, the `name` metric label, the admin URL segment and the snapshot file name, so pick it once and keep it.
+- `name` is required. It is the store identity across reloads, the `name` metric label, the admin URL segment and the snapshot file name, so pick it once and keep it. Each `weir` block has its own engine, and its circuit breaker judges one origin's health: a site whose hosts or routes proxy to unrelated backends opens it for all of them when one fails. Give each independent upstream a site (and a `name`) of its own (08 §4b).
 - `request_body { max_size }` and the server `read_body` timeout are required on Weir routes (FR-LIM-7, T-39). Weir bounds origin concurrency, but a slow or oversized upload still holds a slot from the upload pool until it finishes. Size the limit to your largest legitimate upload.
 - `snapshot_dir` must be absolute, owned by the Caddy user and not writable by group or others. Weir creates it with mode 0700 and refuses a shared one (a planted snapshot would be served as trusted cache content). The file is `<snapshot_dir>/<name>.weir`, written when the store closes and read at the next start. Without `snapshot_dir` every restart is a cold cache.
 - The snapshot is written during shutdown, so give Caddy time: `grace_period` is the time Caddy waits for requests to drain before it stops, and the engine close and the store close can each take up to the 5 s snapshot timeout after that, so about 10 s more. A service manager that kills the process sooner (`TimeoutStopSec` in systemd, `terminationGracePeriodSeconds` in Kubernetes) loses the snapshot. The packaged `caddy.service` sets `TimeoutStopSec=5s`, which is too short: raise it above `grace_period` plus 10 s with a drop-in. Without `grace_period` Caddy waits for connections indefinitely, so the unit's kill timer is the only bound. A reload that replaces a large store waits about as long for the old config to stop (08 §3).
