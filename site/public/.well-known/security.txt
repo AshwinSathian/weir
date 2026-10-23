@@ -1,0 +1,5 @@
+Contact: https://github.com/AshwinSathian/weir/security/advisories/new
+Expires: 2027-10-23T00:00:00.000Z
+Preferred-Languages: en
+Canonical: https://weir.ashwinsathian.com/.well-known/security.txt
+Policy: https://github.com/AshwinSathian/weir/blob/main/SECURITY.md
