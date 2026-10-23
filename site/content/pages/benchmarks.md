@@ -107,7 +107,7 @@ The second round measured `v1.1.0` and the third `v1.2.0`, with the same scenari
 
 ### Not measured
 
-- **Latency, CPU time and throughput against any other cache.** The speed runs measured them, and every timing repetition failed the drift check the specification requires: the control's median held within 5% but its 99th percentile moved 12 to 20% within each repetition. Only the runs' counts are published. Nothing above is a throughput or latency claim.
+- **Latency, CPU time and throughput against any other cache.** The speed runs measured them, and every timing repetition failed the drift check the specification requires: the control's median moved at most 9%, under the check's 10%, but its 99th percentile moved 14% or more in every repetition. Only the runs' counts are published. Nothing above is a throughput or latency claim.
 - Differential fuzzing across the caches.
 - Any review by a maintainer of Varnish, nginx or cache-handler of the configuration used for their project. We have been wrong three times so far, each time against the other project and each time found by our own review before publication: port exhaustion in our containers that looked like nginx failing, a rule from Varnish's grace guide that our tuned tier lacked, and a cache-handler storage left at a default size that evicted the keys the test had stored.
 - cache-handler's memory and hit ratio: its default storage has no size setting we could verify.
@@ -123,11 +123,18 @@ cd bench/compare && ./run.sh -reps 3 && ./probes.sh && ./conformance.sh && ./spe
 
 {{figure results-hit}}
 
-Three builds, run interleaved on the reference machine on 2026-10-13. `main` is `v1.0.1`, "after HRD-01 to 15" is the hardening branch, and "after HRD-19" is the code that became `v1.1.0`. The project's own budget is at most 1.25 µs and 16 allocations per hit on this machine, and a change that slows the hit path by more than 20% fails review.
+Three builds, run interleaved on the reference machine on 2026-10-13. `main` is `v1.0.1`, "hardening branch" is the branch before the hit-path work, and "v1.1 hit path" is the code that became `v1.1.0`. The `v1.2.0` release measured the same hit within noise of `v1.1.0`, with the same allocations, in the first collapsed section below. The project's own budget is at most 1.25 µs and 16 allocations per hit on this machine, and a change that slows the hit path by more than 20% fails review.
 
 ```sh
 make bench
 ```
+
+<details>
+<summary>Every benchmark and load scenario of the v1.2.0 release run</summary>
+
+{{include docs/benchmarks.md "### v1.2.0 release (2026-10-23)"}}
+
+</details>
 
 <details>
 <summary>Every benchmark and load scenario of the v1.1 hardening run</summary>
@@ -149,7 +156,7 @@ After the last hardening changes before v1.0.0 the same benchmark measured 852.2
 
 ## Five load scenarios
 
-`make load` runs each failure mode against a real engine for about eight minutes in total and checks a threshold. This is the idle reference run of 2026-10-11. The same scenarios on the `v1.1.0` code, on a machine that was not idle, are in the collapsed table under [one cached hit](#one-cached-hit).
+`make load` runs each failure mode against a real engine for about eight minutes in total and checks a threshold. This is the idle reference run of 2026-10-11. The same scenarios on the `v1.2.0` release, on a quiet machine, and on the `v1.1.0` code, on a machine that was not idle, are in the collapsed tables under [one cached hit](#one-cached-hit). In the `v1.2.0` run the flood borrows idle origin slots and nothing is shed, and the normal traffic's tail under the flood grows more than in this run, still inside the threshold.
 
 {{include docs/benchmarks.md "### Load scenarios (`make load`, scale 1, 473 s)"}}
 

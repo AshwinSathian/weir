@@ -10,6 +10,8 @@ Reference machine: Apple M4 Pro, 12 cores, 24 GiB, macOS. The budgets are NFR-5 
 
 | What | Result | Budget | Run |
 |---|---|---|---|
+| `BenchmarkServeHitSmall`, `v1.2.0`, Go 1.27.3, quiet machine | 614.8 ns/op, 8 allocs/op, 608 B/op (`v1.1.0` measured 636.8 ns in the same run; no significant change) | 1.25 µs, 16 allocs | "v1.2.0 release" below |
+| Six load scenarios, `v1.2.0`, quiet machine | all pass; GC 0.44 µs per request at 1M entries | [07 §9](07-testing-strategy.md), 2 µs | "v1.2.0 release" below |
 | `BenchmarkServeHitSmall`, v1.1 branch, Go 1.27.1, machine not idle | 669.1 ns/op, 8 allocs/op, 608 B/op (`main` measured 963.9 ns, 12 allocs in the same run) | 1.25 µs, 16 allocs | "v1.1 hardening" below |
 | `BenchmarkServeHitSmall`, v1.0, Go 1.27.2 | 852.2 ns/op, 12 allocs/op | 1.25 µs, 16 allocs | "Hardening after v1.0.0-rc.1" below |
 | `BenchmarkServeHitSmall`, Go 1.27.1, idle machine | 833.5 and 821.4 ns/op, 12 allocs/op | same | "Hit path optimization" below |
@@ -25,11 +27,42 @@ make load
 
 Store the raw output next to the table when a run adds a row, so `benchstat old.txt new.txt` works without rerunning the old commit.
 
+### v1.2.0 release (2026-10-23)
+
+The reference machine (Apple M4 Pro, 12 cores), Go 1.27.3, quiet. Test binaries built at the tags `v1.1.0` and `v1.2.0`, eight interleaved runs each, `benchstat`. Raw output: [benchmarks/v1.2.0-release-2026-10-23-v1.1.0.txt](benchmarks/v1.2.0-release-2026-10-23-v1.1.0.txt) and [benchmarks/v1.2.0-release-2026-10-23-v1.2.0.txt](benchmarks/v1.2.0-release-2026-10-23-v1.2.0.txt).
+
+| Benchmark | `v1.1.0` | `v1.2.0` | change | B/op | allocs/op |
+|---|---:|---:|---|---:|---:|
+| `BenchmarkServeHitSmall` | 636.8 ns ± 7% | 614.8 ns ± 4% | no significant change (p=0.065) | 608 | 8 |
+| `BenchmarkServeHitVary` | 1.107 µs ± 4% | 1.113 µs ± 3% | no significant change (p=0.702) | 1 040 | 12 |
+| `BenchmarkServeMissCoalesced` | 29.17 µs ± 5% | 28.82 µs ± 6% | no significant change (p=0.645) | 22.19 to 22.32 KiB (+0.59%, p<0.001) | 192 |
+| the same, origin calls per key | 1.000 | 1.000 | | | |
+| `BenchmarkServeHitParallel/missrate-on` | 191.8 ns ± 1% | 195.0 ns ± 1% | +1.67% (p=0.022) | 608 | 8 |
+| `BenchmarkServeHitParallel/missrate-off` | 159.8 ns ± 2% | 161.3 ns ± 2% | +1.00% (p=0.038) | 608 | 8 |
+| `BenchmarkServeHitExperiments/unmatched` | 888.7 ns ± 5% | 899.7 ns ± 4% | no significant change (p=0.152) | 1.008 KiB | 11 |
+| `BenchmarkServeHitExperiments/matched-no-cookie` | 2.204 µs ± 6% | 2.224 µs ± 5% | no significant change (p=0.279) | 2.962 KiB | 45 |
+| `BenchmarkServeHitExperiments/matched-valid-cookie` | 1.794 µs ± 5% | 1.795 µs ± 3% | no significant change (p=0.721) | 2.243 KiB | 32 |
+
+The hit path did not change: 615 ns, 608 B and 8 allocations a hit, inside the NFR-5 budget. The two parallel-hit rows are 1 to 2% slower and the coalesced miss allocates 0.6% more bytes; the changes in v1.2.0 are on the miss, refresh and breaker paths, which a hit does not take. Bytes and allocations are equal on every other row.
+
+`make load`, scale 1, at `0147a80` (the `v1.2.0` tag's code), 474.8 s, all six pass. Raw output: [benchmarks/v1.2.0-release-2026-10-23-load.txt](benchmarks/v1.2.0-release-2026-10-23-load.txt).
+
+| Scenario | Measured | Threshold | Result |
+|---|---|---|---|
+| steady hits | 110.1 M requests, 1 835 k/s achieved (target 1 976 k/s, 50% of saturated), hit ratio 1.0000, p50 1.0 µs, p99 4.6 to 5.1 µs in each of six windows, 0 origin calls after warm | ratio > 99%, median-window p99 < 200 µs | pass |
+| synchronized expiry | 10 000 keys stored in 1.7 s, all 10 000 refetched, origin peak in-flight 32, busiest second 1 488 origin calls, 0 client errors | refetch ≥ 90%, in-flight ≤ 32, ≤ 2 000 calls/s | pass |
+| busting flood plus normal | 99 976 flood requests, 0 shed, flood in-flight peak 40 (`MaxPerPartition` 8, 40 with idle slots borrowed), normal offered 499/s with 0 drops, normal p99 45.1 µs alone and 73.7 µs under flood | in-flight ≤ 40, p99 within 20% or 50 µs | pass |
+| origin brownout (×20) | 15 breaker open events, ended closed, 55 834 stale responses, every request 2xx before, during and after, peak 41 goroutines | breaker per config, stale served, no goroutine growth | pass |
+| store flap (50%) | 17.7 M requests, 0 client errors, slowest request 49.6 ms (bound 211.5 ms), store breaker 14 open / 8 closed | bounded latency, breaker cycles | pass |
+| GC at 1M entries | 808 B allocated and 0.44 µs of GC per request (0.52 µs at 10 000 entries), live heap 2 128 MiB after the fill | gate 2 µs | pass |
+
+The busting flood is the scenario v1.2.0 changed. A flooded path may now borrow origin slots the rest of the traffic leaves idle (the limiter change in the CHANGELOG), so the flood reached 40 requests in flight instead of 8 and none of its 99 976 requests was shed, where earlier runs shed about 71 000. The normal traffic paid for it at the tail: p99 under the flood rose by 28.7 µs (64%), inside the 50 µs floor of the threshold but more than the 20% the earlier runs kept to. Its hit ratio stayed 1.0000.
+
 ### v1.1 hardening (2026-10-13)
 
 The reference machine (Apple M4 Pro, 12 cores), Go 1.27.1, not idle (an editor and one agent session), so `main` measured 964 ns here where the record above says 852. Read each row against the other columns of the same row. Three builds, eight interleaved runs each, `benchstat`: `main` at `c070976` (v1.0.1), the branch after cards HRD-01 to HRD-15, and the branch after the performance card HRD-19. Raw output: [benchmarks/v1.1-hardening-2026-10-13.txt](benchmarks/v1.1-hardening-2026-10-13.txt).
 
-| Benchmark | `main` (v1.0.1) | after HRD-01 to 15 | after HRD-19 | change from `main` |
+| Benchmark | `main` (v1.0.1) | hardening branch | v1.1 hit path | change from `main` |
 |---|---:|---:|---:|---|
 | `BenchmarkServeHitSmall` | 963.9 ns ± 6% | 939.5 ns ± 4% | 669.1 ns ± 2% | -30.6% (p<0.001) |
 | `BenchmarkServeHitVary` | 1.304 µs ± 5% | 1.284 µs ± 4% | 1.204 µs ± 2% | -7.7% (p<0.001) |
@@ -354,7 +387,7 @@ Every figure about Varnish, nginx and cache-handler below comes from our own run
 - No maintainer of Varnish, nginx or cache-handler has reviewed the configuration used for their project (11 R4). We have been wrong three times so far, each time against the other project and each time found by our own review before publication. Round 1: nginx and the control answered 502 from port exhaustion in our containers, and the Varnish tuned tier lacked the rule from its grace guide that abandons a failed background fetch. Round 2: cache-handler's tuned tier ran the Otter storage at its default size of 10,000, which evicted stored URLs and showed up as 7,435 origin calls in `sync-expiry` where the same tier with room makes 5,000.
 - Each script ran once, on 2026-10-22, at harness commit `0147a80`, which every result file records: one invocation of `run.sh` for every subject and both tiers, then `probes.sh`, `conformance.sh` and `speed.sh`, with `WEIR_VERSION=v1.2.0`. `bench/compare` last changed at `66e651b`, so it is the same at both commits. Round 2 was stitched from 22 invocations at two harness commits; this round has no such seam.
 - The `origin` control (the runner against the origin with nothing in between) ran every scenario too. In all 50 of its rows that carry requests the origin counted exactly the requests the runner sent (the other 3 are `purge-herd`, which the origin cannot run).
-- The speed and memory pillar (11 §5.5) ran, and only its counts are published: memory per object, hit ratio and origin calls (below). Its latency, CPU per request and saturation figures stay measured but unpublished, because all five timing repetitions failed the drift gate of 11 §6: the `caddy-nocache` control's p50 stayed within 5%, but its p99 moved 12 to 20% within every repetition, and in two repetitions one control run had a p99 of 8.8 ms and 15.4 ms where the others sat near 1.5 ms. Nothing here is a throughput or latency claim. Differential fuzzing (11 §5.6) was not run.
+- The speed and memory pillar (11 §5.5) ran, and only its counts are published: memory per object, hit ratio and origin calls (below). Its latency, CPU per request and saturation figures stay measured but unpublished, because all five timing repetitions failed the drift gate of 11 §6. Measured against the first control run of its repetition, the `caddy-nocache` control's p50 moved at most 9% (under the gate's 10%), but its p99 moved 14 to 22% in four repetitions and 62% in the other, and in two repetitions one control run's p99 was several times the others'. Nothing here is a throughput or latency claim. Differential fuzzing (11 §5.6) was not run.
 - The hardened tiers were written after the round 1 default results, to the headers the round 1 probes use. They show that each project's documented mechanism closes those probes. They do not show that a deployment would have known which headers to list.
 
 ```sh
@@ -453,12 +486,12 @@ What each one does, and what its numbers do not say:
 
 - `busting-flood`: the origin serves 128 requests at once and refuses the rest. For 5 s, each 100 ms brings 200 requests for one path with a query string nobody has used, and 20 requests for other paths nobody has asked for. The flood alone is more than the origin can serve. Weir holds the flooded path to its share of its 64 origin slots, so every bystander is served, and it refuses 83% of the flood to do it: **by clients failed in total, Weir is still the worst subject in this scenario** and Varnish's tuned tier, which queues everything behind one cap of 64, the best. Weir left origin capacity unused: the origin had at most 56 requests in hand, of the 128 it serves. The origin-calls row counts the 1,000 bystanders and the flood requests the origin served. Each of these caches can sort or strip query strings in configuration, and none of the tiers does, Weir's included: the scenario measures how the origin's capacity is shared, not key normalization. `weirproxy` differs from the Caddy row by 22 origin calls.
 - `brownout`: 200 URLs with a 2 s lifetime, 200 requests a second for 60 s; the origin answers 503 for 10 s twice, with 5 s between, and is then healthy for 30 s. With stale serving on, Weir, Varnish and nginx fail nobody. Weir's breaker cuts origin calls during the bursts to about a seventh of Varnish's and nginx's. Without stale serving it still refuses for a moment after the origin is back: 182 requests in the median repetition and 342 in the worst, the last of them 1.5 s after recovery. `weirproxy`: 182 (62 to 263) and 1 s (0.8 to 1.1).
-- `purge-herd`: 1,000 stored URLs are read, purged, read again at once and 1 s later, and read a last time 3 s after that. Each subject is purged the way its configuration documents: Weir through Caddy's admin API (a soft purge of everything), Varnish default with `return (purge)` per URL, Varnish tuned with `purge.soft()` per URL, cache-handler with its flush API. Open source nginx has no purge (`proxy_cache_purge` is commercial), and the control has no cache: "not available". A purge that deletes turns the next wave into a cold start, 1,000 origin requests at once for Varnish's default and cache-handler; Weir's default refetches the same 1,000 through its 64 slots. A soft purge with stale serving keeps answering from the old copy while it refetches. Weir's tuned tier now refreshes every purged URL, 48 at a time: 960 had been refetched by the last read and 88 URLs still had their pre-purge content 4 s after the purge. Varnish's tuned tier had refetched all 1,000.
+- `purge-herd`: 1,000 stored URLs are read, purged, read again at once and 1 s later, and read a last time 3 s after that. Each subject is purged the way its configuration documents: Weir through Caddy's admin API (a soft purge of everything), Varnish default with `return (purge)` per URL, Varnish tuned with `purge.soft()` per URL, cache-handler with its flush API. Open source nginx has no purge (`proxy_cache_purge` is commercial), and the control has no cache: "not available". A purge that deletes turns the next wave into a cold start, 1,000 origin requests at once for Varnish's default and cache-handler; Weir's default refetches the same 1,000 through its 64 slots. A soft purge with stale serving keeps answering from the old copy while it refetches. Weir's tuned tier now refreshes every purged URL, 48 at a time: 960 refetches had started by the last read, and 88 URLs still had their pre-purge content 4 s after the purge. Varnish's tuned tier had refetched all 1,000.
 - `restart`: 2,000 stored URLs, a graceful stop and start of the container, and the URLs read again. nginx keeps its cache on disk and makes no origin call. Weir's tuned tier has `snapshot_dir` set and reloads its entries, but as stale ones (D15): each is checked with the origin on first use, and this origin sends no validator, so every key is fetched again. v1.2.0 added `snapshot_keep_fresh`, which keeps the entries' freshness and makes the restart cost no origin call; it is off by default (a purge sent while the process was down is then not applied to what the snapshot brings back), and the tuned tier does not set it. Varnish's persistent storage is marked deprecated in its own documentation and is not used. cache-handler has disk storages (Badger, NutsDB); neither tier here uses one.
 
 ### Comparison: speed and memory counts
 
-From `speed.sh` (11 §5.5), first repetition. Counts only; the timing rows are discussed in the limits above. cache-handler has no rows: its default storage has no size setting we could verify, so it cannot be held to the store sizes below.
+From `speed.sh` (11 §5.5), first repetition. Counts only: the pillar's latency, CPU and saturation figures are not published, because every timing repetition failed the drift check of 11 §6 (the control it is measured against moved too much). cache-handler has no rows: its default storage has no size setting we could verify, so it cannot be held to the store sizes below.
 
 Memory per stored object: the growth of the container's anonymous plus shared memory across a fill of N new entries with 100-byte bodies, in a store large enough that nothing is evicted, divided by N.
 
@@ -480,7 +513,7 @@ Hit ratio in a 160 MiB store: 200,000 keys with 3,000-byte bodies, about 300,000
 | `scan`: origin calls | 96,258 | 100,071 | 99,962 | 98,486 | 99,194 |
 | `scan`: hit ratio | | 0.666 | 0.667 | 0.672 | 0.669 |
 
-The `zipf` row does not separate the caches: the 42,024 distinct keys it asks for take about 126 MB, which fits the 160 MiB store, so every subject fetched each key once and evicted nothing it needed again. `scan` asks for 96,258 distinct keys, about 290 MB, so the stores evict. Weir refetched 3,813 keys it had evicted, nginx 2,936 and Varnish 2,228: Weir's S3-FIFO admission did not beat the others on this scan, and its hit ratio is the lowest of the three by 0.006. Weir charges 48 bytes per header name against the store, so its 160 MiB holds somewhat fewer of these objects than Varnish's (11 §5.5).
+The `zipf` row does not separate the caches: the 42,024 distinct keys it asks for take about 126 MB, which fits the 160 MiB store, so each subject made about one origin call per distinct key (42,023 to 42,036; a run that sent a few requests fewer saw a key or so fewer) and evicted nothing it needed again. `scan` asks for 96,258 distinct keys, about 290 MB, so the stores evict. Weir refetched 3,813 keys it had evicted, nginx 2,936 and Varnish 2,228: Weir's S3-FIFO admission did not beat the others on this scan, and its hit ratio is the lowest of the three, 0.006 below Varnish and 0.003 below nginx. Weir charges 48 bytes per header name against the store, so its 160 MiB holds somewhat fewer of these objects than Varnish's (11 §5.5).
 
 ### Comparison: what the numbers say about Weir
 
@@ -511,11 +544,12 @@ Where Weir is behind:
 
 ### Comparison: what the round changed in Weir
 
-Round 2 measured `v1.1.0` and found four losses: the flood, the soft purge, the breaker after a brownout, and the restart. `v1.2.0` changed the defaults behind three of them and added options for two (CHANGELOG, v1.2.0). The figures below are the Caddy subject, in round 2 and in round 3, everywhere they differ; every other Weir cell in the tables above is the same in both rounds. The harness logic and the competitor configurations did not change between the rounds.
+Round 2 measured `v1.1.0` and found four losses: the flood, the soft purge, the breaker after a brownout, and the restart. `v1.2.0` changed the defaults behind three of them and added options for two (CHANGELOG, v1.2.0). The figures below are the Caddy subject, in round 2 and in round 3: the ones that moved most. Smaller moves (for example `busting-flood` in the tuned tier, 8,528 to 8,264 clients failed, and `brownout` failures during the bursts, 3,646 to 3,658) are in the tables above, and round 2's tables are in the history of this file. The harness logic and the competitor configurations did not change between the rounds.
 
 | Figure | v1.1.0 | v1.2.0 |
 |---|---:|---:|
 | `sync-expiry`: origin calls in the tuned tier, of 10,000 clients | 272 (242 to 281) | 5,000 |
+| `sync-expiry-capped`: origin calls in the tuned tier, of 10,000 clients | 273 (232 to 288) | 5,000 |
 | `purge-herd`: origin calls in the tuned tier | 144 | 960 |
 | `purge-herd`: answers from before the purge in the tuned tier, second wave of 1,000 | 952 | 797 |
 | `purge-herd`: URLs not refreshed at the last read in the tuned tier, of 1,000 | 904 | 88 |
@@ -525,14 +559,14 @@ Round 2 measured `v1.1.0` and found four losses: the flood, the soft purge, the 
 | `busting-flood`: all clients failed in the default tier, of 11,000 | 8,520 | 8,260 |
 | `busting-flood`: origin calls in the default tier | 2,480 | 2,740 |
 | `busting-flood`: most origin requests at once in the default tier | 50 (41 to 53) | 56 (46 to 58) |
-| `oversize-herd`: origin calls, of 150 clients | 150 | 3 |
-| `large-body-herd`: origin calls, of 20 clients | 20 | 1 |
+| `oversize-herd`: origin calls in both tiers, of 150 clients | 150 | 3 |
+| `large-body-herd`: origin calls in both tiers, of 20 clients | 20 | 1 |
 
 What changed, and why:
 
-- A refresh that stale-while-revalidate owes now waits for a slot instead of being dropped. That is the whole move in `sync-expiry` and `purge-herd`: every expired or purged URL is refreshed, at most 48 at a time, so the origin is called once per URL and the purged content is gone sooner.
-- The same change costs the origin more calls in `origin-down`, and this figure got worse: 200 calls while the origin is down where `v1.1.0` made 144. Our reading: wave one finds 200 expired keys and now queues a refresh for each, where `v1.1.0` started 48 and dropped the rest, so a dead origin sees one call per stored key. No client saw the difference (all 600 were served stale in both rounds). The first repetition made 387; the breaker log shows it opening and half-opening at the same points in all three repetitions, and we did not find what made the extra 187 calls.
-- The breaker probes about once a second and no longer doubles its open period after each failed probe, and once a probe succeeds it admits traffic in doubling steps. In `brownout` without stale serving this trades a lucky case for a bounded one. The median repetition got worse (182 requests failed after recovery, against 120, and the last failure 1.5 s after recovery, against 0.2 s), because the breaker now always learns of the recovery at its next probe, within about a second. The worst repetition got much better: 342 failed against 1,980, and 1.5 s against 9.6 s. On `weirproxy` round 2 measured 2,280 (200 to 3,980) and 11.3 s (0.6 to 14.8); round 3 measured 182 (62 to 263) and 1 s (0.8 to 1.1).
+- A refresh that stale-while-revalidate owes now waits for a slot instead of being dropped. That is the whole move in `sync-expiry`, `sync-expiry-capped` and `purge-herd`: every expired or purged URL is refreshed, at most 48 at a time, so the origin is called once per URL and the purged content is gone sooner.
+- The same change costs the origin more calls in `origin-down`, and this figure got worse: 200 calls while the origin is down where `v1.1.0` made 144. We did not observe the mechanism in the logs. Our reading, consistent with the CHANGELOG: wave one finds 200 expired keys and now queues a refresh for each, where `v1.1.0` started 48 and dropped the rest, so a dead origin sees one call per stored key. No client saw the difference (all 600 were served stale in both rounds). The first repetition made 387. Its breaker went from open to half-open after 2.0 s, as in the second repetition, which made 200 (the third took 1.0 s), so the breaker's timing does not explain the extra 187 calls, and we did not find what does.
+- The breaker probes about once a second and no longer doubles its open period after each failed probe, and once a probe succeeds it admits traffic in doubling steps. In `brownout` without stale serving this trades a lucky case for a bounded one. The median repetition got worse (182 requests failed after recovery, against 120, and the last failure 1.5 s after recovery, against 0.2 s), because the breaker now always waits for its next probe to learn of the recovery (the log shows probes 0.9 to 1.7 s apart), and once a probe succeeds it admits traffic in steps rather than all at once; both put the last failure about a second after recovery. The worst repetition got much better: 342 failed against 1,980, and 1.5 s against 9.6 s. On `weirproxy` round 2 measured 2,280 (200 to 3,980) and 11.3 s (0.6 to 14.8); round 3 measured 182 (62 to 263) and 1 s (0.8 to 1.1).
 - Any client's fetch may now borrow origin slots the other paths leave idle, past the per-path cap. In `busting-flood` the flooded path got more of the origin (2,740 calls against 2,480, up to 56 at once against 50) and 260 fewer clients failed. It is still the worst column.
 - Clients waiting for the same response over the size limit share one download. `oversize-herd` went from one origin call per client to one per wave, and `large-body-herd` from 20 to 1.
 - The restart did not change, because the new `snapshot_keep_fresh` is off by default and the tuned tier does not set it.

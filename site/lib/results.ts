@@ -31,7 +31,7 @@ export const HEAD = {
   probes: ['Probe', ...SUBJECTS.flatMap((s) => (s === WEIR ? [s] : [s, `${s} hardened`]))],
   vary: ['', WEIR, 'Varnish', 'nginx', SOUIN, `${SOUIN} tuned`, 'no cache'],
   conformance: ['Subject', 'Tier', 'Pass', 'Assertion failed', 'Setup failed'],
-  hit: ['Benchmark', '`main` (v1.0.1)', 'after HRD-01 to 15', 'after HRD-19', 'change from `main`'],
+  hit: ['Benchmark', '`main` (v1.0.1)', 'hardening branch', 'v1.1 hit path', 'change from `main`'],
 }
 
 /** Where each table lives: the start of its heading line. scripts/check.mjs reads the same map. */

@@ -1,0 +1,92 @@
+go test -tags load -count=1 -timeout 15m -v ./loadtest/
+=== RUN   TestGCAt1MEntries
+    gc_test.go:213: 
+        gc at scale (scale 1, 12 CPU, go1.27.3)
+          entries (small / large)            10000 / 1000000
+          heap in use / live after fill      31 / 25 MiB / 2483 / 2128 MiB
+          hit ratio (paced)                  1.0000 / 1.0000
+          GC CPU per forced cycle            17.24 ms (6 cycles, every 5s) / 1221.73 ms (6 cycles, every 5s)
+          paced 20000/s p50                  6.144µs / 7.68µs
+          paced p99 with forced cycles       18.432µs / 15.36µs
+          paced max                          1.2125ms / 5.427625ms
+          saturated requests                 268934947 / 213862613
+          saturated alloc per request        800.05 B / 807.92 B
+          saturated non-GC CPU per request   2.57 µs / 3.13 µs
+          saturated natural cycles in window 4567 / 61
+          saturated GC share, runtime-reported 3.56% / 7.05%
+          saturated GC µs per request        0.52 µs / 0.44 µs
+          saturated GC share, projected      16.69% / 12.40%
+        
+--- PASS: TestGCAt1MEntries (183.16s)
+=== RUN   TestSteadyHits
+    scenarios_test.go:88: 
+        steady hits (scale 1, 12 CPU, go1.27.3)
+          requests                           110117700
+          paced target (50% of saturated)    1976183
+          achieved rate                      1835279
+          hit ratio                          1.0000
+          p50                                1.024µs
+          p99 per window                     [5.12µs 4.608µs 5.12µs 4.608µs 4.608µs 4.608µs]
+          p99 median window                  4.608µs
+          p99 overall                        4.608µs
+          max                                3.382459ms
+          origin calls after warm            0
+        
+--- PASS: TestSteadyHits (76.88s)
+=== RUN   TestSynchronizedExpiry
+    scenarios_test.go:139: 
+        synchronized expiry (scale 1, 12 CPU, go1.27.3)
+          keys                               10000
+          max-age                            1m0s
+          storing phase                      1.72s
+          elapsed                            1m20s
+          origin peak in-flight              32
+          origin peak calls/s                1488
+          limit calls/s (20%)                2000
+          refetched after storing            10000
+          client errors                      0
+          peak queue                         0
+        
+--- PASS: TestSynchronizedExpiry (81.94s)
+=== RUN   TestBustingFloodWithNormalTraffic
+    scenarios_test.go:210: 
+        busting flood plus normal traffic (scale 1, 12 CPU, go1.27.3)
+          normal p99 alone                   45.056µs
+          normal p99 under flood             73.728µs
+          normal p50 alone / flood           15.36µs / 11.264µs
+          normal hit ratio under flood       1.0000
+          flood requests / shed errors       99976 / 0
+          flood client drops                 0
+          normal offered (target ~500/s)     499/s, drops 0
+          flood peak in-flight               40
+          MaxPerPartition                    8
+          with idle slots borrowed           40
+        
+--- PASS: TestBustingFloodWithNormalTraffic (41.48s)
+=== RUN   TestOriginBrownout
+    scenarios_test.go:280: 
+        origin brownout (x20 latency) (scale 1, 12 CPU, go1.27.3)
+          2xx / total before                 12064 / 12064
+          2xx / total during                 58882 / 58882
+          2xx / total after                  20032 / 20032
+          stale served during                55834
+          client errors during               0
+          breaker open events                15
+          breaker state at end               closed
+          peak goroutines                    41
+          origin shed events                 0
+        
+--- PASS: TestOriginBrownout (47.59s)
+=== RUN   TestStoreFlap
+    scenarios_test.go:390: 
+        store flap (50% failing) (scale 1, 12 CPU, go1.27.3)
+          requests                           17687056
+          client errors                      0
+          slowest request                    49.62525ms
+          bound                              211.487693ms
+          store breaker open / closed        14 / 8
+          store errors                       434
+        
+--- PASS: TestStoreFlap (43.21s)
+PASS
+ok  	github.com/AshwinSathian/weir/loadtest	474.821s

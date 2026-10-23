@@ -350,8 +350,8 @@ function FloodChart() {
           After a restart it asks the origin for every page again, where nginx asks for none.
         </p>
         <p>
-          The release measured here narrowed the first three and added a setting for the last, which is off by default and not used by the
-          tuned tier. The chart under what the third round changed compares the two releases.
+          Against the previous release, the flood and the purge improved. In the brownout the worst case improved and the typical one got
+          slightly worse. The restart has a new setting that is off by default and not used by the tuned tier. The chart under what the third round changed compares the two releases.
         </p>
         <Spread />
         <Unverified />
@@ -371,10 +371,11 @@ function ChangedChart() {
       ))}
       <figcaption>
         <p>
-          Weir only, behind Caddy, every figure that differs between the two rounds. A bar is a share of the total its row names. Fewer
-          failures and fewer pages left stale are better; more origin calls are the point in the expiry, purge, flood and over-size rows,
-          because each is a refresh or a download that the older release dropped or repeated, and a cost in the outage row. The scenarios,
-          the harness logic and the other caches’ configurations were the same in both rounds.
+          Weir only, behind Caddy: the figures that moved most between the two rounds. Smaller moves are in the tables above. A bar is a
+          share of the total its row names. Fewer failures and fewer pages left stale are better. In the expiry, purge and flood rows more
+          origin calls are the point, because each is a refresh the older release dropped or a request it refused; in the outage row they are
+          a cost. In the over-size rows fewer calls are the gain, because waiting clients now share one download. The scenarios, the harness
+          logic and the other caches’ configurations were the same in both rounds.
         </p>
         <p>The third round on one machine, {R.date}, against the second.</p>
       </figcaption>
