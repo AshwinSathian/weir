@@ -60,7 +60,7 @@ The busting flood is the scenario v1.2.0 changed. A flooded path may now borrow 
 
 ### v1.1 hardening (2026-10-13)
 
-The reference machine (Apple M4 Pro, 12 cores), Go 1.27.1, not idle (an editor and one agent session), so `main` measured 964 ns here where the record above says 852. Read each row against the other columns of the same row. Three builds, eight interleaved runs each, `benchstat`: `main` at `c070976` (v1.0.1), the branch after cards HRD-01 to HRD-15, and the branch after the performance card HRD-19. Raw output: [benchmarks/v1.1-hardening-2026-10-13.txt](benchmarks/v1.1-hardening-2026-10-13.txt).
+The reference machine (Apple M4 Pro, 12 cores), Go 1.27.1, not idle (an editor and one agent session), so `main` measured 964 ns here where the record above says 852. Read each row against the other columns of the same row. Three builds, eight interleaved runs each, `benchstat`: `main` at `c070976` (v1.0.1), the branch after the hardening fixes, and the branch after the hit-path performance change. Raw output: [benchmarks/v1.1-hardening-2026-10-13.txt](benchmarks/v1.1-hardening-2026-10-13.txt).
 
 | Benchmark | `main` (v1.0.1) | hardening branch | v1.1 hit path | change from `main` |
 |---|---:|---:|---:|---|
@@ -75,17 +75,17 @@ The reference machine (Apple M4 Pro, 12 cores), Go 1.27.1, not idle (an editor a
 
 What moved the numbers:
 
-- HRD-09 took the miss-rate tracker's mutex off the hit path: a hit takes a read lock and adds to a counter only when its partition already has one. That is the first drop in the parallel row. A single-threaded hit did not change. (An earlier note here claimed it had, from a run that was not interleaved with its baseline; that was noise.)
-- HRD-19 keeps the request's classification on the stack for a hit and does not build the forwarded header until a miss, a pass-through or a vary lookup needs it. That is the 928 B and the 4 allocations, and with less to collect the parallel rows fall again.
+- The hardening took the miss-rate tracker's mutex off the hit path: a hit takes a read lock and adds to a counter only when its partition already has one. That is the first drop in the parallel row. A single-threaded hit did not change. (An earlier note here claimed it had, from a run that was not interleaved with its baseline; that was noise.)
+- The performance change keeps the request's classification on the stack for a hit and does not build the forwarded header until a miss, a pass-through or a vary lookup needs it. That is the 928 B and the 4 allocations, and with less to collect the parallel rows fall again.
 - A request that creates a flight looks at the store once more first, so the window in which a follower's lookup misses just before the leader stores no longer costs a second fetch (1.003 to 1.000 calls per key).
 
 In round figures, as the README quotes them: hits from 12 goroutines take 225 ns each on the branch and 1,005 ns on `v1.0.1`.
 
 Smaller measurements on the same machine: `BenchmarkLimiterReleaseFullQueue` (one release with 1 024 waiters of distinct partitions) 1 750 to 225 ns; `BenchmarkObserveRequest` in `observe/prom` (one request event, 12 goroutines) 95 to 30 ns.
 
-`make load`, scale 1, on the same machine. The first column is the record of 2026-10-12 further down; the other two are this branch before and after HRD-19.
+`make load`, scale 1, on the same machine. The first column is the record of 2026-10-12 further down; the other two are this branch before and after the performance change.
 
-| Scenario | v1.0.0-rc (2026-10-12) | after HRD-01 to 16 | after HRD-19 | Result |
+| Scenario | v1.0.0-rc (2026-10-12) | after the hardening fixes | after the performance change | Result |
 |---|---|---|---|---|
 | steady hits, paced at half the saturated rate | 578 k/s, p50 1.5 µs, p99 7.7 to 11.3 µs per window | 1 308 k/s, p50 1.4 µs, p99 5.6 to 7.7 µs | 1 331 k/s, p50 1.3 µs, median-window p99 9.2 µs | pass |
 | synchronized expiry | all 10 000 refetched, peak 32 in flight, 1 455 calls in the busiest second, 0 errors | the same, 1 410 calls | the same, 1 464 calls | pass |
@@ -94,11 +94,11 @@ Smaller measurements on the same machine: `BenchmarkLimiterReleaseFullQueue` (on
 | store flap (50%) | 11.2 M requests, 0 errors, slowest 49.2 ms | 11.0 M, 0 errors, 50.5 ms | 15.4 M, 0 errors, 66.0 ms (bound 208 ms) | pass |
 | GC at 1M entries | 1 728 B allocated and 0.93 µs of GC per request | 1 736 B, 0.94 µs | 808 B, 0.46 to 0.71 µs (two runs) | pass (gate 2 µs) |
 
-The paced target of the steady-hits scenario is half of what the engine does saturated, so its rate more than doubling is the tracker's lock again. The saturated stage of the GC test is noisy on a machine that is not idle: two runs after HRD-19 made 88 M and 206 M requests in 60 s at 1M entries (138 M before it), with GC at 0.71 and 0.46 µs per request. Allocation per request is the stable figure, and it halved.
+The paced target of the steady-hits scenario is half of what the engine does saturated, so its rate more than doubling is the tracker's lock again. The saturated stage of the GC test is noisy on a machine that is not idle: two runs after the performance change made 88 M and 206 M requests in 60 s at 1M entries (138 M before it), with GC at 0.71 and 0.46 µs per request. Allocation per request is the stable figure, and it halved.
 
-`make cache-tests`: no regression against the baseline, and `UPDATE=1` leaves the baseline file unchanged, before and after HRD-19.
+`make cache-tests`: no regression against the baseline, and `UPDATE=1` leaves the baseline file unchanged, before and after the performance change.
 
-Eviction pause by shard size (card HRD-13, same machine): the longest single `Set` on a full shard of hot 64-byte records, `BenchmarkEvictionPauseLargeShard`, three runs each.
+Eviction pause by shard size (same machine): the longest single `Set` on a full shard of hot 64-byte records, `BenchmarkEvictionPauseLargeShard`, three runs each.
 
 | Shard | Longest `Set` |
 |---|---|
