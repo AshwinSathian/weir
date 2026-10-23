@@ -7,12 +7,14 @@
 
 import Link from 'next/link'
 import { repoFile } from '@/lib/repo'
-import { DOC, HEAD, NA, SUBJECTS, col, headlines, parseResults, probeCol, type Cell, type Figure, type Tier } from '@/lib/results'
+import { DOC, HEAD, NA, SOUIN, SUBJECTS, col, headlines, parseResults, probeCol, type Cell, type Figure, type Tier } from '@/lib/results'
 import { Svg } from './diagrams'
 
 const R = parseResults(repoFile(DOC))
 const H = headlines(R)
 const W = SUBJECTS[0]
+/** A column title that fits: the tables name cache-handler with the project it is built on. */
+const short = (s: string) => (s === SOUIN ? 'cache-handler' : s)
 const fmt = (n: number) => n.toLocaleString('en-US')
 const bare = (s: string) => s.replaceAll(String.fromCharCode(96), '') // code spans in table labels
 /** The spread of the repetitions, where the table gives one. */
@@ -150,13 +152,13 @@ function Tiered({ id, label, draw, tabs = TIERS }: { id: string; label: number; 
   )
 }
 
-const tierCols = (tier: Tier): Col[] => SUBJECTS.map((s) => ({ key: col(s, tier), title: s, own: s === W }))
+const tierCols = (tier: Tier): Col[] => SUBJECTS.map((s) => ({ key: col(s, tier), title: short(s), own: s === W }))
 
 /** R4a of the comparison spec: the statement travels with every figure that shows another project. */
 function Unverified() {
   return (
     <p className="unverified">
-      Two rounds on one machine, the second on {R.date}. These are our own runs with configurations we wrote. They have not been verified by the owners of
+      Three rounds on one machine, the third on {R.date}. These are our own runs with configurations we wrote. They have not been verified by the owners of
       Varnish, nginx or cache-handler.
     </p>
   )
@@ -265,9 +267,8 @@ function CallsChart() {
           Fewer calls is better only when nobody failed. A ✕ gives the clients that failed in the same run, so a short bar with a ✕ is an origin that refused, not a cache that saved work.
         </p>
         <p>
-          A short bar is not all saving in the expiry rows either. The keys are asked for twice, and a cache that serves stale copies refreshes
-          them in the background. Weir’s tuned tier starts only so many refreshes at a time and, in the release measured here, dropped the rest,
-          so most of its expired keys were still unrefreshed when the counters were read. Varnish’s and nginx’s tuned tiers refreshed every key.
+          In the expiry rows the keys are asked for twice, and a cache that serves stale copies refreshes them in the background, so a tuned
+          tier’s count includes those refreshes. Weir’s tuned tier refreshes every expired key, a few at a time, as Varnish’s and nginx’s do.
         </p>
         <Spread />
         <Unverified />
@@ -343,14 +344,14 @@ function FloodChart() {
           scenario says so in words and gets no bar: open source nginx has no purge.
         </p>
         <p>
-          <strong>Weir loses a row in every group.</strong> In the flood it serves every bystander and fails more clients in total than any
+          <strong>Weir still loses a row in every group.</strong> In the flood it serves every bystander and fails more clients in total than any
           other column, because it refuses the flooded path while the origin still has room. In the brownout its default tier keeps refusing
-          after the origin is back. After a purge with stale serving on, most pages still show their old content at the last read. After a
-          restart it asks the origin for every page again, snapshot or not, where nginx asks for none.
+          for a moment after the origin is back. After a purge with stale serving on, some pages still show their old content at the last read.
+          After a restart it asks the origin for every page again, where nginx asks for none.
         </p>
         <p>
-          These four have fixes merged for the next release, two of them as settings that are off by default. This chart is the release that
-          was measured, and it will be drawn again from a new run when that release exists.
+          The release measured here narrowed the first three and added a setting for the last, which is off by default and not used by the
+          tuned tier. The chart under what the third round changed compares the two releases.
         </p>
         <Spread />
         <Unverified />
@@ -360,24 +361,22 @@ function FloodChart() {
 }
 
 function ChangedChart() {
-  const [, before, after] = HEAD.changed.slice(1)
-  const late = R.changed.filter((f) => String(f.cells[before]) !== String(f.cells[after])).length
   const rows = figureRows('changed', R.changed)
   return (
     <figure className="chart">
       {both(250, (lay, s) => (
-        <Grid id={'changed' + s} lay={lay} rows={rows} flags={false} title="What the round changed in Weir"
-          cols={HEAD.changed.slice(1).map((c) => ({ key: c, title: lay.narrow ? c.replace(' before ', ' pre-') : c, own: true }))}
-          desc="One row per figure, three columns: the last release, the hardening branch before this round's fixes, and the code released after them. The full table follows the chart." />
+        <Grid id={'changed' + s} lay={lay} rows={rows} flags={false} title="What the third round changed in Weir"
+          cols={HEAD.changed.slice(1).map((c) => ({ key: c, title: c, own: true }))}
+          desc="One row per figure that moved, two columns: the release the second round measured and the release the third round measured. The full table follows the chart." />
       ))}
       <figcaption>
         <p>
-          Weir only. Filled means failed, lost or not served, so less fill is better in every row; in the last row the outlined part is the
-          clients served. The middle column is the hardening branch as this round first ran it. {late} of the {R.changed.length} figures were
-          still wrong there: this round found them, and they were fixed before the last column was run. Weir’s zeros in the charts above exist
-          because of those fixes. The scenarios were not changed to fit them.
+          Weir only, behind Caddy, every figure that differs between the two rounds. A bar is a share of the total its row names. Fewer
+          failures and fewer pages left stale are better; more origin calls are the point in the expiry, purge, flood and over-size rows,
+          because each is a refresh or a download that the older release dropped or repeated, and a cost in the outage row. The scenarios,
+          the harness logic and the other caches’ configurations were the same in both rounds.
         </p>
-        <p>The first round on one machine, {R.date}, with that round’s harness. Not run again in the second.</p>
+        <p>The third round on one machine, {R.date}, against the second.</p>
       </figcaption>
     </figure>
   )
@@ -480,7 +479,7 @@ function Probes({ id, lay, hardened }: { id: string; lay: Lay; hardened: boolean
   const out: React.ReactNode[] = []
   let y = 0
   if (!lay.narrow) {
-    SUBJECTS.forEach((s, i) => out.push(<text key={s} className={s === W ? 'acc strong' : 'ink strong'} x={lay.label + i * cw} y={G.sm}>{s}</text>))
+    SUBJECTS.forEach((s, i) => out.push(<text key={s} className={s === W ? 'acc strong' : 'ink strong'} x={lay.label + i * cw} y={G.sm}>{short(s)}</text>))
     y += 28
   }
   const cells = (k: string, draw: (c: string, cx: number, cy: number) => React.ReactNode) =>
@@ -488,7 +487,7 @@ function Probes({ id, lay, hardened }: { id: string; lay: Lay; hardened: boolean
       const cx = lay.label + i * cw
       return (
         <g key={k + s}>
-          {lay.narrow && <text className={s === W ? 'acc sm' : 'mut sm'} x={cx} y={y + 30}>{s}</text>}
+          {lay.narrow && <text className={s === W ? 'acc sm' : 'mut sm'} x={cx} y={y + 30}>{short(s)}</text>}
           {draw(key(s), cx, lay.narrow ? y + 46 : y + 16)}
         </g>
       )
@@ -571,7 +570,7 @@ function ProbeChart() {
         <p>
           The last probe also counted what one client can make a cache keep for one page, by sending many values of a header the origin varies
           on. Of {fmt(v.sampled)} sampled variants still served from the cache afterwards: Varnish {kept('Varnish')}, nginx {kept('nginx')},
-          cache-handler {kept('Souin')}. Weir kept one entry, because it does not forward a header it does not key.
+          cache-handler {kept(SOUIN)}. Weir kept one entry, because it does not forward a header it does not key.
         </p>
         <Unverified />
       </figcaption>
@@ -603,7 +602,7 @@ const CALLS = '/benchmarks/#requests-that-reached-the-origin'
 const OUTAGE = '/benchmarks/#an-origin-outage-a-bad-route-and-a-flood-of-writes'
 const FLOOD = '/benchmarks/#a-flood-a-brownout-a-purge-and-a-restart'
 const BEHIND = '/benchmarks/#what-the-numbers-say-about-weir'
-const NEXT = '/benchmarks/#what-the-next-release-changes'
+const SPEED = '/benchmarks/#speed-and-memory-counts'
 
 const first = (f: Figure, c: string) => f.cells[c][0]
 /** A figure's first value in one column, tied to its table cell. */
@@ -655,7 +654,7 @@ function Ahead() {
       href: '/compare/#poisoning-probes',
       others: true,
       fig: <>{fmt(H.unsafe[W])} of {R.probes.length}</>,
-      what: <>probes served a victim what an attacker caused. By default: Varnish {H.unsafe.Varnish}, nginx {H.unsafe.nginx}, cache-handler {H.unsafe.Souin}. Hardened as each documents: {H.unsafe[probeCol('Varnish', true)]}, {H.unsafe[probeCol('nginx', true)]} and {H.unsafe[probeCol('Souin', true)]}. The probe origin is broken on purpose, so these are not vulnerabilities, and one input behind Caddy is not probed.</>,
+      what: <>probes served a victim what an attacker caused. By default: Varnish {H.unsafe.Varnish}, nginx {H.unsafe.nginx}, cache-handler {H.unsafe[SOUIN]}. Hardened as each documents: {H.unsafe[probeCol('Varnish', true)]}, {H.unsafe[probeCol('nginx', true)]} and {H.unsafe[probeCol(SOUIN, true)]}. The probe origin is broken on purpose, so these are not vulnerabilities, and one input behind Caddy is not probed.</>,
     },
     {
       href: '/compare/#cache-tests',
@@ -668,7 +667,7 @@ function Ahead() {
 }
 
 function Behind() {
-  const [o, l] = H.big
+  const [o] = H.big
   const d = H.down
   const { all, allOthers } = H.flood
   const { late, lag } = H.brownout
@@ -702,8 +701,8 @@ function Behind() {
     {
       href: CALLS,
       others: true,
-      fig: <><N k={['calls', o.label, W]} v={o.cells[W].v} /> and <N k={['calls', l.label, W]} v={l.cells[W].v} /></>,
-      what: <>origin calls for as many clients when a response is over the default size limit: one per client. Varnish and cache-handler make {fmt(o.cells.Varnish.v)}.</>,
+      fig: <><N k={['calls', o.label, W]} v={o.cells[W].v} /> of {fmt(o.clients)}</>,
+      what: <>origin calls for as many clients when a response is over the default size limit: one per wave of clients that wait together, because Weir shares the download and does not store it. Varnish and cache-handler make {fmt(o.cells.Varnish.v)}.</>,
     },
     {
       href: OUTAGE,
@@ -722,14 +721,14 @@ function Behind() {
       what: <>by the source’s arithmetic, not a measured latency: the wait for the last of {fmt(R.cold.clients)} clients on {fmt(R.cold.keys)} cold keys, queued through {R.cold.slots} slots. A cache with no limit answers in one origin round trip.</>,
     },
     {
-      href: NEXT,
-      fig: <>not released</>,
-      what: <>Fixes for the first four tiles are merged and wait for the next release. The numbers here are the published release, and stay until that one is measured.</>,
+      href: SPEED,
+      fig: <>most memory</>,
+      what: <>per stored small object of the caches whose memory was measured, and the lowest hit ratio when a scan evicts. Varnish and nginx hold less per object; nginx keeps its bodies on disk.</>,
     },
     {
       href: '/benchmarks/#not-measured',
-      fig: <>not run</>,
-      what: <>No speed, memory or hit-ratio comparison with any other cache exists, and no latency from these rounds is published.</>,
+      fig: <>not published</>,
+      what: <>No latency, CPU or throughput comparison with any other cache: the timing runs failed the drift check, so only their counts are shown. The third round’s own changes are listed under what it changed in Weir.</>,
     },
   ]
   return <Tiles kind="behind" tiles={tiles} />

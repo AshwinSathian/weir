@@ -3,7 +3,7 @@ title: Compare
 description: Where Varnish, nginx, Souin, Pingora, singleflight or a CDN is the better choice, and where Weir is.
 ---
 
-Most of this page is qualitative. We have not measured speed against any of these projects, so there are no speed claims here. Two rounds of black-box tests against Varnish, nginx and the Caddy cache-handler counted origin calls, failed clients and poisoning verdicts; it is charted [below](#measured-side-by-side). Those measured results are ours alone: we wrote the configurations and ran the tests, and the owners of the other projects have not verified them. Every statement about another project comes from that project's own documentation, linked in each section and read on 2026-10-12. If a claim could not be checked there, it was left out. Corrections are welcome: [open an issue](https://github.com/AshwinSathian/weir/issues/new).
+Most of this page is qualitative. We publish no latency or throughput figures against any of these projects, so there are no speed claims here. Three rounds of black-box tests against Varnish, nginx and the Caddy cache-handler counted origin calls, failed clients, poisoning verdicts, memory per object and cache hits; they are charted [below](#measured-side-by-side) and on the benchmarks page. Those measured results are ours alone: we wrote the configurations and ran the tests, and the owners of the other projects have not verified them. Every statement about another project comes from that project's own documentation, linked in each section and read on 2026-10-12. If a claim could not be checked there, it was left out. Corrections are welcome: [open an issue](https://github.com/AshwinSathian/weir/issues/new).
 
 Each technique in Weir exists somewhere else. What Weir adds is the combination in one Go library, with a written threat model and a test for each claim.
 
@@ -136,7 +136,7 @@ They are not alternatives so much as layers. A CDN in front and Weir at the orig
 
 ## Measured side by side
 
-Two rounds on one machine on 2026-10-13: Varnish 9.1.0, nginx 1.30.5, the Caddy cache-handler v0.17.0 and Weir v1.1.0, as containers behind one origin. These results are based on our own runs and have not been verified by the owners of the other projects.
+The third round, on one machine on 2026-10-22: Varnish 9.1.0, nginx 1.30.5, the Caddy cache-handler v0.17.0 (built on Souin) and Weir v1.2.0, as containers behind one origin. These results are based on our own runs and have not been verified by the owners of the other projects.
 
 ### Poisoning probes
 
@@ -169,9 +169,9 @@ Origin calls and failed clients under herds, expiry, outages, a flood, a purge a
 ## Where Weir is wrong or unproven
 
 - It is new. `v1.0.0` is the first stable release and there are no public production deployments to point to.
-- It has no speed or memory benchmark against any project above, and the measured rounds ran on a single machine with configurations no other project's maintainer has reviewed.
+- It has no published speed comparison with any project above, and the measured rounds ran on a single machine with configurations no other project's maintainer has reviewed. Where memory was measured, Weir held the most per small stored object of the caches measured, and had the lowest hit ratio when a scan pushed entries out (the [benchmarks page](/benchmarks/#speed-and-memory-counts)).
 - It does not store responses over 1 MiB by default, and nothing is served stale unless you or the origin allow it. See the list on the [benchmarks page](/benchmarks/#what-the-numbers-say-about-weir).
-- In the measured rounds it refused most clients of a flooded path while the origin had room, left most pages unrefreshed seconds after a soft purge, kept failing clients for seconds after an origin recovered when stale serving was off, and refetched every page after a restart. Fixes are merged and not yet released; the [benchmarks page](/benchmarks/#what-the-next-release-changes) says what changes and what does not.
+- In the latest round it still refused most clients of a flooded path while the origin had room, left some pages unrefreshed seconds after a soft purge, kept failing clients for a moment after an origin recovered when stale serving was off, and refetched every page after a restart unless the snapshot is told to keep freshness. The [benchmarks page](/benchmarks/#what-the-third-round-changed-in-weir) shows what the latest release changed and what it did not.
 - 81 of the 365 cache-tests fail, most by design, and more with stale serving turned on; read [the reasons](/conformance/) before deciding they suit you.
 - Two store implementations, two adapters, no scripting.
 - The residual risks listed on the [security page](/security/#residual-risks-in-plain-language) are real.

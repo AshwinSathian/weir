@@ -9,10 +9,12 @@
 export const DOC = 'docs/benchmarks.md'
 
 /** The four caches the charts compare, as the tables' column headers name their default tier. */
-export const SUBJECTS = ['Weir v1.1.0', 'Varnish', 'nginx', 'Souin'] as const
+export const SUBJECTS = ['Weir v1.2.0', 'Varnish', 'nginx', 'cache-handler (Souin)'] as const
 export type Subject = (typeof SUBJECTS)[number]
 export type Tier = 'default' | 'tuned'
 const WEIR = SUBJECTS[0]
+/** cache-handler, Caddy's cache module built on Souin. */
+export const SOUIN = SUBJECTS[3]
 /** The column of a subject's tier. Weir's tuned column drops the version. */
 export const col = (s: Subject, t: Tier) => (t === 'default' ? s : s === WEIR ? 'Weir tuned' : `${s} tuned`)
 /** The probe table's column for a subject, as configured by default or hardened. Weir has one: its default is the strict one. */
@@ -25,9 +27,9 @@ export const HEAD = {
   failed: ['Scenario', 'clients', ...NINE],
   recovery: ['Figure', ...NINE],
   flood: ['Figure', ...NINE],
-  changed: ['Figure', 'v1.0.1', 'v1.1 before HRD-21', 'v1.1'],
+  changed: ['Figure', 'v1.1.0', 'v1.2.0'],
   probes: ['Probe', ...SUBJECTS.flatMap((s) => (s === WEIR ? [s] : [s, `${s} hardened`]))],
-  vary: ['', WEIR, 'Varnish', 'nginx', 'Souin', 'Souin tuned', 'no cache'],
+  vary: ['', WEIR, 'Varnish', 'nginx', SOUIN, `${SOUIN} tuned`, 'no cache'],
   conformance: ['Subject', 'Tier', 'Pass', 'Assertion failed', 'Setup failed'],
   hit: ['Benchmark', '`main` (v1.0.1)', 'after HRD-01 to 15', 'after HRD-19', 'change from `main`'],
 }
@@ -45,7 +47,7 @@ export const SECTION = {
   conformance: '### Comparison: conformance',
   hit: '### v1.1 hardening (2026-10-13)',
 }
-const ROUND = '## Comparison with other caches, round 2 ('
+const ROUND = '## Comparison with other caches, round 3 ('
 
 const bad = (m: string): never => {
   throw new Error(`site: ${DOC}: ${m}`)
@@ -300,8 +302,10 @@ export function headlines(r: Results) {
 
   // Losses the first round already showed.
   const big = ['oversize-herd', 'large-body-herd'].map((n) => row(r.calls, n))
-  for (const o of ['Varnish', 'Souin'] as const) want(big.every((s) => s.cells[o].v === 1), `${o} fetches an over-size response once`)
-  want(big.every((s) => tiers.every((t) => s.cells[col(W, t)].v === s.clients)), 'Weir fetches an over-size response once per client')
+  for (const o of ['Varnish', SOUIN] as const) want(big.every((s) => s.cells[o].v === 1), `${o} fetches an over-size response once`)
+  // oversize-herd sends its clients in waves; Weir shares one download per wave and stores none.
+  want(tiers.every((t) => big[0].cells[col(W, t)].v > 1 && big[0].cells[col(W, t)].v < big[0].clients), 'Weir fetches an over-size response once per wave of clients, not once per client')
+  want(tiers.every((t) => big[1].cells[col(W, t)].v === 1), 'Weir fetches a response over the size limit once for one wave of clients')
   const down = rec(/clients failed while down/)
   want(one(down, W).v === down.measures[0].of, "Weir's default fails every client while the origin is down")
   want(one(down, 'Varnish').v < one(down, W).v, "Varnish's default fails fewer clients than Weir's during the outage")

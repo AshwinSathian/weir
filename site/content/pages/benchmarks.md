@@ -1,9 +1,9 @@
 ---
 title: Benchmarks
-description: Two rounds of counting tests against Varnish, nginx and Souin, with the scenarios Weir loses and what the next release changes, then hit-path cost, five load scenarios and garbage-collection cost. One machine, no speed comparison.
+description: Three rounds of counting tests against Varnish, nginx and the Caddy cache-handler (Souin), with the scenarios Weir loses, memory per object and hit ratio, then hit-path cost, load scenarios and garbage-collection cost. One machine, no latency comparison.
 ---
 
-Every number on this page was measured on one machine with a synthetic origin, on the date its section names. The charts and tables are drawn at build time from [docs/benchmarks.md](https://github.com/AshwinSathian/weir/blob/main/docs/benchmarks.md) in the repository, where the raw output files are linked. They show what Weir costs, whether its limits hold under load, and how two rounds of counting tests came out against three other caches. They do not show what your deployment will do, and there is no speed comparison with any other cache here.
+Every number on this page was measured on one machine with a synthetic origin, on the date its section names. The charts and tables are drawn at build time from [docs/benchmarks.md](https://github.com/AshwinSathian/weir/blob/main/docs/benchmarks.md) in the repository, where the raw output files are linked. They show what Weir costs, whether its limits hold under load, and how three rounds of counting tests came out against three other caches. They do not show what your deployment will do, and there is no latency or throughput comparison with any other cache here.
 
 ## Results at a glance
 
@@ -15,7 +15,7 @@ Where it is behind, and what was never measured:
 
 {{figure results-behind}}
 
-Each tile links to the chart it comes from. A tile tagged "our runs" names another project, and the figures in it are ours alone. Every figure is the published `v1.1.0`. Four of the losses have fixes merged for the next release, which [a section below](#what-the-next-release-changes) describes without redrawing a chart. The cost of one cached hit, which is Weir measured against itself, is [further down](#one-cached-hit).
+Each tile links to the chart it comes from. A tile tagged "our runs" names another project, and the figures in it are ours alone. Every figure is the published `v1.2.0`, and [a section below](#what-the-third-round-changed-in-weir) compares it with `v1.1.0`, which the second round measured. The cost of one cached hit, which is Weir measured against itself, is [further down](#one-cached-hit).
 
 ## The reference machine
 
@@ -23,10 +23,10 @@ Apple M4 Pro, 12 cores, 24 GiB, macOS. Go 1.27.1 unless a section says otherwise
 
 ## Against other caches
 
-Black-box tests, run on 2026-10-13 in two rounds: Varnish 9.1.0, nginx 1.30.5 with `proxy_cache`, Caddy with the cache-handler v0.17.0 (Souin), and Caddy with Weir v1.1.0, each in a container behind the same origin. Every cache ran in two tiers. `default` is the smallest configuration that turns caching on, and `tuned` is that project's documented stampede and stale settings. The second round reran everything with a corrected harness, which now counts a success with the wrong body as a failure, and added a flood, a brownout, a purge and a restart. The rounds count origin calls and failed clients. They do not measure speed.
+Black-box tests, the third round run on 2026-10-22 on a quiet machine: Varnish 9.1.0, nginx 1.30.5 with `proxy_cache`, Caddy with cache-handler v0.17.0 (Caddy's cache module, built on Souin), and Caddy with Weir v1.2.0, each in a container behind the same origin. Every cache ran in two tiers. `default` is the smallest configuration that turns caching on, and `tuned` is that project's documented stampede and stale settings. The first two rounds ran on 2026-10-13 against earlier Weir releases; the third repeats the second's scenarios unchanged, each script in one invocation, and adds memory and hit-ratio counts. The rounds count origin calls, failed clients, memory and cache hits. They publish no speed figures.
 
 > [!LIMITS]
-> Every figure about another project here comes from our own runs with configurations we wrote. None has been verified by that project's owners, so treat them as our measurements, not as statements those projects would sign, and [send corrections](https://github.com/AshwinSathian/weir/issues/new). Weir is the published `v1.1.0` module. The configurations, the harness and the method are in [`bench/compare/`](https://github.com/AshwinSathian/weir/tree/main/bench/compare) and the [comparison specification](https://github.com/AshwinSathian/weir/blob/main/docs/11-comparison-spec.md).
+> Every figure about another project here comes from our own runs with configurations we wrote. None has been verified by that project's owners, so treat them as our measurements, not as statements those projects would sign, and [send corrections](https://github.com/AshwinSathian/weir/issues/new). Weir is the published `v1.2.0` module. The configurations, the harness and the method are in [`bench/compare/`](https://github.com/AshwinSathian/weir/tree/main/bench/compare) and the [comparison specification](https://github.com/AshwinSathian/weir/blob/main/docs/11-comparison-spec.md).
 
 The two buttons above a chart switch between the tiers. Both tiers are in the page, and the full table with its notes is under each chart.
 
@@ -86,20 +86,15 @@ Four scenarios the first round left out. What does one flooded path do to everyo
 
 {{include docs/benchmarks.md "### Comparison: what the numbers say about Weir"}}
 
-### What the next release changes
+### Speed and memory counts
 
-The four losses of the second round have fixes merged on `main`. None is in a release yet, so no chart above shows them, and the comparison will be run again when one is.
+How much memory does each cache need per stored object, and how many requests does it answer from a full store? These are the counts of the speed and memory runs. Their latency and CPU figures are not published (see [not measured](#not-measured)).
 
-- A refresh that stale serving owes now waits for a slot. Before, a purge or a mass expiry left most pages stale until someone asked again.
-- The breaker probes about once a second and no longer doubles its wait, and it lets traffic back in steps once a probe succeeds.
-- A path's fetches may use origin slots the other paths leave idle. That alone moves the flood scenario little. An adaptive limit that finds what the origin can take moves it more, and is off by default because finding that limit means crossing it now and then.
-- A snapshot can keep entries as fresh as they were, so a restart costs the origin nothing. It is off by default: a purge sent while the server was down is then not applied to what the snapshot brings back.
+{{include docs/benchmarks.md "### Comparison: speed and memory counts"}}
 
-The measurements behind these, from builds of `main` and not from a release, and one figure that got worse, are in the [changelog](/changelog/) and in the card that tracked the work, [HRD-23](https://github.com/AshwinSathian/weir/blob/main/docs/cards/22-hardening.md).
+### What the third round changed in Weir
 
-### What the first round changed in Weir
-
-The first round started with `v1.0.1`, which was the published release then, and a hardening branch. Which of that release's failures are gone in the code released as `v1.1.0`, and which did the round itself find?
+The second round measured `v1.1.0` and the third `v1.2.0`, with the same scenarios and the same configurations for the other caches. Which Weir figures moved, and why?
 
 {{figure results-changed}}
 
@@ -112,14 +107,14 @@ The first round started with `v1.0.1`, which was the published release then, and
 
 ### Not measured
 
-- **Speed, memory and hit ratio against any other cache.** That part of the comparison has not been run. Nothing above is a throughput claim, and no latency from these rounds is published, because the runs were not made under the drift check the specification requires.
+- **Latency, CPU time and throughput against any other cache.** The speed runs measured them, and every timing repetition failed the drift check the specification requires: the control's median held within 5% but its 99th percentile moved 12 to 20% within each repetition. Only the runs' counts are published. Nothing above is a throughput or latency claim.
 - Differential fuzzing across the caches.
 - Any review by a maintainer of Varnish, nginx or cache-handler of the configuration used for their project. We have been wrong three times so far, each time against the other project and each time found by our own review before publication: port exhaustion in our containers that looked like nginx failing, a rule from Varnish's grace guide that our tuned tier lacked, and a cache-handler storage left at a default size that evicted the keys the test had stored.
-- The next release. Everything above is `v1.1.0`.
-- A second machine. The tables are stitched from many invocations of the harness on one day on one Mac, three repetitions per scenario with the median reported, except `large-body-herd` and `post-flood`, which ran once.
+- cache-handler's memory and hit ratio: its default storage has no size setting we could verify.
+- A second machine. Each round ran on one Mac, three repetitions per scenario with the median reported, except `large-body-herd` and `post-flood`, which ran once.
 
 ```sh
-cd bench/compare && ./run.sh -reps 3 && ./probes.sh && ./conformance.sh   # hours; one subject and tier at a time is in the README there
+cd bench/compare && ./run.sh -reps 3 && ./probes.sh && ./conformance.sh && ./speed.sh   # hours; one subject and tier at a time is in the README there
 ```
 
 ## One cached hit
