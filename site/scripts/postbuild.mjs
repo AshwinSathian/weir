@@ -62,7 +62,7 @@ fs.writeFileSync(
   Cache-Control: public, max-age=31536000, immutable, no-transform
 `,
 )
-fs.writeFileSync(path.join(OUT, '_redirects'), `/docs /docs/quickstart/ 302\n/github https://github.com/AshwinSathian/weir 302\n`)
+fs.writeFileSync(path.join(OUT, '_redirects'), `/docs /docs/quickstart/ 302\n/docs/ /docs/quickstart/ 302\n/github https://github.com/AshwinSathian/weir 302\n`)
 
 // 3. Links
 const ids = new Map()
