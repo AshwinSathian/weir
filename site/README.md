@@ -80,6 +80,10 @@ Security headers are in two places because a static export has inline bootstrap 
 
 No analytics, no cookies, no third-party requests. Fonts are self-hosted from `@fontsource`.
 
+`public/.well-known/security.txt` points vulnerability reports to GitHub's private reporting. Its `Expires` line is one year out: move it forward with each release, and before 2027-10-23 at the latest.
+
+Cloudflare must not inject anything into the pages: with Bot Fight Mode's JavaScript detections, Email Address Obfuscation or Web Analytics on, Cloudflare adds a script that the page's Content-Security-Policy blocks and that breaks the "no third-party requests" promise. Check with `curl -s https://weir.ashwinsathian.com/ | grep -c 'challenge-platform\|cloudflareinsights\|email-protection'`, which must print 0.
+
 ## Design
 
 Dark by default with a stored light override. IBM Plex Sans and IBM Plex Mono. One accent (teal), amber only for "takes a protection back", red only for cautions. Tokens are at the top of `styles/site.css`.
