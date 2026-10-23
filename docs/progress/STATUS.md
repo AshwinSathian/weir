@@ -7,6 +7,7 @@ Card state: ready
 Branch: none
 PR: post-release updates (version pins, release log) and the round 3 results (benchmarks, comparison, site) are open
 Next card: none open. Next steps: merge the two open pull requests, deploy the site, then the Dependabot updates (#137 CI actions, #138 Go dependencies), held back during the release.
+Next release: v1.3.0, by the owner's decision of 2026-10-23 (no v1.2.1). Scope: (1) measure before fixing: CPU for the plain-Caddy control in `speed.sh` and timed runs long enough for p99 to pass the drift gate, then v1.1.0 against v1.2.0 on Weir alone; (2) profile `caddy-weir` against `weirproxy` at 64 KiB and 960 KiB for CPU per hit and the p99 collapse at the top 64 KiB rate (84 times the control, `weirproxy` 13); (3) memory per entry (3.6 KB for a 100-byte body, Varnish 1.0 KB): the pointer-light layout deferred under D36, a store contract change that needs the owner's approval before code.
 
 ## Waiting on Ashwin
 
