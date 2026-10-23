@@ -1,0 +1,104 @@
+goos: darwin
+goarch: arm64
+pkg: github.com/AshwinSathian/weir
+cpu: Apple M4 Pro
+BenchmarkServeHitSmall-12          	 1925726	       612.7 ns/op	     608 B/op	       8 allocs/op
+BenchmarkServeHitVary-12           	 1000000	      1058 ns/op	    1040 B/op	      12 allocs/op
+BenchmarkServeMissCoalesced-12     	   39660	     30580 ns/op	         1.000 origin-calls/op	   22698 B/op	     192 allocs/op
+BenchmarkServeHitParallel/missrate-on-12         	 6139432	       192.0 ns/op	     608 B/op	       8 allocs/op
+BenchmarkServeHitParallel/missrate-off-12        	 7546348	       160.6 ns/op	     608 B/op	       8 allocs/op
+BenchmarkServeHitExperiments/unmatched-12        	 1407734	       848.4 ns/op	    1032 B/op	      11 allocs/op
+BenchmarkServeHitExperiments/matched-no-cookie-12         	  571766	      2081 ns/op	    3033 B/op	      45 allocs/op
+BenchmarkServeHitExperiments/matched-valid-cookie-12      	  712476	      1703 ns/op	    2297 B/op	      32 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/AshwinSathian/weir
+cpu: Apple M4 Pro
+BenchmarkServeHitSmall-12          	 2024750	       592.6 ns/op	     608 B/op	       8 allocs/op
+BenchmarkServeHitVary-12           	 1000000	      1087 ns/op	    1040 B/op	      12 allocs/op
+BenchmarkServeMissCoalesced-12     	   39445	     30291 ns/op	         1.000 origin-calls/op	   22729 B/op	     192 allocs/op
+BenchmarkServeHitParallel/missrate-on-12         	 6047767	       199.9 ns/op	     608 B/op	       8 allocs/op
+BenchmarkServeHitParallel/missrate-off-12        	 7735987	       160.1 ns/op	     608 B/op	       8 allocs/op
+BenchmarkServeHitExperiments/unmatched-12        	 1377938	       876.6 ns/op	    1032 B/op	      11 allocs/op
+BenchmarkServeHitExperiments/matched-no-cookie-12         	  551120	      2139 ns/op	    3033 B/op	      45 allocs/op
+BenchmarkServeHitExperiments/matched-valid-cookie-12      	  680989	      1748 ns/op	    2297 B/op	      32 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/AshwinSathian/weir
+cpu: Apple M4 Pro
+BenchmarkServeHitSmall-12          	 1888026	       641.5 ns/op	     608 B/op	       8 allocs/op
+BenchmarkServeHitVary-12           	 1000000	      1097 ns/op	    1040 B/op	      12 allocs/op
+BenchmarkServeMissCoalesced-12     	   38988	     30541 ns/op	         1.000 origin-calls/op	   22736 B/op	     192 allocs/op
+BenchmarkServeHitParallel/missrate-on-12         	 6202479	       189.2 ns/op	     608 B/op	       8 allocs/op
+BenchmarkServeHitParallel/missrate-off-12        	 7585394	       161.1 ns/op	     608 B/op	       8 allocs/op
+BenchmarkServeHitExperiments/unmatched-12        	 1353199	       885.6 ns/op	    1032 B/op	      11 allocs/op
+BenchmarkServeHitExperiments/matched-no-cookie-12         	  538783	      2187 ns/op	    3033 B/op	      45 allocs/op
+BenchmarkServeHitExperiments/matched-valid-cookie-12      	  672703	      1821 ns/op	    2297 B/op	      32 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/AshwinSathian/weir
+cpu: Apple M4 Pro
+BenchmarkServeHitSmall-12          	 1870005	       640.2 ns/op	     608 B/op	       8 allocs/op
+BenchmarkServeHitVary-12           	 1000000	      1103 ns/op	    1040 B/op	      12 allocs/op
+BenchmarkServeMissCoalesced-12     	   38253	     30235 ns/op	         1.000 origin-calls/op	   22726 B/op	     192 allocs/op
+BenchmarkServeHitParallel/missrate-on-12         	 6179101	       192.9 ns/op	     608 B/op	       8 allocs/op
+BenchmarkServeHitParallel/missrate-off-12        	 7712670	       159.9 ns/op	     608 B/op	       8 allocs/op
+BenchmarkServeHitExperiments/unmatched-12        	 1360471	       882.3 ns/op	    1032 B/op	      11 allocs/op
+BenchmarkServeHitExperiments/matched-no-cookie-12         	  540205	      2198 ns/op	    3033 B/op	      45 allocs/op
+BenchmarkServeHitExperiments/matched-valid-cookie-12      	  665655	      1780 ns/op	    2297 B/op	      32 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/AshwinSathian/weir
+cpu: Apple M4 Pro
+BenchmarkServeHitSmall-12          	 1861876	       633.3 ns/op	     608 B/op	       8 allocs/op
+BenchmarkServeHitVary-12           	 1000000	      1120 ns/op	    1040 B/op	      12 allocs/op
+BenchmarkServeMissCoalesced-12     	   41406	     28102 ns/op	         1.000 origin-calls/op	   22719 B/op	     192 allocs/op
+BenchmarkServeHitParallel/missrate-on-12         	 6120274	       189.1 ns/op	     608 B/op	       8 allocs/op
+BenchmarkServeHitParallel/missrate-off-12        	 7788523	       158.1 ns/op	     608 B/op	       8 allocs/op
+BenchmarkServeHitExperiments/unmatched-12        	 1335522	       897.4 ns/op	    1032 B/op	      11 allocs/op
+BenchmarkServeHitExperiments/matched-no-cookie-12         	  533913	      2211 ns/op	    3033 B/op	      45 allocs/op
+BenchmarkServeHitExperiments/matched-valid-cookie-12      	  669717	      1809 ns/op	    2297 B/op	      32 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/AshwinSathian/weir
+cpu: Apple M4 Pro
+BenchmarkServeHitSmall-12          	 1857892	       645.1 ns/op	     608 B/op	       8 allocs/op
+BenchmarkServeHitVary-12           	 1000000	      1129 ns/op	    1040 B/op	      12 allocs/op
+BenchmarkServeMissCoalesced-12     	   43065	     27838 ns/op	         1.000 origin-calls/op	   22725 B/op	     192 allocs/op
+BenchmarkServeHitParallel/missrate-on-12         	 6180219	       189.8 ns/op	     608 B/op	       8 allocs/op
+BenchmarkServeHitParallel/missrate-off-12        	 7672214	       157.3 ns/op	     608 B/op	       8 allocs/op
+BenchmarkServeHitExperiments/unmatched-12        	 1329967	       899.3 ns/op	    1032 B/op	      11 allocs/op
+BenchmarkServeHitExperiments/matched-no-cookie-12         	  534493	      2224 ns/op	    3033 B/op	      45 allocs/op
+BenchmarkServeHitExperiments/matched-valid-cookie-12      	  655758	      1791 ns/op	    2297 B/op	      32 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/AshwinSathian/weir
+cpu: Apple M4 Pro
+BenchmarkServeHitSmall-12          	 1933634	       623.2 ns/op	     608 B/op	       8 allocs/op
+BenchmarkServeHitVary-12           	 1000000	      1112 ns/op	    1040 B/op	      12 allocs/op
+BenchmarkServeMissCoalesced-12     	   42595	     27873 ns/op	         1.000 origin-calls/op	   22697 B/op	     192 allocs/op
+BenchmarkServeHitParallel/missrate-on-12         	 6163708	       191.7 ns/op	     608 B/op	       8 allocs/op
+BenchmarkServeHitParallel/missrate-off-12        	 7535050	       158.3 ns/op	     608 B/op	       8 allocs/op
+BenchmarkServeHitExperiments/unmatched-12        	 1325974	       904.3 ns/op	    1032 B/op	      11 allocs/op
+BenchmarkServeHitExperiments/matched-no-cookie-12         	  531916	      2223 ns/op	    3033 B/op	      45 allocs/op
+BenchmarkServeHitExperiments/matched-valid-cookie-12      	  667536	      1801 ns/op	    2297 B/op	      32 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/AshwinSathian/weir
+cpu: Apple M4 Pro
+BenchmarkServeHitSmall-12          	 1812651	       657.0 ns/op	     608 B/op	       8 allocs/op
+BenchmarkServeHitVary-12           	 1000000	      1125 ns/op	    1040 B/op	      12 allocs/op
+BenchmarkServeMissCoalesced-12     	   43374	     27803 ns/op	         1.000 origin-calls/op	   22706 B/op	     192 allocs/op
+BenchmarkServeHitParallel/missrate-on-12         	 6343976	       193.4 ns/op	     608 B/op	       8 allocs/op
+BenchmarkServeHitParallel/missrate-off-12        	 7534635	       159.6 ns/op	     608 B/op	       8 allocs/op
+BenchmarkServeHitExperiments/unmatched-12        	 1345392	       891.9 ns/op	    1032 B/op	      11 allocs/op
+BenchmarkServeHitExperiments/matched-no-cookie-12         	  535626	      2236 ns/op	    3033 B/op	      45 allocs/op
+BenchmarkServeHitExperiments/matched-valid-cookie-12      	  666054	      1797 ns/op	    2297 B/op	      32 allocs/op
+PASS

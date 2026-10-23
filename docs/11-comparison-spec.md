@@ -1,7 +1,7 @@
 # Weir comparison benchmark specification
 
-Status: v0.4. Design approved by the project owner on 2026-10-13; the 160 MiB store of §5.5 on 2026-10-22. Two rounds ran the same day; the results of the second are in [benchmarks.md](benchmarks.md) and this version records what it added and changed (cards CMP-03b and CMP-04b).
-Date: 2026-10-22 (v0.4: the speed pillar's harness, CMP-06)
+Status: v0.5. Design approved by the project owner on 2026-10-13; the 160 MiB store of §5.5 on 2026-10-22. Two rounds ran on 2026-10-13 and a third, against `v1.2.0`, on 2026-10-22; the results of the third are in [benchmarks.md](benchmarks.md).
+Date: 2026-10-23 (v0.5: round 3 and what it published; v0.4: the speed pillar's harness, CMP-06)
 Depends on: [07-testing-strategy.md §9](07-testing-strategy.md) (the in-process load scenarios this mirrors over HTTP), [06-threat-model.md](06-threat-model.md) (the threats the security probes exercise)
 
 ## 1. What this is for
@@ -27,7 +27,7 @@ This document does not change Weir's behavior. It is normative only for the harn
 
 `caddy-weir` and `weirproxy` are built from Weir's published modules, the way a user gets them. A fix that is not released yet is measured by the labeled subjects `caddy-weir-next` and `weirproxy-next`: `run.sh` builds them from the working tree, records the commit beside the results, and they run the same configuration files as the published subjects. A result from a `-next` subject is always reported with its commit and never called a release. All three drivers build them through `lib.sh`, so no driver can use a binary another run left behind.
 
-Round 2 measured the published `v1.1.0` and did not run the `-next` subjects: `main` differed from the `v1.1.0` tag in one documentation comment (`caddy/doc.go`), so they would have measured the same code twice. `v1.0.1` is no longer a subject. Its round 1 figures stay in the before-and-after table of [benchmarks.md](benchmarks.md), where they show what the release fixed; a `v1.0.1` column in every table would describe a version nobody should install and would have had to be rerun with the corrected harness to sit beside the other columns.
+Round 3 measured the published `v1.2.0`, and neither it nor round 2 ran the `-next` subjects. Round 2 measured the published `v1.1.0`: `main` differed from the `v1.1.0` tag in one documentation comment (`caddy/doc.go`), so they would have measured the same code twice. `v1.0.1` is no longer a subject. Its round 1 figures stay in the before-and-after table of [benchmarks.md](benchmarks.md), where they show what the release fixed; a `v1.0.1` column in every table would describe a version nobody should install and would have had to be rerun with the corrected harness to sit beside the other columns.
 
 Out of the first round: Apache Traffic Server and a Valkey-against-Redis pairing (second round, only if the first is worth publishing), Squid, and Pingora. Pingora would need a proxy written by us in Rust, and the numbers would describe our code.
 
@@ -113,7 +113,7 @@ Notes on the CMP-03b scenarios:
 
 ### 5.2 Scenarios Weir is expected to lose
 
-- `large-body-herd`: a 50 MiB body, 200 ms origin, 20 clients on one key, one repetition (the virtual machine has 8 GiB). Weir stores at most 1 MiB by default and passes the rest through, so each client reaches the origin. Varnish streams one fetch to all.
+- `large-body-herd`: a 50 MiB body, 200 ms origin, 20 clients on one key, one repetition (the virtual machine had 8 GiB in rounds 1 and 2 and about 12 GiB in round 3). Weir stores at most 1 MiB by default and passes the rest through, so before `v1.2.0` each client reached the origin. Since `v1.2.0` clients that wait together share one download, and round 3 measured one origin call. Varnish streams one fetch to all.
 - `restart`: store 2000 keys with `max-age=600`, stop and start the cache's container gracefully, read the keys again 64 at a time. The origin calls of the replay are the entries lost. 2000 keys in chunks, not 10 000 at once, for the reason given for `sync-expiry`. nginx keeps its disk cache. Weir's tuned tier sets `snapshot_dir`; its snapshot reloads entries as stale ones (D15), so against an origin with no validators the replay still fetches every key, and the scenario reports that. Varnish's `deprecated_persistent` storage is marked deprecated and experimental in its own storage guide and is not used; neither cache-handler tier uses one of its disk storages.
 - Raw hit throughput against the C proxies, in pillar 5.
 
@@ -175,7 +175,9 @@ A finding becomes a card of its own. It is never fixed inside a comparison card.
 
 First round: three defects of v1.0.1 were already fixed on the v1.1 branch (`slow-origin-herd`, `bad-route`, `post-flood`). Four more findings, CMP-F1 to CMP-F4 in [cards/21-comparison.md](cards/21-comparison.md), were fixed in card HRD-21 with the owner's go-ahead, and the Weir v1.1 subjects were rerun. All seven are reported before and after in [benchmarks.md](benchmarks.md).
 
-Second round: four findings, CMP-F5 to CMP-F8, none fixed here. The per-path cap refuses a busy path's clients while the origin has room (`busting-flood`); a soft purge with stale serving leaves most URLs unrefreshed (`purge-herd`); without stale serving the breaker keeps failing clients after the origin recovers from repeated bursts (`brownout`); a snapshot does not save origin calls after a restart (`restart`). Each is on the page as a loss and has a card for the owner's decision.
+Second round: four findings, CMP-F5 to CMP-F8, none fixed in the comparison cards. The per-path cap refuses a busy path's clients while the origin has room (`busting-flood`); a soft purge with stale serving leaves most URLs unrefreshed (`purge-herd`); without stale serving the breaker keeps failing clients after the origin recovers from repeated bursts (`brownout`); a snapshot does not save origin calls after a restart (`restart`). Each is on the page as a loss and has a card for the owner's decision. They were addressed for `v1.2.0` (card HRD-23), and round 3 reports each before and after.
+
+Third round (`v1.2.0`): no new defect. Three figures are new losses or got worse, and are on the page as such: Weir holds the most memory per small object of the measured caches (3,692 B behind Caddy at 100 000 entries, Varnish 1,080 B), its hit ratio under the scan workload is the lowest (0.666, Varnish 0.672), and its tuned tier calls a dead origin once per stale key in `origin-down` (200, where `v1.1.0` made 144), a side effect of the queued refreshes. None has a card yet; that is the owner's decision.
 
 ## 9. What is published
 
@@ -189,10 +191,9 @@ Decided on 2026-10-13: run first, then decide what to publish. After the first r
 
 - Image digests are pinned in `compose.yaml` (2026-10-13). The two builder images in `docker/` are pinned by tag only.
 - R4 is not done: no competitor configuration has been reviewed by that project's maintainers. The page says so and invites corrections. Our own review has found three mistakes against other projects so far (port exhaustion, Varnish's rule that abandons a failed background fetch, Otter's default size), each fixed and rerun before publication.
-- The published data of round 2 comes from two harness commits that differ in one subject's configuration and one probe's verdict logic. A single clean pass would be tidier and is not expected to change a cell.
+- The published data of round 2 came from two harness commits that differ in one subject's configuration and one probe's verdict logic. Round 3 ran each script once at one commit (`0147a80`).
 - cache-handler: the `stale` setting has no visible effect in our tuned tier, with or without stale directives from the origin; a `GET` with a body, a cached `Set-Cookie` and a percent-encoded path stay unsafe in its hardened tier because we found no documented option for them; its Otter storage grew by more than 1 GiB for 10 000 small objects. Each may be our configuration. They need its maintainers' reading (R4) before more is said. The empty 200 is reported upstream as darkweak/souin#876 (open, no reply on 2026-10-13); the percent-encoded path is not reported yet.
-- Latency was measured but not published: neither round ran under the drift gate of §6.
-- Pillar 5.5 (speed and memory) has a harness (CMP-06, `speed.sh`) and had not run on a quiet machine when this was written. The memory reading of the `Vary` probe is not a substitute for it.
+- Latency was measured but not published: rounds 1 and 2 did not run under the drift gate of §6. Round 3 ran pillar 5.5 on a quiet machine, and all five timing repetitions failed the gate (measured against each repetition's first control run, the control's p50 moved at most 9%, under the 10% gate, but its p99 moved 14 to 22% in four repetitions and 62% in the other, with two single-run spikes of 8.8 ms and 15.4 ms). The owner decided on 2026-10-22 to publish the pillar's counts only (memory per object, hit ratio, origin calls) and keep its latency, CPU and saturation figures unpublished until a run passes the gate.
 - Differential fuzzing (§5.6) has not run.
 - Varnish's tuned tier carries Weir's limiter numbers (R2), so `cold-keys` and the capped scenarios compare two configurations of the same idea there, not two designs.
 - `restart` does not show what Weir's snapshot is for. An origin profile with a validator, and a restart while the origin is down, would.
