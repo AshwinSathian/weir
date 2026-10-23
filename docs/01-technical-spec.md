@@ -1,7 +1,7 @@
 # Weir technical specification
 
 Status: v1.0, implemented through Phase 3 (first approved for Phase 0 and Phase 1; later phases added in §13, §14 and docs 08 and 10)
-Date: 2026-10-22
+Date: 2026-10-23
 Owner: Ashwin Sathian
 Module: `github.com/AshwinSathian/weir`
 Supersedes: the interface sketch in [00-design-doc.md §7.2](00-design-doc.md)
@@ -402,7 +402,7 @@ All fields are optional. The zero value of `Config` is valid and yields the defa
 
 | Field | Default | Notes |
 |---|---|---|
-| `Store` | memory store, 16 shards (halved, down to 1, while a shard's small queue could not hold `Storable.MaxObjectBytes`, so the zero Config stays valid under a small `GOMEMLIMIT`), size per D35: 40% of `GOMEMLIMIT` clamped to [16 MiB, 8 GiB], or 256 MiB with a warning when `GOMEMLIMIT` is unset | engine closes it on `Close` only if it created it |
+| `Store` | memory store, 16 shards (halved, down to 1, while a shard's small queue could not hold `Storable.MaxObjectBytes`, so the zero Config stays valid under a small `GOMEMLIMIT`), size (D35): 40% of `GOMEMLIMIT` clamped to [16 MiB, 8 GiB], or 256 MiB with a warning when `GOMEMLIMIT` is unset | engine closes it on `Close` only if it created it |
 | `Key.QueryDrop`, `Key.QueryKeep` | empty | patterns, trailing `*` allowed |
 | `Key.QuerySort` | false | |
 | `Key.NormalizePath` | false | |
@@ -447,12 +447,12 @@ All fields are optional. The zero value of `Config` is valid and yields the defa
 | `Client.HonorRevalidation` | false | decision D5 |
 | `Timeouts.Origin` / `Background` / `Store` | 30 s / 30 s / 50 ms | |
 | `Warm.Concurrency` | 4 | a default is lowered to `MaxConcurrent − ReserveForeground` when that is smaller; an explicit value above it is rejected (FR-LCY-1) |
-| `Limiter.MaxPerHost` | 0 (off) | M14; the Caddy adapter sets 25% for multi-host sites |
+| `Limiter.MaxPerHost` | 0 (off) | per-host fairness (FR-FAIR-1); the Caddy adapter sets 25% for multi-host sites |
 | `Limiter.MaxPerClient` | 0 (off) | FR-FAIR-4; needs `Request.Client` from a trusted source |
-| `Limiter.MaxUpload` | 25% of `MaxConcurrent` | D25, separate pool for requests with a body |
+| `Limiter.MaxUpload` | 25% of `MaxConcurrent` | separate pool for requests with a body (D25) |
 | `Timeouts.StreamIdle` | 60 s | D26 |
 | `Bypass.ReportStrippedCookies` | 5 min | D31; a negative value disables |
-| `Experiments.Cookie`, `Experiments.Header` | `weir_v`, `Weir-Variant` | docs/10 §3. The header name has no underscore and is not a reserved name (T-35) |
+| `Experiments.Cookie`, `Experiments.Header` | `weir_v`, `Weir-Variant` | The header name has no underscore and is not a reserved name (docs/10 §3, T-35) |
 | `Experiments.MaxActive` | 4 | at most 8 |
 | `Experiments.SigningKeys` | none | required when experiments are configured: 1 to 4 keys of 32 to 256 bytes, the first signs and all verify |
 | `Limits.*` | see FR-VAL-1, FR-VAL-3, FR-STO-10 | |

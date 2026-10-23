@@ -25,4 +25,4 @@ Weir is written and maintained by [Ashwin Sathian](https://github.com/AshwinSath
 
 ## For contributors
 
-The repository carries more process than most: normative design documents with requirement IDs, task cards, and a progress log. They are in [`docs/`](https://github.com/AshwinSathian/weir/tree/main/docs), and [CONTRIBUTING.md](https://github.com/AshwinSathian/weir/blob/main/CONTRIBUTING.md) says which ones you need to read for a given change.
+The repository carries more process than most: normative design documents with requirement IDs that the tests cite. They are in [`docs/`](https://github.com/AshwinSathian/weir/tree/main/docs), and [CONTRIBUTING.md](https://github.com/AshwinSathian/weir/blob/main/CONTRIBUTING.md) says which ones you need to read for a given change.

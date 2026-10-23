@@ -10,6 +10,8 @@ export function repoFile(rel: string): string {
   return fs.readFileSync(path.join(ROOT, rel), 'utf8')
 }
 
+const FENCE = /^\s*(```|~~~)/ // a fence line opens or closes a code block
+
 /** The body of the section whose heading line starts with `heading` (for example "## 6. Configuration"). */
 export function section(rel: string, heading: string, opts: { keepHeading?: boolean } = {}): string {
   const lines = repoFile(rel).split('\n')
@@ -17,8 +19,10 @@ export function section(rel: string, heading: string, opts: { keepHeading?: bool
   if (start < 0) throw new Error(`site: ${rel} has no heading starting with "${heading}"`)
   const level = /^#+/.exec(heading)?.[0].length ?? 2
   let end = lines.length
+  let fence = false // a "# comment" in a shell block is not a heading
   for (let i = start + 1; i < lines.length; i++) {
-    const m = /^(#+) /.exec(lines[i])
+    if (FENCE.test(lines[i])) fence = !fence
+    const m = fence ? null : /^(#+) /.exec(lines[i])
     if (m && m[1].length <= level) {
       end = i
       break
@@ -45,7 +49,14 @@ export function tableRows(md: string, firstHeader: string): string[][] {
 
 /** Shift every heading in `md` by `n` levels (negative promotes, never above h2), so a repo section fits under a page title. */
 export function demote(md: string, n: number): string {
-  return md.replace(/^(#+) /gm, (_, h: string) => '#'.repeat(Math.max(2, Math.min(6, h.length + n))) + ' ')
+  let fence = false
+  return md
+    .split('\n')
+    .map((l) => {
+      if (FENCE.test(l)) fence = !fence
+      return fence ? l : l.replace(/^(#+) /, (_, h: string) => '#'.repeat(Math.max(2, Math.min(6, h.length + n))) + ' ')
+    })
+    .join('\n')
 }
 
 /** The body of a tested Example function, without the signature and closing brace. */

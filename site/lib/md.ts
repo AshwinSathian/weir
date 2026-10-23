@@ -20,7 +20,7 @@ const blob = (path: string) => `${REPO}/blob/main/${path}`
 // of the site gets nothing from them. A parenthesis that holds only such
 // references is dropped from prose, and an ID left in running text is plain
 // text. The threat table keeps its row labels (idRows).
-const IDTOK = String.raw`(?:FR-[A-Z]+-\d+|NFR-\d+|INV-\d+|T6\.\d+[a-z]?|T-\d+|R-\d{1,2}|D-H\d+|D\d{1,2}|E-\d+|S-\d+|V-\d+|P[1-8]|OQ-[A-Z0-9]+(?:-\d+)?|HRD-\d+[a-z]?|CMP-[A-Z0-9-]+|M\d+-\d+[a-z]?|P2-\d+[a-z]?|P25-\d+[a-z]?|(?:docs\/)?\d\d §[\d.]+[a-z]?|§\d+(?:\.\d+)*[a-z]?)`
+const IDTOK = String.raw`(?:FR-[A-Z]+-\d+|NFR-\d+|INV-\d+|T6\.\d+[a-z]?|T-\d+|R-\d{1,2}|D-H\d+|D\d{1,2}|E-\d+|S-\d+|V-\d+|P[1-8]|OQ-[A-Z0-9]+(?:-\d+)?|HRD-\d+[a-z]?|CMP-[A-Z0-9-]+|M\d+-\d+[a-z]?|P2-\d+[a-z]?|P25-\d+[a-z]?|(?:docs\/)?\d\d §[\d.]+[a-z]?(?: step \d+)?|§\d+(?:\.\d+)*[a-z]?)`
 const REF = String.raw`(?:\d\d )?${IDTOK}` // "06 R-2": a risk in document 06
 const LIST = String.raw`(?:(?:decisions?|cards?|see|threat|requirement|per) )?${REF}(?:(?:, |; | and | to )${REF})*`
 const PAREN = new RegExp(String.raw`\s*\(${LIST}\)`, 'g')

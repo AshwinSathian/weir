@@ -173,7 +173,7 @@ The memory store keeps entries as ordinary Go objects, so the garbage collector 
 
 {{include docs/benchmarks.md "### GC cost at 1M entries (D36)"}}
 
-At 1 million entries the collector costs 1.08 µs per request here, and 1.76 µs on the 4-vCPU Linux container, against a project gate of 2 µs. A layout that stores entries without pointers brought that to 0.014 µs in a prototype, but it added 12 allocations per hit and broke the hit-path budget, so it is deferred (M16-02) until a deployment needs it. `GOGC=200` roughly halves the cost for more memory headroom.
+At 1 million entries the collector costs 1.08 µs per request here, and 1.76 µs on the 4-vCPU Linux container, against a project gate of 2 µs. A layout that stores entries without pointers brought that to 0.014 µs in a prototype, but it added 12 allocations per hit and broke the hit-path budget, so it is deferred until a deployment needs it. `GOGC=200` roughly halves the cost for more memory headroom.
 
 ## What this does not show
 

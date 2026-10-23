@@ -43,7 +43,7 @@ The reference machine (Apple M4 Pro, 12 cores), Go 1.27.3, quiet. Test binaries 
 | `BenchmarkServeHitExperiments/matched-no-cookie` | 2.204 µs ± 6% | 2.224 µs ± 5% | no significant change (p=0.279) | 2.962 KiB | 45 |
 | `BenchmarkServeHitExperiments/matched-valid-cookie` | 1.794 µs ± 5% | 1.795 µs ± 3% | no significant change (p=0.721) | 2.243 KiB | 32 |
 
-The hit path did not change: 615 ns, 608 B and 8 allocations a hit, inside the NFR-5 budget. The two parallel-hit rows are 1 to 2% slower and the coalesced miss allocates 0.6% more bytes; the changes in v1.2.0 are on the miss, refresh and breaker paths, which a hit does not take. Bytes and allocations are equal on every other row.
+The hit path did not change: 615 ns, 608 B and 8 allocations a hit, inside the hit-path budget (NFR-5). The two parallel-hit rows are 1 to 2% slower and the coalesced miss allocates 0.6% more bytes; the changes in v1.2.0 are on the miss, refresh and breaker paths, which a hit does not take. Bytes and allocations are equal on every other row.
 
 `make load`, scale 1, at `0147a80` (the `v1.2.0` tag's code), 474.8 s, all six pass. Raw output: [benchmarks/v1.2.0-release-2026-10-23-load.txt](benchmarks/v1.2.0-release-2026-10-23-load.txt).
 
@@ -60,7 +60,7 @@ The busting flood is the scenario v1.2.0 changed. A flooded path may now borrow 
 
 ### v1.1 hardening (2026-10-13)
 
-The reference machine (Apple M4 Pro, 12 cores), Go 1.27.1, not idle (an editor and one agent session), so `main` measured 964 ns here where the record above says 852. Read each row against the other columns of the same row. Three builds, eight interleaved runs each, `benchstat`: `main` at `c070976` (v1.0.1), the branch after the hardening fixes, and the branch after the hit-path performance change. Raw output: [benchmarks/v1.1-hardening-2026-10-13.txt](benchmarks/v1.1-hardening-2026-10-13.txt).
+The reference machine (Apple M4 Pro, 12 cores), Go 1.27.1, not idle (an editor and a second interactive workload), so `main` measured 964 ns here where the record above says 852. Read each row against the other columns of the same row. Three builds, eight interleaved runs each, `benchstat`: `main` at `c070976` (v1.0.1), the branch after the hardening fixes, and the branch after the hit-path performance change. Raw output: [benchmarks/v1.1-hardening-2026-10-13.txt](benchmarks/v1.1-hardening-2026-10-13.txt).
 
 | Benchmark | `main` (v1.0.1) | hardening branch | v1.1 hit path | change from `main` |
 |---|---:|---:|---:|---|
@@ -278,7 +278,7 @@ All five passed, and `TestGCAt1MEntries` passed as well.
 | GC share of busy CPU, projected | 5.7% | 6.8% |
 | **GC µs per request** | 0.66 | **1.08** |
 
-The D36 gate (at most 2 µs of GC per request at 1M entries) holds with 1.08 µs, against 1.76 µs on the 4-core Xeon. The share of busy CPU is 6.2% to 6.8%, under the 10% line that PLAN M10.5b set. The pointer-light layout (M16-02) stays deferred.
+The GC gate (at most 2 µs of GC per request at 1M entries, D36) holds with 1.08 µs, against 1.76 µs on the 4-core Xeon. The share of busy CPU is 6.2% to 6.8%, under the project's 10% line. The pointer-light layout stays deferred.
 
 ### `BenchmarkServeHitSmall` (NFR-5)
 
@@ -330,23 +330,23 @@ Every change to `internal/keys` is held to the old behavior by a differential fu
 
 ### On the reference machine
 
-Two back-to-back runs on the M4 Pro, machine otherwise idle, three builds interleaved by `benchstat` (`-count 10` each; raw: [benchmarks/hit-path-opt-m4pro.txt](benchmarks/hit-path-opt-m4pro.txt)). An earlier run with several Claude Code sessions and a Chrome video stream open had a ±38% spread and is discarded.
+Two back-to-back runs on the M4 Pro, machine otherwise idle, three builds interleaved by `benchstat` (`-count 10` each; raw: [benchmarks/hit-path-opt-m4pro.txt](benchmarks/hit-path-opt-m4pro.txt)). An earlier run with several other interactive workloads and a Chrome video stream open had a ±38% spread and is discarded.
 
-| Build | Run 1 ns/op | Run 2 ns/op | vs M1 (run 1 / run 2) | B/op | allocs/op |
+| Build | Run 1 ns/op | Run 2 ns/op | vs first engine (run 1 / run 2) | B/op | allocs/op |
 |---|---:|---:|---|---:|---:|
-| M1 `73e4d2e` | 870.5 ± 1% | 854.1 ± 2% | | 1 480 | 14 |
-| M10 `b909550` | 1 087 ± 3% | 1 070.5 ± 1% | +24.9% / +25.3% | 1 480 | 14 |
+| first engine `73e4d2e` | 870.5 ± 1% | 854.1 ± 2% | | 1 480 | 14 |
+| all defenses on `b909550` | 1 087 ± 3% | 1 070.5 ± 1% | +24.9% / +25.3% | 1 480 | 14 |
 | optimized branch | 833.5 ± 3% | 821.4 ± 4% | **-4.3% / -3.8%** (p<0.01) | 1 536 | 12 |
 
-The optimized hit path is about 4% faster than M1 and 23% faster than M10 on the M4 Pro, with two fewer allocations. The +32% growth since M1 that the first reference run exposed is gone. Bytes per op are 56 above M1 (1 536 against 1 480), not the 160 above M1 of the release candidate, and the allocation count is lower.
+The optimized hit path is about 4% faster than the first engine and 23% faster than the build with all defenses on, with two fewer allocations. The +32% growth since the first engine that the first reference run exposed is gone. Bytes per op are 56 above the first engine (1 536 against 1 480), not the 160 above it of the release candidate, and the allocation count is lower.
 
-The gain is smaller on the M4 Pro than on the Xeon (-30% there against M10-to-branch -23% here, relative to the release candidate), as expected: SHA-256 is cheaper with the ARM instructions, so the two tags no longer hashed per hit saved less.
+The gain is smaller on the M4 Pro than on the Xeon (-30% there against -23% here from the all-defenses build to the branch, relative to the release candidate), as expected: SHA-256 is cheaper with the ARM instructions, so the two tags no longer hashed per hit saved less.
 
-**New baseline.** The 20% regression rule is measured from this run, a median of about 0.83 µs. NFR-5 sets the ns/op ceiling at 1.5 times that, 1.25 µs (docs/01), replacing the 1.9 µs derived from the first, noisier reference run. The first reference run above stays as the record of the release candidate.
+**New baseline.** The 20% regression rule is measured from this run, a median of about 0.83 µs. The hit-path budget sets the ns/op ceiling at 1.5 times that, 1.25 µs (NFR-5), replacing the 1.9 µs derived from the first, noisier reference run. The first reference run above stays as the record of the release candidate.
 
 ## Hardening after v1.0.0-rc.1 (2026-10-12)
 
-The changes that followed the `v1.0.0-rc.1` rehearsal (stable `QuerySort` by name, the `Cache-Control` and `Pragma` filter on the forward, `Range` ignored beside `If-Match`, per-field overhead in `Entry.Size`, the Valkey record limit, the wasm build) measured on the reference machine with Go 1.27.2. The machine was not idle (an editor and one agent session), so read the load figures as pass or fail and the benchstat lines as the comparison. Raw output: [benchmarks/hardening-2026-10-12.txt](benchmarks/hardening-2026-10-12.txt).
+The changes that followed the `v1.0.0-rc.1` rehearsal (stable `QuerySort` by name, the `Cache-Control` and `Pragma` filter on the forward, `Range` ignored beside `If-Match`, per-field overhead in `Entry.Size`, the Valkey record limit, the wasm build) measured on the reference machine with Go 1.27.2. The machine was not idle (an editor and a second interactive workload), so read the load figures as pass or fail and the benchstat lines as the comparison. Raw output: [benchmarks/hardening-2026-10-12.txt](benchmarks/hardening-2026-10-12.txt).
 
 ### Benchmarks (`benchstat`, `main` at `3f7eefa` against the branch, 10 interleaved runs)
 
@@ -415,7 +415,7 @@ WEIR_VERSION=v1.2.0 ./run.sh -reps 3      # every subject, both tiers; SUBJECTS=
 | `oversize-herd` | 150 | 150 | 3 | 3 | 1 | 1 | 50 | 1 | 1 | 1 |
 | `large-body-herd` | 20 | 20 | 1 | 1 | 1 | 1 | 20 | 1 | 1 | 1 |
 
-The origin's delay and body per scenario are in the table of 11 §5.1. The two `-capped` scenarios use an origin that refuses with 503 beyond 128 concurrent requests; a refused request is not counted as an origin call, so "128" for a subject without a limiter means the whole burst arrived and 128 were served. `sync-expiry` sends two waves of 5,000, two seconds apart, and reads the counters two seconds after the second, so background refreshes that a cache started during the first wave are counted. Weir's tuned tier now refreshes every expired URL, as Varnish's and nginx's tuned tiers do, at most 48 at a time: it had made 144 calls (128 to 172) when the first wave ended and 5,000 by the last read. In round 2 it made 272, because refreshes beyond those 48 were dropped and most URLs were still served stale when the counters were read. Varnish's tuned tier made between 3,017 and 5,000 calls across the three repetitions.
+The origin's delay and body per scenario are in a table of the [comparison specification](11-comparison-spec.md) (11 §5.1). The two `-capped` scenarios use an origin that refuses with 503 beyond 128 concurrent requests; a refused request is not counted as an origin call, so "128" for a subject without a limiter means the whole burst arrived and 128 were served. `sync-expiry` sends two waves of 5,000, two seconds apart, and reads the counters two seconds after the second, so background refreshes that a cache started during the first wave are counted. Weir's tuned tier now refreshes every expired URL, as Varnish's and nginx's tuned tiers do, at most 48 at a time: it had made 144 calls (128 to 172) when the first wave ended and 5,000 by the last read. In round 2 it made 272, because refreshes beyond those 48 were dropped and most URLs were still served stale when the counters were read. Varnish's tuned tier made between 3,017 and 5,000 calls across the three repetitions.
 
 `oversize-herd` sends three waves of 50 clients a second apart for a 2 MiB response. Weir does not store it (the limit is 1 MiB by default), but since v1.2.0 the clients of one wave share one download, so the origin sees one call per wave instead of one per client. `large-body-herd` is one wave of 20 for a 50 MiB response: one call.
 
@@ -491,7 +491,7 @@ What each one does, and what its numbers do not say:
 
 ### Comparison: speed and memory counts
 
-From `speed.sh` (11 §5.5), first repetition. Counts only: the pillar's latency, CPU and saturation figures are not published, because every timing repetition failed the drift check of 11 §6 (the control it is measured against moved too much). cache-handler has no rows: its default storage has no size setting we could verify, so it cannot be held to the store sizes below.
+From `speed.sh` (11 §5.5), first repetition. Counts only: the pillar's latency, CPU and saturation figures are not published, because every timing repetition failed the drift check in section 6 of the comparison specification (the control it is measured against moved too much). cache-handler has no rows: its default storage has no size setting we could verify, so it cannot be held to the store sizes below.
 
 Memory per stored object: the growth of the container's anonymous plus shared memory across a fill of N new entries with 100-byte bodies, in a store large enough that nothing is evicted, divided by N.
 

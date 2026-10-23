@@ -13,6 +13,9 @@
 //   charts    (after a build: `node scripts/check.mjs charts`) every number drawn on a chart in out/
 //             equals its cell in docs/benchmarks.md, no row or column of a charted table is missing, and
 //             every figure that shows another project carries the "not verified" statement
+//   internal  (after a build: `node scripts/check.mjs internal`) no page in out/ shows a card, requirement
+//             or decision ID, a planning file, the AI workflow or the owner's first name; the security
+//             page keeps its invariant labels (INV-n), and threat IDs are not checked
 //   release   with RELEASED=true, all four modules resolve at VERSION from the Go proxy
 import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
@@ -225,6 +228,25 @@ function charts() {
   }
 }
 
+function internal() {
+  const out = path.join(SITE, 'out')
+  if (!fs.existsSync(out)) return fail('out/ is missing: build the site first')
+  const banned = [
+    /\b(?:HRD|CMP|P2|P25|OQ)-[0-9A-Z]+|\bM\d+-\d+|\bM\d+\.\d+[a-z]\b/, // cards and plan steps
+    /\bN?FR-(?:[A-Z]+-)?\d+|\bD-H\d+|\bD\d{1,2}\b/, // requirements and decisions
+    /docs\/progress|PLAN-weir|docs\/cards|20-later|surfaces-and-site-plan|Claude Code|agent session|Waiting on/, // planning and workflow
+    /\bAshwin\b(?! Sathian)/, // the owner by first name; the full-name credit stays
+  ]
+  for (const f of walk(out, '.html')) {
+    const page = path.relative(out, f)
+    const t = read(f).replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>|<[^>]+>/g, ' ').replace(/\s+/g, ' ')
+    for (const re of page === 'security/index.html' ? banned : [...banned, /\bINV-\d+/]) {
+      const m = re.exec(t)
+      if (m) fail(`out/${page}: "${m[0]}" in "…${t.slice(Math.max(0, m.index - 50), m.index + 50)}…"`)
+    }
+  }
+}
+
 function release() {
   const src = read(path.join(SITE, 'data/release.ts'))
   if (!/RELEASED = true/.test(src)) return console.log('release: RELEASED is false, nothing to resolve')
@@ -242,7 +264,7 @@ function release() {
 }
 
 const only = process.argv[2]
-const checks = only === 'release' ? { release } : only === 'charts' ? { charts } : { style, numbers, counts, versions, data, results: resultsCheck, snippet }
+const checks = only === 'release' ? { release } : only === 'charts' ? { charts } : only === 'internal' ? { internal } : { style, numbers, counts, versions, data, results: resultsCheck, snippet }
 for (const [name, fn] of Object.entries(checks)) {
   const before = errors.length
   fn()
