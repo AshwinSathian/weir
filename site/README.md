@@ -83,7 +83,7 @@ No analytics, no cookies, no third-party requests. Fonts are self-hosted from `@
 
 `public/.well-known/security.txt` points vulnerability reports to GitHub's private reporting. Its `Expires` line is one year out: move it forward with each release, and before 2027-10-23 at the latest.
 
-Cloudflare must not inject anything into the pages: with Bot Fight Mode's JavaScript detections, Email Address Obfuscation or Web Analytics on, Cloudflare adds a script that the page's Content-Security-Policy blocks and that breaks the "no third-party requests" promise. Check with `curl -s https://weir.ashwinsathian.com/ | grep -c 'challenge-platform\|cloudflareinsights\|email-protection'`, which must print 0.
+Cloudflare must not inject anything into the pages: with Bot Fight Mode's JavaScript detections, Email Address Obfuscation or Web Analytics on, Cloudflare adds a script that the page's Content-Security-Policy blocks and that breaks the "no third-party requests" promise. Bot Fight Mode keeps JavaScript detections on with no switch to turn them off, so `_headers` sends `Cache-Control: no-transform` on every response, which Cloudflare honors by not rewriting the page. Check with `curl -s https://weir.ashwinsathian.com/ | grep -c 'challenge-platform\|cloudflareinsights\|email-protection'`, which must print 0.
 
 ## Design
 
