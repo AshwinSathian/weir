@@ -58,6 +58,7 @@ The charts and headline tiles on the benchmarks and compare pages are static inl
 - A measured figure in hand-written copy (a time, an allocation count, a count of four digits or more) must be listed in `content/claims.md` with its source, and must appear in that source.
 - The README's Go program must compile against the working tree.
 - Every internal link and anchor in the built site must resolve.
+- No built page may show the project's internal references: card and plan-step IDs (`HRD-03`, `M16-02`), requirement and decision IDs (`FR-COA-4`, `NFR-5`, `D36`), invariant IDs outside the security page, planning files (`docs/progress/`, `docs/cards/`, `PLAN-weir.md`), the AI workflow, or the owner's first name on its own. `pnpm check internal` reads the text of every page in `out/` and `pnpm build` runs it. Threat and risk IDs are not checked: the security pages navigate by them. Most IDs never reach a page because `lib/md.ts` drops reference-only parentheses at render time; when the check fails on an ID in running text, rewrite that sentence in its source document so the ID sits in a parenthesis of its own (`(NFR-5)`), which keeps it on GitHub and drops it here.
 
 `content/claims.md` is not published. Statements about other projects on the compare page are listed there with the URL and the date they were read. Re-read them before changing that page.
 

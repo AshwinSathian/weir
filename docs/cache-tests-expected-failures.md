@@ -1,6 +1,6 @@
 # cache-tests expected failures
 
-Updated: 2026-10-12
+Updated: 2026-10-23
 Last verified: 2026-10-12, `make cache-tests` on the Mac with Go 1.27.2 against `main`, no regression from the baseline (docs/progress/LOG.md, rc-rehearsal entry).
 
 Tests from [http-tests/cache-tests](https://github.com/http-tests/cache-tests) that `examples/weirproxy` fails, from the run recorded in `testdata/cache-tests-baseline.json` (suite commit `d644cf4`, 365 tests, 284 pass, 81 fail). The nightly job (docs/07 §8) fails only when a test that passed in the baseline fails now, so this list is documentation, not configuration. Update both files together with `UPDATE=1 scripts/cache-tests.sh`.
@@ -32,7 +32,7 @@ Passing everything means nothing (the suite's own words). Rows with a requiremen
 | `age-parse-numeric-parameter`, `age-parse-parameter` | An `Age` with parameters (`7200;foo=bar`) is not a delta-seconds value, so it is ignored (age 0) as RFC 9111 §5.1 says for an invalid `Age` | FR-FRS-4, RFC 9111 §5.1 |
 | `headers-omit-headers-listed-in-Cache-Control-no-cache`, `headers-omit-headers-listed-in-Cache-Control-no-cache-single` | A qualified `no-cache="a"` is read as unqualified (validate before every reuse), the same strict reading as qualified `private` | FR-STO-4, FR-SRV-1 |
 | `vary-normalise-space` | A keyed header value is compared exactly; `1,2` and ` 1, 2 ` are two variants. An "optimal" test; normalizing would be a key-boundary change | FR-KEY-9, P2 |
-| `interim-102`, `interim-103`, `interim-no-header-reuse`, `interim-not-cached` | 1xx responses are not relayed to the client (the final response is cached correctly). Relaying is not a Phase 1 goal | D43 |
+| `interim-102`, `interim-103`, `interim-no-header-reuse`, `interim-not-cached` | 1xx responses are not relayed to the client (the final response is cached correctly). Relaying is not a goal of the engine | D43 |
 | `headers-store-Transfer-Encoding` | The suite sends an invalid `Transfer-Encoding` value and Go's HTTP client rejects the response, so Weir answers 502 for a malformed origin response | FR-FWD-7, `ErrOrigin` |
 | `304-etag-update-response-ETag` | The suite reports a retry (`↻`), which its authors say needs manual interpretation; nothing is asserted | no assertion to decide (suite limitation) |
 | `conditional-lm-fresh-no-lm` | The suite sends `If-Modified-Since` 3000 s before the response's `Date` and the response has no `Last-Modified`. Weir compares the stored `Date`, which is 3000 s later than the client's `If-Modified-Since`, so the resource counts as modified and the answer is 200 (RFC 9110 §13.1.3). The test expects 304 | FR-SRV-2 |
