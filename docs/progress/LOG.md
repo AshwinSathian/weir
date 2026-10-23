@@ -158,3 +158,11 @@ Entry template for new sessions:
 - Deviations: each pull request lists the documents it changed.
 - Follow-ups: the v1.2.0 release and the comparison rerun on a quiet machine.
 - Context: long session, several cards by agreement with the owner.
+
+## 2026-10-23 · v1.2.0 release · done
+- Branch / PR: launch/gate-chunks / #145; launch/post-v1.2.0 and launch/results-v1.2.0 / open
+- Done: release gate (the root package group now runs two race runs per process, after the runner ran out of memory twice); load, benchmarks, `make vuln` and `make cache-tests` on a quiet machine; `v1.2.0-rc.1` rehearsal, then `v1.2.0` for all four modules; runbook 7.8 on Caddy built from the tags; GitHub release v1.2.0, and the internal IDs removed from the v1.0.0 and v1.1.0 release notes; comparison round 3 against the published v1.2.0.
+- Tests: `release-gate` runs 39753002745 and 39796966321; `make release-smoke` for rc.1 and v1.2.0.
+- Deviations: speed pillar latency not published (drift gate, see STATUS); docs/07 §12 and the release-gate workflow run the 100 race runs in processes of two.
+- Follow-ups: Dependabot #137 and #138; pkg.go.dev pages for v1.2.0 requested; site deploy after the results pull request.
+- Context: same long session as the launch preparation.
