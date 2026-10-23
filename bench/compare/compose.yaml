@@ -36,7 +36,7 @@ services:
     build:
       context: .
       dockerfile: docker/weirproxy.Dockerfile
-      args: { WEIR_VERSION: "${WEIR_VERSION:-v1.1.0}" }
+      args: { WEIR_VERSION: "${WEIR_VERSION:-v1.2.0}" }
     command: ["-listen", ":8080", "-origin", "http://origin:9000"]
     <<: *plumbing
 
@@ -45,7 +45,7 @@ services:
       context: .
       dockerfile: docker/caddy.Dockerfile
       args:
-        WITH: "--with github.com/AshwinSathian/weir@${WEIR_VERSION:-v1.1.0} --with github.com/AshwinSathian/weir/caddy@${WEIR_VERSION:-v1.1.0}"
+        WITH: "--with github.com/AshwinSathian/weir@${WEIR_VERSION:-v1.2.0} --with github.com/AshwinSathian/weir/caddy@${WEIR_VERSION:-v1.2.0}"
     volumes: ["./subjects/caddy-weir/${TIER:-default}/Caddyfile:/etc/caddy/Caddyfile:ro"]
     <<: *plumbing
 

@@ -24,7 +24,7 @@ build_next() {
 record_env() {
   {
     echo "harness commit: $(git rev-parse HEAD) $(git status --porcelain -- . | grep -q . && echo '(uncommitted changes in bench/compare)' || echo '(clean)')"
-    echo "weir version: ${WEIR_VERSION:-v1.1.0}"
+    echo "weir version: ${WEIR_VERSION:-v1.2.0}"
     docker compose version
     docker compose --profile tools images
   } > "results/$1.env.txt"

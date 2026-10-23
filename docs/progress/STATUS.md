@@ -1,12 +1,12 @@
 # Status
 
-Updated: 2026-10-22
-Phase: v1.2.0 in preparation (v1.1.0 released 2026-10-13)
-Current card: none (launch preparation outside a card)
-Card state: awaiting-merge
-Branch: launch/* (one pull request per topic)
-PR: #134 to #136 merged; #139 (HRD-22), #140 (HRD-20), #141 (CMP-06), #142 (site and docs), #143 (this cleanup) open, stacked in that order except #141
-Next card: none open. Next steps: the v1.2.0 release (rc first), then the comparison rerun and the speed pillar on a quiet machine.
+Updated: 2026-10-23
+Phase: v1.2.0 released 2026-10-23 (tags on `release/v1.2.0`; CHANGELOG dated 2026-10-22)
+Current card: none
+Card state: ready
+Branch: none
+PR: post-release updates (version pins, release log) and the round 3 results (benchmarks, comparison, site) are open
+Next card: none open. Next steps: merge the two open pull requests, deploy the site, then the Dependabot updates (#137 CI actions, #138 Go dependencies), held back during the release.
 
 ## Waiting on Ashwin
 
@@ -26,6 +26,7 @@ Testing
 - The caddytest end-to-end tests listen on 127.0.0.1:9080 and :2999: two `make check` runs at once on one machine make them fail.
 
 Comparison harness (bench/compare)
+- Round 3 (2026-10-22, Weir v1.2.0) ran every pillar in one invocation per script on a quiet machine. The speed pillar's timing rows all failed the drift gate: the control's p50 held within 5%, its p99 moved 12 to 20% inside every repetition. Only its counts (memory per object, hit ratio, origin calls) are published, by the owner's decision. Publishing latency needs longer timed runs or a p99 rule that fits runs of this length; either is a docs/11 §6 change for the owner.
 - `run.sh` (counting pillars, about two and a half hours in full; one call per subject and tier keeps each under ten minutes), `probes.sh`, `conformance.sh` and `speed.sh` (speed and memory, about two hours, needs a quiet machine and Docker Desktop with 8 CPUs).
 - Unreleased engine changes are measured with the `-next` subjects (`SUBJECTS=caddy-weir-next`), built from the working tree.
 - Charts on the site are drawn from `docs/benchmarks.md` by `site/lib/results.ts`. A table whose columns change, or a rerun that contradicts a headline tile, fails `make site-check` on purpose: update `HEAD` in that file or the tile copy in `site/components/charts.tsx`.

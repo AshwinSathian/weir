@@ -126,7 +126,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      WEIR_VERSION: v1.1.0
+      WEIR_VERSION: v1.2.0
     steps:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:

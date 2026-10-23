@@ -1,8 +1,7 @@
-// One switch for the launch gate (docs/progress/surfaces-and-site-plan.md §10).
 // RELEASED=false shows the pre-release banner and the rc install lines.
 export const RELEASED = true
-export const VERSION = 'v1.1.0'
-export const RC_VERSION = 'v1.0.0-rc.3'
+export const VERSION = 'v1.2.0'
+export const RC_VERSION = 'v1.2.0-rc.1'
 export const SHOWN_VERSION = RELEASED ? VERSION : RC_VERSION
 
 export const MODULE = 'github.com/AshwinSathian/weir'
