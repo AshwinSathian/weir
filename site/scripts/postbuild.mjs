@@ -43,6 +43,9 @@ for (const file of pages) {
 }
 
 // 2. Headers
+// no-transform keeps Cloudflare from rewriting pages: with Bot Fight Mode on it
+// injects a JavaScript Detections script that cannot be switched off, which the
+// CSP above blocks and which breaks "no third-party requests".
 fs.writeFileSync(
   path.join(OUT, '_headers'),
   `/*
@@ -52,9 +55,11 @@ fs.writeFileSync(
   Referrer-Policy: strict-origin-when-cross-origin
   Permissions-Policy: camera=(), microphone=(), geolocation=(), interest-cohort=()
   Cross-Origin-Opener-Policy: same-origin
+  Cache-Control: public, max-age=0, must-revalidate, no-transform
 
 /_next/static/*
-  Cache-Control: public, max-age=31536000, immutable
+  ! Cache-Control
+  Cache-Control: public, max-age=31536000, immutable, no-transform
 `,
 )
 fs.writeFileSync(path.join(OUT, '_redirects'), `/docs /docs/quickstart/ 302\n/github https://github.com/AshwinSathian/weir 302\n`)
