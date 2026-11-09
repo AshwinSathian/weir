@@ -2,12 +2,15 @@
 <!-- Source of public/og.png. Open at 1200x630 and screenshot; see site/README.md. -->
 <meta charset="utf-8">
 <style>
-  @font-face { font-family: P; src: local('IBM Plex Sans SemiBold'), local('IBM Plex Sans'); }
-  html, body { margin: 0; width: 1200px; height: 630px; background: #0d1418; color: #e2eaee; font-family: 'IBM Plex Sans', system-ui, sans-serif; }
+  /* The site's fonts, read from node_modules after pnpm install. */
+  @font-face { font-family: 'Bricolage Grotesque Variable'; font-weight: 200 800; src: url(../node_modules/@fontsource-variable/bricolage-grotesque/files/bricolage-grotesque-latin-wght-normal.woff2) format('woff2'); }
+  @font-face { font-family: 'Figtree Variable'; font-weight: 300 900; src: url(../node_modules/@fontsource-variable/figtree/files/figtree-latin-wght-normal.woff2) format('woff2'); }
+  @font-face { font-family: 'JetBrains Mono Variable'; font-weight: 100 800; src: url(../node_modules/@fontsource-variable/jetbrains-mono/files/jetbrains-mono-latin-wght-normal.woff2) format('woff2'); }
+  html, body { margin: 0; width: 1200px; height: 630px; background: #0d1418; color: #e2eaee; font-family: 'Figtree Variable', system-ui, sans-serif; }
   .w { padding: 72px 80px; }
-  .logo { display: flex; align-items: center; gap: 14px; font-size: 34px; font-weight: 600; }
-  h1 { font-size: 66px; line-height: 1.08; letter-spacing: -0.03em; margin: 44px 0 0; max-width: 960px; font-weight: 600; }
-  p { font: 24px ui-monospace, 'IBM Plex Mono', Menlo, monospace; color: #9bafb9; margin: 36px 0 0; }
+  .logo { display: flex; align-items: center; gap: 14px; font: 700 34px/1 'Bricolage Grotesque Variable', system-ui, sans-serif; letter-spacing: -0.03em; }
+  h1 { font: 700 68px/1.02 'Bricolage Grotesque Variable', system-ui, sans-serif; letter-spacing: -0.03em; margin: 44px 0 0; max-width: 960px; text-wrap: balance; }
+  p { font: 24px 'JetBrains Mono Variable', ui-monospace, Menlo, monospace; font-variant-ligatures: none; color: #9bafb9; margin: 36px 0 0; }
   svg.h { position: absolute; left: 0; bottom: 0; }
 </style>
 <div class="w">

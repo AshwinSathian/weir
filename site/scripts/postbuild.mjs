@@ -1,7 +1,9 @@
 // Runs after `next build`. Three jobs on the static output in out/:
 //   1. Content-Security-Policy per page. A static export has inline bootstrap
 //      scripts, so each page gets a <meta> policy listing the SHA-256 of its
-//      own inline scripts. No 'unsafe-inline' for scripts.
+//      own inline scripts. No 'unsafe-inline' for scripts. The same pass
+//      preloads the latin heading and body fonts, so the first screen does not
+//      wait for the stylesheet to discover them.
 //   2. _headers for Cloudflare Pages: the headers a <meta> cannot set, and caching.
 //   3. Link check: every internal href and #fragment must resolve, and every
 //      GitHub link into this repository must name a file that exists.
@@ -19,7 +21,17 @@ const pages = []
   }
 })(OUT)
 
-// 1. CSP
+// The bundler keeps fontsource's file names and appends a hash.
+const MEDIA = path.join(OUT, '_next/static/media')
+const preload = ['bricolage-grotesque-latin-wght-normal', 'figtree-latin-wght-normal']
+  .map((name) => {
+    const f = fs.readdirSync(MEDIA).find((f) => f.startsWith(name + '.') && f.endsWith('.woff2'))
+    if (!f) throw new Error(`postbuild: no ${name} font in ${MEDIA}`)
+    return `<link rel="preload" href="/_next/static/media/${f}" as="font" type="font/woff2" crossorigin=""/>`
+  })
+  .join('')
+
+// 1. CSP and font preload
 for (const file of pages) {
   let html = fs.readFileSync(file, 'utf8')
   const hashes = new Set()
@@ -38,7 +50,7 @@ for (const file of pages) {
     "form-action 'none'",
   ].join('; ')
   if (!html.includes('<head>')) throw new Error(`postbuild: no <head> in ${file}`)
-  html = html.replace('<head>', `<head><meta http-equiv="Content-Security-Policy" content="${csp}"/>`)
+  html = html.replace('<head>', `<head><meta http-equiv="Content-Security-Policy" content="${csp}"/>${preload}`)
   fs.writeFileSync(file, html)
 }
 

@@ -1,9 +1,8 @@
 import type { Metadata, Viewport } from 'next'
-import '@fontsource/ibm-plex-sans/400.css'
-import '@fontsource/ibm-plex-sans/500.css'
-import '@fontsource/ibm-plex-sans/600.css'
-import '@fontsource/ibm-plex-mono/400.css'
-import '@fontsource/ibm-plex-mono/500.css'
+// Variable fonts, self-hosted (SIL OFL 1.1): one file per subset covers every weight.
+import '@fontsource-variable/bricolage-grotesque'
+import '@fontsource-variable/figtree'
+import '@fontsource-variable/jetbrains-mono'
 import '@/styles/site.css'
 import { Footer, Header } from '@/components/chrome'
 import { Enhance } from '@/components/client'

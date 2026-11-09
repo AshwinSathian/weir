@@ -79,7 +79,7 @@ make site-deploy BRANCH=site-launch # a preview URL
 
 Security headers are in two places because a static export has inline bootstrap scripts. `scripts/postbuild.mjs` writes a Content-Security-Policy `<meta>` into each page with the SHA-256 of that page's inline scripts (no `unsafe-inline` for scripts), and writes `out/_headers` for the headers a `<meta>` cannot set. Styles allow `unsafe-inline` because the syntax highlighter and the search UI set style attributes.
 
-No analytics, no cookies, no third-party requests. Fonts are self-hosted from `@fontsource`.
+No analytics, no cookies, no third-party requests. Fonts are self-hosted from `@fontsource-variable` (SIL Open Font License 1.1), and `scripts/postbuild.mjs` preloads the latin files for headings and body text.
 
 `public/.well-known/security.txt` points vulnerability reports to GitHub's private reporting. Its `Expires` line is one year out: move it forward with each release, and before 2027-10-23 at the latest.
 
@@ -87,7 +87,13 @@ Cloudflare must not inject anything into the pages: with Bot Fight Mode's JavaSc
 
 ## Design
 
-Dark by default with a stored light override. IBM Plex Sans and IBM Plex Mono. One accent (teal), amber only for "takes a protection back", red only for cautions. Tokens are at the top of `styles/site.css`.
+Dark by default with a stored light override. One accent (teal), amber only for "takes a protection back", red only for cautions. Tokens are at the top of `styles/site.css`.
+
+Type, changed on 2026-11-09 from IBM Plex to the font system shared with the owner's other sites:
+
+- Bricolage Grotesque (`--display`) for headings and the wordmark: weight 700, tracking -0.03em, line height 1.02 to 1.1 for page titles and 1.25 for small headings.
+- Figtree (`--sans`) for body text and every form control (`font: inherit`). Line height 1.5, and 1.65 in long-form prose.
+- JetBrains Mono (`--mono`) for code, commands, the terminal transcript, IDs, table heads, labels, chart text and headline figures. Ligatures are off in code, so `!=` and `=>` show the characters a reader would type. Tables and charts use tabular figures so numbers line up.
 
 Design references looked at on 2026-10-12, desktop, before choosing:
 
@@ -101,7 +107,7 @@ Design references looked at on 2026-10-12, desktop, before choosing:
 
 The home page figure (demand against origin load across a weir) is the one piece of imagery. Its shape is a schematic and its labels are measured numbers; keep it that way.
 
-`public/og.png` is a 1200x630 screenshot of `scripts/og.html`.
+`public/og.png` is a 1200x630 screenshot of `scripts/og.html`, taken after `pnpm install` because the page loads the fonts from `node_modules`.
 
 ## What is not here, on purpose
 
