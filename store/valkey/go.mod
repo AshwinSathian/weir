@@ -7,7 +7,10 @@ require (
 	github.com/valkey-io/valkey-go v1.0.79
 )
 
-require golang.org/x/sys v0.47.0 // indirect
+require (
+	golang.org/x/net v0.60.0 // indirect
+	golang.org/x/sys v0.48.0 // indirect
+)
 
 // ponytail: the root v0.1.0 tag predates the APIs this module uses; the
 // release branch pins a v1 tag and drops this replace (docs/release.md; a
